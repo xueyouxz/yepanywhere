@@ -4640,33 +4640,6 @@ a.sidebar-nav-item {
   cursor: default;
 }
 
-.scroll-to-current-button {
-  display: none;
-}
-
-@media (hover: none), (pointer: coarse), (max-width: 600px) {
-  .scroll-to-current-button {
-    position: fixed;
-    right: max(1rem, env(safe-area-inset-right, 0px) + 1rem);
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 6.75rem);
-    z-index: 150;
-    display: grid;
-    width: 3rem;
-    height: 3rem;
-    place-items: center;
-    color: #fff;
-    background: var(--app-yep-green);
-    border: 1px solid color-mix(in srgb, #fff 18%, var(--app-yep-green));
-    border-radius: 999px;
-    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.26);
-    touch-action: manipulation;
-  }
-
-  .scroll-to-current-button:active {
-    transform: translateY(1px);
-  }
-}
-
 /* ==========================================================================
    System Messages - Context compaction notifications
    ========================================================================== */

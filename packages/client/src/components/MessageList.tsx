@@ -1477,30 +1477,6 @@ export const MessageList = memo(function MessageList({
         onTrimAnchor={onTrimBeforeUserMessage}
         searchState={userTurnNavSearchState}
       />
-      {!isScrolledToBottom && (
-        <button
-          type="button"
-          className="scroll-to-current-button"
-          onClick={scrollToCurrent}
-          aria-label="Scroll to latest"
-          title="Scroll to latest"
-        >
-          <svg
-            width="22"
-            height="22"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.25"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M12 5v14" />
-            <path d="m19 12-7 7-7-7" />
-          </svg>
-        </button>
-      )}
       {searchPanelTarget && searchPanel
         ? createPortal(searchPanel, searchPanelTarget)
         : searchPanel}

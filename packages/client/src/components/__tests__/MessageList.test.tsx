@@ -343,7 +343,11 @@ describe("MessageList", () => {
     editableTarget.remove();
   });
 
-  it("shows a mobile catch-up control when scrolled away from latest", async () => {
+  it("shows a composer follow control when scrolled away from latest", async () => {
+    const composerTarget = document.createElement("div");
+    composerTarget.className = "session-input-inner";
+    document.body.append(composerTarget);
+
     const { container } = render(
       <MessageList
         messages={[
@@ -373,10 +377,13 @@ describe("MessageList", () => {
     fireEvent.scroll(container);
 
     fireEvent.click(
-      await screen.findByRole("button", { name: "Scroll to latest" }),
+      await screen.findByRole("button", {
+        name: "Follow latest session output",
+      }),
     );
 
     expect(scrollTo).toHaveBeenCalledWith({ top: 500, behavior: "smooth" });
+    composerTarget.remove();
   });
 
   it("opens reverse user-turn search with Ctrl+R and hides nonmatches", async () => {
