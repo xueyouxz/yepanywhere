@@ -1862,6 +1862,49 @@ a.sidebar-nav-item {
   width: 8px;
 }
 
+.user-turn-nav-trim-marker {
+  appearance: none;
+  position: absolute;
+  right: 23px;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--primary-color) 72%, var(--text-muted));
+  cursor: pointer;
+  opacity: 0.64;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.user-turn-nav-trim-dot {
+  position: absolute;
+  top: 7px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-primary) 80%, transparent);
+}
+
+.user-turn-nav-trim-marker:hover,
+.user-turn-nav-trim-marker:focus-visible {
+  opacity: 1;
+  outline: none;
+}
+
+.user-turn-nav-trim-marker:hover .user-turn-nav-trim-dot,
+.user-turn-nav-trim-marker:focus-visible .user-turn-nav-trim-dot {
+  background: currentColor;
+  box-shadow:
+    0 0 0 2px var(--bg-primary),
+    0 0 0 4px color-mix(in srgb, var(--primary-color) 36%, transparent);
+}
+
 .user-turn-nav-preview {
   appearance: none;
   position: absolute;
@@ -2650,6 +2693,39 @@ a.sidebar-nav-item {
 
 .message-input-toggle svg.chevron-up {
   transform: rotate(180deg);
+}
+
+.message-follow-toggle {
+  position: absolute;
+  top: -12px;
+  right: 10px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  color: var(--text-muted);
+  background: var(--bg-code);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.message-follow-toggle:hover,
+.message-follow-toggle:focus-visible {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+  outline: none;
+}
+
+.message-follow-toggle svg {
+  flex-shrink: 0;
 }
 
 /* Message input */

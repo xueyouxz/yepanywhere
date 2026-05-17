@@ -34,6 +34,7 @@ interface Props {
   messageListRef: RefObject<HTMLDivElement | null>;
   motionCue?: UserTurnNavMotionCue | null;
   onNavigateStart?: () => void;
+  onTrimAnchor?: (id: string) => void;
   searchState?: UserTurnNavSearchState | null;
 }
 
@@ -366,6 +367,7 @@ export const UserTurnNavigator = memo(function UserTurnNavigator({
   messageListRef,
   motionCue,
   onNavigateStart,
+  onTrimAnchor,
   searchState,
 }: Props) {
   const [layout, setLayout] = useState<UserTurnNavLayout | null>(null);
@@ -696,33 +698,50 @@ export const UserTurnNavigator = memo(function UserTurnNavigator({
           />
         )}
         {markersToRender.map((marker) => (
-          <button
-            key={marker.id}
-            type="button"
-            className={[
-              "user-turn-nav-marker",
-              marker.id === activeMarkerId ? "is-active" : "",
-              marker.id === latestMarkerId ? "is-latest" : "",
-              hasSearchMatches && searchMatchIds.has(marker.id)
-                ? "is-search-match"
-                : "",
-              hasSearchMatches && !searchMatchIds.has(marker.id)
-                ? "is-search-nonmatch"
-                : "",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            style={{ top: `${marker.topPct * 100}%` }}
-            aria-label={`Jump to turn: ${marker.preview}`}
-            title={marker.preview}
-            onClick={() => handleJump(marker.id)}
-            onFocus={() => setPreviewId(marker.id)}
-            onBlur={() => setPreviewId(null)}
-            onPointerEnter={() => setPreviewId(marker.id)}
-            onPointerDown={() => setPreviewId(marker.id)}
-          >
-            <span className="user-turn-nav-marker-line" />
-          </button>
+          <span key={marker.id}>
+            <button
+              type="button"
+              className={[
+                "user-turn-nav-marker",
+                marker.id === activeMarkerId ? "is-active" : "",
+                marker.id === latestMarkerId ? "is-latest" : "",
+                hasSearchMatches && searchMatchIds.has(marker.id)
+                  ? "is-search-match"
+                  : "",
+                hasSearchMatches && !searchMatchIds.has(marker.id)
+                  ? "is-search-nonmatch"
+                  : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              style={{ top: `${marker.topPct * 100}%` }}
+              aria-label={`Jump to turn: ${marker.preview}`}
+              title={marker.preview}
+              onClick={() => handleJump(marker.id)}
+              onFocus={() => setPreviewId(marker.id)}
+              onBlur={() => setPreviewId(null)}
+              onPointerEnter={() => setPreviewId(marker.id)}
+              onPointerDown={() => setPreviewId(marker.id)}
+            >
+              <span className="user-turn-nav-marker-line" />
+            </button>
+            {onTrimAnchor && (
+              <button
+                type="button"
+                className="user-turn-nav-trim-marker"
+                style={{ top: `${marker.topPct * 100}%` }}
+                aria-label={`Load client transcript from turn: ${marker.preview}`}
+                title="Load client transcript from this turn"
+                onClick={() => onTrimAnchor(marker.id)}
+                onFocus={() => setPreviewId(marker.id)}
+                onBlur={() => setPreviewId(null)}
+                onPointerEnter={() => setPreviewId(marker.id)}
+                onPointerDown={() => setPreviewId(marker.id)}
+              >
+                <span className="user-turn-nav-trim-dot" />
+              </button>
+            )}
+          </span>
         ))}
         {previewLabels.map((label) => (
           <button

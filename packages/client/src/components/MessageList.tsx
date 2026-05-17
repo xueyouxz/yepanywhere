@@ -170,7 +170,9 @@ interface UserTurnSearchSession {
 }
 
 const NAV_MOTION_CUE_CLEAR_MS = 760;
-const BOTTOM_SCROLL_THRESHOLD_PX = 100;
+const MIN_BOTTOM_FOLLOW_THRESHOLD_PX = 120;
+const MAX_BOTTOM_FOLLOW_THRESHOLD_PX = 520;
+const BOTTOM_FOLLOW_VIEWPORT_FRACTION = 0.45;
 
 function highResolutionNowMs(): number {
   return typeof performance !== "undefined" &&
@@ -180,9 +182,16 @@ function highResolutionNowMs(): number {
 }
 
 function isNearScrollBottom(container: HTMLElement): boolean {
+  const followThreshold = Math.min(
+    MAX_BOTTOM_FOLLOW_THRESHOLD_PX,
+    Math.max(
+      MIN_BOTTOM_FOLLOW_THRESHOLD_PX,
+      container.clientHeight * BOTTOM_FOLLOW_VIEWPORT_FRACTION,
+    ),
+  );
   return (
     container.scrollHeight - container.scrollTop - container.clientHeight <
-    BOTTOM_SCROLL_THRESHOLD_PX
+    followThreshold
   );
 }
 
@@ -474,6 +483,11 @@ export const MessageList = memo(function MessageList({
   const isProgrammaticScrollRef = useRef(false);
   const lastHeightRef = useRef(0);
   const followUpScrollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const forcedCurrentScrollTimersRef = useRef<ReturnType<typeof setTimeout>[]>(
+    [],
+  );
+  const programmaticScrollReleaseRef =
+    useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousRenderItemsRef = useRef<RenderItem[]>([]);
   const navMotionCueTokenRef = useRef(0);
   const navMotionCueClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -500,6 +514,10 @@ export const MessageList = memo(function MessageList({
   const scrollToBottom = useCallback(
     (container: HTMLElement, behavior: ScrollBehavior = "auto") => {
       isProgrammaticScrollRef.current = true;
+      if (programmaticScrollReleaseRef.current !== null) {
+        clearTimeout(programmaticScrollReleaseRef.current);
+        programmaticScrollReleaseRef.current = null;
+      }
       const top = Math.max(0, container.scrollHeight - container.clientHeight);
       if (behavior === "auto") {
         container.scrollTop = top;
@@ -510,9 +528,22 @@ export const MessageList = memo(function MessageList({
       setIsScrolledToBottom(true);
 
       // Clear programmatic flag after scroll events have fired
-      requestAnimationFrame(() => {
+      const releaseProgrammaticScroll = () => {
         isProgrammaticScrollRef.current = false;
-      });
+        programmaticScrollReleaseRef.current = null;
+        if (isNearScrollBottom(container)) {
+          shouldAutoScrollRef.current = true;
+          setIsScrolledToBottom(true);
+        }
+      };
+      if (behavior === "smooth") {
+        programmaticScrollReleaseRef.current = setTimeout(
+          releaseProgrammaticScroll,
+          520,
+        );
+      } else {
+        requestAnimationFrame(releaseProgrammaticScroll);
+      }
 
       // Schedule a follow-up scroll to catch any async rendering (markdown, syntax highlighting)
       if (followUpScrollRef.current !== null) {
@@ -533,9 +564,11 @@ export const MessageList = memo(function MessageList({
           }
           lastHeightRef.current = container.scrollHeight;
           setIsScrolledToBottom(true);
-          requestAnimationFrame(() => {
-            isProgrammaticScrollRef.current = false;
-          });
+          if (programmaticScrollReleaseRef.current === null) {
+            requestAnimationFrame(() => {
+              isProgrammaticScrollRef.current = false;
+            });
+          }
         }
       }, 50);
     },
@@ -1217,6 +1250,10 @@ export const MessageList = memo(function MessageList({
       if (heightIncreased && shouldAutoScrollRef.current) {
         scrollToBottom(scrollContainer);
       } else {
+        if (isNearScrollBottom(scrollContainer)) {
+          shouldAutoScrollRef.current = true;
+          setIsScrolledToBottom(true);
+        }
         // Update height tracking even when not scrolling
         lastHeightRef.current = newHeight;
       }
@@ -1233,6 +1270,13 @@ export const MessageList = memo(function MessageList({
       if (followUpScrollRef.current !== null) {
         clearTimeout(followUpScrollRef.current);
       }
+      if (programmaticScrollReleaseRef.current !== null) {
+        clearTimeout(programmaticScrollReleaseRef.current);
+      }
+      for (const timer of forcedCurrentScrollTimersRef.current) {
+        clearTimeout(timer);
+      }
+      forcedCurrentScrollTimersRef.current = [];
       if (navMotionCueClearTimerRef.current !== null) {
         clearTimeout(navMotionCueClearTimerRef.current);
       }
@@ -1280,7 +1324,9 @@ export const MessageList = memo(function MessageList({
         isProgrammaticScrollRef.current = true;
         resizeContainer.scrollTop = targetScrollTop;
         lastHeightRef.current = resizeContainer.scrollHeight;
-        setIsScrolledToBottom(isNearScrollBottom(resizeContainer));
+        const nearBottom = isNearScrollBottom(resizeContainer);
+        shouldAutoScrollRef.current = nearBottom;
+        setIsScrolledToBottom(nearBottom);
 
         requestAnimationFrame(() => {
           isProgrammaticScrollRef.current = false;
@@ -1304,6 +1350,18 @@ export const MessageList = memo(function MessageList({
       const container = containerRef.current?.parentElement;
       if (container) {
         scrollToBottom(container);
+        for (const timer of forcedCurrentScrollTimersRef.current) {
+          clearTimeout(timer);
+        }
+        forcedCurrentScrollTimersRef.current = [80, 240, 640].map((delay) =>
+          setTimeout(() => {
+            shouldAutoScrollRef.current = true;
+            const currentContainer = containerRef.current?.parentElement;
+            if (currentContainer) {
+              scrollToBottom(currentContainer);
+            }
+          }, delay),
+        );
       }
     }
   }, [scrollTrigger, scrollToBottom]);
@@ -1321,6 +1379,10 @@ export const MessageList = memo(function MessageList({
 
   const searchPanelTarget =
     userTurnSearch.active && typeof document !== "undefined"
+      ? document.querySelector<HTMLElement>(".session-input-inner")
+      : null;
+  const followButtonTarget =
+    !isScrolledToBottom && typeof document !== "undefined"
       ? document.querySelector<HTMLElement>(".session-input-inner")
       : null;
   const getItemStaleNowMs = useCallback(
@@ -1376,6 +1438,31 @@ export const MessageList = memo(function MessageList({
       </span>
     </div>
   ) : null;
+  const followButton = !isScrolledToBottom ? (
+    <button
+      type="button"
+      className="message-follow-toggle"
+      onClick={scrollToCurrent}
+      aria-label="Follow latest session output"
+      title="Follow latest session output"
+    >
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M12 5v14" />
+        <path d="m19 12-7 7-7-7" />
+      </svg>
+      <span>Follow</span>
+    </button>
+  ) : null;
 
   return (
     <>
@@ -1387,6 +1474,7 @@ export const MessageList = memo(function MessageList({
           shouldAutoScrollRef.current = false;
           setIsScrolledToBottom(false);
         }}
+        onTrimAnchor={onTrimBeforeUserMessage}
         searchState={userTurnNavSearchState}
       />
       {!isScrolledToBottom && (
@@ -1416,6 +1504,9 @@ export const MessageList = memo(function MessageList({
       {searchPanelTarget && searchPanel
         ? createPortal(searchPanel, searchPanelTarget)
         : searchPanel}
+      {followButtonTarget && followButton
+        ? createPortal(followButton, followButtonTarget)
+        : followButton}
       <div className="message-list" ref={containerRef}>
         {(hasOlderMessages || onTrimToRecentTurns) && (
           <div className="load-older-messages">
