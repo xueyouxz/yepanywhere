@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -331,5 +331,65 @@ describe("CodexSessionReader - OSS Support", () => {
       "test-project" as UrlProjectId,
     );
     expect(summary?.originator).toBe("yep-anywhere");
+  });
+
+  it("reuses cached Codex entries and parses appended JSONL", async () => {
+    const sessionId = "append-cache";
+    const now = new Date().toISOString();
+    const sessionPath = join(testDir, `${sessionId}.jsonl`);
+    await writeFile(
+      sessionPath,
+      `${[
+        JSON.stringify({
+          type: "session_meta",
+          timestamp: now,
+          payload: {
+            id: sessionId,
+            cwd: "/test/project",
+            timestamp: now,
+            model_provider: "openai",
+          },
+        }),
+        JSON.stringify({
+          type: "event_msg",
+          timestamp: now,
+          payload: {
+            type: "user_message",
+            message: "first",
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    const first = await reader.getSession(
+      sessionId,
+      "test-project" as UrlProjectId,
+    );
+    expect(first?.data.session.entries).toHaveLength(2);
+
+    await appendFile(
+      sessionPath,
+      `${JSON.stringify({
+        type: "event_msg",
+        timestamp: new Date().toISOString(),
+        payload: {
+          type: "user_message",
+          message: "second",
+        },
+      })}\n`,
+    );
+
+    const second = await reader.getSession(
+      sessionId,
+      "test-project" as UrlProjectId,
+    );
+    expect(second?.data.session.entries).toHaveLength(3);
+    expect(
+      second?.data.session.entries.filter(
+        (entry) =>
+          entry.type === "event_msg" &&
+          entry.payload.type === "user_message",
+      ),
+    ).toHaveLength(2);
   });
 });

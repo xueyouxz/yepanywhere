@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useScrollPreservingToggle } from "../../../lib/scrollAnchor";
-import { renderFixedFontMath } from "../../ui/FixedFontMathToggle";
+import {
+  FixedFontMathToggle,
+  renderFixedFontMath,
+  renderFixedFontRichContent,
+} from "../../ui/FixedFontMathToggle";
 import type { ZodError } from "zod";
 import { useOptionalSessionMetadata } from "../../../contexts/SessionMetadataContext";
 import { useSchemaValidationContext } from "../../../contexts/SchemaValidationContext";
@@ -8,7 +12,6 @@ import { makeDisplayPath } from "../../../lib/text";
 import { validateToolResult } from "../../../lib/validateToolResult";
 import { SchemaWarning } from "../../SchemaWarning";
 import { FilePathDisplay } from "../../ui/FilePathDisplay";
-import { FixedFontMathToggle } from "../../ui/FixedFontMathToggle";
 import { Modal } from "../../ui/Modal";
 import { RenderModeGlyph } from "../../ui/RenderModeGlyph";
 import type {
@@ -110,11 +113,18 @@ function FileModalContent({
   highlightedTruncated?: boolean;
   renderedMarkdownHtml?: string;
 }) {
-  const hasMarkdownPreview = !!renderedMarkdownHtml;
-  // Default to rendered preview for markdown files
-  const [showPreview, setShowPreview] = useState(hasMarkdownPreview);
-  const { btnRef: sigmaBtnRef, handleClick: handleMarkdownToggle } =
-    useScrollPreservingToggle(showPreview, () => setShowPreview((v) => !v));
+  const clientMarkdownPreview = useMemo(() => {
+    if (renderedMarkdownHtml) {
+      return null;
+    }
+    const rendered = renderFixedFontRichContent(file.content, {
+      baseFilePath: file.filePath,
+    });
+    return rendered.changed ? rendered.html : null;
+  }, [file.content, file.filePath, renderedMarkdownHtml]);
+  const markdownHtml = renderedMarkdownHtml ?? clientMarkdownPreview;
+  const hasMarkdownPreview = !!markdownHtml;
+  const [showPreview, setShowPreview] = useState(false);
 
   // For Shiki-highlighted code files: offer KaTeX-only math rendering (default off).
   // Uses renderFixedFontMath (not renderFixedFontRichContent) so markdown structural
@@ -157,12 +167,12 @@ function FileModalContent({
   );
 
   const content =
-    showPreview && renderedMarkdownHtml ? (
+    showPreview && markdownHtml ? (
       <div className="markdown-preview">
         <div
           className="markdown-rendered"
           // biome-ignore lint/security/noDangerouslySetInnerHtml: server-rendered HTML
-          dangerouslySetInnerHTML={{ __html: renderedMarkdownHtml }}
+          dangerouslySetInnerHTML={{ __html: markdownHtml }}
         />
       </div>
     ) : highlightedHtml ? (
@@ -178,28 +188,40 @@ function FileModalContent({
       />
     );
 
-  // Sigma button is shared across all three cases but only one is active at a time.
-  const sigmaActive = hasMarkdownPreview ? showPreview : hasMathToggle ? showMath : false;
-  const sigmaRef = hasMarkdownPreview ? sigmaBtnRef : mathBtnRef;
-  const sigmaHandler = hasMarkdownPreview ? handleMarkdownToggle : handleMathToggle;
-  const sigmaLabel = hasMarkdownPreview
-    ? showPreview ? "Show source" : "Show rendered markdown"
-    : showMath ? "Show source" : "Render math (LaTeX)";
-  const showSigma = hasMarkdownPreview || hasMathToggle;
+  const toggleButton = hasMarkdownPreview && (
+    <div className="markdown-view-toggle">
+      <button
+        type="button"
+        className={`toggle-btn ${!showPreview ? "active" : ""}`}
+        onClick={() => setShowPreview(false)}
+      >
+        Source
+      </button>
+      <button
+        type="button"
+        className={`toggle-btn ${showPreview ? "active" : ""}`}
+        onClick={() => setShowPreview(true)}
+      >
+        Preview
+      </button>
+    </div>
+  );
+  const showSigma = !hasMarkdownPreview && hasMathToggle;
 
   return (
     <div className="file-content-modal">
+      {toggleButton}
       {showSigma ? (
         <div className="fixed-font-render-toggle">
           {content}
           <button
-            ref={sigmaRef}
+            ref={mathBtnRef}
             type="button"
-            className={`fixed-font-render-toggle__button ${sigmaActive ? "is-rendered" : ""}`}
-            onClick={sigmaHandler}
-            aria-label={sigmaLabel}
-            title={sigmaLabel}
-            aria-pressed={sigmaActive}
+            className={`fixed-font-render-toggle__button ${showMath ? "is-rendered" : ""}`}
+            onClick={handleMathToggle}
+            aria-label={showMath ? "Show source" : "Render math (LaTeX)"}
+            title={showMath ? "Show source" : "Render math (LaTeX)"}
+            aria-pressed={showMath}
           >
             <RenderModeGlyph />
           </button>
@@ -527,14 +549,32 @@ function ReadInteractiveSummary({
   }
 
   return (
-    <span>
-      <FilePathDisplay displayPath={displayPath} />
-      {" "}
-      <span className="file-line-count-inline">{file.numLines} lines</span>
-      {showValidationWarning && validationErrors && (
-        <SchemaWarning toolName="Read" errors={validationErrors} />
+    <>
+      <button
+        type="button"
+        className="file-link-inline"
+        onClick={(e) => {
+          e.stopPropagation();
+          setShowModal(true);
+        }}
+      >
+        <FilePathDisplay displayPath={displayPath} />{" "}
+        <span className="file-line-count-inline">{file.numLines} lines</span>
+        {showValidationWarning && validationErrors && (
+          <SchemaWarning toolName="Read" errors={validationErrors} />
+        )}
+      </button>
+      {showModal && (
+        <Modal title={fileName} onClose={() => setShowModal(false)}>
+          <TextFileResult
+            file={file}
+            highlightedHtml={result._highlightedContentHtml}
+            highlightedTruncated={result._highlightedTruncated}
+            renderedMarkdownHtml={result._renderedMarkdownHtml}
+          />
+        </Modal>
       )}
-    </span>
+    </>
   );
 }
 

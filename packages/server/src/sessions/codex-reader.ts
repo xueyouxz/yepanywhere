@@ -11,7 +11,7 @@
  * Unlike Claude's DAG structure, Codex sessions are linear.
  */
 
-import { readdir, stat } from "node:fs/promises";
+import { open, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   type CodexEventMsgEntry,
@@ -67,6 +67,36 @@ interface CodexSessionFile {
 
 const CODEX_META_READ_MAX_BYTES = 1024 * 1024;
 
+interface CodexEntryCache {
+  filePath: string;
+  mtimeMs: number;
+  size: number;
+  entries: CodexSessionEntry[];
+  partialLine: string;
+}
+
+function parseCodexJsonlChunk(
+  chunk: string,
+  mayEndWithPartialLine: boolean,
+): { entries: CodexSessionEntry[]; partialLine: string } {
+  const lines = chunk.split("\n");
+  const partialLine = mayEndWithPartialLine ? (lines.pop() ?? "") : "";
+  const entries: CodexSessionEntry[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const entry = parseCodexSessionEntry(trimmed);
+    if (entry) {
+      entries.push(entry);
+    }
+  }
+
+  return { entries, partialLine };
+}
+
 /**
  * Codex-specific session reader for Codex CLI JSONL files.
  *
@@ -79,6 +109,7 @@ export class CodexSessionReader implements ISessionReader {
 
   // Cache of session ID -> file path for quick lookups
   private sessionFileCache: Map<string, CodexSessionFile> = new Map();
+  private entryCache: Map<string, CodexEntryCache> = new Map();
   private cacheTimestamp = 0;
   private readonly CACHE_TTL_MS = 5000; // 5 second cache
 
@@ -91,6 +122,7 @@ export class CodexSessionReader implements ISessionReader {
 
   invalidateCache(): void {
     this.sessionFileCache.clear();
+    this.entryCache.clear();
     this.cacheTimestamp = 0;
   }
 
@@ -130,16 +162,7 @@ export class CodexSessionReader implements ISessionReader {
     if (!sessionFile) return null;
 
     try {
-      const lines = await readJsonlLines(sessionFile.filePath);
-      if (lines.length === 0 || (lines.length === 1 && !lines[0])) return null;
-      const entries: CodexSessionEntry[] = [];
-
-      for (const line of lines) {
-        const entry = parseCodexSessionEntry(line);
-        if (entry) {
-          entries.push(entry);
-        }
-      }
+      const entries = await this.readEntries(sessionId, sessionFile.filePath);
 
       if (entries.length === 0) return null;
 
@@ -209,15 +232,7 @@ export class CodexSessionReader implements ISessionReader {
     const sessionFile = await this.findSessionFile(sessionId);
     if (!sessionFile) return null;
 
-    const lines = await readJsonlLines(sessionFile.filePath);
-
-    const entries: CodexSessionEntry[] = [];
-    for (const line of lines) {
-      const entry = parseCodexSessionEntry(line);
-      if (entry) {
-        entries.push(entry);
-      }
-    }
+    const entries = await this.readEntries(sessionId, sessionFile.filePath);
 
     // Filter entries if needed (for incremental fetching)
     // Note: Codex entries are not 1:1 with messages, so standard ID filtering is tricky
@@ -348,6 +363,80 @@ export class CodexSessionReader implements ISessionReader {
     // Scan if cache miss
     await this.scanSessions();
     return this.sessionFileCache.get(sessionId) ?? null;
+  }
+
+  private async readEntries(
+    sessionId: string,
+    filePath: string,
+  ): Promise<CodexSessionEntry[]> {
+    const stats = await stat(filePath);
+    const cached = this.entryCache.get(sessionId);
+
+    if (
+      cached &&
+      cached.filePath === filePath &&
+      cached.size === stats.size &&
+      cached.mtimeMs === stats.mtimeMs
+    ) {
+      return cached.entries;
+    }
+
+    if (
+      cached &&
+      cached.filePath === filePath &&
+      cached.size < stats.size
+    ) {
+      const appended = await this.readFileRange(
+        filePath,
+        cached.size,
+        stats.size - cached.size,
+      );
+      const { entries, partialLine } = parseCodexJsonlChunk(
+        cached.partialLine + appended,
+        stats.size > cached.size,
+      );
+      cached.entries.push(...entries);
+      cached.partialLine = partialLine;
+      cached.size = stats.size;
+      cached.mtimeMs = stats.mtimeMs;
+      return cached.entries;
+    }
+
+    const lines = await readJsonlLines(filePath);
+    const entries: CodexSessionEntry[] = [];
+    for (const line of lines) {
+      const entry = parseCodexSessionEntry(line);
+      if (entry) {
+        entries.push(entry);
+      }
+    }
+    this.entryCache.set(sessionId, {
+      filePath,
+      mtimeMs: stats.mtimeMs,
+      size: stats.size,
+      entries,
+      partialLine: "",
+    });
+    return entries;
+  }
+
+  private async readFileRange(
+    filePath: string,
+    start: number,
+    length: number,
+  ): Promise<string> {
+    if (length <= 0) {
+      return "";
+    }
+
+    const handle = await open(filePath, "r");
+    try {
+      const buffer = Buffer.alloc(length);
+      const { bytesRead } = await handle.read(buffer, 0, length, start);
+      return buffer.toString("utf-8", 0, bytesRead);
+    } finally {
+      await handle.close();
+    }
   }
 
   /**

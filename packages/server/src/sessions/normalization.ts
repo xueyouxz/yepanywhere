@@ -1,7 +1,6 @@
 import type {
   ClaudeSessionEntry,
   CodexCompactedEntry,
-  CodexCustomToolCallOutputPayload,
   CodexCustomToolCallPayload,
   CodexEventMsgEntry,
   CodexFunctionCallPayload,
@@ -15,7 +14,6 @@ import type {
   GeminiUserMessage,
   OpenCodeSessionEntry,
   OpenCodeStoredPart,
-  UnifiedSession,
 } from "@yep-anywhere/shared";
 import {
   getGeminiUserMessageText,
@@ -48,6 +46,10 @@ interface CodexToolUseConversion {
 }
 
 const CODEX_CONTEXT_COMPACTED_DEDUPE_WINDOW_MS = 5000;
+const codexMessageCache = new WeakMap<
+  CodexSessionEntry[],
+  { length: number; lastEntry: CodexSessionEntry | undefined; messages: Message[] }
+>();
 
 function normalizeClaudeQueueOperationContent(content: unknown): string {
   if (content === undefined) {
@@ -206,6 +208,16 @@ function convertCodexEntries(
   entries: CodexSessionEntry[],
   sessionId: string,
 ): Message[] {
+  const cached = codexMessageCache.get(entries);
+  const lastEntry = entries[entries.length - 1];
+  if (
+    cached &&
+    cached.length === entries.length &&
+    cached.lastEntry === lastEntry
+  ) {
+    return cached.messages;
+  }
+
   const messages: Message[] = [];
   let messageIndex = 0;
   const hasResponseItemUser = hasCodexResponseItemUserMessages(entries);
@@ -313,6 +325,11 @@ function convertCodexEntries(
     }
   }
 
+  codexMessageCache.set(entries, {
+    length: entries.length,
+    lastEntry,
+    messages,
+  });
   return messages;
 }
 
