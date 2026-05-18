@@ -13,6 +13,15 @@ import { RenderModeGlyph } from "../ui/RenderModeGlyph";
 
 const EMPTY_LOCAL_MATH_PREVIEW = { html: "", changed: false };
 
+function htmlToText(html: string): string {
+  if (typeof document === "undefined") {
+    return html;
+  }
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  return template.content.textContent ?? "";
+}
+
 interface Props {
   text: string;
   isStreaming?: boolean;
@@ -31,6 +40,10 @@ export const TextBlock = memo(function TextBlock({
     () => (isStreaming ? EMPTY_LOCAL_MATH_PREVIEW : renderFixedFontMath(text)),
     [isStreaming, text],
   );
+  const serverMarkdownChanged = useMemo(() => {
+    if (!augmentHtml) return false;
+    return htmlToText(augmentHtml).trim() !== text.trim();
+  }, [augmentHtml, text]);
 
   // Streaming markdown hook for server-rendered content
   const streamingMarkdown = useStreamingMarkdown();
@@ -97,8 +110,8 @@ export const TextBlock = memo(function TextBlock({
   useLocalMediaInlinePreviews(copySourceRef);
 
   const showStreamingContent = isStreaming && useStreamingContent;
-  const canToggleMath = localMathPreview.changed;
-  const { showRendered, toggleLocalMode } = useRenderModeToggle(canToggleMath, {
+  const canToggleRendered = serverMarkdownChanged || localMathPreview.changed;
+  const { showRendered, toggleLocalMode } = useRenderModeToggle(canToggleRendered, {
     resetDependencies: [isStreaming, isStreaming ? "" : text, augmentHtml ?? ""],
   });
 
@@ -112,13 +125,13 @@ export const TextBlock = memo(function TextBlock({
       className={`text-block text-block-assistant timeline-item${isStreaming ? " streaming" : ""}`}
     >
       <div className="text-block-actions">
-        {canToggleMath && (
+        {canToggleRendered && (
           <button
             type="button"
             className={`text-block-toggle ${showRendered ? "is-rendered" : ""}`}
             onClick={toggleLocalMode}
-            title={showRendered ? "Show source" : "Show rendered math"}
-            aria-label={showRendered ? "Show source" : "Show rendered math"}
+            title={showRendered ? "Show source" : "Show rendered"}
+            aria-label={showRendered ? "Show source" : "Show rendered"}
             aria-pressed={showRendered}
           >
             <RenderModeGlyph />

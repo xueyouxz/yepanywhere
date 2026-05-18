@@ -25,6 +25,24 @@ describe("TextBlock", () => {
     expect(container.querySelector(".katex")).toBeTruthy();
   });
 
+  it("does not show render toggle for server HTML that matches plain text", () => {
+    const { container } = render(
+      <TextBlock text="Plain answer." augmentHtml="<p>Plain answer.</p>" />,
+    );
+
+    expect(container.querySelector(".text-block-toggle")).toBeNull();
+    expect(screen.getByText("Plain answer.")).toBeDefined();
+  });
+
+  it("shows render toggle for completed server markdown", () => {
+    const { container } = render(
+      <TextBlock text="- **win**" augmentHtml="<ul><li><strong>win</strong></li></ul>" />,
+    );
+
+    expect(container.querySelector(".text-block-toggle")).toBeTruthy();
+    expect(container.querySelector("strong")?.textContent).toBe("win");
+  });
+
   it("mounts local media previews inline beside rendered markdown links", async () => {
     vi.stubGlobal(
       "fetch",

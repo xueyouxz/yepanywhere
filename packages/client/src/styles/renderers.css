@@ -1664,6 +1664,38 @@ details[open] .collapsible__icon {
   position: relative;
 }
 
+.diff-copy-button {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.45rem;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.2;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+  z-index: 11;
+  user-select: none;
+}
+
+.diff-view-container:hover .diff-copy-button,
+.diff-copy-button:focus {
+  opacity: 1;
+}
+
+.diff-copy-button:hover,
+.diff-copy-button.copied {
+  color: var(--text-primary);
+  border-color: var(--border-strong, var(--border-color));
+}
+
 .diff-view-container.truncated {
   max-height: 18rem; /* ~12 lines */
   overflow: hidden;
@@ -1708,7 +1740,8 @@ details[open] .collapsible__icon {
 
 /* Always show expand button on mobile (no hover on touch devices) */
 @media (max-width: 600px) {
-  .diff-expand-button {
+  .diff-expand-button,
+  .diff-copy-button {
     opacity: 1;
   }
 }

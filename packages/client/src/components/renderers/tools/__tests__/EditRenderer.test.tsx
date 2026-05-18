@@ -27,6 +27,7 @@ const renderCollapsedPreview = editRenderer.renderCollapsedPreview;
 describe("EditRenderer collapsed preview fallback", () => {
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
   });
 
   it("renders raw patch text for completed rows when structured patch is missing", () => {
@@ -511,5 +512,141 @@ describe("EditRenderer collapsed preview fallback", () => {
 
     expect(screen.getAllByTitle("src/a.ts").length).toBeGreaterThan(0);
     expect(screen.getAllByTitle("src/b.ts").length).toBeGreaterThan(0);
+  });
+
+  it("renders Codex Add File patches as created file content", () => {
+    const structuredPatch = [
+      {
+        oldStart: 1,
+        oldLines: 0,
+        newStart: 1,
+        newLines: 3,
+        lines: [
+          "+# Recent MT Adapter Progress",
+          "+",
+          "+- **win** in `dev`",
+        ],
+      },
+    ];
+
+    const { container } = render(
+      <div>
+        {renderCollapsedPreview(
+          {
+            _rawPatch: [
+              "*** Begin Patch",
+              "*** Add File: /repo/research/progress-2026-05-18.md",
+              "+# Recent MT Adapter Progress",
+              "+",
+              "+- **win** in `dev`",
+              "*** End Patch",
+            ].join("\n"),
+            _structuredPatch: structuredPatch,
+          } as never,
+          { ok: true } as never,
+          false,
+          renderContext,
+        )}
+      </div>,
+    );
+
+    expect(screen.queryByText(/\*\*\* Begin Patch/)).toBeNull();
+    expect(screen.getByText("Recent MT Adapter Progress")).toBeDefined();
+    expect(container.querySelector(".fixed-font-markdown-heading")).toBeTruthy();
+    expect(container.querySelector("strong")?.textContent).toBe("win");
+    expect(container.querySelector("code")?.textContent).toBe("dev");
+  });
+
+  it("copies only post-change diff text from the copy button", () => {
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+
+    const structuredPatch = [
+      {
+        oldStart: 1,
+        oldLines: 2,
+        newStart: 1,
+        newLines: 3,
+        lines: [" context", "-old", "+new", "+tail"],
+      },
+    ];
+
+    render(
+      <div>
+        {renderCollapsedPreview(
+          {
+            _structuredPatch: structuredPatch,
+          } as never,
+          {
+            filePath: "notes.md",
+            structuredPatch,
+          } as never,
+          false,
+          renderContext,
+        )}
+      </div>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy post-change text" }));
+
+    expect(writeText).toHaveBeenCalledWith("context\nnew\ntail");
+  });
+
+  it("opens full add-file modal with a fresh render toggle", () => {
+    const structuredPatch = [
+      {
+        oldStart: 1,
+        oldLines: 0,
+        newStart: 1,
+        newLines: 13,
+        lines: [
+          "+# Recent MT Adapter Progress",
+          "+",
+          "+- **win** in `dev`",
+          "+- line 4",
+          "+- line 5",
+          "+- line 6",
+          "+- line 7",
+          "+- line 8",
+          "+- line 9",
+          "+- line 10",
+          "+- line 11",
+          "+- line 12",
+          "+- line 13",
+        ],
+      },
+    ];
+
+    const { container } = render(
+      <SessionMetadataProvider
+        projectId="project-1"
+        projectPath="/repo"
+        sessionId="session-1"
+      >
+        <I18nProvider>
+          {renderCollapsedPreview(
+            {
+              _structuredPatch: structuredPatch,
+            } as never,
+            {
+              filePath: "research/progress-2026-05-18.md",
+              structuredPatch,
+            } as never,
+            false,
+            renderContext,
+          )}
+        </I18nProvider>
+      </SessionMetadataProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Show full diff" }));
+
+    const modal = document.body.querySelector(".modal");
+    expect(modal?.textContent).toContain("Recent MT Adapter Progress");
+    const modalToggle = modal?.querySelector(".fixed-font-render-toggle__button");
+    expect(modalToggle).toBeTruthy();
+
+    fireEvent.click(modalToggle as Element);
+    expect(container.textContent).toContain("Recent MT Adapter Progress");
   });
 });

@@ -205,6 +205,25 @@ function computeChangeSummary(structuredPatch: PatchHunk[]): string | null {
   return null;
 }
 
+function diffTextToNewSide(diffText: string): string {
+  const lines = diffText.split("\n");
+  const newSideLines: string[] = [];
+  for (const line of lines) {
+    const prefix = line[0];
+    if (prefix === "-") {
+      continue;
+    }
+    if (prefix === "+" || prefix === " ") {
+      newSideLines.push(line.slice(1));
+      continue;
+    }
+    if (line.trim().length > 0 && !line.startsWith("@@")) {
+      newSideLines.push(line);
+    }
+  }
+  return newSideLines.join("\n");
+}
+
 function truncateByLines(
   text: string,
   maxLines: number,
@@ -231,19 +250,47 @@ function renderFixedFontMathPanel(html: string, className: string) {
   );
 }
 
+function DiffCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  }, [text]);
+
+  return (
+    <button
+      type="button"
+      className={`diff-copy-button ${copied ? "copied" : ""}`}
+      onMouseDown={(event) => event.stopPropagation()}
+      onClick={handleCopy}
+      aria-label="Copy post-change text"
+      title="Copy post-change text"
+    >
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
 function DiffMathView({
   sourceText,
   sourceView,
   truncated = false,
   diffAware = true,
   baseFilePath,
+  copyText,
 }: {
   sourceText: string;
   sourceView: ReactNode;
   truncated?: boolean;
   diffAware?: boolean;
   baseFilePath?: string;
+  copyText?: string;
 }) {
+  const effectiveCopyText = copyText ?? (diffAware ? diffTextToNewSide(sourceText) : sourceText);
   return (
     <FixedFontMathToggle
       sourceText={sourceText}
@@ -252,6 +299,7 @@ function DiffMathView({
       sourceView={
         <div className={`diff-view-container ${truncated ? "truncated" : ""}`}>
           <div className="diff-view">{sourceView}</div>
+          {effectiveCopyText && <DiffCopyButton text={effectiveCopyText} />}
           {truncated && <div className="diff-fade-overlay" />}
         </div>
       }
@@ -260,6 +308,7 @@ function DiffMathView({
           <div className="diff-view">
             {renderFixedFontMathPanel(html, "diff-content")}
           </div>
+          {effectiveCopyText && <DiffCopyButton text={effectiveCopyText} />}
           {truncated && <div className="diff-fade-overlay" />}
         </div>
       )}

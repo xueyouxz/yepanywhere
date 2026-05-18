@@ -453,6 +453,18 @@ describe("StreamCoordinator", () => {
       expect(totalAugments).toBeGreaterThan(1); // Multiple updates during streaming
     });
 
+    it("stops live-rendering very large open code fences", async () => {
+      await coordinator.onChunk("```markdown\n");
+      const result = await coordinator.onChunk("x".repeat(25_000));
+
+      expect(result.augments).toHaveLength(0);
+      expect(result.pendingHtml).toBe("");
+
+      const flushResult = await coordinator.flush();
+      expect(flushResult.augments).toHaveLength(1);
+      expect(flushResult.augments[0]?.type).toBe("code");
+    });
+
     it("transitions from streaming to completed correctly", async () => {
       // Start streaming code block
       const result1 = await coordinator.onChunk("```js\ncode");
