@@ -173,6 +173,8 @@ const NAV_MOTION_CUE_CLEAR_MS = 760;
 const MIN_BOTTOM_FOLLOW_THRESHOLD_PX = 120;
 const MAX_BOTTOM_FOLLOW_THRESHOLD_PX = 520;
 const BOTTOM_FOLLOW_VIEWPORT_FRACTION = 0.45;
+const FOLLOW_CATCH_UP_DELAYS_MS = [50, 120, 240, 480, 960, 1600, 2400];
+const SEND_CATCH_UP_DELAYS_MS = [80, 240, 640];
 
 function highResolutionNowMs(): number {
   return typeof performance !== "undefined" &&
@@ -567,6 +569,37 @@ export const MessageList = memo(function MessageList({
       }, 50);
     },
     [],
+  );
+
+  const clearForcedCurrentScrollTimers = useCallback(() => {
+    for (const timer of forcedCurrentScrollTimersRef.current) {
+      clearTimeout(timer);
+    }
+    forcedCurrentScrollTimersRef.current = [];
+  }, []);
+
+  const forceScrollToCurrent = useCallback(
+    (delays: readonly number[] = FOLLOW_CATCH_UP_DELAYS_MS) => {
+      shouldAutoScrollRef.current = true;
+      const container = containerRef.current?.parentElement;
+      if (container) {
+        scrollToBottom(container);
+      }
+
+      clearForcedCurrentScrollTimers();
+      forcedCurrentScrollTimersRef.current = delays.map((delay) =>
+        setTimeout(() => {
+          if (!shouldAutoScrollRef.current) {
+            return;
+          }
+          const currentContainer = containerRef.current?.parentElement;
+          if (currentContainer) {
+            scrollToBottom(currentContainer);
+          }
+        }, delay),
+      );
+    },
+    [clearForcedCurrentScrollTimers, scrollToBottom],
   );
 
   // Preprocess messages into render items and group into turns
@@ -999,11 +1032,8 @@ export const MessageList = memo(function MessageList({
   );
 
   const scrollToCurrent = useCallback(() => {
-    const scrollContainer = containerRef.current?.parentElement;
-    if (!scrollContainer) return;
-    shouldAutoScrollRef.current = true;
-    scrollToBottom(scrollContainer, "smooth");
-  }, [scrollToBottom]);
+    forceScrollToCurrent();
+  }, [forceScrollToCurrent]);
 
   const closeUserTurnSearch = useCallback((restoreScroll: boolean) => {
     const scrollTopToRestore = restoreScroll
@@ -1213,8 +1243,11 @@ export const MessageList = memo(function MessageList({
 
     const atBottom = isNearScrollBottom(container);
     shouldAutoScrollRef.current = atBottom;
+    if (!atBottom) {
+      clearForcedCurrentScrollTimers();
+    }
     setIsScrolledToBottom(atBottom);
-  }, []);
+  }, [clearForcedCurrentScrollTimers]);
 
   // Attach scroll listener to parent container
   useEffect(() => {
@@ -1267,15 +1300,12 @@ export const MessageList = memo(function MessageList({
       if (programmaticScrollReleaseRef.current !== null) {
         clearTimeout(programmaticScrollReleaseRef.current);
       }
-      for (const timer of forcedCurrentScrollTimersRef.current) {
-        clearTimeout(timer);
-      }
-      forcedCurrentScrollTimersRef.current = [];
+      clearForcedCurrentScrollTimers();
       if (navMotionCueClearTimerRef.current !== null) {
         clearTimeout(navMotionCueClearTimerRef.current);
       }
     };
-  }, [scrollToBottom]);
+  }, [clearForcedCurrentScrollTimers, scrollToBottom]);
 
   // Preserve relative scroll position when the viewport is resized.
   useEffect(() => {
@@ -1340,25 +1370,9 @@ export const MessageList = memo(function MessageList({
   // Force scroll to bottom when scrollTrigger changes (user sent a message)
   useEffect(() => {
     if (scrollTrigger > 0) {
-      shouldAutoScrollRef.current = true;
-      const container = containerRef.current?.parentElement;
-      if (container) {
-        scrollToBottom(container);
-        for (const timer of forcedCurrentScrollTimersRef.current) {
-          clearTimeout(timer);
-        }
-        forcedCurrentScrollTimersRef.current = [80, 240, 640].map((delay) =>
-          setTimeout(() => {
-            shouldAutoScrollRef.current = true;
-            const currentContainer = containerRef.current?.parentElement;
-            if (currentContainer) {
-              scrollToBottom(currentContainer);
-            }
-          }, delay),
-        );
-      }
+      forceScrollToCurrent(SEND_CATCH_UP_DELAYS_MS);
     }
-  }, [scrollTrigger, scrollToBottom]);
+  }, [forceScrollToCurrent, scrollTrigger]);
 
   // Initial scroll to bottom on first render
   useEffect(() => {

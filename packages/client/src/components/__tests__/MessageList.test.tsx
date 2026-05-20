@@ -77,6 +77,10 @@ describe("MessageList", () => {
   });
 
   afterEach(() => {
+    document
+      .querySelectorAll(".session-input-inner")
+      .forEach((node) => node.remove());
+    document.querySelectorAll("textarea").forEach((node) => node.remove());
     cleanup();
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -339,7 +343,8 @@ describe("MessageList", () => {
       ctrlKey: true,
     });
 
-    expect(scrollTo).toHaveBeenCalledWith({ top: 900, behavior: "smooth" });
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(container.scrollTop).toBe(900);
     editableTarget.remove();
   });
 
@@ -382,7 +387,62 @@ describe("MessageList", () => {
       }),
     );
 
-    expect(scrollTo).toHaveBeenCalledWith({ top: 500, behavior: "smooth" });
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(container.scrollTop).toBe(500);
+    composerTarget.remove();
+  });
+
+  it("keeps catching up after Follow while output grows", async () => {
+    const composerTarget = document.createElement("div");
+    composerTarget.className = "session-input-inner";
+    document.body.append(composerTarget);
+
+    const { container } = render(
+      <MessageList
+        messages={[
+          userMessage("user-1", "earlier request"),
+          assistantMessage("assistant-1", "current response"),
+        ]}
+      />,
+    );
+    let scrollHeight = 1000;
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      value: 200,
+      writable: true,
+    });
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 500,
+    });
+    const scrollTo = vi.fn((options: ScrollToOptions) => {
+      container.scrollTop = Number(options.top ?? 0);
+    });
+    container.scrollTo = scrollTo as typeof container.scrollTo;
+
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    fireEvent.scroll(container);
+    const followButton = await screen.findByRole("button", {
+      name: "Follow latest session output",
+    });
+    vi.useFakeTimers();
+    fireEvent.click(
+      followButton,
+    );
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(container.scrollTop).toBe(500);
+
+    scrollHeight = 1400;
+    act(() => {
+      vi.advanceTimersByTime(120);
+    });
+
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(container.scrollTop).toBe(900);
     composerTarget.remove();
   });
 
@@ -498,13 +558,6 @@ describe("MessageList", () => {
     expect(screen.getByText("the assistant found needle text")).toBeTruthy();
     expect(screen.getByText("system compacted needle context")).toBeTruthy();
 
-    scrollTo.mockClear();
-    fireEvent.keyDown(window, { key: "Enter" });
-
-    await waitFor(() => {
-      expect(scrollTo).toHaveBeenLastCalledWith(
-        expect.objectContaining({ behavior: "auto" }),
-      );
-    });
+    expect(scrollTo).not.toHaveBeenCalled();
   });
 });
