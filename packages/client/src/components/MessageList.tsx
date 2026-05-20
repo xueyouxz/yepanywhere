@@ -175,6 +175,9 @@ const MAX_BOTTOM_FOLLOW_THRESHOLD_PX = 520;
 const BOTTOM_FOLLOW_VIEWPORT_FRACTION = 0.45;
 const FOLLOW_CATCH_UP_DELAYS_MS = [50, 120, 240, 480, 960, 1600, 2400];
 const SEND_CATCH_UP_DELAYS_MS = [80, 240, 640];
+const TOUCH_SCROLL_CANCEL_THRESHOLD_PX = 6;
+const INTERACTIVE_SCROLL_TARGET_SELECTOR =
+  "button, input, textarea, select, a[href], [contenteditable='true']";
 
 function highResolutionNowMs(): number {
   return typeof performance !== "undefined" &&
@@ -194,6 +197,20 @@ function isNearScrollBottom(container: HTMLElement): boolean {
   return (
     container.scrollHeight - container.scrollTop - container.clientHeight <
     followThreshold
+  );
+}
+
+function eventTargetIsInside(
+  target: EventTarget | null,
+  container: HTMLElement,
+): boolean {
+  return target instanceof Node && container.contains(target);
+}
+
+function isInteractiveScrollTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    target.closest(INTERACTIVE_SCROLL_TARGET_SELECTOR) !== null
   );
 }
 
@@ -478,6 +495,7 @@ export const MessageList = memo(function MessageList({
   const isInitialLoadRef = useRef(true);
   const isProgrammaticScrollRef = useRef(false);
   const lastHeightRef = useRef(0);
+  const touchStartYRef = useRef<number | null>(null);
   const followUpScrollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const forcedCurrentScrollTimersRef = useRef<ReturnType<typeof setTimeout>[]>(
     [],
@@ -577,6 +595,31 @@ export const MessageList = memo(function MessageList({
     }
     forcedCurrentScrollTimersRef.current = [];
   }, []);
+
+  const clearFollowUpScrollTimer = useCallback(() => {
+    if (followUpScrollRef.current !== null) {
+      clearTimeout(followUpScrollRef.current);
+      followUpScrollRef.current = null;
+    }
+  }, []);
+
+  const stopFollowingForUserScroll = useCallback(
+    (container: HTMLElement | null | undefined) => {
+      shouldAutoScrollRef.current = false;
+      isProgrammaticScrollRef.current = false;
+      if (programmaticScrollReleaseRef.current !== null) {
+        clearTimeout(programmaticScrollReleaseRef.current);
+        programmaticScrollReleaseRef.current = null;
+      }
+      clearFollowUpScrollTimer();
+      clearForcedCurrentScrollTimers();
+      if (container) {
+        lastHeightRef.current = container.scrollHeight;
+      }
+      setIsScrolledToBottom(false);
+    },
+    [clearFollowUpScrollTimer, clearForcedCurrentScrollTimers],
+  );
 
   const forceScrollToCurrent = useCallback(
     (delays: readonly number[] = FOLLOW_CATCH_UP_DELAYS_MS) => {
@@ -1261,6 +1304,107 @@ export const MessageList = memo(function MessageList({
     };
   }, [handleScroll]);
 
+  // Cancel follow before browser scroll events when the user clearly tries to
+  // move away from the live tail. Programmatic scroll bursts can otherwise keep
+  // the scroll handler muted long enough to rubber-band the viewport back down.
+  useEffect(() => {
+    const container = containerRef.current?.parentElement;
+    if (!container) return;
+
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0 && !isInteractiveScrollTarget(event.target)) {
+        stopFollowingForUserScroll(container);
+      }
+    };
+
+    const handleTouchStart = (event: TouchEvent) => {
+      touchStartYRef.current = event.touches[0]?.clientY ?? null;
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      const startY = touchStartYRef.current;
+      const currentY = event.touches[0]?.clientY;
+      if (
+        startY !== null &&
+        currentY !== undefined &&
+        currentY - startY > TOUCH_SCROLL_CANCEL_THRESHOLD_PX &&
+        !isInteractiveScrollTarget(event.target)
+      ) {
+        stopFollowingForUserScroll(container);
+      }
+    };
+
+    const handleTouchEnd = () => {
+      touchStartYRef.current = null;
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0 || isInteractiveScrollTarget(event.target)) {
+        return;
+      }
+      const scrollbarWidth = container.offsetWidth - container.clientWidth;
+      if (scrollbarWidth <= 0) {
+        return;
+      }
+      const rect = container.getBoundingClientRect();
+      if (event.clientX >= rect.right - scrollbarWidth) {
+        stopFollowingForUserScroll(container);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        isInteractiveScrollTarget(event.target)
+      ) {
+        return;
+      }
+      const target = event.target;
+      const scrollTargetActive =
+        target === document.body ||
+        target === document ||
+        eventTargetIsInside(target, container);
+      if (!scrollTargetActive) {
+        return;
+      }
+      if (
+        event.key === "ArrowUp" ||
+        event.key === "PageUp" ||
+        event.key === "Home" ||
+        (event.key === " " && event.shiftKey)
+      ) {
+        stopFollowingForUserScroll(container);
+      }
+    };
+
+    container.addEventListener("wheel", handleWheel, { passive: true });
+    container.addEventListener("touchstart", handleTouchStart, {
+      passive: true,
+    });
+    container.addEventListener("touchmove", handleTouchMove, {
+      passive: true,
+    });
+    container.addEventListener("touchend", handleTouchEnd, { passive: true });
+    container.addEventListener("touchcancel", handleTouchEnd, {
+      passive: true,
+    });
+    container.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown, true);
+
+    return () => {
+      container.removeEventListener("wheel", handleWheel);
+      container.removeEventListener("touchstart", handleTouchStart);
+      container.removeEventListener("touchmove", handleTouchMove);
+      container.removeEventListener("touchend", handleTouchEnd);
+      container.removeEventListener("touchcancel", handleTouchEnd);
+      container.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [stopFollowingForUserScroll]);
+
   // Use ResizeObserver to detect content height changes (handles async markdown rendering)
   useEffect(() => {
     const container = containerRef.current?.parentElement;
@@ -1294,9 +1438,7 @@ export const MessageList = memo(function MessageList({
     return () => {
       resizeObserver.disconnect();
       // Clean up any pending scroll on unmount
-      if (followUpScrollRef.current !== null) {
-        clearTimeout(followUpScrollRef.current);
-      }
+      clearFollowUpScrollTimer();
       if (programmaticScrollReleaseRef.current !== null) {
         clearTimeout(programmaticScrollReleaseRef.current);
       }
@@ -1305,7 +1447,7 @@ export const MessageList = memo(function MessageList({
         clearTimeout(navMotionCueClearTimerRef.current);
       }
     };
-  }, [clearForcedCurrentScrollTimers, scrollToBottom]);
+  }, [clearFollowUpScrollTimer, clearForcedCurrentScrollTimers, scrollToBottom]);
 
   // Preserve relative scroll position when the viewport is resized.
   useEffect(() => {

@@ -834,12 +834,21 @@ function SessionPageContent({
   useEffect(() => {
     if (!latestCodexConfigAck) return;
 
-    setLiveModelConfig((prev) => ({
-      model: latestCodexConfigAck.model ?? prev?.model,
-      thinking: latestCodexConfigAck.thinking ?? prev?.thinking,
-      effort: latestCodexConfigAck.effort ?? prev?.effort,
-    }));
-  }, [latestCodexConfigAck]);
+    setLiveModelConfig((prev) => {
+      if (currentOwnedProcessId && prev) {
+        return {
+          model: prev.model ?? latestCodexConfigAck.model,
+          thinking: prev.thinking ?? latestCodexConfigAck.thinking,
+          effort: prev.effort ?? latestCodexConfigAck.effort,
+        };
+      }
+      return {
+        model: latestCodexConfigAck.model ?? prev?.model,
+        thinking: latestCodexConfigAck.thinking ?? prev?.thinking,
+        effort: latestCodexConfigAck.effort ?? prev?.effort,
+      };
+    });
+  }, [currentOwnedProcessId, latestCodexConfigAck]);
 
   // Inline title editing state
   const [isEditingTitle, setIsEditingTitle] = useState(false);

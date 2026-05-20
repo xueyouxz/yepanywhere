@@ -446,6 +446,55 @@ describe("MessageList", () => {
     composerTarget.remove();
   });
 
+  it("lets a user wheel away cancel live follow before resize catch-up", () => {
+    let resizeCallback: ResizeObserverCallback | null = null;
+    class CapturingResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallback = callback;
+      }
+      observe() {}
+      disconnect() {}
+    }
+    Object.defineProperty(window, "ResizeObserver", {
+      configurable: true,
+      value: CapturingResizeObserver,
+    });
+
+    const { container } = render(
+      <MessageList
+        messages={[
+          userMessage("user-1", "earlier request"),
+          assistantMessage("assistant-1", "current response"),
+        ]}
+      />,
+    );
+    let scrollHeight = 1000;
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      value: 200,
+      writable: true,
+    });
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 500,
+    });
+    container.scrollTo = vi.fn() as typeof container.scrollTo;
+
+    fireEvent.wheel(container, { deltaY: -120 });
+    container.scrollTop = 320;
+    scrollHeight = 1400;
+    expect(resizeCallback).not.toBeNull();
+    act(() => {
+      resizeCallback?.([], {} as ResizeObserver);
+    });
+
+    expect(container.scrollTop).toBe(320);
+  });
+
   it("opens reverse user-turn search with Ctrl+R and hides nonmatches", async () => {
     Object.defineProperty(HTMLElement.prototype, "scrollTo", {
       configurable: true,
