@@ -2,9 +2,9 @@
 
 export type { AskForApproval } from "./generated/v2/AskForApproval.js";
 export type { SandboxMode } from "./generated/v2/SandboxMode.js";
-export type { PermissionProfile } from "./generated/v2/PermissionProfile.js";
 export type { ThreadStartParams } from "./generated/v2/ThreadStartParams.js";
 export type { ThreadResumeParams } from "./generated/v2/ThreadResumeParams.js";
+export type { ThreadReadParams } from "./generated/v2/ThreadReadParams.js";
 export type { TurnStartParams } from "./generated/v2/TurnStartParams.js";
 export type { TurnSteerParams } from "./generated/v2/TurnSteerParams.js";
 export type { TurnInterruptParams } from "./generated/v2/TurnInterruptParams.js";

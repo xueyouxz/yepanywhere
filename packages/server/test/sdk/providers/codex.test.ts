@@ -443,7 +443,17 @@ describeRealCodexContract("Codex app-server real contract", () => {
       );
       const result = await runNodeProbe(probePath, repoRoot);
 
-      expect(result.code).toBe(0);
+      if (result.code !== 0) {
+        throw new Error(
+          [
+            `Codex app-server probe exited with code ${result.code}`,
+            "stdout:",
+            result.stdout.trim() || "(empty)",
+            "stderr:",
+            result.stderr.trim() || "(empty)",
+          ].join("\n"),
+        );
+      }
       expect(result.stdout).toContain("turn/steer");
       expect(result.stdout).toContain("turn/interrupt");
       expect(result.stdout).toContain('"status": "interrupted"');
@@ -1366,7 +1376,7 @@ describe("CodexProvider Event Normalization", () => {
     });
   });
 
-  it("builds stable thread policy params without removed protocol fields", () => {
+  it("builds stable thread policy params with limited history", () => {
     const provider = createTestProvider() as unknown as {
       mapPermissionModeToThreadPolicy: (permissionMode?: string) => {
         approvalPolicy: string;
@@ -1395,18 +1405,20 @@ describe("CodexProvider Event Normalization", () => {
     expect(start).toMatchObject({
       approvalPolicy: "on-request",
       sandbox: "workspace-write",
+      experimentalRawEvents: false,
+      persistExtendedHistory: false,
     });
     expect(bypassStart).toMatchObject({
       approvalPolicy: "never",
       sandbox: "danger-full-access",
+      experimentalRawEvents: false,
+      persistExtendedHistory: false,
     });
-    expect(start.experimentalRawEvents).toBeUndefined();
-    expect(start.persistExtendedHistory).toBeUndefined();
     expect(start.permissionProfile).toBeUndefined();
     expect(bypassStart.permissionProfile).toBeUndefined();
   });
 
-  it("builds stable resume params without removed protocol fields", () => {
+  it("builds stable resume params with limited history", () => {
     const provider = createTestProvider() as unknown as {
       createThreadResumeParams: (
         options: { resumeSessionId?: string; model?: string; cwd: string },
@@ -1433,9 +1445,9 @@ describe("CodexProvider Event Normalization", () => {
       threadId: "thread-1",
       approvalPolicy: "on-request",
       sandbox: "workspace-write",
+      persistExtendedHistory: false,
     });
     expect(resume.excludeTurns).toBeUndefined();
-    expect(resume.persistExtendedHistory).toBeUndefined();
     expect(resume.permissionProfile).toBeUndefined();
   });
 
@@ -1466,6 +1478,7 @@ describe("CodexProvider Event Normalization", () => {
     expect(resume).toMatchObject({
       threadId: "thread-1",
       excludeTurns: true,
+      persistExtendedHistory: false,
     });
   });
 

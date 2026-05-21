@@ -3,7 +3,7 @@
 This directory contains a checked-in subset of Codex app-server generated
 TypeScript types used by the Codex provider runtime.
 
-- `generated/`: copied subset from `codex app-server generate-ts`
+- `generated/`: copied subset from `codex app-server generate-ts --experimental`
 - `index.ts`: stable typed exports consumed by provider code
 
 Update subset:

@@ -43,9 +43,9 @@ const SUBSET_INDEX_FILE = join(
 const SUBSET_EXPORTS = [
   { name: "AskForApproval", file: "v2/AskForApproval.ts" },
   { name: "SandboxMode", file: "v2/SandboxMode.ts" },
-  { name: "PermissionProfile", file: "v2/PermissionProfile.ts" },
   { name: "ThreadStartParams", file: "v2/ThreadStartParams.ts" },
   { name: "ThreadResumeParams", file: "v2/ThreadResumeParams.ts" },
+  { name: "ThreadReadParams", file: "v2/ThreadReadParams.ts" },
   { name: "TurnStartParams", file: "v2/TurnStartParams.ts" },
   { name: "TurnSteerParams", file: "v2/TurnSteerParams.ts" },
   { name: "TurnInterruptParams", file: "v2/TurnInterruptParams.ts" },
@@ -326,7 +326,13 @@ function main() {
   try {
     mkdirSync(generatedTypesDir, { recursive: true });
 
-    runCodex(["app-server", "generate-ts", "--out", generatedTypesDir]);
+    runCodex([
+      "app-server",
+      "generate-ts",
+      "--experimental",
+      "--out",
+      generatedTypesDir,
+    ]);
     writeSubsetArtifacts(
       generatedTypesDir,
       generatedSubsetDir,

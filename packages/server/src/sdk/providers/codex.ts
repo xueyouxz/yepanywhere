@@ -49,6 +49,7 @@ import type {
   RawResponseItemCompletedNotification,
   ReasoningSummaryTextDeltaNotification,
   SandboxMode as CodexSandboxMode,
+  ThreadReadParams,
   ThreadItem as CodexThreadItem,
   CommandExecutionApprovalDecision,
   CommandExecutionRequestApprovalParams,
@@ -170,13 +171,7 @@ interface CodexThreadReadResponse {
   };
 }
 
-type CodexThreadResumeParamsForRequest = ThreadResumeParams & {
-  /**
-   * Experimental in Codex 0.129. YA opts into experimentalApi and uses this to
-   * avoid hydrating large turn histories that it does not consume.
-   */
-  excludeTurns?: boolean;
-};
+type CodexThreadResumeParamsForRequest = ThreadResumeParams;
 
 /**
  * When enabled, declare Codex session originator as "Codex Desktop"
@@ -1504,7 +1499,7 @@ export class CodexProvider implements AgentProvider {
         {
           threadId: runtimeState.threadId,
           includeTurns: false,
-        },
+        } satisfies ThreadReadParams,
       );
       const status = response.thread?.status;
       const statusType = status?.type;
@@ -2024,6 +2019,8 @@ export class CodexProvider implements AgentProvider {
       cwd: options.cwd,
       ...this.buildThreadPermissionParams(policy),
       config: this.buildThreadConfigOverrides(options),
+      experimentalRawEvents: false,
+      persistExtendedHistory: false,
     };
   }
 
@@ -2039,6 +2036,7 @@ export class CodexProvider implements AgentProvider {
       cwd: options.cwd,
       ...this.buildThreadPermissionParams(policy),
       config: this.buildThreadConfigOverrides(options),
+      persistExtendedHistory: false,
     };
     if (experimentalApiEnabled) {
       params.excludeTurns = true;
