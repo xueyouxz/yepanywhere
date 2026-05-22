@@ -1939,6 +1939,96 @@ describe("Process", () => {
       const info = process.getInfo();
       expect(info.state).toBe("terminated");
     });
+
+    it("terminates after emitting a Claude SDK API error message", async () => {
+      const apiError: SDKMessage = {
+        type: "assistant",
+        uuid: "25f342b9-efa8-416c-9e9b-e617f61af756",
+        message: {
+          model: "<synthetic>",
+          role: "assistant",
+          content: [
+            {
+              type: "text",
+              text: "API Error: 529 Overloaded. This is a server-side issue, usually temporary.",
+            },
+          ],
+        },
+        isApiErrorMessage: true,
+        apiErrorStatus: 529,
+      };
+      const abortFn = vi.fn();
+      const iterator = createMockIterator([
+        { type: "system", subtype: "init", session_id: "sess-1" },
+        apiError,
+      ]);
+      const process = new Process(iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        provider: "claude",
+        idleTimeoutMs: 100,
+        abortFn,
+      });
+
+      const events: ProcessEvent[] = [];
+      process.subscribe((event) => events.push(event));
+
+      await vi.waitFor(() => {
+        expect(process.isTerminated).toBe(true);
+      });
+
+      const messageEventIndex = events.findIndex(
+        (event) =>
+          event.type === "message" &&
+          event.message.type === "assistant" &&
+          event.message.uuid === apiError.uuid &&
+          event.message.isApiErrorMessage === true &&
+          event.message.apiErrorStatus === 529,
+      );
+      const terminatedEventIndex = events.findIndex(
+        (event) => event.type === "terminated",
+      );
+
+      expect(messageEventIndex).toBeGreaterThanOrEqual(0);
+      expect(terminatedEventIndex).toBeGreaterThan(messageEventIndex);
+      expect(process.terminationReason).toBe(
+        "Claude SDK API error; restart required",
+      );
+      expect(abortFn).toHaveBeenCalledOnce();
+      expect(process.queueMessage({ text: "should fail" }).success).toBe(false);
+    });
+
+    it("does not terminate non-Claude processes on Claude-shaped API errors", async () => {
+      const apiError: SDKMessage = {
+        type: "assistant",
+        message: {
+          model: "<synthetic>",
+          role: "assistant",
+          content: "API Error: 529 Overloaded.",
+        },
+        isApiErrorMessage: true,
+        apiErrorStatus: 529,
+      };
+      const iterator = createMockIterator([
+        { type: "system", subtype: "init", session_id: "sess-1" },
+        apiError,
+        { type: "result", session_id: "sess-1" },
+      ]);
+      const process = new Process(iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        provider: "codex",
+        idleTimeoutMs: 100,
+      });
+
+      await vi.waitFor(() => {
+        expect(process.state.type).toBe("idle");
+      });
+
+      expect(process.isTerminated).toBe(false);
+    });
   });
 
   describe("hold mode", () => {

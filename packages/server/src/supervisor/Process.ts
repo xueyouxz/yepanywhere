@@ -71,6 +71,49 @@ export function shouldEmitMessage(_message: SDKMessage): boolean {
   return true;
 }
 
+function isClaudeSdkProvider(provider: ProviderName): boolean {
+  return provider === "claude" || provider === "claude-ollama";
+}
+
+function isClaudeSdkApiErrorMessage(
+  provider: ProviderName,
+  message: SDKMessage,
+): boolean {
+  return (
+    isClaudeSdkProvider(provider) &&
+    message.type === "assistant" &&
+    message.isApiErrorMessage === true
+  );
+}
+
+function extractMessageText(message: SDKMessage): string | undefined {
+  const content = message.message?.content;
+  if (typeof content === "string") {
+    return content.trim() || undefined;
+  }
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+  const text = content
+    .map((block) => (block.type === "text" ? block.text : undefined))
+    .filter((part): part is string => !!part)
+    .join("\n")
+    .trim();
+  return text || undefined;
+}
+
+function describeClaudeSdkApiError(message: SDKMessage): string {
+  const status = message.apiErrorStatus;
+  const statusText =
+    typeof status === "number" || typeof status === "string"
+      ? `status ${status}`
+      : "unknown status";
+  const detail = extractMessageText(message);
+  return detail
+    ? `Claude SDK API error (${statusText}): ${detail}`
+    : `Claude SDK API error (${statusText})`;
+}
+
 /**
  * Pending tool approval request.
  * The SDK's canUseTool callback creates this and waits for respondToInput.
@@ -1961,6 +2004,15 @@ export class Process {
         // See shouldEmitMessage() for why we never filter messages
         if (shouldEmitMessage(message)) {
           this.emit({ type: "message", message });
+        }
+
+        if (isClaudeSdkApiErrorMessage(this.provider, message)) {
+          this.abortFn?.();
+          this.markTerminated(
+            "Claude SDK API error; restart required",
+            new Error(describeClaudeSdkApiError(message)),
+          );
+          return;
         }
 
         // Handle special message types
