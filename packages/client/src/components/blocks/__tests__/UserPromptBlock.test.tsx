@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../../i18n";
 import { useRemoteImage } from "../../../hooks/useRemoteImage";
@@ -91,7 +97,9 @@ describe("UserPromptBlock", () => {
     expect(screen.getByText(/annotated-shot\.jpg/)).toBeDefined();
   });
 
-  it("does not fetch uploaded image previews until opened", () => {
+  it("does not fetch uploaded image previews until opened", async () => {
+    const remotePath =
+      "/api/projects/proj/sessions/session/upload/123e4567-e89b-12d3-a456-426614174000_photo.jpg";
     const content: ContentBlock[] = [
       {
         type: "text",
@@ -110,15 +118,15 @@ describe("UserPromptBlock", () => {
       </I18nProvider>,
     );
 
-    expect(useRemoteImage).toHaveBeenCalledWith(null);
-    expect(useRemoteImage).not.toHaveBeenCalledWith(
-      "/api/projects/proj/sessions/session/upload/123e4567-e89b-12d3-a456-426614174000_photo.jpg",
-    );
+    await waitFor(() => {
+      expect(useRemoteImage).toHaveBeenCalledWith(remotePath, false);
+    });
+    expect(useRemoteImage).not.toHaveBeenCalledWith(remotePath, true);
 
     fireEvent.click(screen.getByRole("button", { name: /photo\.jpg/i }));
 
-    expect(useRemoteImage).toHaveBeenCalledWith(
-      "/api/projects/proj/sessions/session/upload/123e4567-e89b-12d3-a456-426614174000_photo.jpg",
-    );
+    await waitFor(() => {
+      expect(useRemoteImage).toHaveBeenCalledWith(remotePath, true);
+    });
   });
 });

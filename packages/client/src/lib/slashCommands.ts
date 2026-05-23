@@ -1,6 +1,12 @@
 import type { ThinkingOption } from "@yep-anywhere/shared";
 
-export const CLIENT_SLASH_COMMANDS = ["fast", "run", "btw", "model"] as const;
+export const CLIENT_SLASH_COMMANDS = [
+  "fast",
+  "run",
+  "btw",
+  "done",
+  "model",
+] as const;
 
 export type ComposerSlashCommand =
   | { kind: "fast"; argument: string }
@@ -24,6 +30,7 @@ const COMMAND_DISPLAY: Record<
   fast: { label: "fast turn", shortcut: "/f" },
   run: { label: "run exactly", shortcut: "/r" },
   btw: { label: "btw aside", shortcut: "/b" },
+  done: { label: "done with aside", shortcut: "/d" },
   model: { label: "model", shortcut: "/m" },
 };
 
@@ -73,6 +80,9 @@ export function parseComposerSlashCommand(
   }
   if (command === "b" || command === "btw") {
     return { kind: "custom", command: "btw", argument };
+  }
+  if (command === "d" || command === "done") {
+    return { kind: "custom", command: "done", argument };
   }
   if (command === "compact") {
     return { kind: "custom", command, argument };

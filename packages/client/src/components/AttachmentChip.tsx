@@ -78,6 +78,7 @@ function getUploadUrl(filePath: string): string | null {
 function useCachedAttachmentImage(
   attachmentId: string,
   path: string,
+  remotePreviewEnabled: boolean,
   previewUrl?: string,
 ): {
   previewUrl: string | null;
@@ -146,7 +147,14 @@ function useCachedAttachmentImage(
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load attachment preview");
+        if (remotePath) {
+          setError(null);
+          setRemoteEnabled(true);
+        } else {
+          setError(
+            err instanceof Error ? err.message : "Failed to load attachment preview",
+          );
+        }
         setLoading(false);
       });
 
@@ -161,9 +169,12 @@ function useCachedAttachmentImage(
         fullUrlRef.current = null;
       }
     };
-  }, [attachmentId, path, previewUrl]);
+  }, [attachmentId, path, previewUrl, remotePath]);
 
-  const remote = useRemoteImage(remotePath, remoteEnabled && !previewUrl);
+  const remote = useRemoteImage(
+    remotePath,
+    remotePreviewEnabled && remoteEnabled && !previewUrl,
+  );
 
   return {
     previewUrl: previewUrl ?? cachePreviewUrl ?? remote.url,
@@ -190,7 +201,7 @@ export function AttachmentChip({
   const isImage = isImageMimeType(mimeType);
   const cacheKey = attachmentId ?? path;
   const { previewUrl: imagePreviewUrl, fullUrl, previewWidth, previewHeight, loading, error } =
-    useCachedAttachmentImage(cacheKey, path, previewUrl);
+    useCachedAttachmentImage(cacheKey, path, showModal, previewUrl);
   const previewPlan =
     previewWidth && previewHeight
       ? { width: previewWidth, height: previewHeight }

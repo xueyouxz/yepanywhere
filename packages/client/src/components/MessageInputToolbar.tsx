@@ -24,6 +24,7 @@ import {
   type SessionIsearchGuideState,
   type SessionIsearchScope,
 } from "../lib/sessionIsearchGuide";
+import type { BtwToolbarMode } from "../lib/btwAsideRouting";
 import type { ContextUsage, PermissionMode } from "../types";
 import { MessageAge } from "./MessageAge";
 import { RenderModeGlyph } from "./ui/RenderModeGlyph";
@@ -62,6 +63,7 @@ export interface MessageInputToolbarProps {
   onBtwClick?: () => void;
   btwActive?: boolean;
   btwHasAsides?: boolean;
+  btwToolbarMode?: BtwToolbarMode;
   modelIndicatorProvider?: string;
   modelIndicatorModel?: string;
   modelIndicatorTone?: ModelIndicatorTone;
@@ -203,6 +205,29 @@ function describeLivenessSummary(
   return `${display.prefix} ${formatLivenessAge(display.timestampMs, nowMs)}`;
 }
 
+function getBtwTitle(mode: BtwToolbarMode): string {
+  switch (mode) {
+    case "child-session":
+      return "Viewing a /btw child session; click to return to Mother (Ctrl+B)";
+    case "focused-footer":
+      return "Composer is focused on a /btw aside; click to return to Mother (Ctrl+B)";
+    case "focused-pane":
+      return "A /btw pane is focused; click to focus its composer (Ctrl+B)";
+    case "focus-existing":
+      return "Focus existing /btw aside (Ctrl+B)";
+    case "start":
+      return "Start /btw aside (Ctrl+B)";
+  }
+}
+
+function isBtwPressed(mode: BtwToolbarMode): boolean {
+  return (
+    mode === "child-session" ||
+    mode === "focused-footer" ||
+    mode === "focused-pane"
+  );
+}
+
 const MODEL_DENSITY_ORDER: readonly ModelToolbarDensity[] = [
   "full",
   "compact",
@@ -241,6 +266,7 @@ export function MessageInputToolbar({
   onBtwClick,
   btwActive = false,
   btwHasAsides = false,
+  btwToolbarMode,
   modelIndicatorProvider,
   modelIndicatorModel,
   modelIndicatorTone,
@@ -364,11 +390,11 @@ export function MessageInputToolbar({
       ? 'Queue when done; queued text starts with "when done,"'
       : "Queue ASAP"
     : t("toolbarQueueTooltip");
-  const btwTitle = btwActive
-    ? "Composer is focused on a /btw aside; click to return to main (Ctrl+B)"
-    : btwHasAsides
-      ? "Focus existing /btw aside (Ctrl+B)"
-      : "Start /btw aside (Ctrl+B)";
+  const effectiveBtwToolbarMode =
+    btwToolbarMode ??
+    (btwActive ? "focused-footer" : btwHasAsides ? "focus-existing" : "start");
+  const btwTitle = getBtwTitle(effectiveBtwToolbarMode);
+  const btwPressed = isBtwPressed(effectiveBtwToolbarMode);
   const primaryActionIcon =
     effectivePrimaryActionKind === "steer"
       ? "↗"
@@ -1050,13 +1076,13 @@ export function MessageInputToolbar({
         {onBtwClick && (
           <button
             type="button"
-            className={`btw-toolbar-button ${btwActive ? "active" : ""} ${
-              btwHasAsides && !btwActive ? "has-asides" : ""
+            className={`btw-toolbar-button ${btwPressed ? "active" : ""} ${
+              effectiveBtwToolbarMode === "focus-existing" ? "has-asides" : ""
             }`}
             onClick={onBtwClick}
             disabled={disabled || voiceDisabled}
             aria-label={btwTitle}
-            aria-pressed={btwActive}
+            aria-pressed={btwPressed}
             title={btwTitle}
           >
             /btw

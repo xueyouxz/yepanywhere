@@ -41,6 +41,29 @@ describe("slashCommands", () => {
     });
   });
 
+  it("parses /done and /d as a client-side close-aside command", () => {
+    expect(parseComposerSlashCommand("/d")).toEqual({
+      kind: "custom",
+      command: "done",
+      argument: "",
+    });
+    expect(parseComposerSlashCommand("/done")).toEqual({
+      kind: "custom",
+      command: "done",
+      argument: "",
+    });
+    expect(parseComposerSlashCommand("/done with notes")).toEqual({
+      kind: "custom",
+      command: "done",
+      argument: "with notes",
+    });
+    expect(resolveComposerSlashTurn("/done")).toEqual({
+      kind: "custom",
+      command: "done",
+      argument: "",
+    });
+  });
+
   it("parses /btw as a client-side aside command", () => {
     expect(parseComposerSlashCommand("/b side lookup")).toEqual({
       kind: "custom",

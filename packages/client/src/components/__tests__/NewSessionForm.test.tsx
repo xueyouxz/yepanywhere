@@ -91,6 +91,7 @@ vi.mock("../../hooks/useDraftPersistence", () => ({
   useDraftPersistence: (key: string) => {
     draftKeys.push(key);
     const [value, setValue] = useState("");
+    const getDraft = useCallback(() => value, [value]);
     const setDraft = useCallback((nextValue: string) => setValue(nextValue), []);
     const flushDraft = useCallback(() => {}, []);
     const clearInput = useCallback(() => setValue(""), []);
@@ -99,13 +100,21 @@ vi.mock("../../hooks/useDraftPersistence", () => ({
 
     const controls = useMemo(
       () => ({
+        getDraft,
         setDraft,
         flushDraft,
         clearInput,
         clearDraft,
         restoreFromStorage,
       }),
-      [clearDraft, clearInput, flushDraft, restoreFromStorage, setDraft],
+      [
+        clearDraft,
+        clearInput,
+        flushDraft,
+        getDraft,
+        restoreFromStorage,
+        setDraft,
+      ],
     );
 
     return [value, setValue, controls] as const;

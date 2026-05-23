@@ -16,6 +16,7 @@ import { MessageInput } from "../MessageInput";
 vi.mock("../../hooks/useDraftPersistence", () => ({
   useDraftPersistence: () => {
     const [value, setValue] = useState("");
+    const getDraft = useCallback(() => value, [value]);
     const setDraft = useCallback((nextValue: string) => setValue(nextValue), []);
     const flushDraft = useCallback(() => {}, []);
     const clearInput = useCallback(() => setValue(""), []);
@@ -24,13 +25,21 @@ vi.mock("../../hooks/useDraftPersistence", () => ({
 
     const controls = useMemo(
       () => ({
+        getDraft,
         setDraft,
         flushDraft,
         clearInput,
         clearDraft,
         restoreFromStorage,
       }),
-      [setDraft, flushDraft, clearInput, clearDraft, restoreFromStorage],
+      [
+        getDraft,
+        setDraft,
+        flushDraft,
+        clearInput,
+        clearDraft,
+        restoreFromStorage,
+      ],
     );
 
     return [value, setValue, controls] as const;
@@ -361,6 +370,50 @@ describe("MessageInput", () => {
     fireEvent.click(button);
 
     expect(onBtwShortcut).toHaveBeenCalledWith("");
+  });
+
+  it("marks a focused /btw pane without claiming footer routing", () => {
+    const onBtwShortcut = vi.fn(() => false);
+    renderMessageInput(vi.fn(() => true), {
+      btwToolbarMode: "focused-pane",
+      onBtwShortcut,
+    });
+
+    const button = screen.getByRole("button", {
+      name: /click to focus its composer/,
+    });
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(button);
+
+    expect(onBtwShortcut).toHaveBeenCalledWith("");
+  });
+
+  it("lets a pane-focused /btw click move focus after footer refocus", () => {
+    vi.useFakeTimers();
+    const paneComposer = document.createElement("textarea");
+    document.body.append(paneComposer);
+    const onBtwShortcut = vi.fn(() => {
+      window.setTimeout(() => paneComposer.focus(), 0);
+      return false;
+    });
+    renderMessageInput(vi.fn(() => true), {
+      btwToolbarMode: "focused-pane",
+      onBtwShortcut,
+    });
+
+    try {
+      fireEvent.click(
+        screen.getByRole("button", { name: /click to focus its composer/ }),
+      );
+      act(() => {
+        vi.runOnlyPendingTimers();
+      });
+
+      expect(document.activeElement).toBe(paneComposer);
+    } finally {
+      paneComposer.remove();
+    }
   });
 
   it("marks the /btw toolbar button when an aside can be focused", () => {

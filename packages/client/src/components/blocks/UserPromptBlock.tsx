@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, type ReactNode, useState } from "react";
 import {
   type UploadedFileInfo,
   getFilename,
@@ -15,6 +15,7 @@ interface Props {
   content: string | ContentBlock[];
   onCorrect?: () => void;
   onTrimBefore?: () => void;
+  extraActions?: ReactNode;
 }
 
 interface InputImageBlock extends ContentBlock {
@@ -310,12 +311,14 @@ function UserPromptActionButtons({
   onCorrect,
   onTrimBefore,
   copyText,
+  extraActions,
 }: {
   onCorrect?: () => void;
   onTrimBefore?: () => void;
   copyText?: string;
+  extraActions?: ReactNode;
 }) {
-  if (!onCorrect && !onTrimBefore && !copyText) return null;
+  if (!onCorrect && !onTrimBefore && !copyText && !extraActions) return null;
 
   return (
     <div className="user-prompt-actions">
@@ -378,6 +381,7 @@ function UserPromptActionButtons({
           <span className="user-prompt-correct-label">Edit</span>
         </button>
       )}
+      {extraActions}
     </div>
   );
 }
@@ -405,6 +409,7 @@ export const UserPromptBlock = memo(function UserPromptBlock({
   content,
   onCorrect,
   onTrimBefore,
+  extraActions,
 }: Props) {
   if (typeof content === "string") {
     const { text, openedFiles, uploadedFiles } = parseUserPrompt(content);
@@ -434,6 +439,7 @@ export const UserPromptBlock = memo(function UserPromptBlock({
           onCorrect={onCorrect}
           onTrimBefore={onTrimBefore}
           copyText={getUserPromptCopyText(text)}
+          extraActions={extraActions}
         />
         <OpenedFilesMetadata files={openedFiles} />
       </div>
@@ -485,6 +491,7 @@ export const UserPromptBlock = memo(function UserPromptBlock({
         onCorrect={onCorrect}
         onTrimBefore={onTrimBefore}
         copyText={getUserPromptCopyText(text)}
+        extraActions={extraActions}
       />
       <OpenedFilesMetadata files={openedFiles} />
     </div>

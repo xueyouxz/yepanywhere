@@ -18,6 +18,7 @@ import {
   useDraftPersistence,
 } from "../hooks/useDraftPersistence";
 import { useI18n } from "../i18n";
+import type { BtwToolbarMode } from "../lib/btwAsideRouting";
 import type { ModelIndicatorTone } from "../lib/modelConfigIndicator";
 import { hasCoarsePointer } from "../lib/deviceDetection";
 import type { ContextUsage, PermissionMode } from "../types";
@@ -182,6 +183,8 @@ interface Props {
   btwActive?: boolean;
   /** Whether this session has an active /btw aside available to focus. */
   btwHasAsides?: boolean;
+  /** Explicit /btw toolbar display state when focus and footer routing differ. */
+  btwToolbarMode?: BtwToolbarMode;
   /** Live model/effort indicator shown on the slash button */
   modelIndicatorTone?: ModelIndicatorTone;
   modelIndicatorProvider?: string;
@@ -237,6 +240,7 @@ export function MessageInput({
   onBtwShortcut,
   btwActive = false,
   btwHasAsides = false,
+  btwToolbarMode,
   modelIndicatorTone,
   modelIndicatorProvider,
   modelIndicatorModel,
@@ -872,6 +876,7 @@ export function MessageInput({
             onBtwClick={onBtwShortcut ? handleBtwClick : undefined}
             btwActive={btwActive}
             btwHasAsides={btwHasAsides}
+            btwToolbarMode={btwToolbarMode}
             modelIndicatorTone={modelIndicatorTone}
             modelIndicatorProvider={modelIndicatorProvider}
             modelIndicatorModel={modelIndicatorModel}

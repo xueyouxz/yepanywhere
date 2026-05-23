@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export interface DraftControls {
+  /** Return the current in-memory draft value */
+  getDraft: () => string;
   /** Replace input state and localStorage immediately */
   setDraft: (value: string) => void;
   /** Flush any pending draft write immediately */
@@ -138,6 +140,9 @@ export function useDraftPersistence(
     saveToStorage(keyRef.current, newValue);
   }, []);
 
+  // Read the current in-memory value for UI actions that append to the draft.
+  const getDraft = useCallback(() => valueRef.current, []);
+
   // Replace the draft immediately. This is used when another UI action, such
   // as editing a queued message, needs to take over the composer.
   const setDraft = useCallback((newValue: string) => {
@@ -206,13 +211,21 @@ export function useDraftPersistence(
 
   const controls = useMemo(
     () => ({
+      getDraft,
       setDraft,
       flushDraft: flushPending,
       clearInput,
       clearDraft,
       restoreFromStorage,
     }),
-    [setDraft, flushPending, clearInput, clearDraft, restoreFromStorage],
+    [
+      getDraft,
+      setDraft,
+      flushPending,
+      clearInput,
+      clearDraft,
+      restoreFromStorage,
+    ],
   );
 
   return [value, setValue, controls];

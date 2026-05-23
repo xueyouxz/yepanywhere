@@ -41,6 +41,10 @@ import {
   type UserTurnNavSearchState,
 } from "./UserTurnNavigator";
 import { CopyTextButton } from "./ui/CopyTextButton";
+import {
+  BtwAsideTranscript,
+  type BtwAsideTranscriptTurn,
+} from "./BtwAsidePane";
 
 /**
  * Groups consecutive assistant items (text, thinking, tool_call) into turns.
@@ -351,6 +355,7 @@ interface BtwAsideTimelineItem {
   preview?: string;
   error?: string;
   responses: string[];
+  turns?: BtwAsideTranscriptTurn[];
   expanded?: boolean;
   isFocused?: boolean;
   canStop?: boolean;
@@ -379,6 +384,8 @@ interface Props {
   onStopBtwAside?: (asideId: string) => void;
   /** Toggle the inline /btw transcript preview. */
   onToggleBtwAsideExpanded?: (asideId: string) => void;
+  /** Insert a /btw transcript turn into the Mother composer. */
+  onTransferBtwAsideTurn?: (text: string) => void;
   /** Callback to cancel a deferred message */
   onCancelDeferred?: (tempId: string) => void;
   /** Callback to take a deferred message back into the composer */
@@ -472,15 +479,20 @@ function BtwAsideTimelineCard({
   onDone,
   onStop,
   onToggleExpanded,
+  onTransferTurn,
 }: {
   aside: BtwAsideTimelineItem;
   onFocus?: (asideId: string) => void;
   onDone?: () => void;
   onStop?: (asideId: string) => void;
   onToggleExpanded?: (asideId: string) => void;
+  onTransferTurn?: (text: string) => void;
 }) {
   const canExpand = Boolean(
-    aside.request || aside.followUps.length > 0 || aside.responses.length > 0,
+    aside.request ||
+      aside.followUps.length > 0 ||
+      aside.responses.length > 0 ||
+      (aside.turns?.length ?? 0) > 0,
   );
 
   return (
@@ -513,29 +525,11 @@ function BtwAsideTimelineCard({
         )}
       </button>
       {aside.expanded && canExpand && (
-        <div className="btw-aside-transcript">
-          {aside.request && (
-            <div className="btw-aside-turn btw-aside-turn-user">
-              {aside.request}
-            </div>
-          )}
-          {aside.responses.map((response, index) => (
-            <div
-              key={`response-${index}`}
-              className="btw-aside-turn btw-aside-turn-assistant"
-            >
-              {response}
-            </div>
-          ))}
-          {aside.followUps.map((followUp, index) => (
-            <div
-              key={`followup-${index}`}
-              className="btw-aside-turn btw-aside-turn-user"
-            >
-              {followUp}
-            </div>
-          ))}
-        </div>
+        <BtwAsideTranscript
+          aside={aside}
+          autoScrollLatest
+          onTransferToComposer={onTransferTurn}
+        />
       )}
       <div className="btw-aside-actions">
         {canExpand && (
@@ -598,6 +592,7 @@ export const MessageList = memo(function MessageList({
   onDoneBtwAside,
   onStopBtwAside,
   onToggleBtwAsideExpanded,
+  onTransferBtwAsideTurn,
   onCancelDeferred,
   onEditDeferred,
   onCorrectLatestUserMessage,
@@ -1791,6 +1786,7 @@ export const MessageList = memo(function MessageList({
                 onDone={onDoneBtwAside}
                 onStop={onStopBtwAside}
                 onToggleExpanded={onToggleBtwAsideExpanded}
+                onTransferTurn={onTransferBtwAsideTurn}
               />
             );
           }
