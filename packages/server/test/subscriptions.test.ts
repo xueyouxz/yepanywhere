@@ -178,6 +178,28 @@ describe("createSessionSubscription", () => {
     ).toBe(true);
   });
 
+  it("emits plain user echoes synchronously before augmentation", async () => {
+    const { process, fireEvent } = createMockProcess();
+    const { emit, events } = collectEmit();
+
+    createSessionSubscription(process, emit);
+
+    const delivered = fireEvent({
+      type: "message",
+      message: {
+        type: "user",
+        uuid: "user-1",
+        message: {
+          role: "user",
+          content: "queued input accepted",
+        },
+      },
+    } as ProcessEvent);
+
+    expect(events.some(([type]) => type === "message")).toBe(true);
+    await delivered;
+  });
+
   it("forwards state-change events", async () => {
     const { process, fireEvent } = createMockProcess();
     const { emit, events } = collectEmit();

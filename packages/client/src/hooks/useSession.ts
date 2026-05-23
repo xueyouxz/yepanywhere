@@ -1804,6 +1804,15 @@ export function useSession(
           reason: deferredData.reason,
           tempId: deferredData.tempId,
         });
+        if (
+          deferredData.reason === "promoted" &&
+          (deferredData.messages?.length ?? 0) === 0
+        ) {
+          throttledFetch();
+          // A second call asks the existing throttle for a trailing catch-up in
+          // case the provider user echo lands just after the promotion event.
+          throttledFetch();
+        }
       } else if (data.eventType === "complete") {
         logSessionUiTrace("stream-complete", { sessionId });
         setProcessState("idle");

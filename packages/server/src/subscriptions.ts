@@ -46,6 +46,33 @@ export function normalizeStreamMessage(
   return message;
 }
 
+function hasToolResultContent(message: Record<string, unknown>): boolean {
+  const sdkMessage = message.message;
+  const content =
+    sdkMessage && typeof sdkMessage === "object" && "content" in sdkMessage
+      ? (sdkMessage as { content?: unknown }).content
+      : message.content;
+
+  return (
+    Array.isArray(content) &&
+    content.some(
+      (block) =>
+        block !== null &&
+        typeof block === "object" &&
+        (block as { type?: unknown }).type === "tool_result",
+    )
+  );
+}
+
+function isPlainUserEcho(message: Record<string, unknown>): boolean {
+  return (
+    message.type === "user" &&
+    message.tool_use_result === undefined &&
+    message.toolUseResult === undefined &&
+    !hasToolResultContent(message)
+  );
+}
+
 /**
  * Create a session subscription that forwards process events via `emit`.
  *
@@ -133,7 +160,9 @@ export function createSessionSubscription(
             );
           }
 
-          if (isStreamEvent) {
+          if (isStreamEvent || isPlainUserEcho(message)) {
+            // User echoes reconcile optimistic/deferred queue state; do not let
+            // markdown/tool augmentation delay that delivery signal.
             emit("message", markSubagent(message));
             void processAugments().catch((err) => {
               options?.onError?.(err);

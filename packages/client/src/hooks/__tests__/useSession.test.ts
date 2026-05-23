@@ -670,7 +670,7 @@ describe("useSession completion reconciliation", () => {
     });
   });
 
-  it("marks a promoted deferred queue chip as sending until the user echo arrives", () => {
+  it("marks a promoted deferred queue chip as sending and fetches catch-up", () => {
     const { result } = renderHook(() =>
       useSession(PROJECT_ID, "sess-1", {
         owner: "self",
@@ -702,6 +702,13 @@ describe("useSession completion reconciliation", () => {
         deliveryState: "sending",
       },
     ]);
+    expect(fetchNewMessages).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
+    expect(fetchNewMessages).toHaveBeenCalledTimes(2);
   });
 
   it("clears a promoted deferred batch from a concatenated user echo", () => {
