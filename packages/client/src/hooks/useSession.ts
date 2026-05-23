@@ -206,6 +206,15 @@ interface DeliveredUserEcho {
 }
 
 const CONCATENATED_USER_TURN_SEPARATOR = "\n\n--------\n\n";
+const USER_ECHO_CLOCK_SKEW_MS = 60_000;
+
+function parseMessageTimestampMs(value: unknown): number | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const timestampMs = Date.parse(value);
+  return Number.isFinite(timestampMs) ? timestampMs : null;
+}
 
 function extractUserMessageText(
   sdkMessage: Record<string, unknown>,
@@ -573,6 +582,51 @@ function removeDeliveredDeferredMessages(
     : filtered;
 }
 
+function userTurnMatchesPending(
+  message: Message,
+  pending: PendingMessage,
+): boolean {
+  if (message.type !== "user" && message.role !== "user") {
+    return false;
+  }
+  if (message.tempId === pending.tempId) {
+    return true;
+  }
+
+  const text = extractUserMessageText(message as Record<string, unknown>);
+  if (!text || !userTextContainsDeferredContent(text, pending.content)) {
+    return false;
+  }
+
+  const messageTimestampMs = parseMessageTimestampMs(message.timestamp);
+  const pendingTimestampMs = parseMessageTimestampMs(pending.timestamp);
+  if (messageTimestampMs === null || pendingTimestampMs === null) {
+    return false;
+  }
+
+  return messageTimestampMs + USER_ECHO_CLOCK_SKEW_MS >= pendingTimestampMs;
+}
+
+function removeDeliveredPendingMessages(
+  pendingMessages: PendingMessage[],
+  messages: Message[],
+): PendingMessage[] {
+  if (pendingMessages.length === 0 || messages.length === 0) {
+    return pendingMessages;
+  }
+
+  const recentMessages = messages.slice(-30);
+  const filtered = pendingMessages.filter(
+    (pending) =>
+      !recentMessages.some((message) =>
+        userTurnMatchesPending(message, pending),
+      ),
+  );
+  return filtered.length === pendingMessages.length
+    ? pendingMessages
+    : filtered;
+}
+
 function summarizeDeferredMessages(messages: DeferredMessage[]): Array<{
   tempId?: string;
   deliveryState?: DeferredMessage["deliveryState"];
@@ -908,6 +962,9 @@ export function useSession(
   }, [sessionId]);
 
   useEffect(() => {
+    setPendingMessages((prev) =>
+      removeDeliveredPendingMessages(prev, messages),
+    );
     setDeferredMessages((prev) =>
       removeDeliveredDeferredMessages(
         prev,

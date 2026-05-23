@@ -381,6 +381,87 @@ describe("useSession completion reconciliation", () => {
     expect(result.current.deferredMessages).toEqual([]);
   });
 
+  it("clears pending direct sends when persisted history contains the user turn", () => {
+    const { result, rerender } = renderHook(() =>
+      useSession(PROJECT_ID, "sess-1", {
+        owner: "self",
+        processId: "proc-1",
+      }),
+    );
+
+    act(() => {
+      result.current.addPendingMessage(
+        "does origin have both parts",
+        undefined,
+        "2026-05-23T04:36:39.900Z",
+      );
+    });
+
+    expect(result.current.pendingMessages).toHaveLength(1);
+
+    sessionMessagesMock.messages = [
+      {
+        type: "user",
+        uuid: "uuid-user",
+        timestamp: "2026-05-23T04:36:39.966Z",
+        message: {
+          role: "user",
+          content: "does origin have both parts",
+        },
+      },
+      {
+        type: "assistant",
+        uuid: "uuid-assistant",
+        timestamp: "2026-05-23T04:36:49.441Z",
+        message: {
+          role: "assistant",
+          content: "No. The fetched origin/master has neither part.",
+        },
+      },
+    ];
+
+    rerender();
+
+    expect(result.current.pendingMessages).toEqual([]);
+  });
+
+  it("keeps pending direct sends when only older duplicate history matches", () => {
+    const { result, rerender } = renderHook(() =>
+      useSession(PROJECT_ID, "sess-1", {
+        owner: "self",
+        processId: "proc-1",
+      }),
+    );
+
+    act(() => {
+      result.current.addPendingMessage(
+        "repeatable question",
+        undefined,
+        "2026-05-23T04:36:39.900Z",
+      );
+    });
+
+    sessionMessagesMock.messages = [
+      {
+        type: "user",
+        uuid: "uuid-old-user",
+        timestamp: "2026-05-23T04:30:00.000Z",
+        message: {
+          role: "user",
+          content: "repeatable question",
+        },
+      },
+    ];
+
+    rerender();
+
+    expect(result.current.pendingMessages).toMatchObject([
+      {
+        content: "repeatable question",
+      },
+    ]);
+  });
+
   it("keeps deferred queue chips on an idle status boundary", () => {
     const { result } = renderHook(() =>
       useSession(PROJECT_ID, "sess-1", {
