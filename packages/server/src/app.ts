@@ -32,6 +32,7 @@ import {
   GEMINI_TMP_DIR,
   GeminiSessionScanner,
 } from "./projects/gemini-scanner.js";
+import { GROK_SESSIONS_DIR } from "./projects/paths.js";
 import { ProjectScanner } from "./projects/scanner.js";
 import { PushNotifier, type PushService } from "./push/index.js";
 import { createPushRoutes } from "./push/routes.js";
@@ -94,6 +95,7 @@ import type { SharingService } from "./services/SharingService.js";
 import type { SpeechBackendRegistry } from "./services/voice/registry.js";
 import { CodexSessionReader } from "./sessions/codex-reader.js";
 import { GeminiSessionReader } from "./sessions/gemini-reader.js";
+import { GrokSessionReader } from "./sessions/grok-reader.js";
 import { OpenCodeSessionReader } from "./sessions/opencode-reader.js";
 import { findSessionSummaryAcrossProviders } from "./sessions/provider-resolution.js";
 import { normalizeSession } from "./sessions/normalization.js";
@@ -385,6 +387,15 @@ export function createApp(options: AppOptions): AppResult {
               projectPath: project.path,
             }),
         );
+      case "grok":
+        return getOrCreateReader(
+          `grok::${GROK_SESSIONS_DIR}::${project.path}`,
+          () =>
+            new GrokSessionReader({
+              sessionsDir: GROK_SESSIONS_DIR,
+              projectPath: project.path,
+            }),
+        );
     }
   };
   const codexReaderFactory = (projectPath: string): CodexSessionReader =>
@@ -406,6 +417,15 @@ export function createApp(options: AppOptions): AppResult {
           hashToCwd: geminiScanner.getHashToCwd(),
         }),
     );
+  const grokReaderFactory = (projectPath: string): GrokSessionReader =>
+    getOrCreateReader(
+      `grok-extra::${GROK_SESSIONS_DIR}::${projectPath}`,
+      () =>
+        new GrokSessionReader({
+          sessionsDir: GROK_SESSIONS_DIR,
+          projectPath,
+        }),
+    );
   const getSessionSummary = async (sessionId: string, projectId: string) => {
     const project = await scanner.getProject(projectId);
     if (!project) return null;
@@ -420,6 +440,8 @@ export function createApp(options: AppOptions): AppResult {
         geminiSessionsDir: GEMINI_TMP_DIR,
         geminiReaderFactory,
         geminiHashToCwd: geminiScanner.getHashToCwd(),
+        grokSessionsDir: GROK_SESSIONS_DIR,
+        grokReaderFactory,
       },
       options.sessionMetadataService?.getProvider(sessionId),
     );
@@ -737,6 +759,11 @@ export function createApp(options: AppOptions): AppResult {
             return {
               reader: geminiReaderFactory(project.path),
               sessionDir: GEMINI_TMP_DIR,
+            };
+          case "grok":
+            return {
+              reader: grokReaderFactory(project.path),
+              sessionDir: GROK_SESSIONS_DIR,
             };
           default:
             return {

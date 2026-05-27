@@ -3,14 +3,15 @@ import type {
   ISessionIndexService,
   SessionIndexListOptions,
 } from "../indexes/types.js";
-import { canonicalizeProjectPath } from "../projects/paths.js";
+import { GROK_SESSIONS_DIR, canonicalizeProjectPath } from "../projects/paths.js";
 import type { Project, SessionSummary } from "../supervisor/types.js";
 import { CodexSessionReader } from "./codex-reader.js";
 import { GeminiSessionReader } from "./gemini-reader.js";
+import { GrokSessionReader } from "./grok-reader.js";
 import { ClaudeSessionReader } from "./reader.js";
 import type { ISessionReader } from "./types.js";
 
-type ProviderGroup = "claude" | "codex" | "gemini" | "opencode";
+type ProviderGroup = "claude" | "codex" | "gemini" | "opencode" | "grok";
 
 export interface ProviderProjectCatalog {
   codexPaths: Set<string>;
@@ -26,13 +27,15 @@ export interface ProviderResolutionDeps {
   geminiSessionsDir?: string;
   geminiReaderFactory?: (projectPath: string) => GeminiSessionReader;
   geminiHashToCwd?: Promise<Map<string, string>>;
+  grokSessionsDir?: string;
+  grokReaderFactory?: (projectPath: string) => GrokSessionReader;
 }
 
 export interface SessionSource {
   provider: ProviderName;
   reader: ISessionReader;
   sessionDir: string;
-  kind: "primary" | "codex" | "gemini";
+  kind: "primary" | "codex" | "gemini" | "grok";
 }
 
 export interface ResolvedSessionSummary {
@@ -48,6 +51,7 @@ function normalizeProviderGroup(
   if (provider === "gemini" || provider === "gemini-acp") return "gemini";
   if (provider === "opencode") return "opencode";
   if (provider === "claude" || provider === "claude-ollama") return "claude";
+  if (provider === "grok" || provider === "grok-acp") return "grok";
   return null;
 }
 
@@ -70,6 +74,18 @@ function mayHaveGeminiSessions(
   }
   const provider = normalizeProviderGroup(project.provider);
   return provider === "claude" || provider === "codex";
+}
+
+function mayHaveGrokSessions(project: Project): boolean {
+  const group = normalizeProviderGroup(project.provider);
+  // Grok sessions can appear for any project (cross-provider) or as primary
+  // when the project was started with the grok provider.
+  return (
+    group === "grok" ||
+    group === "claude" ||
+    group === "codex" ||
+    group === "gemini"
+  );
 }
 
 function createClaudeSource(
@@ -128,6 +144,24 @@ function createGeminiSource(
   };
 }
 
+function createGrokSource(
+  project: Project,
+  deps: ProviderResolutionDeps,
+): SessionSource | null {
+  const reader =
+    deps.grokReaderFactory?.(project.path) ??
+    new GrokSessionReader({
+      sessionsDir: deps.grokSessionsDir ?? GROK_SESSIONS_DIR,
+      projectPath: project.path,
+    });
+  return {
+    provider: "grok",
+    reader,
+    sessionDir: deps.grokSessionsDir ?? GROK_SESSIONS_DIR,
+    kind: "grok",
+  };
+}
+
 function buildCandidateGroups(
   project: Project,
   preferredProvider: ProviderName | string | undefined,
@@ -151,6 +185,9 @@ function buildCandidateGroups(
   if (mayHaveGeminiSessions(project, catalog)) {
     pushGroup("gemini");
   }
+  if (mayHaveGrokSessions(project)) {
+    pushGroup("grok");
+  }
 
   return groups;
 }
@@ -169,6 +206,8 @@ function getSourceForGroup(
       return createCodexSource(project, deps);
     case "gemini":
       return createGeminiSource(project, deps, catalog);
+    case "grok":
+      return createGrokSource(project, deps);
   }
 }
 

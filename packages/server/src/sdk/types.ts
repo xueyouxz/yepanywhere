@@ -21,6 +21,8 @@ export interface ContentBlock {
   tool_use_id?: string;
   /** For tool_result blocks - the result content */
   content?: string;
+  /** For tool_result blocks - true when the tool failed */
+  is_error?: boolean;
 }
 
 /**

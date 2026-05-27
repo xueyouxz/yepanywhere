@@ -81,6 +81,13 @@ export const CLAUDE_PROJECTS_DIR =
 export const DETACHED_PROJECT_PATH = join(tmpdir(), "yep-anywhere-no-project");
 export const DETACHED_PROJECT_NAME = "No project";
 
+/** Root for Grok Build sessions (persistent across restarts, similar to Gemini/Codex) */
+export const GROK_DIR =
+  process.env.GROK_SESSIONS_DIR?.replace(new RegExp(`\\${sep}sessions$`), "") ??
+  join(homedir(), ".grok");
+export const GROK_SESSIONS_DIR =
+  process.env.GROK_SESSIONS_DIR ?? join(GROK_DIR, "sessions");
+
 /**
  * Encode an absolute project path to a projectId (base64url).
  * This is reversible via `decodeProjectId()`.

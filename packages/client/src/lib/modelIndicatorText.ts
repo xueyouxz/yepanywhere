@@ -15,6 +15,7 @@ const providerGlyphMap: Record<string, string> = {
   "codex-oss": "Cd↓",
   gemini: "✦",
   "gemini-acp": "✦",
+  grok: "Gk",
   opencode: "OC",
 };
 
@@ -95,6 +96,7 @@ const modelGlyphRulesByProvider: Readonly<
     { patterns: ["1.5-pro"], glyph: "✹" },
     { patterns: ["gemini"], glyph: "◗" },
   ],
+  grok: [{ patterns: ["grok-build"], glyph: "Gk" }],
   opencode: [
     { patterns: ["gpt-5"], glyph: "◆" },
     { patterns: ["gpt-4"], glyph: "⧉" },
@@ -135,7 +137,7 @@ function normalizeForCodexModelAliasMatching(
 }
 
 function normalizeModelSuffixTail(raw: string): string {
-  const suffix = raw.replace(/^[\-._\s]+/u, "");
+  const suffix = raw.replace(/^[-._\s]+/u, "");
   if (!suffix) {
     return "";
   }

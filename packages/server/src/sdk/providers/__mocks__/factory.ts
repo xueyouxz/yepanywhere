@@ -9,6 +9,7 @@ import type { ProviderName } from "../types.js";
 import { MockClaudeOllamaProvider, MockClaudeProvider } from "./claude.js";
 import { MockCodexOSSProvider, MockCodexProvider } from "./codex.js";
 import { MockGeminiProvider } from "./gemini.js";
+import { MockGrokProvider } from "./grok.js";
 import { MockOpenCodeProvider } from "./opencode.js";
 import type {
   MockAgentProvider,
@@ -34,6 +35,10 @@ export function createMockProvider(
       return new MockCodexOSSProvider(config);
     case "gemini":
       return new MockGeminiProvider(config);
+    case "gemini-acp":
+      return new MockGeminiProvider(config);
+    case "grok":
+      return new MockGrokProvider(config);
     case "opencode":
       return new MockOpenCodeProvider(config);
     default:
@@ -53,6 +58,7 @@ export function createAllMockProviders(
   providers.set("codex", new MockCodexProvider(config));
   providers.set("codex-oss", new MockCodexOSSProvider(config));
   providers.set("gemini", new MockGeminiProvider(config));
+  providers.set("grok", new MockGrokProvider(config));
   providers.set("opencode", new MockOpenCodeProvider(config));
   return providers;
 }
@@ -76,6 +82,7 @@ export const MOCK_PROVIDER_TYPES: ProviderName[] = [
   "codex",
   "codex-oss",
   "gemini",
+  "grok",
   "opencode",
 ];
 

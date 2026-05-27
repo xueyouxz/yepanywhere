@@ -19,6 +19,7 @@
   --provider-claude: var(--app-claude-orange);
   --provider-codex: #10a37f;
   --provider-gemini: #4285f4;
+  --provider-grok: #111827;
   --provider-opencode: #9333ea;
 
   /* Semantic Colors */
@@ -7779,6 +7780,10 @@ a.sidebar-nav-item {
   background: var(--provider-gemini);
 }
 
+.provider-option-dot.provider-grok {
+  background: var(--provider-grok);
+}
+
 .provider-option-dot.provider-opencode {
   background: var(--provider-opencode);
 }
@@ -8669,6 +8674,16 @@ a.sidebar-nav-item {
 
 .agent-provider-gemini {
   background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  color: white;
+}
+
+.agent-provider-grok {
+  background: linear-gradient(135deg, #111827 0%, #374151 100%);
+  color: white;
+}
+
+.agent-provider-opencode {
+  background: linear-gradient(135deg, #7c3aed 0%, #9333ea 100%);
   color: white;
 }
 

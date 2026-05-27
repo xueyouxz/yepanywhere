@@ -4,7 +4,12 @@
  * - "codex": OpenAI Codex via SDK (cloud models)
  * - "codex-oss": Codex via CLI with --oss (local models via Ollama)
  * - "gemini": Google Gemini via CLI
+ * - "gemini-acp": Gemini via CLI with --experimental-acp (preferred)
+ * - "grok": Grok Build via ACP (`grok agent stdio`) - Phase 1 isolated prototype
  * - "opencode": OpenCode via HTTP server (multi-provider agent)
+ *
+ * "grok" added (additive only) for Phase 1 Grok Build provider per topics/grok.md.
+ * Gated behind ENABLED_PROVIDERS=grok; no impact on other providers or core paths.
  */
 export type ProviderName =
   | "claude"
@@ -13,12 +18,15 @@ export type ProviderName =
   | "codex-oss"
   | "gemini"
   | "gemini-acp"
+  | "grok"
   | "opencode";
 
 /**
  * All provider names in display order.
  * Used for filter dropdowns, iteration, etc.
  * Keep in sync with ProviderName type above.
+ *
+ * "grok" added (additive) - see ProviderName comment for isolation/ENABLED_PROVIDERS notes.
  */
 export const ALL_PROVIDERS: readonly ProviderName[] = [
   "claude",
@@ -27,6 +35,7 @@ export const ALL_PROVIDERS: readonly ProviderName[] = [
   "codex-oss",
   "gemini",
   "gemini-acp",
+  "grok",
   "opencode",
 ] as const;
 
