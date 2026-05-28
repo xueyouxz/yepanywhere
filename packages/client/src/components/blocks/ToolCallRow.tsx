@@ -267,9 +267,11 @@ export const ToolCallRow = memo(function ToolCallRow({
     sessionProvider,
     status,
   );
+  const rendererToolName = toolRegistry.get(toolName).tool;
   const mayHaveCollapsedPreview =
     toolRegistry.hasCollapsedPreview(toolName) && !suppressCollapsedPreview;
-  const isEditTool = toolRegistry.get(toolName).tool === "Edit";
+  const isEditTool = rendererToolName === "Edit";
+  const isReadTool = rendererToolName === "Read";
   const canRenderInteractiveSummary =
     status === "complete" || (status === "pending" && isEditTool);
   const mayHaveInteractiveSummary =
@@ -358,23 +360,23 @@ export const ToolCallRow = memo(function ToolCallRow({
     !isNonExpandable && (toolName === "Edit" || toolName === "TodoWrite"),
   );
 
-  // Dot-expanded: inline file content for Read rows (starts collapsed).
-  // Not used for Edit — its interactive summary + modal is already the full view.
+  // Dot-expanded: inline full result for preview-first rows (starts collapsed).
   const [dotExpanded, setDotExpanded] = useState(false);
   const shouldFocusExpandedTopRef = useRef(false);
-
-  // Dot button: expandable rows + Read rows with interactive summary.
-  const showDotBtn =
-    !isNonExpandable ||
-    (hasInteractiveSummary && toolName === "Read") ||
-    hasBashPreviewToggle;
-
-  // Header toggles dotExpanded for Read rows — same pattern as thinking blocks.
-  const hasHeaderDotToggle =
+  const canInlineExpandToolResult =
     isNonExpandable &&
     hasInteractiveSummary &&
     shouldHydrateRichContent &&
-    toolName === "Read";
+    (isReadTool || (isEditTool && toolResult !== undefined));
+
+  // Dot button: expandable rows + preview-first rows with an inline result.
+  const showDotBtn =
+    !isNonExpandable ||
+    canInlineExpandToolResult ||
+    hasBashPreviewToggle;
+
+  // Header toggles dotExpanded for preview-first inline result rows.
+  const hasHeaderDotToggle = canInlineExpandToolResult;
   const hasBashHeaderToggle = hasBashPreviewToggle && shouldHydrateRichContent;
 
   const handleDotClick = (e: MouseEvent<HTMLButtonElement>) => {
@@ -394,7 +396,7 @@ export const ToolCallRow = memo(function ToolCallRow({
         }
         return !v;
       });
-    } else if (hasInteractiveSummary && toolName === "Read" && shouldHydrateRichContent) {
+    } else if (canInlineExpandToolResult) {
       setDotExpanded((v) => {
         if (!v) {
           shouldFocusExpandedTopRef.current = true;
@@ -600,7 +602,7 @@ export const ToolCallRow = memo(function ToolCallRow({
       </div>
 
       {/* Collapsed preview - shown when tool supports it (non-expandable) */}
-      {hasCollapsedPreview && bashPreviewExpanded && (
+      {hasCollapsedPreview && bashPreviewExpanded && !(dotExpanded && isEditTool) && (
         <div className="tool-row-collapsed-preview">
           {hasBashPreviewToggle && (
             <ToolRowCollapseStrip
@@ -625,7 +627,7 @@ export const ToolCallRow = memo(function ToolCallRow({
         </div>
       )}
 
-      {dotExpanded && isNonExpandable && hasInteractiveSummary && toolName === "Read" && (
+      {dotExpanded && canInlineExpandToolResult && (
         <div className="tool-row-content">
           <ToolRowCollapseStrip onCollapse={() => setDotExpanded(false)} />
           <ToolResultExpanded

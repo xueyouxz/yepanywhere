@@ -258,6 +258,59 @@ describe("ToolCallRow", () => {
     ).toBeDefined();
   });
 
+  it("expands completed Edit rows inline from the timeline dot", () => {
+    const { container } = render(
+      <ToolCallRow
+        id="tool-edit"
+        toolName="Edit"
+        toolInput={{
+          file_path: "packages/client/src/file.ts",
+          old_string: "const value = 1;",
+          new_string: "const value = 2;",
+        }}
+        toolResult={{
+          structured: {
+            filePath: "packages/client/src/file.ts",
+            oldString: "const value = 1;",
+            newString: "const value = 2;",
+            originalFile: "const value = 1;\n",
+            replaceAll: false,
+            userModified: false,
+            structuredPatch: [
+              {
+                oldStart: 1,
+                oldLines: 1,
+                newStart: 1,
+                newLines: 1,
+                lines: ["-const value = 1;", "+const value = 2;"],
+              },
+            ],
+          },
+          content: "const value = 2;",
+          isError: false,
+        }}
+        status="complete"
+      />,
+    );
+
+    expect(container.querySelector(".edit-collapsed-preview")).not.toBeNull();
+    expect(container.querySelector(".edit-result")).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand inline view" }),
+    );
+
+    expect(container.querySelector(".edit-collapsed-preview")).toBeNull();
+    expect(container.querySelector(".edit-result")).not.toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Collapse expanded tool row" }),
+    );
+
+    expect(container.querySelector(".edit-collapsed-preview")).not.toBeNull();
+    expect(container.querySelector(".edit-result")).toBeNull();
+  });
+
   it("focuses the tool row top when expanding long inline content", () => {
     let scrollTop = 40;
     const { container } = render(
