@@ -303,6 +303,6 @@ export class GrokSessionReader implements ISessionReader {
   }
 
   getIndexScopeKey(sessionDir: string): string {
-    return `grok::${sessionDir}`;
+    return `grok::${sessionDir}::${this.projectPath ?? "*"}`;
   }
 }
