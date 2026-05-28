@@ -595,6 +595,102 @@ describe("Supervisor", () => {
         initialMessage: { text: "second" },
       });
     });
+
+    it("steers active turns without restarting for composer thinking drift", async () => {
+      let aborted = false;
+      const steeredMessages: string[] = [];
+      const startSession = vi.fn(
+        async (options: Parameters<AgentProvider["startSession"]>[0]) => {
+          async function* iterator() {
+            yield {
+              type: "system",
+              subtype: "init",
+              session_id: options.resumeSessionId ?? "steering-session",
+            };
+            while (!aborted) {
+              await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+          }
+
+          return {
+            iterator: iterator(),
+            queue: new MessageQueue(),
+            abort: () => {
+              aborted = true;
+            },
+            steer: async (message) => {
+              steeredMessages.push(message.text);
+              return true;
+            },
+          };
+        },
+      );
+      const provider: AgentProvider = {
+        name: "codex",
+        displayName: "Codex",
+        supportsPermissionMode: true,
+        supportsThinkingToggle: true,
+        supportsSlashCommands: false,
+        supportsSteering: true,
+        isInstalled: async () => true,
+        isAuthenticated: async () => true,
+        getAuthStatus: async () => ({
+          installed: true,
+          authenticated: true,
+          enabled: true,
+        }),
+        getAvailableModels: async () => [],
+        startSession,
+      };
+      const supervisorWithProvider = new Supervisor({
+        provider,
+        idleTimeoutMs: 100,
+      });
+
+      const started = await supervisorWithProvider.resumeSession(
+        "steering-session",
+        "/tmp/test",
+        { text: "start" },
+        undefined,
+        {
+          model: "gpt-5.5",
+          thinking: { type: "adaptive" },
+          effort: "high",
+        },
+      );
+      if (!("id" in started)) {
+        throw new Error("expected process");
+      }
+      await vi.waitFor(() => {
+        expect(started.state.type).toBe("in-turn");
+      });
+
+      const result = await supervisorWithProvider.queueMessageToSession(
+        "steering-session",
+        "/tmp/test",
+        {
+          text: "steer me",
+          metadata: { deliveryIntent: "steer" as const },
+        },
+        undefined,
+        {
+          model: "gpt-5.5",
+          thinking: { type: "adaptive" },
+          effort: "max",
+        },
+      );
+
+      expect(result).toMatchObject({ success: true, restarted: false });
+      expect(startSession).toHaveBeenCalledTimes(1);
+      expect(supervisorWithProvider.getProcessForSession("steering-session")).toBe(
+        started,
+      );
+      await vi.waitFor(() => {
+        expect(steeredMessages).toEqual(["steer me"]);
+      });
+
+      await supervisorWithProvider.abortProcess(started.id);
+    });
   });
 
   describe("heartbeat turns", () => {

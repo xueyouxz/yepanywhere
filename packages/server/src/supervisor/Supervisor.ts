@@ -1244,10 +1244,20 @@ export class Supervisor {
       return { success: false, error: "Process terminated" };
     }
 
+    const isActiveSteeringMessage =
+      message.metadata?.deliveryIntent === "steer" &&
+      process.state.type === "in-turn";
+    const requestedThinking = isActiveSteeringMessage
+      ? process.thinking
+      : modelSettings?.thinking;
+    const requestedEffort = isActiveSteeringMessage
+      ? process.effort
+      : modelSettings?.effort;
+
     // Check if thinking/effort settings changed
     const thinkingChanged =
-      process.thinking?.type !== (modelSettings?.thinking?.type ?? undefined);
-    const effortChanged = process.effort !== modelSettings?.effort;
+      process.thinking?.type !== (requestedThinking?.type ?? undefined);
+    const effortChanged = process.effort !== requestedEffort;
 
     if (thinkingChanged || effortChanged) {
       if (
@@ -1256,14 +1266,14 @@ export class Supervisor {
         process.supportsThinkingModeChange
       ) {
         // Toggle thinking dynamically via deprecated API (works for auto↔off)
-        const tokens = modelSettings?.thinking?.type === "disabled" ? 0 : 1;
+        const tokens = requestedThinking?.type === "disabled" ? 0 : 1;
         const changed = await process.setMaxThinkingTokens(
           tokens === 0 ? undefined : tokens,
         );
         if (changed) {
           process.updateThinkingConfig(
-            modelSettings?.thinking,
-            modelSettings?.effort,
+            requestedThinking,
+            requestedEffort,
           );
         } else {
           const log = getLogger();
@@ -1286,8 +1296,8 @@ export class Supervisor {
             processId: process.id,
             oldThinking: process.thinking?.type,
             oldEffort: process.effort,
-            newThinking: modelSettings?.thinking?.type,
-            newEffort: modelSettings?.effort,
+            newThinking: requestedThinking?.type,
+            newEffort: requestedEffort,
           },
           "Thinking/effort changed on queue, restarting process",
         );
