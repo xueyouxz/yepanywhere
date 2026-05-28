@@ -577,6 +577,79 @@ describe("SessionIndexService", () => {
         "session-old",
       ]);
     });
+
+    it("does not prune archive rows when provider enumeration is active-window filtered", async () => {
+      await createSession("session-old", "Old session");
+      await createSession("session-new", "New session");
+
+      const oldTime = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      await utimes(join(sessionDir, "session-old.jsonl"), oldTime, oldTime);
+
+      await service.getSessionsWithCache(sessionDir, projectId, reader);
+
+      const filteringReader: ISessionReader = {
+        listSessions: (projectId) => reader.listSessions(projectId),
+        getSessionSummary: (sessionId, projectId) =>
+          reader.getSessionSummary(sessionId, projectId),
+        getSession: (sessionId, projectId, afterMessageId, options) =>
+          reader.getSession(sessionId, projectId, afterMessageId, options),
+        getSessionSummaryIfChanged: (
+          sessionId,
+          projectId,
+          cachedMtime,
+          cachedSize,
+        ) =>
+          reader.getSessionSummaryIfChanged(
+            sessionId,
+            projectId,
+            cachedMtime,
+            cachedSize,
+          ),
+        getAgentMappings: () => reader.getAgentMappings(),
+        getAgentSession: (agentId) => reader.getAgentSession(agentId),
+        listSessionFiles: async (_sessionDir, options) => {
+          const files = await readdir(sessionDir);
+          const entries: { sessionId: string; filePath: string }[] = [];
+          for (const file of files) {
+            if (!file.endsWith(".jsonl") || file.startsWith("agent-")) {
+              continue;
+            }
+            const filePath = join(sessionDir, file);
+            const stats = await stat(filePath);
+            if (
+              options?.activeAfterMs !== undefined &&
+              stats.mtimeMs < options.activeAfterMs
+            ) {
+              continue;
+            }
+            entries.push({
+              sessionId: file.replace(".jsonl", ""),
+              filePath,
+            });
+          }
+          return entries;
+        },
+      };
+
+      const activeAfterMs = Date.now() - 14 * 24 * 60 * 60 * 1000;
+      const active = await service.getSessionsWithCache(
+        sessionDir,
+        projectId,
+        filteringReader,
+        { activeAfterMs },
+      );
+      expect(active.map((session) => session.id)).toEqual(["session-new"]);
+
+      const archive = await service.getSessionsWithCache(
+        sessionDir,
+        projectId,
+        reader,
+      );
+      expect(archive.map((session) => session.id).sort()).toEqual([
+        "session-new",
+        "session-old",
+      ]);
+    });
   });
 
   describe("sorting", () => {
