@@ -6,6 +6,8 @@
  * basic install/auth detection via ~/.grok/bin/grok + ~/.grok/auth.json,
  * normalization of ACP events (agent_thought_chunk, tool_call*,
  * agent_message_chunk, plan) into SDKMessage (thinking blocks + tool_use/tool_result + approvals).
+ * Steering uses a second ACP session/prompt call against the same live Grok
+ * session while the current prompt is still active.
  *
  * Effort mapping: YA EffortLevel is passed through to Grok's top-level --effort flag.
  *
@@ -27,7 +29,7 @@
  * - /home/graehl/.grok/docs/user-guide/03-keyboard-shortcuts.md + 14-headless-mode.md (effort,
  *   permission modes, interject for future phases)
  * - Local ~/.grok/models_cache.json + `grok models` + `~/.grok/bin/grok --help` (model info)
- * Steering, native ACP fork, scanner/history, full /btw, tests, docs updates = later phases.
+ * Native ACP fork, scanner/history, full /btw, tests, docs updates = later phases.
  *
  * Beta software (grok 0.1.220 as of 2026-05); surfaces can change. All claims grounded in
  * local binary + docs inspection.
@@ -94,6 +96,12 @@ interface GrokAuthProfile {
   [key: string]: unknown;
 }
 
+interface GrokPromptRuntime {
+  sessionId?: string;
+  activePromptCount: number;
+  promptError: unknown;
+}
+
 /**
  * Configuration for Grok ACP provider (rarely needed; auto-detects preferred ~/.grok/bin/grok).
  */
@@ -120,7 +128,7 @@ export class GrokACPProvider implements AgentProvider {
   readonly supportsPermissionMode = true;
   readonly supportsThinkingToggle = true; // Effort via CLI --effort flag (attempted even if model cache says false)
   readonly supportsSlashCommands = false;
-  readonly supportsSteering = false; // Explicitly Phase 1 scope (steering/interject + native fork later per topic + user query)
+  readonly supportsSteering = true;
 
   private readonly grokPath?: string;
   private readonly createClient: () => ACPClient;
@@ -225,11 +233,16 @@ export class GrokACPProvider implements AgentProvider {
     }
 
     const client = this.createClient();
+    const runtime: GrokPromptRuntime = {
+      activePromptCount: 0,
+      promptError: null,
+    };
     const iterator = this.runSession(
       client,
       options,
       queue,
       abortController.signal,
+      runtime,
     );
 
     return {
@@ -242,6 +255,8 @@ export class GrokACPProvider implements AgentProvider {
       get pid() {
         return client.pid;
       },
+      steer: (message) =>
+        this.steerActivePrompt(client, runtime, message, abortController.signal),
     };
   }
 
@@ -253,6 +268,7 @@ export class GrokACPProvider implements AgentProvider {
     options: StartSessionOptions,
     queue: MessageQueue,
     signal: AbortSignal,
+    runtime: GrokPromptRuntime,
   ): AsyncIterableIterator<SDKMessage> {
     const grokPath = await this.findGrokPath();
     if (!grokPath) {
@@ -335,6 +351,7 @@ export class GrokACPProvider implements AgentProvider {
         sessionId = await client.newSession(options.cwd);
         this.log.debug({ sessionId }, "Grok ACP session created");
       }
+      runtime.sessionId = sessionId;
 
       // Emit init
       yield {
@@ -375,16 +392,25 @@ export class GrokACPProvider implements AgentProvider {
           { textLength: userText.length },
           "Sending prompt to Grok",
         );
-        const promptPromise = client.prompt(sessionId, userText);
+        runtime.promptError = null;
+        const promptPromise = this.promptWithTracking(
+          client,
+          sessionId,
+          userText,
+          runtime,
+          { recordError: true },
+        );
+        void promptPromise.catch(() => undefined);
 
         for await (const msg of this.yieldUpdates(
-          promptPromise,
           updateQueue,
           sessionId,
           signal,
+          runtime,
         )) {
           yield msg;
         }
+        await promptPromise;
         this.log.debug(
           { durationMs: Date.now() - promptStart },
           "Grok prompt complete",
@@ -402,6 +428,8 @@ export class GrokACPProvider implements AgentProvider {
         error: err instanceof Error ? err.message : String(err),
       } as SDKMessage;
     } finally {
+      runtime.sessionId = undefined;
+      runtime.activePromptCount = 0;
       client.close();
     }
   }
@@ -541,24 +569,11 @@ export class GrokACPProvider implements AgentProvider {
    * Async generator to yield session updates as SDKMessages (adapted for Grok events).
    */
   private async *yieldUpdates(
-    promptPromise: Promise<unknown>,
     updateQueue: SessionNotification[],
     sessionId: string,
     signal: AbortSignal,
+    runtime: GrokPromptRuntime,
   ): AsyncIterableIterator<SDKMessage> {
-    let promptDone = false;
-    let promptError: unknown = null;
-
-    promptPromise
-      .then(() => {
-        promptDone = true;
-      })
-      .catch((err) => {
-        promptDone = true;
-        promptError = err;
-        this.log.error({ err }, "Grok prompt error");
-      });
-
     let assistantTextBuffer = "";
     let assistantMessageId: string | null = null;
     const toolStates = new Map<
@@ -571,7 +586,10 @@ export class GrokACPProvider implements AgentProvider {
     let thinkingBuffer = "";
     let thinkingMessageId: string | null = null;
 
-    while (!signal.aborted && (!promptDone || updateQueue.length > 0)) {
+    while (
+      !signal.aborted &&
+      (runtime.activePromptCount > 0 || updateQueue.length > 0)
+    ) {
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       while (updateQueue.length > 0) {
@@ -686,8 +704,56 @@ export class GrokACPProvider implements AgentProvider {
       } as SDKMessage;
     }
 
-    if (promptError) {
-      throw promptError;
+    if (runtime.promptError) {
+      throw runtime.promptError;
+    }
+  }
+
+  private async promptWithTracking(
+    client: ACPClient,
+    sessionId: string,
+    text: string,
+    runtime: GrokPromptRuntime,
+    options: { recordError?: boolean } = {},
+  ): Promise<unknown> {
+    runtime.activePromptCount++;
+    try {
+      return await client.prompt(sessionId, text);
+    } catch (err) {
+      if (options.recordError) {
+        runtime.promptError = err;
+        this.log.error({ err }, "Grok prompt error");
+      }
+      throw err;
+    } finally {
+      runtime.activePromptCount--;
+    }
+  }
+
+  private async steerActivePrompt(
+    client: ACPClient,
+    runtime: GrokPromptRuntime,
+    message: unknown,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    if (signal.aborted || !runtime.sessionId || runtime.activePromptCount <= 0) {
+      return false;
+    }
+
+    const text = this.extractTextFromMessage(message).trim();
+    if (!text) {
+      return true;
+    }
+
+    try {
+      await this.promptWithTracking(client, runtime.sessionId, text, runtime);
+      return true;
+    } catch (err) {
+      this.log.warn(
+        { err },
+        "Grok steer prompt failed; caller should queue message instead",
+      );
+      return false;
     }
   }
 

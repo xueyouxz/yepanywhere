@@ -169,8 +169,8 @@ Any subagent or human doing the implementation work **must** be explicitly instr
 ## Progress Snapshot (2026-05-26 Takeover)
 
 Current live repo state has a Grok ACP provider at a verified Phase 1 point.
-It can be committed as an isolated provider integration, with history replay
-and steering left as explicit follow-up work.
+It has landed as an isolated provider integration, with history replay left as
+explicit follow-up work.
 
 What is already in place:
 
@@ -188,6 +188,9 @@ What is already in place:
 - Rich live ACP normalization now preserves `agent_thought_chunk` as thinking
   blocks, tool names mapped from kind/title (`Read`, `Bash`, etc.), tool
   kind/status, locations, raw input/content, and structured read/bash results.
+- Active-turn steering is implemented by sending a second ACP
+  `session/prompt` on the same live Grok session while keeping YA's update
+  drain open until all active Grok prompt calls settle.
 - Client provider registry/badges/filter colors/model glyphs are wired.
 - `topics/grok.md` remains the active progress tracker; related reliability
   context is tracked in `tasks/015-verified-session-liveness.md`.
@@ -236,10 +239,9 @@ Known remaining gap:
 
 Near follow-up once the above is green:
 
-- Implement `supportsSteering = true` plus `steer(message)` by sending a second
-  ACP `session/prompt` on the same session, matching Grok TUI's documented
-  `Ctrl+Enter` interject behavior. Do this after the basic prompt lifecycle is
-  proven, so failures are attributable.
+- Live-smoke active-turn steering against the installed Grok CLI. Mocked
+  coverage verifies the repeated ACP prompt path, but the beta CLI should still
+  be exercised manually because native interject behavior is agent-side.
 - Revisit model-list policy. `grok models` on 2026-05-26 reports
   `grok-build` and `grok-build-latest`, while `models_cache.json` currently
   only lists `grok-build`; YA should either expose only the stable default or
@@ -262,7 +264,8 @@ gitignored umbrella task `tasks/015-verified-session-liveness.md`.
 - [x] Native Grok session ID used in new-session URL and recoverable through provider metadata/process lookup
 - [x] End-to-end live supervision test (visible read/bash/thought events in a desktop WebSocket subscription)
 - [x] Rich ACP event fidelity test: thoughts, tool kind/status, locations, execute output, and structured read/bash results
-- [ ] Active-turn interject/steering via repeated ACP prompt
+- [x] Active-turn interject/steering via repeated ACP prompt (mocked coverage;
+  live smoke still useful)
 - [ ] (Phase 2) `grok-scanner.ts` + minimal schema for session listing + history — summary reader exists; full scanner/history replay not done
 - [ ] Docs updates + version pinning note — topic and `CLAUDE.md` provider list updated; broader README/provider capability docs not done
 - [ ] Decision point: promote "grok" to default-enabled once ACP surface proves stable

@@ -51,8 +51,8 @@ describe("GrokACPProvider", () => {
       expect(provider.supportsThinkingToggle).toBe(true);
     });
 
-    it("should report supportsSteering false in Phase 1", () => {
-      expect(provider.supportsSteering).toBe(false);
+    it("should report supportsSteering true", () => {
+      expect(provider.supportsSteering).toBe(true);
     });
   });
 
@@ -260,7 +260,10 @@ describe("GrokACPProvider Auth File Parsing", () => {
 describe("GrokACPProvider — ACP integration (mocked)", () => {
   let acpClientMock: any;
   let connectCalls: any[] = [];
+  let promptCalls: Array<{ sessionId: string; text: string }> = [];
   let sessionCalls: any[] = [];
+  let holdFirstPrompt = false;
+  let releaseHeldPrompt: (() => void) | null = null;
 
   // Minimal fake ACPClient that records calls and allows controlling flow
   class FakeACPClient {
@@ -291,6 +294,7 @@ describe("GrokACPProvider — ACP integration (mocked)", () => {
       return id; // success path
     }
     async prompt(_sessionId: string, _text: string) {
+      promptCalls.push({ sessionId: _sessionId, text: _text });
       // Simulate a quick success with one update if cb present
       if (this.updateCb) {
         this.updateCb({
@@ -301,6 +305,11 @@ describe("GrokACPProvider — ACP integration (mocked)", () => {
           },
         });
       }
+      if (holdFirstPrompt && promptCalls.length === 1) {
+        return new Promise((resolve) => {
+          releaseHeldPrompt = () => resolve({ ok: true });
+        });
+      }
       return { ok: true };
     }
     close() {}
@@ -308,7 +317,10 @@ describe("GrokACPProvider — ACP integration (mocked)", () => {
 
   beforeEach(async () => {
     connectCalls = [];
+    promptCalls = [];
     sessionCalls = [];
+    holdFirstPrompt = false;
+    releaseHeldPrompt = null;
     acpClientMock = vi.fn(() => new FakeACPClient());
 
     // Mock fs for isInstalled / findGrokPath to always succeed in these tests
@@ -475,6 +487,51 @@ describe("GrokACPProvider — ACP integration (mocked)", () => {
     // (verified indirectly: no crash, and Fake records via set* in constructor)
     // We can at least confirm a connect happened with a provider that had the cb
     expect(connectCalls.length).toBeGreaterThan(0);
+  });
+
+  it("steers an active Grok prompt with a second ACP prompt", async () => {
+    holdFirstPrompt = true;
+    const provider = await loadFreshGrokProvider({ grokPath: "/fake/grok" });
+
+    const session = await provider.startSession({
+      cwd: "/tmp",
+      initialMessage: { text: "hold the first prompt" },
+    });
+
+    try {
+      const init = await session.iterator.next();
+      expect(init.value).toMatchObject({
+        type: "system",
+        subtype: "init",
+      });
+
+      const user = await session.iterator.next();
+      expect(user.value).toMatchObject({
+        type: "user",
+        message: { content: "hold the first prompt" },
+      });
+
+      const firstAssistantPromise = session.iterator.next();
+      await vi.waitFor(() => {
+        expect(promptCalls).toHaveLength(1);
+      });
+
+      const steered = await session.steer?.({ text: "mid turn interject" });
+      expect(steered).toBe(true);
+      expect(promptCalls).toEqual([
+        { sessionId: init.value.session_id, text: "hold the first prompt" },
+        { sessionId: init.value.session_id, text: "mid turn interject" },
+      ]);
+
+      releaseHeldPrompt?.();
+      const firstAssistant = await firstAssistantPromise;
+      expect(firstAssistant.value).toMatchObject({
+        type: "assistant",
+      });
+    } finally {
+      releaseHeldPrompt?.();
+      session.abort();
+    }
   });
 });
 
