@@ -21,7 +21,7 @@ import type { SessionMetadataService } from "../metadata/index.js";
 import type { NotificationService } from "../notifications/index.js";
 import type { CodexSessionScanner } from "../projects/codex-scanner.js";
 import type { GeminiSessionScanner } from "../projects/gemini-scanner.js";
-import { DETACHED_PROJECT_PATH } from "../projects/paths.js";
+import { DETACHED_PROJECT_PATH, encodeProjectId } from "../projects/paths.js";
 import type { ProjectScanner } from "../projects/scanner.js";
 import { ensureRemoteDirectory } from "../sdk/remote-spawn.js";
 import { getProjectDirFromCwd, syncSessions } from "../sdk/session-sync.js";
@@ -1281,6 +1281,45 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         })
       : null);
 
+  let unscopedGrokReader: GrokSessionReader | null | undefined;
+  const getUnscopedGrokReader = (): GrokSessionReader | null => {
+    if (unscopedGrokReader !== undefined) {
+      return unscopedGrokReader;
+    }
+    unscopedGrokReader = deps.grokSessionsDir
+      ? new GrokSessionReader({ sessionsDir: deps.grokSessionsDir })
+      : null;
+    return unscopedGrokReader;
+  };
+
+  const getGrokNativeProjectId = async (
+    sessionId: string,
+    currentProjectId: UrlProjectId,
+  ): Promise<UrlProjectId | null> => {
+    const reader = getUnscopedGrokReader();
+    if (!reader) {
+      return null;
+    }
+    const projectPath = await reader.getSessionProjectPath(sessionId);
+    if (!projectPath) {
+      return null;
+    }
+    const canonicalProjectId = encodeProjectId(projectPath);
+    return canonicalProjectId === currentProjectId ? null : canonicalProjectId;
+  };
+
+  const buildGrokNativeRedirectPath = (
+    canonicalProjectId: UrlProjectId,
+    sessionId: string,
+    suffix: "" | "/metadata",
+    requestUrl: string,
+  ): string => {
+    const search = new URL(requestUrl).search;
+    return `/api/projects/${canonicalProjectId}/sessions/${encodeURIComponent(
+      sessionId,
+    )}${suffix}${search}`;
+  };
+
   const getGlobalInstructions = (): string | undefined =>
     deps.serverSettingsService?.getSetting("globalInstructions") || undefined;
 
@@ -1564,6 +1603,21 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     const sessionSummary = sessionSummaryResult?.summary ?? null;
 
     if (!sessionSummary && !process) {
+      const canonicalProjectId = await getGrokNativeProjectId(
+        sessionId,
+        projectId as UrlProjectId,
+      );
+      if (canonicalProjectId) {
+        return c.redirect(
+          buildGrokNativeRedirectPath(
+            canonicalProjectId,
+            sessionId,
+            "/metadata",
+            c.req.url,
+          ),
+          307,
+        );
+      }
       return c.json({ error: "Session not found" }, 404);
     }
 
@@ -1850,6 +1904,21 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
           pendingInputRequest,
           slashCommands,
         });
+      }
+      const canonicalProjectId = await getGrokNativeProjectId(
+        sessionId,
+        projectId as UrlProjectId,
+      );
+      if (canonicalProjectId) {
+        return c.redirect(
+          buildGrokNativeRedirectPath(
+            canonicalProjectId,
+            sessionId,
+            "",
+            c.req.url,
+          ),
+          307,
+        );
       }
       return c.json({ error: "Session not found" }, 404);
     }

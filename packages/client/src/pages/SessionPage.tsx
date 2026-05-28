@@ -1031,6 +1031,31 @@ function SessionPageContent({
     basePath,
   ]);
 
+  // Navigate to the session reader canonical project when the API followed
+  // a provider-native redirect from a stale project-scoped link.
+  useEffect(() => {
+    const canonicalProjectId = session?.projectId;
+    if (!canonicalProjectId || canonicalProjectId === projectId) {
+      return;
+    }
+
+    navigate(
+      `${basePath}/projects/${canonicalProjectId}/sessions/${actualSessionId}${location.search}`,
+      {
+        replace: true,
+        state: location.state,
+      },
+    );
+  }, [
+    actualSessionId,
+    basePath,
+    location.search,
+    location.state,
+    navigate,
+    projectId,
+    session?.projectId,
+  ]);
+
   // File attachment state
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress[]>([]);

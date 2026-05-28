@@ -1,4 +1,7 @@
-import type { UrlProjectId } from "@yep-anywhere/shared";
+import { toUrlProjectId, type UrlProjectId } from "@yep-anywhere/shared";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   type SessionsDeps,
@@ -35,6 +38,52 @@ function createSummary(): SessionSummary {
     ownership: { owner: "none" },
     provider: "codex",
     model: "gpt-5-codex",
+  };
+}
+
+async function createGrokRedirectFixture(): Promise<{
+  tempDir: string;
+  wrongProject: Project;
+  rightProjectId: UrlProjectId;
+  sessionId: string;
+  grokSessionsDir: string;
+}> {
+  const tempDir = await mkdtemp(join(tmpdir(), "ya-grok-redirect-"));
+  const wrongProjectPath = join(tempDir, "wrong");
+  const rightProjectPath = join(tempDir, "right");
+  const sessionId = "grok-native-id";
+  const grokSessionsDir = join(tempDir, "grok-sessions");
+  const sessionDir = join(
+    grokSessionsDir,
+    encodeURIComponent(rightProjectPath),
+    sessionId,
+  );
+  await mkdir(sessionDir, { recursive: true });
+  await writeFile(
+    join(sessionDir, "summary.json"),
+    JSON.stringify({
+      info: { id: sessionId, cwd: rightProjectPath },
+      created_at: "2026-05-28T17:00:00.000Z",
+      updated_at: "2026-05-28T17:01:00.000Z",
+      generated_title: "Right Grok",
+      session_summary: "Right Grok",
+      num_messages: 1,
+      current_model_id: "grok-build",
+    }),
+  );
+
+  return {
+    tempDir,
+    wrongProject: {
+      ...createProject(),
+      id: toUrlProjectId(wrongProjectPath),
+      path: wrongProjectPath,
+      name: "wrong",
+      sessionDir: join(wrongProjectPath, ".claude-sessions"),
+    },
+    rightProjectId: toUrlProjectId(rightProjectPath),
+    sessionId,
+    grokSessionsDir,
   };
 }
 
@@ -422,6 +471,67 @@ describe("Sessions metadata route", () => {
       undefined,
       { includeOrphans: true },
     );
+  });
+
+  it("redirects stale Grok detail links to the native cwd project", async () => {
+    const fixture = await createGrokRedirectFixture();
+    try {
+      const primaryReader = {
+        getSession: vi.fn(async () => null),
+      } as unknown as ISessionReader;
+      const routes = createSessionsRoutes({
+        supervisor: {
+          getProcessForSession: vi.fn(() => null),
+          wasEverOwned: vi.fn(() => false),
+        } as unknown as SessionsDeps["supervisor"],
+        scanner: {
+          getOrCreateProject: vi.fn(async () => fixture.wrongProject),
+        } as unknown as SessionsDeps["scanner"],
+        readerFactory: vi.fn(() => primaryReader),
+        grokSessionsDir: fixture.grokSessionsDir,
+      });
+
+      const response = await routes.request(
+        `/projects/${fixture.wrongProject.id}/sessions/${fixture.sessionId}?tailCompactions=2`,
+      );
+
+      expect(response.status).toBe(307);
+      expect(response.headers.get("location")).toContain(
+        `/api/projects/${fixture.rightProjectId}/sessions/${fixture.sessionId}?tailCompactions=2`,
+      );
+    } finally {
+      await rm(fixture.tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("redirects stale Grok metadata links to the native cwd project", async () => {
+    const fixture = await createGrokRedirectFixture();
+    try {
+      const primaryReader = {
+        getSessionSummary: vi.fn(async () => null),
+      } as unknown as ISessionReader;
+      const routes = createSessionsRoutes({
+        supervisor: {
+          getProcessForSession: vi.fn(() => null),
+        } as unknown as SessionsDeps["supervisor"],
+        scanner: {
+          getOrCreateProject: vi.fn(async () => fixture.wrongProject),
+        } as unknown as SessionsDeps["scanner"],
+        readerFactory: vi.fn(() => primaryReader),
+        grokSessionsDir: fixture.grokSessionsDir,
+      });
+
+      const response = await routes.request(
+        `/projects/${fixture.wrongProject.id}/sessions/${fixture.sessionId}/metadata`,
+      );
+
+      expect(response.status).toBe(307);
+      expect(response.headers.get("location")).toContain(
+        `/api/projects/${fixture.rightProjectId}/sessions/${fixture.sessionId}/metadata`,
+      );
+    } finally {
+      await rm(fixture.tempDir, { recursive: true, force: true });
+    }
   });
 
   it("keeps persisted provider when metadata refresh misses the session summary", async () => {

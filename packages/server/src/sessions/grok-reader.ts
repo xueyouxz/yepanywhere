@@ -302,6 +302,15 @@ export class GrokSessionReader implements ISessionReader {
     }));
   }
 
+  async getSessionProjectPath(sessionId: string): Promise<string | null> {
+    const sessions = await this.scanSessions();
+    let info = sessions.find((s) => s.id === sessionId);
+    if (!info) {
+      info = sessions.find((s) => s.dirBasename === sessionId);
+    }
+    return info ? canonicalizeProjectPath(info.cwd) : null;
+  }
+
   getIndexScopeKey(sessionDir: string): string {
     return `grok::${sessionDir}::${this.projectPath ?? "*"}`;
   }
