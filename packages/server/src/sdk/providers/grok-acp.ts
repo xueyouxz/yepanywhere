@@ -50,7 +50,7 @@ import type {
   ToolCallUpdate,
   ToolKind,
 } from "@agentclientprotocol/sdk";
-import type { ModelInfo } from "@yep-anywhere/shared";
+import type { ModelInfo, SlashCommand } from "@yep-anywhere/shared";
 import { getLogger } from "../../logging/logger.js";
 import { whichCommand } from "../cli-detection.js";
 import { MessageQueue } from "../messageQueue.js";
@@ -102,6 +102,10 @@ interface GrokPromptRuntime {
   promptError: unknown;
 }
 
+interface GrokCommandInventory {
+  commands: SlashCommand[];
+}
+
 /**
  * Configuration for Grok ACP provider (rarely needed; auto-detects preferred ~/.grok/bin/grok).
  */
@@ -127,7 +131,7 @@ export class GrokACPProvider implements AgentProvider {
   readonly displayName = "Grok Build (ACP)";
   readonly supportsPermissionMode = true;
   readonly supportsThinkingToggle = true; // Effort via CLI --effort flag (attempted even if model cache says false)
-  readonly supportsSlashCommands = false;
+  readonly supportsSlashCommands = true;
   readonly supportsSteering = true;
 
   private readonly grokPath?: string;
@@ -233,6 +237,7 @@ export class GrokACPProvider implements AgentProvider {
     }
 
     const client = this.createClient();
+    const commandInventory: GrokCommandInventory = { commands: [] };
     const runtime: GrokPromptRuntime = {
       activePromptCount: 0,
       promptError: null,
@@ -243,6 +248,7 @@ export class GrokACPProvider implements AgentProvider {
       queue,
       abortController.signal,
       runtime,
+      commandInventory,
     );
 
     return {
@@ -257,6 +263,7 @@ export class GrokACPProvider implements AgentProvider {
       },
       steer: (message) =>
         this.steerActivePrompt(client, runtime, message, abortController.signal),
+      supportedCommands: async () => [...commandInventory.commands],
     };
   }
 
@@ -269,6 +276,7 @@ export class GrokACPProvider implements AgentProvider {
     queue: MessageQueue,
     signal: AbortSignal,
     runtime: GrokPromptRuntime,
+    commandInventory: GrokCommandInventory,
   ): AsyncIterableIterator<SDKMessage> {
     const grokPath = await this.findGrokPath();
     if (!grokPath) {
@@ -296,6 +304,7 @@ export class GrokACPProvider implements AgentProvider {
     const updateQueue: SessionNotification[] = [];
 
     client.setSessionUpdateCallback((update) => {
+      this.updateCommandInventory(update, commandInventory);
       updateQueue.push(update);
     });
 
@@ -359,6 +368,7 @@ export class GrokACPProvider implements AgentProvider {
         subtype: "init",
         session_id: sessionId,
         cwd: options.cwd,
+        slash_commands: commandInventory.commands.map((command) => command.name),
       } as SDKMessage;
 
       // Process messages from the queue (identical pattern to gemini-acp)
@@ -407,6 +417,7 @@ export class GrokACPProvider implements AgentProvider {
           sessionId,
           signal,
           runtime,
+          commandInventory,
         )) {
           yield msg;
         }
@@ -432,6 +443,72 @@ export class GrokACPProvider implements AgentProvider {
       runtime.activePromptCount = 0;
       client.close();
     }
+  }
+
+  private updateCommandInventory(
+    notification: SessionNotification,
+    inventory: GrokCommandInventory,
+  ): void {
+    const update = notification.update;
+    if (update.sessionUpdate !== "available_commands_update") {
+      return;
+    }
+    inventory.commands = this.grokSlashCommands(update.availableCommands);
+  }
+
+  private grokSlashCommands(value: unknown): SlashCommand[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    const commands: SlashCommand[] = [];
+    const seen = new Set<string>();
+    for (const item of value) {
+      const command = this.grokSlashCommand(item);
+      if (!command || seen.has(command.name)) {
+        continue;
+      }
+      seen.add(command.name);
+      commands.push(command);
+    }
+    return commands;
+  }
+
+  private grokSlashCommand(value: unknown): SlashCommand | null {
+    const command = this.asRecord(value);
+    const rawName = this.stringField(command, "name");
+    const name = rawName?.trim().replace(/^\/+/, "");
+    if (!name) {
+      return null;
+    }
+
+    const input = this.asRecord(command?.input);
+    const argumentHint = this.stringField(input, "hint");
+    return {
+      name,
+      description: this.stringField(command, "description") ?? "",
+      ...(argumentHint ? { argumentHint } : {}),
+      providerDetails: this.grokSlashCommandProviderDetails(
+        this.asRecord(command?._meta),
+      ),
+    };
+  }
+
+  private grokSlashCommandProviderDetails(
+    meta: Record<string, unknown> | undefined,
+  ): SlashCommand["providerDetails"] {
+    const scope = this.stringField(meta, "scope");
+    const path = this.stringField(meta, "path");
+    return {
+      grok:
+        scope || path
+          ? {
+              source: "skill",
+              ...(scope ? { scope } : {}),
+              ...(path ? { path } : {}),
+            }
+          : { source: "builtin" },
+    };
   }
 
   /**
@@ -573,6 +650,7 @@ export class GrokACPProvider implements AgentProvider {
     sessionId: string,
     signal: AbortSignal,
     runtime: GrokPromptRuntime,
+    commandInventory: GrokCommandInventory,
   ): AsyncIterableIterator<SDKMessage> {
     let assistantTextBuffer = "";
     let assistantMessageId: string | null = null;
@@ -668,6 +746,7 @@ export class GrokACPProvider implements AgentProvider {
           sessionUpdate,
           sessionId,
           toolStates,
+          commandInventory,
         );
         if (sdkMessage) {
           yield sdkMessage;
@@ -766,6 +845,7 @@ export class GrokACPProvider implements AgentProvider {
     update: SessionUpdate,
     sessionId: string,
     toolStates: Map<string, { name: string; input: Record<string, unknown> }>,
+    commandInventory: GrokCommandInventory,
   ): SDKMessage | null {
     const updateType = update.sessionUpdate;
 
@@ -868,6 +948,14 @@ export class GrokACPProvider implements AgentProvider {
         }
         return null;
       }
+
+      case "available_commands_update":
+        return {
+          type: "system",
+          subtype: "init",
+          session_id: sessionId,
+          slash_commands: commandInventory.commands.map((command) => command.name),
+        } as SDKMessage;
 
       default:
         this.log.trace(

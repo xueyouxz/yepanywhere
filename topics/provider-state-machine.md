@@ -113,7 +113,11 @@ forcing silent state transitions.[^claude-queued-bug][^codex-queued-bug]
 Providers may carry optional, provider-specific detail when it either maps cleanly
 to existing renderer semantics or preserves compact signal for a later provider
 UI. These fields are additive: generic session rendering must keep working when
-they are absent.
+they are absent. When the UI grows a provider-neutral renderer contract, promote
+matching fields out of provider-specific namespaces instead of keeping duplicate
+Grok-only paths. For example, future first-class diff/ListDir/plan renderers
+should use optional provider-agnostic fields when the semantics are one-to-one;
+Grok-only provenance and lossy raw structures stay under `providerDetails.grok`.
 
 | Field / capability | Source | Current YA mapping | UI status |
 |---|---|---|---|
@@ -124,7 +128,8 @@ they are absent.
 | `toolUseResult` normalized from Grok `rawOutput` | Grok `ReadFile`, `Bash`, `GrepSearch`, `SearchReplace`, `Todo` | Mapped to existing YA result schemas for `Read`, `Bash`, `Grep`, `Edit`, and `TodoWrite` when fields line up. | Rendered by existing tool rows. |
 | Grok custom `rawOutput` fallback | Grok `rawOutput` types without a close YA schema, e.g. `ListDir` | Kept as compact provider result data rather than forcing a misleading generic tool schema. Per-update `_meta` is intentionally not carried. | Fallback JSON only; custom Grok UI is not landed. |
 | `message.content[].grokPlan.entries` | Grok ACP `plan` | Plan entries are carried on a thinking block while also rendering readable `status: content` text. | Thinking text renders; structured plan UI is not landed. |
-| dynamic command inventory | Grok `available_commands_update` | Recognized as a provider capability signal, but not replayed into transcript messages because it is high-churn and noisy. | Dynamic command UI from persisted Grok history is not landed. |
+| dynamic command inventory | Grok `available_commands_update` | Live Grok `availableCommands` maps into the existing `SlashCommand[]` provider hook and `/` menu names; descriptions, argument hints, and compact `providerDetails.grok` provenance are preserved on the command objects. Persisted replay still treats command updates as capability evidence, not transcript messages. | `/` menu names are wired for live sessions. Description/hint/provenance display is not landed. |
+| `SlashCommand.providerDetails.grok.source/scope/path` | Grok command `_meta` | Carries whether a command is built-in or skill-backed, plus skill scope/path when Grok reports them. `_meta.tools` is intentionally ignored as noisy tool inventory, not slash-command UI data. | API-carried only; client command menu does not yet display provenance or hints. |
 
 When adding fields here, prefer the existing renderer schema if the semantic map
 is close enough. If not, keep the Grok-specific structure compact and explicit

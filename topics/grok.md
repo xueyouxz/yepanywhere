@@ -104,7 +104,10 @@ This structure guarantees that enabling or even crashing the Grok prototype (via
 Grok history replay reads `updates.jsonl` as the authoritative restore stream and
 normalizes only the transcript-bearing updates. High-churn
 `available_commands_update` records are treated as capability evidence, not
-message history.
+message history. In live ACP sessions, the same update feeds the existing
+`SlashCommand[]` provider hook so the `/` menu can show Grok commands
+immediately while descriptions, argument hints, and Grok skill provenance remain
+API-carried optional detail for later UI expansion.
 
 Replay should follow the provider optional-detail dictionary in
 [provider-state-machine.md](provider-state-machine.md): map `read_file`,

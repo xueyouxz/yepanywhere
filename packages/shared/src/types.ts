@@ -97,6 +97,20 @@ export interface ProviderImageSizing {
 /**
  * Slash command (skill) available in a session.
  */
+export interface GrokSlashCommandDetails {
+  /** Whether Grok reported this as a built-in command or a skill-backed command. */
+  source: "builtin" | "skill";
+  /** Grok skill scope, when reported. */
+  scope?: string;
+  /** Grok skill definition path, when reported. */
+  path?: string;
+}
+
+export interface SlashCommandProviderDetails {
+  grok?: GrokSlashCommandDetails;
+  [provider: string]: unknown;
+}
+
 export interface SlashCommand {
   /** Command name without leading slash (e.g., "commit", "review-pr") */
   name: string;
@@ -104,6 +118,8 @@ export interface SlashCommand {
   description: string;
   /** Hint for command arguments (e.g., "<file>") */
   argumentHint?: string;
+  /** Optional provider-specific provenance or capability detail. */
+  providerDetails?: SlashCommandProviderDetails;
 }
 
 /**

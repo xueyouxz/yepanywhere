@@ -54,6 +54,10 @@ describe("GrokACPProvider", () => {
     it("should report supportsSteering true", () => {
       expect(provider.supportsSteering).toBe(true);
     });
+
+    it("should report supportsSlashCommands true", () => {
+      expect(provider.supportsSlashCommands).toBe(true);
+    });
   });
 
   describe("getAvailableModels", () => {
@@ -272,6 +276,32 @@ describe("GrokACPProvider — ACP integration (mocked)", () => {
     private updateCb: ((u: any) => void) | null = null;
     private permCb: ((r: any) => Promise<any>) | null = null;
 
+    private emitCommandInventory(sessionId: string) {
+      this.updateCb?.({
+        sessionId,
+        update: {
+          sessionUpdate: "available_commands_update",
+          availableCommands: [
+            {
+              name: "compact",
+              description: "Compress conversation history to save context window",
+              input: { hint: "optional context about what to preserve" },
+            },
+            {
+              name: "ship",
+              description: "Squash-merge current feature branch",
+              input: { hint: "<task-number>" },
+              _meta: {
+                scope: "user",
+                path: "/home/graehl/.grok/skills/ship/SKILL.md",
+              },
+            },
+          ],
+          _meta: { tools: ["run_terminal_command", "read_file"] },
+        },
+      });
+    }
+
     setSessionUpdateCallback(cb: (u: any) => void) {
       this.updateCb = cb;
     }
@@ -288,6 +318,7 @@ describe("GrokACPProvider — ACP integration (mocked)", () => {
     async newSession(cwd: string) {
       const id = "grok_ses_new_" + Math.random().toString(36).slice(2, 8);
       sessionCalls.push({ type: "new", cwd, id });
+      this.emitCommandInventory(id);
       return id;
     }
     async resumeSession(id: string, cwd: string) {
@@ -295,6 +326,7 @@ describe("GrokACPProvider — ACP integration (mocked)", () => {
       if (failResume) {
         throw new Error("mock resume failed");
       }
+      this.emitCommandInventory(id);
       return id;
     }
     async prompt(_sessionId: string, _text: string) {
@@ -392,6 +424,48 @@ describe("GrokACPProvider — ACP integration (mocked)", () => {
     session.abort();
     return session;
   }
+
+  it("surfaces Grok command inventory through slash commands", async () => {
+    const provider = await loadFreshGrokProvider({ grokPath: "/fake/grok" });
+
+    const session = await provider.startSession({
+      cwd: "/tmp",
+      initialMessage: { text: "hi" },
+    });
+
+    try {
+      const init = await session.iterator.next();
+      expect(init.value).toMatchObject({
+        type: "system",
+        subtype: "init",
+        slash_commands: ["compact", "ship"],
+      });
+
+      const commands = await session.supportedCommands?.();
+      expect(commands).toEqual([
+        {
+          name: "compact",
+          description: "Compress conversation history to save context window",
+          argumentHint: "optional context about what to preserve",
+          providerDetails: { grok: { source: "builtin" } },
+        },
+        {
+          name: "ship",
+          description: "Squash-merge current feature branch",
+          argumentHint: "<task-number>",
+          providerDetails: {
+            grok: {
+              source: "skill",
+              scope: "user",
+              path: "/home/graehl/.grok/skills/ship/SKILL.md",
+            },
+          },
+        },
+      ]);
+    } finally {
+      session.abort();
+    }
+  });
 
   it("builds correct args for `grok agent stdio` including effort mapping", async () => {
     const provider = await loadFreshGrokProvider({ grokPath: "/fake/grok" });
