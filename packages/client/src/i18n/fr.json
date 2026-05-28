@@ -481,6 +481,7 @@
   "globalSessionsFilterProjectPlaceholder": "Tous les projets",
   "globalSessionsFilterStatus": "État",
   "globalSessionsFilterProvider": "Fournisseur",
+  "globalSessionsProviderAll": "Tous les fournisseurs",
   "globalSessionsFilterExecutor": "Machine",
   "globalSessionsFilterAge": "Âge",
   "globalSessionsFilterMachinePlaceholder": "Toutes les machines",

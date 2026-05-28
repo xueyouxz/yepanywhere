@@ -5,6 +5,7 @@ import { api } from "../api/client";
 import { BulkActionBar } from "../components/BulkActionBar";
 import {
   FilterDropdown,
+  type FilterDropdownOption,
   type FilterOption,
 } from "../components/FilterDropdown";
 import { PageHeader } from "../components/PageHeader";
@@ -20,8 +21,8 @@ import { getSessionDisplayTitle } from "../utils";
 // Long-press threshold for entering selection mode on mobile
 const LONG_PRESS_MS = 500;
 
-// Status filter options
-type StatusFilter = "all" | "unread" | "starred" | "archived";
+const STATUS_FILTER_VALUES = ["unread", "starred", "archived"] as const;
+type StatusFilter = (typeof STATUS_FILTER_VALUES)[number];
 
 // Age filter options (days)
 type AgeFilter = "3" | "7" | "14" | "30";
@@ -37,6 +38,70 @@ const PROVIDER_COLORS: Record<ProviderName, string> = {
   grok: "#111827",
   opencode: "#9333ea", // Purple for OpenCode
 };
+
+function isStatusFilter(value: string): value is StatusFilter {
+  return (STATUS_FILTER_VALUES as readonly string[]).includes(value);
+}
+
+function StatusFilterIcon({ status }: { status: StatusFilter }) {
+  const className = `status-filter-icon status-filter-icon--${status}`;
+  switch (status) {
+    case "unread":
+      return (
+        <svg
+          className={className}
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+          <path d="m3 7 9 6 9-6" />
+        </svg>
+      );
+    case "starred":
+      return (
+        <svg
+          className={className}
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+        </svg>
+      );
+    case "archived":
+      return (
+        <svg
+          className={className}
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="3" y="4" width="18" height="4" rx="1" />
+          <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" />
+          <path d="M10 12h4" />
+        </svg>
+      );
+  }
+}
 
 /**
  * Global sessions page showing all sessions across all projects.
@@ -64,9 +129,7 @@ export function GlobalSessionsPage() {
     if (!param) return [];
     return param
       .split(",")
-      .filter((s): s is StatusFilter =>
-        ["all", "unread", "starred", "archived"].includes(s),
-      );
+      .filter(isStatusFilter);
   }, [searchParams]);
 
   const providerFilters = useMemo(() => {
@@ -174,9 +237,6 @@ export function GlobalSessionsPage() {
         let matchesStatus = false;
         for (const status of statusFilters) {
           switch (status) {
-            case "all":
-              if (!session.isArchived) matchesStatus = true;
-              break;
             case "unread":
               if (session.hasUnread && !session.isArchived)
                 matchesStatus = true;
@@ -225,42 +285,55 @@ export function GlobalSessionsPage() {
 
   // Build status filter options with global counts from server
   // When filtering by project, we don't have global stats, so omit counts
-  const statusOptions = useMemo((): FilterOption<StatusFilter>[] => {
+  const statusOptions = useMemo((): FilterDropdownOption<StatusFilter>[] => {
     // Only show counts when not filtering by project (global view)
     const showCounts = !projectFilter;
 
     return [
       {
-        value: "all",
-        label: t("globalSessionsStatusAll"),
-        count: showCounts ? stats.totalCount : undefined,
-      },
-      {
         value: "unread",
         label: t("globalSessionsStatusUnread"),
+        icon: <StatusFilterIcon status="unread" />,
         count: showCounts ? stats.unreadCount : undefined,
       },
       {
         value: "starred",
         label: t("globalSessionsStatusStarred"),
+        icon: <StatusFilterIcon status="starred" />,
         count: showCounts ? stats.starredCount : undefined,
       },
       {
         value: "archived",
         label: t("globalSessionsStatusArchived"),
+        icon: <StatusFilterIcon status="archived" />,
         count: showCounts ? stats.archivedCount : undefined,
+      },
+      {
+        value: "all",
+        label: t("globalSessionsStatusAll"),
+        clearSelection: true,
+        dividerBefore: true,
+        count: showCounts ? stats.totalCount : undefined,
       },
     ];
   }, [stats, projectFilter, t]);
 
+  const statusPlaceholder = (
+    <span className="status-filter-placeholder" aria-hidden="true">
+      {STATUS_FILTER_VALUES.map((status) => (
+        <StatusFilterIcon key={status} status={status} />
+      ))}
+    </span>
+  );
+
   // Build provider filter options with global counts from server
   // When filtering by project, we don't have global stats, so omit counts
-  const providerOptions = useMemo((): FilterOption<ProviderName>[] => {
+  const providerOptions = useMemo((): FilterDropdownOption<ProviderName>[] => {
     const showCounts = !projectFilter;
     const providerCounts = stats.providerCounts;
 
     // Only show providers that have sessions
-    const options: FilterOption<ProviderName>[] = [];
+    const options: FilterDropdownOption<ProviderName>[] = [];
     for (const provider of ALL_PROVIDERS) {
       const count = providerCounts[provider];
       if (count && count > 0) {
@@ -272,8 +345,15 @@ export function GlobalSessionsPage() {
         });
       }
     }
+    options.push({
+      value: "all-providers",
+      label: t("globalSessionsProviderAll"),
+      clearSelection: true,
+      dividerBefore: true,
+      count: showCounts ? stats.totalCount : undefined,
+    });
     return options;
-  }, [stats.providerCounts, projectFilter]);
+  }, [stats.providerCounts, stats.totalCount, projectFilter, t]);
 
   // Age filter options
   const ageOptions = useMemo((): FilterOption<AgeFilter>[] => {
@@ -708,6 +788,8 @@ export function GlobalSessionsPage() {
                   selected={statusFilters}
                   onChange={setStatusFilters}
                   placeholder={t("globalSessionsStatusAll")}
+                  placeholderContent={statusPlaceholder}
+                  className="filter-dropdown--status"
                 />
                 {providerOptions.length > 1 && (
                   <FilterDropdown
@@ -715,7 +797,8 @@ export function GlobalSessionsPage() {
                     options={providerOptions}
                     selected={providerFilters}
                     onChange={setProviderFilters}
-                    placeholder={t("globalSessionsStatusAll")}
+                    placeholder={t("globalSessionsProviderAll")}
+                    className="filter-dropdown--provider"
                   />
                 )}
                 {executorOptions.length > 1 && (

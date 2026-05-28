@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../i18n";
 
@@ -8,19 +15,39 @@ const DESKTOP_BREAKPOINT = 769;
 export interface FilterOption<T extends string> {
   value: T;
   label: string;
+  icon?: ReactNode;
   description?: string; // Optional description shown below label
   count?: number;
   color?: string; // For provider colors (colored dot)
+  clearSelection?: false;
+  dividerBefore?: boolean;
 }
+
+export interface FilterResetOption {
+  value: string;
+  label: string;
+  icon?: ReactNode;
+  description?: string;
+  count?: number;
+  color?: string;
+  clearSelection: true; // Option row that resets selected values
+  dividerBefore?: boolean;
+}
+
+export type FilterDropdownOption<T extends string> =
+  | FilterOption<T>
+  | FilterResetOption;
 
 export interface FilterDropdownProps<T extends string> {
   label: string;
-  options: FilterOption<T>[];
+  options: FilterDropdownOption<T>[];
   selected: T[];
   onChange: (selected: T[]) => void;
   multiSelect?: boolean; // default true
   placeholder?: string; // shown when nothing selected
+  placeholderContent?: ReactNode; // overrides placeholder for custom visual summaries
   align?: "left" | "right"; // dropdown alignment, default left
+  className?: string;
 }
 
 /**
@@ -35,7 +62,9 @@ export function FilterDropdown<T extends string>({
   onChange,
   multiSelect = true,
   placeholder,
+  placeholderContent,
   align = "left",
+  className = "",
 }: FilterDropdownProps<T>) {
   const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
@@ -50,7 +79,18 @@ export function FilterDropdown<T extends string>({
     setIsOpen((prev) => !prev);
   };
 
-  const handleOptionClick = (value: T) => {
+  const hasClearSelectionOption = options.some(
+    (option) => option.clearSelection,
+  );
+
+  const handleOptionClick = (option: FilterDropdownOption<T>) => {
+    if (option.clearSelection) {
+      onChange([]);
+      setIsOpen(false);
+      return;
+    }
+
+    const { value } = option;
     if (multiSelect) {
       if (selected.includes(value)) {
         onChange(selected.filter((v) => v !== value));
@@ -136,12 +176,11 @@ export function FilterDropdown<T extends string>({
     }
   };
 
-  // For single-select, show the selected option's label; for multi-select, show count
-  const displayText = (() => {
+  const displayContent = (() => {
     if (selected.length === 0) {
-      return placeholder || label;
+      return placeholderContent ?? placeholder ?? label;
     }
-    if (!multiSelect && selected.length === 1) {
+    if (selected.length === 1) {
       const selectedOption = options.find((o) => o.value === selected[0]);
       return selectedOption?.label || label;
     }
@@ -150,7 +189,7 @@ export function FilterDropdown<T extends string>({
 
   const optionsContent = (
     <>
-      {multiSelect && selected.length > 0 && (
+      {multiSelect && selected.length > 0 && !hasClearSelectionOption && (
         <>
           <button
             type="button"
@@ -164,59 +203,78 @@ export function FilterDropdown<T extends string>({
       )}
 
       {options.map((option) => {
-        const isSelected = selected.includes(option.value);
+        const isSelected = option.clearSelection
+          ? selected.length === 0
+          : selected.includes(option.value);
+        const showCheckbox = multiSelect && !option.clearSelection;
         return (
-          <button
-            key={option.value}
-            type="button"
-            className={`filter-dropdown-option ${isSelected ? "selected" : ""} ${!multiSelect ? "single-select" : ""}`}
-            onClick={() => handleOptionClick(option.value)}
-            aria-pressed={isSelected}
-          >
-            {multiSelect && (
-              <span
-                className={`filter-dropdown-checkbox ${isSelected ? "checked" : ""}`}
-                aria-hidden="true"
-              >
-                {isSelected && (
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="3"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                )}
-              </span>
+          <Fragment key={option.value}>
+            {option.dividerBefore && (
+              <div className="filter-dropdown-divider" />
             )}
-
-            {option.color && (
-              <span
-                className="filter-dropdown-color-dot"
-                style={{ backgroundColor: option.color }}
-                aria-hidden="true"
-              />
-            )}
-
-            <span className="filter-dropdown-label-wrapper">
-              <span className="filter-dropdown-label">{option.label}</span>
-              {option.description && (
-                <span className="filter-dropdown-description">
-                  {option.description}
+            <button
+              type="button"
+              className={`filter-dropdown-option ${isSelected ? "selected" : ""} ${!multiSelect ? "single-select" : ""} ${option.clearSelection ? "clear-selection" : ""}`}
+              onClick={() => handleOptionClick(option)}
+              aria-pressed={isSelected}
+            >
+              {showCheckbox && (
+                <span
+                  className={`filter-dropdown-checkbox ${isSelected ? "checked" : ""}`}
+                  aria-hidden="true"
+                >
+                  {isSelected && (
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  )}
                 </span>
               )}
-            </span>
+              {multiSelect && option.clearSelection && (
+                <span
+                  className="filter-dropdown-checkbox-spacer"
+                  aria-hidden="true"
+                />
+              )}
 
-            {option.count !== undefined && (
-              <span className="filter-dropdown-count">{option.count}</span>
-            )}
-          </button>
+              {option.color && (
+                <span
+                  className="filter-dropdown-color-dot"
+                  style={{ backgroundColor: option.color }}
+                  aria-hidden="true"
+                />
+              )}
+
+              {option.icon && (
+                <span className="filter-dropdown-option-icon" aria-hidden="true">
+                  {option.icon}
+                </span>
+              )}
+
+              <span className="filter-dropdown-label-wrapper">
+                <span className="filter-dropdown-label">{option.label}</span>
+                {option.description && (
+                  <span className="filter-dropdown-description">
+                    {option.description}
+                  </span>
+                )}
+              </span>
+
+              {option.count !== undefined && (
+                <span className="filter-dropdown-count">{option.count}</span>
+              )}
+            </button>
+          </Fragment>
         );
       })}
     </>
@@ -260,17 +318,18 @@ export function FilterDropdown<T extends string>({
     ) : null;
 
   return (
-    <div className="filter-dropdown-container">
+    <div className={`filter-dropdown-container ${className}`.trim()}>
       <button
         ref={buttonRef}
         type="button"
         className={`filter-dropdown-button ${selected.length > 0 ? "has-selection" : ""}`}
         onClick={handleButtonClick}
         title={t("filterByLabel", { label })}
+        aria-label={t("filterByLabel", { label })}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
       >
-        {displayText}
+        {displayContent}
         <svg
           className="filter-dropdown-chevron"
           width="12"

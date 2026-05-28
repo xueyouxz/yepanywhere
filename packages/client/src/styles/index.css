@@ -10181,7 +10181,18 @@ a.sidebar-nav-item {
   font-size: var(--font-size-sm);
   color: var(--text-muted);
   cursor: pointer;
+  white-space: nowrap;
   transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.filter-dropdown--status .filter-dropdown-button {
+  min-width: 104px;
+  justify-content: space-between;
+}
+
+.filter-dropdown--provider .filter-dropdown-button {
+  min-width: 132px;
+  justify-content: space-between;
 }
 
 .filter-dropdown-button:hover {
@@ -10191,6 +10202,36 @@ a.sidebar-nav-item {
 .filter-dropdown-button.has-selection {
   border-color: var(--app-yep-green);
   color: var(--text-primary);
+}
+
+.status-filter-placeholder,
+.filter-dropdown-option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.status-filter-placeholder {
+  gap: 6px;
+}
+
+.status-filter-icon,
+.filter-dropdown-option-icon svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.status-filter-icon--unread {
+  color: var(--attention-color);
+}
+
+.status-filter-icon--starred {
+  color: var(--warning-color);
+}
+
+.status-filter-icon--archived {
+  color: var(--text-muted);
 }
 
 .filter-dropdown-chevron {
@@ -10286,6 +10327,12 @@ a.sidebar-nav-item {
   background: var(--app-yep-green);
   border-color: var(--app-yep-green);
   color: white;
+}
+
+.filter-dropdown-checkbox-spacer {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
 }
 
 /* Single-select mode: show checkmark on right side instead of checkbox */

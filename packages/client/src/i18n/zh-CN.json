@@ -481,6 +481,7 @@
   "globalSessionsFilterProjectPlaceholder": "全部项目",
   "globalSessionsFilterStatus": "状态",
   "globalSessionsFilterProvider": "提供商",
+  "globalSessionsProviderAll": "所有提供商",
   "globalSessionsFilterExecutor": "机器",
   "globalSessionsFilterAge": "时间范围",
   "globalSessionsFilterMachinePlaceholder": "全部机器",

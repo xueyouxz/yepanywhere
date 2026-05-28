@@ -481,6 +481,7 @@
   "globalSessionsFilterProjectPlaceholder": "すべてのプロジェクト",
   "globalSessionsFilterStatus": "ステータス",
   "globalSessionsFilterProvider": "プロバイダー",
+  "globalSessionsProviderAll": "すべてのプロバイダー",
   "globalSessionsFilterExecutor": "マシン",
   "globalSessionsFilterAge": "期間",
   "globalSessionsFilterMachinePlaceholder": "すべてのマシン",

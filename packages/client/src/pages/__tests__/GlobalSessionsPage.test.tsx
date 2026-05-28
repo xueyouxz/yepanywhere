@@ -100,6 +100,7 @@ vi.mock("../../i18n", () => ({
         globalSessionsFilterProjectPlaceholder: "All projects",
         globalSessionsFilterStatus: "Status",
         globalSessionsFilterProvider: "Provider",
+        globalSessionsProviderAll: "All providers",
         globalSessionsFilterExecutor: "Machine",
         globalSessionsFilterAge: "Age",
         inboxFilterProject: "Project",
