@@ -244,6 +244,7 @@
 
 /* Collapsed preview area - shown when tool has preview but not expanded */
 .tool-row-collapsed-preview {
+  position: relative;
   margin-left: 24px;
   margin-top: 4px;
   cursor: pointer;
@@ -283,17 +284,17 @@
 /* Invisible wide strip over border-left — click anywhere along it to collapse */
 .tool-row-collapse-strip {
   position: absolute;
-  left: 0;
+  left: -24px;
   top: 0;
   bottom: 0;
-  width: 14px;
-  transform: translateX(-50%);
+  width: 32px;
   border: none;
   background: transparent;
   cursor: pointer;
   padding: 0;
   z-index: 1;
   user-select: none;
+  touch-action: manipulation;
 }
 
 .tool-row-collapse-strip:hover {
@@ -302,6 +303,11 @@
 
 .tool-row-content:has(.tool-row-collapse-strip:hover) {
   border-left-color: var(--text-dimmed, #666);
+}
+
+.tool-row-collapsed-preview:has(.tool-row-collapse-strip:hover)
+  .bash-collapsed-preview {
+  border-color: var(--text-dimmed, #666);
 }
 
 @keyframes slideDown {

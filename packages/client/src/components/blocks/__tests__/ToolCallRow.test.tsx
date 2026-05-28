@@ -115,6 +115,19 @@ describe("ToolCallRow", () => {
     expect(container.querySelector(".expand-chevron")).toBeNull();
     expect(screen.getAllByText("git diff -- notes.md")).toHaveLength(1);
 
+    fireEvent.click(
+      screen.getByRole("button", { name: "Collapse preview from left gutter" }),
+    );
+
+    expect(container.querySelector(".tool-row-collapsed-preview")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Expand preview" }),
+    ).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand preview" }));
+
+    expect(container.querySelector(".tool-row-collapsed-preview")).not.toBeNull();
+
     fireEvent.click(screen.getByRole("button", { name: "Collapse preview" }));
 
     expect(container.querySelector(".tool-row-collapsed-preview")).toBeNull();
@@ -168,6 +181,151 @@ describe("ToolCallRow", () => {
     );
 
     expect(container.querySelector(".expand-chevron")).not.toBeNull();
+  });
+
+  it("collapses generic expanded tool rows from the left strip", () => {
+    const { container } = render(
+      <ToolCallRow
+        id="tool-grep"
+        toolName="Grep"
+        toolInput={{ pattern: "needle" }}
+        toolResult={{
+          structured: {
+            mode: "content",
+            content: "src/file.ts:1:needle",
+            numFiles: 1,
+          },
+          content: "src/file.ts:1:needle",
+          isError: false,
+        }}
+        status="complete"
+      />,
+    );
+
+    expect(container.querySelector(".grep-result")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+
+    expect(container.querySelector(".grep-result")).not.toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Collapse expanded tool row" }),
+    );
+
+    expect(container.querySelector(".grep-result")).toBeNull();
+    expect(screen.getByRole("button", { name: "Expand" })).toBeDefined();
+  });
+
+  it("collapses expanded Read rows from the left strip", () => {
+    const { container } = render(
+      <ToolCallRow
+        id="tool-read"
+        toolName="Read"
+        toolInput={{ file_path: "packages/client/src/file.ts" }}
+        toolResult={{
+          structured: {
+            type: "text",
+            file: {
+              filePath: "packages/client/src/file.ts",
+              content: "line 1\nline 2\nline 3\n",
+              numLines: 3,
+              startLine: 1,
+              totalLines: 3,
+            },
+          },
+          content: "line 1\nline 2\nline 3\n",
+          isError: false,
+        }}
+        status="complete"
+      />,
+    );
+
+    expect(container.querySelector(".read-text-inline")).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand inline view" }),
+    );
+
+    expect(container.querySelector(".read-text-inline")).not.toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Collapse expanded tool row" }),
+    );
+
+    expect(container.querySelector(".read-text-inline")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Expand inline view" }),
+    ).toBeDefined();
+  });
+
+  it("focuses the tool row top when expanding long inline content", () => {
+    let scrollTop = 40;
+    const { container } = render(
+      <div data-testid="scroll-container" style={{ overflowY: "auto" }}>
+        <ToolCallRow
+          id="tool-read-scroll"
+          toolName="Read"
+          toolInput={{ file_path: "packages/client/src/file.ts" }}
+          toolResult={{
+            structured: {
+              type: "text",
+              file: {
+                filePath: "packages/client/src/file.ts",
+                content: "line\n".repeat(80),
+                numLines: 80,
+                startLine: 1,
+                totalLines: 80,
+              },
+            },
+            content: "line\n".repeat(80),
+            isError: false,
+          }}
+          status="complete"
+        />
+      </div>,
+    );
+    const scrollContainer = screen.getByTestId("scroll-container");
+    Object.defineProperty(scrollContainer, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value) => {
+        scrollTop = Number(value);
+      },
+    });
+    scrollContainer.getBoundingClientRect = () =>
+      ({
+        top: 100,
+        bottom: 300,
+        left: 0,
+        right: 300,
+        width: 300,
+        height: 200,
+        x: 0,
+        y: 100,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    const row = container.querySelector<HTMLElement>(".tool-row");
+    expect(row).not.toBeNull();
+    if (row) {
+      row.getBoundingClientRect = () =>
+        ({
+          top: 220,
+          bottom: 260,
+          left: 0,
+          right: 300,
+          width: 300,
+          height: 40,
+          x: 0,
+          y: 220,
+          toJSON: () => ({}),
+        }) as DOMRect;
+    }
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand inline view" }),
+    );
+
+    expect(scrollTop).toBe(148);
   });
 
   it("reserves a bounded deferred preview shell before near-viewport hydration", () => {

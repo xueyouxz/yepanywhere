@@ -1,5 +1,6 @@
 import {
   type CSSProperties,
+  type MouseEvent,
   memo,
   type RefObject,
   useEffect,
@@ -113,6 +114,47 @@ export function estimateDeferredPreviewHeightPx(params: {
 
 function canDeferRichToolRow(status: ToolCallItem["status"]): boolean {
   return status === "complete" || status === "error";
+}
+
+function findNearestScrollContainer(element: HTMLElement): HTMLElement | null {
+  let scrollEl = element.parentElement;
+  while (scrollEl) {
+    const { overflowY } = window.getComputedStyle(scrollEl);
+    if (overflowY === "auto" || overflowY === "scroll") {
+      return scrollEl;
+    }
+    scrollEl = scrollEl.parentElement;
+  }
+  return null;
+}
+
+function scrollExpandedToolTopIntoView(row: HTMLElement | null) {
+  if (!row) {
+    return;
+  }
+
+  const scrollEl = findNearestScrollContainer(row);
+  if (!scrollEl) {
+    return;
+  }
+
+  const scrollRect = scrollEl.getBoundingClientRect();
+  const rowRect = row.getBoundingClientRect();
+  const nextTop = Math.max(
+    0,
+    scrollEl.scrollTop + rowRect.top - scrollRect.top - 12,
+  );
+  scrollEl.scrollTop = nextTop;
+  scrollEl.dispatchEvent(new Event("scroll"));
+}
+
+function queueExpandedToolTopFocus(rowRef: RefObject<HTMLDivElement | null>) {
+  const focusTop = () => scrollExpandedToolTopIntoView(rowRef.current);
+  focusTop();
+  if (typeof window.requestAnimationFrame === "function") {
+    window.requestAnimationFrame(focusTop);
+  }
+  window.setTimeout(focusTop, 80);
 }
 
 function useNearViewportHydration(status: ToolCallItem["status"]): {
@@ -319,6 +361,7 @@ export const ToolCallRow = memo(function ToolCallRow({
   // Dot-expanded: inline file content for Read rows (starts collapsed).
   // Not used for Edit — its interactive summary + modal is already the full view.
   const [dotExpanded, setDotExpanded] = useState(false);
+  const shouldFocusExpandedTopRef = useRef(false);
 
   // Dot button: expandable rows + Read rows with interactive summary.
   const showDotBtn =
@@ -334,15 +377,30 @@ export const ToolCallRow = memo(function ToolCallRow({
     toolName === "Read";
   const hasBashHeaderToggle = hasBashPreviewToggle && shouldHydrateRichContent;
 
-  const handleDotClick = (e: React.MouseEvent) => {
+  const handleDotClick = (e: MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     hydrateNow();
     if (hasBashPreviewToggle) {
-      setBashPreviewExpanded((v) => !v);
+      setBashPreviewExpanded((v) => {
+        if (!v) {
+          shouldFocusExpandedTopRef.current = true;
+        }
+        return !v;
+      });
     } else if (!isNonExpandable) {
-      setExpanded((v) => !v);
+      setExpanded((v) => {
+        if (!v) {
+          shouldFocusExpandedTopRef.current = true;
+        }
+        return !v;
+      });
     } else if (hasInteractiveSummary && toolName === "Read" && shouldHydrateRichContent) {
-      setDotExpanded((v) => !v);
+      setDotExpanded((v) => {
+        if (!v) {
+          shouldFocusExpandedTopRef.current = true;
+        }
+        return !v;
+      });
     }
   };
 
@@ -353,8 +411,21 @@ export const ToolCallRow = memo(function ToolCallRow({
   const handleToggle = () => {
     hydrateNow();
     if (!isNonExpandable) {
-      setExpanded(!expanded);
+      setExpanded((v) => {
+        if (!v) {
+          shouldFocusExpandedTopRef.current = true;
+        }
+        return !v;
+      });
     }
+  };
+  const handleBashPreviewToggle = () => {
+    setBashPreviewExpanded((v) => {
+      if (!v) {
+        shouldFocusExpandedTopRef.current = true;
+      }
+      return !v;
+    });
   };
   const dotAriaLabel = !isNonExpandable
     ? expanded
@@ -367,6 +438,17 @@ export const ToolCallRow = memo(function ToolCallRow({
       : dotExpanded
         ? "Collapse inline view"
         : "Expand inline view";
+
+  useLayoutEffect(() => {
+    if (
+      !shouldFocusExpandedTopRef.current ||
+      (!expanded && !dotExpanded && !bashPreviewExpanded)
+    ) {
+      return;
+    }
+    shouldFocusExpandedTopRef.current = false;
+    queueExpandedToolTopFocus(rowRef);
+  }, [bashPreviewExpanded, expanded, dotExpanded, rowRef]);
 
   // Inline renderers bypass the entire tool-row structure
   if (hasInlineRenderer) {
@@ -405,9 +487,15 @@ export const ToolCallRow = memo(function ToolCallRow({
           hasDeferredInteractiveShell
             ? hydrateNow
             : hasBashHeaderToggle
-              ? () => setBashPreviewExpanded((v) => !v)
+              ? handleBashPreviewToggle
               : hasHeaderDotToggle
-                ? () => setDotExpanded((v) => !v)
+                ? () =>
+                    setDotExpanded((v) => {
+                      if (!v) {
+                        shouldFocusExpandedTopRef.current = true;
+                      }
+                      return !v;
+                    })
                 : isNonExpandable
                   ? undefined
                   : handleToggle
@@ -424,16 +512,21 @@ export const ToolCallRow = memo(function ToolCallRow({
               ? (e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    setBashPreviewExpanded((v) => !v);
+                    handleBashPreviewToggle();
                   }
                 }
-              : hasHeaderDotToggle
-                ? (e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      setDotExpanded((v) => !v);
-                    }
+            : hasHeaderDotToggle
+              ? (e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setDotExpanded((v) => {
+                      if (!v) {
+                        shouldFocusExpandedTopRef.current = true;
+                      }
+                      return !v;
+                    });
                   }
+                }
                 : isNonExpandable
                   ? undefined
                   : (e) => e.key === "Enter" && handleToggle()
@@ -509,6 +602,12 @@ export const ToolCallRow = memo(function ToolCallRow({
       {/* Collapsed preview - shown when tool supports it (non-expandable) */}
       {hasCollapsedPreview && bashPreviewExpanded && (
         <div className="tool-row-collapsed-preview">
+          {hasBashPreviewToggle && (
+            <ToolRowCollapseStrip
+              onCollapse={() => setBashPreviewExpanded(false)}
+              ariaLabel="Collapse preview from left gutter"
+            />
+          )}
           {collapsedPreviewContent}
         </div>
       )}
@@ -528,13 +627,7 @@ export const ToolCallRow = memo(function ToolCallRow({
 
       {dotExpanded && isNonExpandable && hasInteractiveSummary && toolName === "Read" && (
         <div className="tool-row-content">
-          <button
-            type="button"
-            className="tool-row-collapse-strip"
-            onClick={() => setDotExpanded(false)}
-            aria-label="Collapse"
-            title="Collapse"
-          />
+          <ToolRowCollapseStrip onCollapse={() => setDotExpanded(false)} />
           <ToolResultExpanded
             toolName={toolName}
             toolInput={toolInput}
@@ -546,13 +639,7 @@ export const ToolCallRow = memo(function ToolCallRow({
 
       {expanded && !isNonExpandable && (
         <div className="tool-row-content">
-          <button
-            type="button"
-            className="tool-row-collapse-strip"
-            onClick={() => setExpanded(false)}
-            aria-label="Collapse"
-            title="Collapse"
-          />
+          <ToolRowCollapseStrip onCollapse={() => setExpanded(false)} />
           {status === "pending" ||
           status === "aborted" ||
           status === "incomplete" ? (
@@ -574,6 +661,27 @@ export const ToolCallRow = memo(function ToolCallRow({
     </div>
   );
 });
+
+function ToolRowCollapseStrip({
+  onCollapse,
+  ariaLabel = "Collapse expanded tool row",
+}: {
+  onCollapse: () => void;
+  ariaLabel?: string;
+}) {
+  return (
+    <button
+      type="button"
+      className="tool-row-collapse-strip"
+      onClick={(event) => {
+        event.stopPropagation();
+        onCollapse();
+      }}
+      aria-label={ariaLabel}
+      title={ariaLabel}
+    />
+  );
+}
 
 function shouldSuppressBashCollapsedPreview(
   toolName: string,
