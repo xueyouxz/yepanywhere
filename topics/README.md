@@ -16,6 +16,7 @@
 - Compact-and-handoff guardrail (targeted provider/model policy)
 - Heartbeat ownership and timers
 - Claude provider control
+- Codex API provider as a future API-key-backed backend
 - Pixel-scale icon aesthetics
 - UI testing and screenshot regression checks
 - Provider/model compact glyph vocabulary (top-right status)
