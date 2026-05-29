@@ -204,6 +204,10 @@ interface Props {
   onRecallLastSubmission?: () => boolean;
   /** Cancel the newest cancellable queued message. */
   onCancelLatestDeferred?: () => boolean;
+  /** Predicted next user prompt from the SDK; shown as a ghost/chip below the composer. */
+  promptSuggestion?: string;
+  /** Dismiss the current prompt suggestion without acting on it. */
+  onDismissPromptSuggestion?: () => void;
 }
 
 export function MessageInput({
@@ -252,6 +256,8 @@ export function MessageInput({
   onCancelCorrection,
   onRecallLastSubmission,
   onCancelLatestDeferred,
+  promptSuggestion,
+  onDismissPromptSuggestion,
 }: Props) {
   const { t } = useI18n();
   const [text, setText, controls] = useDraftPersistence(draftKey);
@@ -589,6 +595,23 @@ export function MessageInput({
       return;
     }
 
+    // Tab when composer is empty accepts the prompt suggestion into the draft
+    if (
+      e.key === "Tab" &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.shiftKey &&
+      !e.altKey &&
+      promptSuggestion &&
+      !text.trim()
+    ) {
+      e.preventDefault();
+      noteComposerEdit(promptSuggestion);
+      setText(promptSuggestion);
+      onDismissPromptSuggestion?.();
+      return;
+    }
+
     if (e.key === "Enter") {
       // Skip Enter during IME composition (e.g. Chinese/Japanese/Korean input)
       if (e.nativeEvent.isComposing) return;
@@ -853,6 +876,33 @@ export function MessageInput({
           style={{ display: "none" }}
           onChange={handleFileSelect}
         />
+
+        {!collapsed && promptSuggestion && (
+          <div className="prompt-suggestion">
+            <button
+              type="button"
+              className="prompt-suggestion-text"
+              onClick={() => {
+                const metadata = buildSubmissionMetadata("direct");
+                onDismissPromptSuggestion?.();
+                onSend(promptSuggestion, metadata);
+                textareaRef.current?.focus();
+              }}
+              title="Send this suggestion"
+            >
+              {promptSuggestion}
+            </button>
+            <button
+              type="button"
+              className="prompt-suggestion-dismiss"
+              onClick={onDismissPromptSuggestion}
+              aria-label="Dismiss suggestion"
+              title="Dismiss"
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         {!collapsed && (
           <MessageInputToolbar

@@ -3070,6 +3070,62 @@ a.sidebar-nav-item {
   outline: none;
 }
 
+.prompt-suggestion {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg-code);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-style: italic;
+}
+
+.prompt-suggestion-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-style: italic;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+}
+
+.prompt-suggestion-text:hover {
+  color: var(--text-primary);
+}
+
+.prompt-suggestion-dismiss {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--font-size-base);
+  line-height: 1;
+}
+
+.prompt-suggestion-dismiss:hover,
+.prompt-suggestion-dismiss:focus-visible {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  outline: none;
+}
+
 /* Collapsed state - when approval panel is showing above */
 .message-input-collapsed {
   margin-top: var(--space-2);

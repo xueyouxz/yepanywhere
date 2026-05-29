@@ -850,6 +850,7 @@ export function useSession(
   const [sessionTools, setSessionTools] = useState<string[]>([]);
   // MCP servers available for this session (from init message)
   const [mcpServers, setMcpServers] = useState<string[]>([]);
+  const [promptSuggestion, setPromptSuggestion] = useState<string | null>(null);
   const lastKnownModeVersionRef = useRef<number>(0);
 
   useEffect(() => {
@@ -1593,6 +1594,15 @@ export function useSession(
           }
         }
 
+        // Predicted next-user-prompt suggestion: store and don't add to message list
+        if (msgType === "prompt_suggestion") {
+          const suggestion = sdkMessage.suggestion;
+          if (typeof suggestion === "string" && suggestion.trim()) {
+            setPromptSuggestion(suggestion);
+          }
+          return;
+        }
+
         // For assistant messages, clear streaming state and remove ALL streaming placeholders
         if (msgType === "assistant") {
           // Check if this is a subagent message
@@ -1691,6 +1701,7 @@ export function useSession(
         // but this reconciles clients that miss that event across reconnects.
         const tempId = sdkMessage.tempId as string | undefined;
         if (msgType === "user") {
+          setPromptSuggestion(null);
           const incomingText = extractUserMessageText(sdkMessage);
           if (tempId || incomingText) {
             deliveredUserEchoesRef.current = [
@@ -2139,6 +2150,8 @@ export function useSession(
     slashCommands, // Available slash commands from init message
     sessionTools, // Available tools from init message
     mcpServers, // Available MCP servers from init message
+    promptSuggestion, // Predicted next user prompt from prompt_suggestion SDK message
+    dismissPromptSuggestion: () => setPromptSuggestion(null),
     pagination, // Compact-boundary pagination metadata
     loadingOlder, // Whether older messages are being loaded
     loadOlderMessages, // Load next chunk of older messages

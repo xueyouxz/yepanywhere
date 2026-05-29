@@ -677,6 +677,8 @@ function SessionPageContent({
     loadingOlder,
     loadOlderMessages,
     reconnectStream,
+    promptSuggestion,
+    dismissPromptSuggestion,
   } = useSession(
     projectId,
     sessionId,
@@ -3961,6 +3963,8 @@ function SessionPageContent({
                 heartbeatEnabled={heartbeatTurnsEnabled}
                 onToggleHeartbeat={handleToggleHeartbeat}
                 onConfigureHeartbeat={() => setShowHeartbeatModal(true)}
+                promptSuggestion={mainComposerForAside ? undefined : promptSuggestion ?? undefined}
+                onDismissPromptSuggestion={mainComposerForAside ? undefined : dismissPromptSuggestion}
               />
               )}
             </div>

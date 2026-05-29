@@ -736,6 +736,7 @@ export class ClaudeProvider implements AgentProvider {
           systemPrompt: this.getSystemPrompt(options.globalInstructions),
           settingSources: ["user", "project", "local"],
           includePartialMessages: true,
+          promptSuggestions: true,
           // Model, thinking, and effort options
           model: options.model,
           thinking: options.thinking,
