@@ -1,5 +1,6 @@
-import type { UrlProjectId } from "@yep-anywhere/shared";
+import { type UrlProjectId, toUrlProjectId } from "@yep-anywhere/shared";
 import { describe, expect, it, vi } from "vitest";
+import type { ProjectMetadataService } from "../../src/metadata/index.js";
 import type { ProjectScanner } from "../../src/projects/scanner.js";
 import { createProjectsRoutes } from "../../src/routes/projects.js";
 import type { CodexSessionReader } from "../../src/sessions/codex-reader.js";
@@ -71,5 +72,60 @@ describe("Projects Routes", () => {
       title: "Codex project session",
       provider: "codex",
     });
+  });
+
+  it("hides a project from YA lists", async () => {
+    const project = {
+      ...createProject(),
+      id: toUrlProjectId("/tmp/project"),
+    };
+    const scanner = {
+      getProject: vi.fn(async () => project),
+      invalidateCache: vi.fn(),
+    } as unknown as ProjectScanner;
+    const projectMetadataService = {
+      hideProject: vi.fn(async () => {}),
+    } as unknown as ProjectMetadataService;
+
+    const routes = createProjectsRoutes({
+      scanner,
+      readerFactory: vi.fn(),
+      projectMetadataService,
+    });
+
+    const response = await routes.request(`/${project.id}`, {
+      method: "DELETE",
+    });
+    expect(response.status).toBe(200);
+
+    const json = await response.json();
+    expect(json).toMatchObject({
+      removed: true,
+      projectId: project.id,
+      path: project.path,
+    });
+    expect(projectMetadataService.hideProject).toHaveBeenCalledWith(
+      project.id,
+      project.path,
+    );
+    expect(scanner.invalidateCache).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 404 when hiding an unknown project", async () => {
+    const routes = createProjectsRoutes({
+      scanner: {
+        getProject: vi.fn(async () => null),
+        invalidateCache: vi.fn(),
+      } as unknown as ProjectScanner,
+      readerFactory: vi.fn(),
+      projectMetadataService: {
+        hideProject: vi.fn(async () => {}),
+      } as unknown as ProjectMetadataService,
+    });
+
+    const response = await routes.request(`/${toUrlProjectId("/tmp/missing")}`, {
+      method: "DELETE",
+    });
+    expect(response.status).toBe(404);
   });
 });

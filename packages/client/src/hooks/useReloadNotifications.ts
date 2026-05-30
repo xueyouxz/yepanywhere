@@ -23,6 +23,34 @@ interface DevStatus {
   backendDirty?: boolean;
 }
 
+export const FRONTEND_RELOAD_QUERY_PARAM = "__ya_reload";
+
+function toReloadUrl(currentUrl: string | URL): URL {
+  return new URL(
+    typeof currentUrl === "string" ? currentUrl : currentUrl.toString(),
+  );
+}
+
+export function buildFrontendReloadUrl(
+  currentUrl: string | URL,
+  reloadToken: string,
+): string {
+  const url = toReloadUrl(currentUrl);
+  url.searchParams.set(FRONTEND_RELOAD_QUERY_PARAM, reloadToken);
+  return url.toString();
+}
+
+export function getFrontendReloadCleanupUrl(
+  currentUrl: string | URL,
+): string | null {
+  const url = toReloadUrl(currentUrl);
+  if (!url.searchParams.has(FRONTEND_RELOAD_QUERY_PARAM)) {
+    return null;
+  }
+  url.searchParams.delete(FRONTEND_RELOAD_QUERY_PARAM);
+  return url.toString();
+}
+
 /**
  * Hook to manage reload notifications when running in manual reload mode.
  * Listens for source-change events via the global activityBus.
@@ -85,6 +113,16 @@ export function useReloadNotifications() {
       .catch(() => {
         setDevStatus(null);
       });
+  }, []);
+
+  // Clean the cache-busting reload param back out after the fresh document loads
+  // so copied/shared URLs do not retain reload-only query state.
+  useEffect(() => {
+    const cleanupUrl = getFrontendReloadCleanupUrl(window.location.href);
+    if (!cleanupUrl) {
+      return;
+    }
+    window.history.replaceState(window.history.state, "", cleanupUrl);
   }, []);
 
   // Subscribe to events from the bus
@@ -164,7 +202,11 @@ export function useReloadNotifications() {
 
   // Reload the frontend (browser refresh)
   const reloadFrontend = useCallback(() => {
-    window.location.reload();
+    const reloadUrl = buildFrontendReloadUrl(
+      window.location.href,
+      String(Date.now()),
+    );
+    window.location.replace(reloadUrl);
   }, []);
 
   // Reload whichever needs it (backend first if both)

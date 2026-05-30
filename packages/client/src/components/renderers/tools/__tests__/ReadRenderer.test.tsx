@@ -51,6 +51,7 @@ describe("ReadRenderer", () => {
     expect(
       screen.getByRole("button", { name: /useGlobalSessions\.ts/i }),
     ).toBeDefined();
+    expect(screen.getByRole("button").textContent).toContain("useGlobalSessions.ts 1 lines");
   });
 
   it("does not offer an empty modal for PTY handoff reads", () => {

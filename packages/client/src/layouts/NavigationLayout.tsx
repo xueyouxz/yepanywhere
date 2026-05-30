@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { Outlet, useOutletContext, useParams } from "react-router-dom";
+import {
+  Outlet,
+  useLocation,
+  useOutletContext,
+  useParams,
+} from "react-router-dom";
 import { Sidebar } from "../components/Sidebar";
 import { useSidebarPreference } from "../hooks/useSidebarPreference";
 import { useSidebarWidth } from "../hooks/useSidebarWidth";
@@ -23,8 +28,12 @@ export interface NavigationLayoutContext {
 export function NavigationLayout() {
   // Extract sessionId from URL for highlighting in sidebar (works for session pages)
   const { sessionId } = useParams<{ sessionId?: string }>();
+  const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { isExpanded, toggleExpanded } = useSidebarPreference();
+  const forceExpandedSidebar =
+    new URLSearchParams(location.search).get("sidebar") === "expanded";
+  const { isExpanded, toggleExpanded } =
+    useSidebarPreference(forceExpandedSidebar);
   const {
     width: sidebarWidth,
     setWidth: setSidebarWidth,

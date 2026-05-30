@@ -1,9 +1,18 @@
-import { memo, useMemo, useState } from "react";
 import {
-  getDisplayBashCommandFromInput,
-  isCodexLikeBashInput,
-} from "../../lib/bashCommand";
-import type { ToolResultData } from "../../types/renderItems";
+  type CSSProperties,
+  type MouseEvent,
+  memo,
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { getDisplayBashCommandFromInput } from "../../lib/bashCommand";
+import { PREDICTIVE_SCROLL_ROOT_MARGIN } from "../../lib/predictiveScroll";
+import { parseShellToolOutput } from "../../lib/shellToolOutput";
+import type { ToolCallItem, ToolResultData } from "../../types/renderItems";
 import { toolRegistry } from "../renderers/tools";
 import type { RenderContext } from "../renderers/types";
 import { getToolSummary } from "../tools/summaries";
@@ -13,8 +22,219 @@ interface Props {
   toolName: string;
   toolInput: unknown;
   toolResult?: ToolResultData;
-  status: "pending" | "complete" | "error" | "aborted";
+  status: ToolCallItem["status"];
   sessionProvider?: string;
+}
+
+export const DEFERRED_PREVIEW_HEIGHT = {
+  outputRowChromePx: 12,
+  previewBorderPx: 2,
+  emptyOutputRowPx: 28,
+  minOutputRowPx: 35,
+  outputLineHeightPx: 18,
+  maxOutputPx: 80,
+  minPx: 28,
+  maxPx: 94,
+  defaultContentWidthPx: 720,
+  minCharsPerLine: 24,
+  maxCharsPerLine: 160,
+  averageCharWidthPx: 7.5,
+} as const;
+
+type DeferredPreviewStyle = CSSProperties & {
+  "--tool-row-deferred-preview-height"?: string;
+};
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function estimatePreviewCharsPerLine(rowWidthPx?: number | null): number {
+  const contentWidthPx =
+    typeof rowWidthPx === "number" && rowWidthPx > 0
+      ? Math.max(120, rowWidthPx - 112)
+      : DEFERRED_PREVIEW_HEIGHT.defaultContentWidthPx;
+  return clamp(
+    Math.floor(contentWidthPx / DEFERRED_PREVIEW_HEIGHT.averageCharWidthPx),
+    DEFERRED_PREVIEW_HEIGHT.minCharsPerLine,
+    DEFERRED_PREVIEW_HEIGHT.maxCharsPerLine,
+  );
+}
+
+function estimateWrappedLineCount(text: string, charsPerLine: number): number {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  let count = 0;
+  for (const line of lines) {
+    count += Math.max(1, Math.ceil(line.length / charsPerLine));
+  }
+  return count;
+}
+
+export function estimateDeferredPreviewHeightPx(params: {
+  toolName: string;
+  toolInput: unknown;
+  result: unknown;
+  status: ToolCallItem["status"];
+  rowWidthPx?: number | null;
+}): number | null {
+  if (
+    !canDeferRichToolRow(params.status) ||
+    !isBashLikeToolName(params.toolName)
+  ) {
+    return null;
+  }
+
+  const output = getBashResultOutputForRichPreview(params.result).trimEnd();
+  if (params.result === undefined && !output) {
+    return null;
+  }
+
+  const charsPerLine = estimatePreviewCharsPerLine(params.rowWidthPx);
+  const outputPx = output
+    ? Math.max(
+        DEFERRED_PREVIEW_HEIGHT.minOutputRowPx,
+        Math.min(
+          DEFERRED_PREVIEW_HEIGHT.maxOutputPx,
+          estimateWrappedLineCount(output, charsPerLine) *
+            DEFERRED_PREVIEW_HEIGHT.outputLineHeightPx,
+        ) + DEFERRED_PREVIEW_HEIGHT.outputRowChromePx,
+      )
+    : params.result
+      ? DEFERRED_PREVIEW_HEIGHT.emptyOutputRowPx
+      : 0;
+
+  return clamp(
+    outputPx + DEFERRED_PREVIEW_HEIGHT.previewBorderPx,
+    DEFERRED_PREVIEW_HEIGHT.minPx,
+    DEFERRED_PREVIEW_HEIGHT.maxPx,
+  );
+}
+
+function isBashLikeToolName(toolName: string): boolean {
+  const normalized = toolName.toLowerCase();
+  return (
+    normalized === "bash" ||
+    normalized === "exec_command" ||
+    normalized === "shell_command"
+  );
+}
+
+function canDeferRichToolRow(status: ToolCallItem["status"]): boolean {
+  return status === "complete" || status === "error";
+}
+
+function findNearestScrollContainer(element: HTMLElement): HTMLElement | null {
+  let scrollEl = element.parentElement;
+  while (scrollEl) {
+    const { overflowY } = window.getComputedStyle(scrollEl);
+    if (overflowY === "auto" || overflowY === "scroll") {
+      return scrollEl;
+    }
+    scrollEl = scrollEl.parentElement;
+  }
+  return null;
+}
+
+function scrollExpandedToolTopIntoView(row: HTMLElement | null) {
+  if (!row) {
+    return;
+  }
+
+  const scrollEl = findNearestScrollContainer(row);
+  if (!scrollEl) {
+    return;
+  }
+
+  const scrollRect = scrollEl.getBoundingClientRect();
+  const rowRect = row.getBoundingClientRect();
+  const nextTop = Math.max(
+    0,
+    scrollEl.scrollTop + rowRect.top - scrollRect.top - 12,
+  );
+  scrollEl.scrollTop = nextTop;
+  scrollEl.dispatchEvent(new Event("scroll"));
+}
+
+function queueExpandedToolTopFocus(rowRef: RefObject<HTMLDivElement | null>) {
+  const focusTop = () => scrollExpandedToolTopIntoView(rowRef.current);
+  focusTop();
+  if (typeof window.requestAnimationFrame === "function") {
+    window.requestAnimationFrame(focusTop);
+  }
+  window.setTimeout(focusTop, 80);
+}
+
+function useNearViewportHydration(status: ToolCallItem["status"]): {
+  rowRef: RefObject<HTMLDivElement | null>;
+  shouldHydrate: boolean;
+  hydrateNow: () => void;
+  rowWidthPx: number | null;
+} {
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const [rowWidthPx, setRowWidthPx] = useState<number | null>(null);
+  const [shouldHydrate, setShouldHydrate] = useState(
+    () =>
+      !canDeferRichToolRow(status) ||
+      typeof window === "undefined" ||
+      typeof IntersectionObserver === "undefined",
+  );
+
+  useEffect(() => {
+    if (!canDeferRichToolRow(status)) {
+      setShouldHydrate(true);
+      return;
+    }
+    if (typeof IntersectionObserver === "undefined") {
+      setShouldHydrate(true);
+      return;
+    }
+    setShouldHydrate(false);
+  }, [status]);
+
+  useLayoutEffect(() => {
+    if (shouldHydrate || !canDeferRichToolRow(status)) {
+      return;
+    }
+    const node = rowRef.current;
+    if (!node) {
+      return;
+    }
+    const width = Math.round(node.getBoundingClientRect().width);
+    if (width > 0) {
+      setRowWidthPx((current) => (current === width ? current : width));
+    }
+  }, [shouldHydrate, status]);
+
+  useEffect(() => {
+    if (shouldHydrate || !canDeferRichToolRow(status)) {
+      return;
+    }
+
+    const node = rowRef.current;
+    if (!node) {
+      setShouldHydrate(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setShouldHydrate(true);
+          observer.disconnect();
+        }
+      },
+      { root: null, rootMargin: PREDICTIVE_SCROLL_ROOT_MARGIN },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [shouldHydrate, status]);
+
+  return {
+    rowRef,
+    shouldHydrate,
+    hydrateNow: () => setShouldHydrate(true),
+    rowWidthPx,
+  };
 }
 
 export const ToolCallRow = memo(function ToolCallRow({
@@ -38,18 +258,44 @@ export const ToolCallRow = memo(function ToolCallRow({
 
   // Get structured result for interactive summary
   const structuredResult = toolResult?.structured ?? toolResult?.content;
+  const {
+    rowRef,
+    shouldHydrate: shouldHydrateRichContent,
+    hydrateNow,
+    rowWidthPx,
+  } = useNearViewportHydration(status);
 
   // Check if this tool renders inline (bypasses entire tool-row structure)
   const hasInlineRenderer = toolRegistry.hasInlineRenderer(toolName);
   const suppressCollapsedPreview = shouldSuppressBashCollapsedPreview(
     toolName,
-    toolInput,
-    sessionProvider,
+    structuredResult,
     status,
+  );
+  const rendererToolName = toolRegistry.get(toolName).tool;
+  const mayHaveCollapsedPreview =
+    toolRegistry.hasCollapsedPreview(toolName) && !suppressCollapsedPreview;
+  const isEditTool = rendererToolName === "Edit";
+  const isReadTool = rendererToolName === "Read";
+  const isBashTool = rendererToolName === "Bash";
+  const canRenderInteractiveSummary =
+    status === "complete" || (status === "pending" && isEditTool);
+  const mayHaveInteractiveSummary =
+    canRenderInteractiveSummary && toolRegistry.hasInteractiveSummary(toolName);
+  const deferredPreviewHeightPx = useMemo(
+    () =>
+      estimateDeferredPreviewHeightPx({
+        toolName,
+        toolInput,
+        result: structuredResult,
+        status,
+        rowWidthPx,
+      }),
+    [toolName, toolInput, structuredResult, status, rowWidthPx],
   );
 
   const interactiveSummaryContent = useMemo(() => {
-    if (status !== "complete") {
+    if (!canRenderInteractiveSummary || !shouldHydrateRichContent) {
       return null;
     }
     return toolRegistry.renderInteractiveSummary(
@@ -66,6 +312,8 @@ export const ToolCallRow = memo(function ToolCallRow({
     structuredResult,
     toolResult,
     renderContext,
+    shouldHydrateRichContent,
+    canRenderInteractiveSummary,
   ]);
 
   const hasInteractiveSummary =
@@ -74,7 +322,7 @@ export const ToolCallRow = memo(function ToolCallRow({
     interactiveSummaryContent !== false;
 
   const collapsedPreviewContent = useMemo(() => {
-    if (suppressCollapsedPreview) {
+    if (suppressCollapsedPreview || !shouldHydrateRichContent) {
       return null;
     }
     return toolRegistry.renderCollapsedPreview(
@@ -91,34 +339,125 @@ export const ToolCallRow = memo(function ToolCallRow({
     structuredResult,
     toolResult,
     renderContext,
+    shouldHydrateRichContent,
   ]);
 
   const hasCollapsedPreview =
     collapsedPreviewContent !== null &&
     collapsedPreviewContent !== undefined &&
     collapsedPreviewContent !== false;
-  const hideSummaryWhenPreviewVisible =
-    toolName === "Bash" &&
-    status === "pending" &&
-    hasCollapsedPreview &&
-    isCodexLikeBashInput(toolInput, sessionProvider);
+  const hasBashPreviewToggle = isBashTool && hasCollapsedPreview;
+  const hasDeferredPreviewShell =
+    !shouldHydrateRichContent &&
+    mayHaveCollapsedPreview &&
+    deferredPreviewHeightPx !== null;
+  const hasDeferredInteractiveShell =
+    !shouldHydrateRichContent &&
+    (mayHaveCollapsedPreview || mayHaveInteractiveSummary);
+  const [bashPreviewExpanded, setBashPreviewExpanded] = useState(true);
   // Tools with collapsed preview or interactive summary don't expand
-  const isNonExpandable = hasInteractiveSummary || hasCollapsedPreview;
+  const isNonExpandable =
+    hasInteractiveSummary || hasCollapsedPreview || hasDeferredInteractiveShell;
 
   // Edit and TodoWrite tools are expanded by default
   const [expanded, setExpanded] = useState(
     !isNonExpandable && (toolName === "Edit" || toolName === "TodoWrite"),
   );
 
+  // Dot-expanded: inline full result for preview-first rows (starts collapsed).
+  const [dotExpanded, setDotExpanded] = useState(false);
+  const shouldFocusExpandedTopRef = useRef(false);
+  const canInlineExpandToolResult =
+    isNonExpandable &&
+    hasInteractiveSummary &&
+    shouldHydrateRichContent &&
+    (isReadTool || (isEditTool && toolResult !== undefined));
+
+  // Dot button: expandable rows + preview-first rows with an inline result.
+  const showDotBtn =
+    !isNonExpandable ||
+    canInlineExpandToolResult ||
+    hasBashPreviewToggle;
+
+  // Header toggles dotExpanded for preview-first inline result rows.
+  const hasHeaderDotToggle = canInlineExpandToolResult;
+  const hasBashHeaderToggle = hasBashPreviewToggle && shouldHydrateRichContent;
+
+  const handleDotClick = (e: MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    hydrateNow();
+    if (hasBashPreviewToggle) {
+      setBashPreviewExpanded((v) => {
+        if (!v) {
+          shouldFocusExpandedTopRef.current = true;
+        }
+        return !v;
+      });
+    } else if (!isNonExpandable) {
+      setExpanded((v) => {
+        if (!v) {
+          shouldFocusExpandedTopRef.current = true;
+        }
+        return !v;
+      });
+    } else if (canInlineExpandToolResult) {
+      setDotExpanded((v) => {
+        if (!v) {
+          shouldFocusExpandedTopRef.current = true;
+        }
+        return !v;
+      });
+    }
+  };
+
   const summary = useMemo(() => {
     return getToolSummary(toolName, toolInput, toolResult, status);
   }, [toolName, toolInput, toolResult, status]);
+  const headerCommand = isBashTool
+    ? getDisplayBashCommandFromInput(toolInput)
+    : "";
 
   const handleToggle = () => {
+    hydrateNow();
     if (!isNonExpandable) {
-      setExpanded(!expanded);
+      setExpanded((v) => {
+        if (!v) {
+          shouldFocusExpandedTopRef.current = true;
+        }
+        return !v;
+      });
     }
   };
+  const handleBashPreviewToggle = () => {
+    setBashPreviewExpanded((v) => {
+      if (!v) {
+        shouldFocusExpandedTopRef.current = true;
+      }
+      return !v;
+    });
+  };
+  const dotAriaLabel = !isNonExpandable
+    ? expanded
+      ? "Collapse"
+      : "Expand"
+    : hasBashPreviewToggle
+      ? bashPreviewExpanded
+        ? "Collapse preview"
+        : "Expand preview"
+      : dotExpanded
+        ? "Collapse inline view"
+        : "Expand inline view";
+
+  useLayoutEffect(() => {
+    if (
+      !shouldFocusExpandedTopRef.current ||
+      (!expanded && !dotExpanded && !bashPreviewExpanded)
+    ) {
+      return;
+    }
+    shouldFocusExpandedTopRef.current = false;
+    queueExpandedToolTopFocus(rowRef);
+  }, [bashPreviewExpanded, expanded, dotExpanded, rowRef]);
 
   // Inline renderers bypass the entire tool-row structure
   if (hasInlineRenderer) {
@@ -138,18 +477,85 @@ export const ToolCallRow = memo(function ToolCallRow({
 
   return (
     <div
-      className={`tool-row timeline-item ${expanded ? "expanded" : "collapsed"} status-${status} ${isNonExpandable ? "interactive" : ""}`}
+      ref={rowRef}
+      onPointerEnter={hydrateNow}
+      onFocus={hydrateNow}
+      className={`tool-row timeline-item ${expanded ? "expanded" : "collapsed"} status-${status} ${isNonExpandable ? "interactive" : ""} ${shouldHydrateRichContent ? "" : "rich-deferred"} ${isBashTool ? "ran-tool-row" : ""}`}
     >
+      {showDotBtn && (
+        <button
+          type="button"
+          className="timeline-dot-btn"
+          onClick={handleDotClick}
+          aria-label={dotAriaLabel}
+        />
+      )}
       <div
         className={`tool-row-header ${isNonExpandable ? "non-expandable" : ""}`}
-        onClick={isNonExpandable ? undefined : handleToggle}
-        onKeyDown={
-          isNonExpandable
-            ? undefined
-            : (e) => e.key === "Enter" && handleToggle()
+        onClick={
+          hasDeferredInteractiveShell
+            ? hydrateNow
+            : hasBashHeaderToggle
+              ? handleBashPreviewToggle
+              : hasHeaderDotToggle
+                ? () =>
+                    setDotExpanded((v) => {
+                      if (!v) {
+                        shouldFocusExpandedTopRef.current = true;
+                      }
+                      return !v;
+                    })
+                : isNonExpandable
+                  ? undefined
+                  : handleToggle
         }
-        role={isNonExpandable ? "presentation" : "button"}
-        tabIndex={isNonExpandable ? undefined : 0}
+        onKeyDown={
+          hasDeferredInteractiveShell
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  hydrateNow();
+                }
+              }
+            : hasBashHeaderToggle
+              ? (e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    handleBashPreviewToggle();
+                  }
+                }
+            : hasHeaderDotToggle
+              ? (e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setDotExpanded((v) => {
+                      if (!v) {
+                        shouldFocusExpandedTopRef.current = true;
+                      }
+                      return !v;
+                    });
+                  }
+                }
+                : isNonExpandable
+                  ? undefined
+                  : (e) => e.key === "Enter" && handleToggle()
+        }
+        role={
+          hasDeferredInteractiveShell ||
+          hasBashHeaderToggle ||
+          hasHeaderDotToggle ||
+          !isNonExpandable
+            ? "button"
+            : "presentation"
+        }
+        tabIndex={
+          hasDeferredInteractiveShell ||
+          hasBashHeaderToggle ||
+          hasHeaderDotToggle ||
+          !isNonExpandable
+            ? 0
+            : undefined
+        }
       >
         {status === "pending" && (
           <span className="tool-spinner" aria-label="Running">
@@ -161,41 +567,95 @@ export const ToolCallRow = memo(function ToolCallRow({
             ⨯
           </span>
         )}
+        {status === "incomplete" && (
+          <span className="tool-incomplete-icon" aria-label="Result unavailable">
+            ?
+          </span>
+        )}
 
         <span className="tool-name">
           {toolRegistry.getDisplayName(toolName)}
         </span>
 
-        {hasInteractiveSummary && status === "complete" ? (
+        {hasInteractiveSummary && canRenderInteractiveSummary ? (
           <span className="tool-summary interactive-summary">
             {interactiveSummaryContent}
           </span>
-        ) : !hideSummaryWhenPreviewVisible ? (
+        ) : (
           <span className="tool-summary">
             {summary}
             {status === "aborted" && (
               <span className="tool-aborted-label"> (interrupted)</span>
             )}
+            {status === "incomplete" && (
+              <span className="tool-incomplete-label">
+                {" "}
+                (result unavailable)
+              </span>
+            )}
           </span>
-        ) : null}
+        )}
+
+        {headerCommand && (
+          <ToolHeaderCopyButton text={headerCommand} label="Copy command" />
+        )}
 
         {!isNonExpandable && (
           <span className="expand-chevron" aria-hidden="true">
             {expanded ? "▾" : "▸"}
           </span>
         )}
+        {hasHeaderDotToggle && (
+          <span className="expand-chevron" aria-hidden="true">
+            {dotExpanded ? "▾" : "▸"}
+          </span>
+        )}
       </div>
 
       {/* Collapsed preview - shown when tool supports it (non-expandable) */}
-      {hasCollapsedPreview && (
+      {hasCollapsedPreview && bashPreviewExpanded && !(dotExpanded && isEditTool) && (
         <div className="tool-row-collapsed-preview">
+          {hasBashPreviewToggle && (
+            <ToolRowCollapseStrip
+              onCollapse={() => setBashPreviewExpanded(false)}
+              ariaLabel="Collapse preview from left gutter"
+            />
+          )}
           {collapsedPreviewContent}
+        </div>
+      )}
+      {hasDeferredPreviewShell && (
+        <div
+          className="tool-row-collapsed-preview tool-row-deferred-preview"
+          style={
+            {
+              "--tool-row-deferred-preview-height": `${deferredPreviewHeightPx}px`,
+            } as DeferredPreviewStyle
+          }
+          aria-hidden="true"
+        >
+          <div className="tool-row-deferred-preview-box" />
+        </div>
+      )}
+
+      {dotExpanded && canInlineExpandToolResult && (
+        <div className="tool-row-content">
+          <ToolRowCollapseStrip onCollapse={() => setDotExpanded(false)} />
+          <ToolResultExpanded
+            toolName={toolName}
+            toolInput={toolInput}
+            toolResult={toolResult}
+            context={renderContext}
+          />
         </div>
       )}
 
       {expanded && !isNonExpandable && (
         <div className="tool-row-content">
-          {status === "pending" || status === "aborted" ? (
+          <ToolRowCollapseStrip onCollapse={() => setExpanded(false)} />
+          {status === "pending" ||
+          status === "aborted" ||
+          status === "incomplete" ? (
             <ToolUseExpanded
               toolName={toolName}
               toolInput={toolInput}
@@ -215,37 +675,69 @@ export const ToolCallRow = memo(function ToolCallRow({
   );
 });
 
+function ToolRowCollapseStrip({
+  onCollapse,
+  ariaLabel = "Collapse expanded tool row",
+}: {
+  onCollapse: () => void;
+  ariaLabel?: string;
+}) {
+  return (
+    <button
+      type="button"
+      className="tool-row-collapse-strip"
+      onClick={(event) => {
+        event.stopPropagation();
+        onCollapse();
+      }}
+      aria-label={ariaLabel}
+      title={ariaLabel}
+    />
+  );
+}
+
 function shouldSuppressBashCollapsedPreview(
   toolName: string,
-  toolInput: unknown,
-  sessionProvider?: string,
-  status?: "pending" | "complete" | "error" | "aborted",
+  result: unknown,
+  status?: ToolCallItem["status"],
 ): boolean {
-  if (toolName !== "Bash") {
+  if (!isBashLikeToolName(toolName)) {
     return false;
   }
 
-  if (!isCodexLikeBashInput(toolInput, sessionProvider)) {
-    return false;
-  }
-
-  // Keep Codex bash rows compact by default (header + expandable details) for
-  // both running and completed commands to avoid persistent IN/OUT cards.
-  if (
-    status === "pending" ||
-    status === "complete" ||
-    status === "error" ||
-    status === "aborted"
-  ) {
+  if (status === "pending") {
     return true;
   }
 
-  const command = getDisplayBashCommandFromInput(toolInput);
-  if (!command) {
-    return false;
+  return result === undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function getBashResultOutputForRichPreview(result: unknown): string {
+  if (typeof result === "string") {
+    const parsed = parseShellToolOutput(result);
+    return parsed.hasEnvelope ? parsed.output : result;
   }
 
-  return /^(rg|grep|sed|nl|cat)\b/.test(command.trimStart());
+  if (!isRecord(result)) {
+    return "";
+  }
+
+  const stdout = typeof result.stdout === "string" ? result.stdout : "";
+  const stderr = typeof result.stderr === "string" ? result.stderr : "";
+  if (stdout || stderr) {
+    return [stdout, stderr].filter(Boolean).join("\n");
+  }
+
+  if (typeof result.content === "string") {
+    const parsed = parseShellToolOutput(result.content);
+    return parsed.hasEnvelope ? parsed.output : result.content;
+  }
+
+  return "";
 }
 
 function ToolUseExpanded({
@@ -315,5 +807,74 @@ function Spinner() {
         strokeDashoffset="8"
       />
     </svg>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      aria-hidden="true"
+    >
+      <rect x="5" y="5" width="8" height="8" rx="1.5" />
+      <path d="M3 10.5H2.5A1.5 1.5 0 0 1 1 9V2.5A1.5 1.5 0 0 1 2.5 1H9a1.5 1.5 0 0 1 1.5 1.5V3" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 8.5 6.5 12 13 4" />
+    </svg>
+  );
+}
+
+function ToolHeaderCopyButton({
+  text,
+  label,
+}: {
+  text: string;
+  label: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <button
+      type="button"
+      className={`tool-header-copy ${copied ? "copied" : ""}`}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        navigator.clipboard
+          .writeText(text)
+          .then(() => {
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 3000);
+          })
+          .catch((error) => {
+            console.error("Failed to copy tool header text:", error);
+          });
+      }}
+      aria-label={copied ? "Copied" : label}
+      title={copied ? "Copied" : label}
+    >
+      {copied ? <CheckIcon /> : <CopyIcon />}
+    </button>
   );
 }

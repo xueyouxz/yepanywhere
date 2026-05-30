@@ -13,6 +13,7 @@ import {
   createHighlighter,
 } from "shiki";
 import { createCssVariablesTheme } from "shiki/core";
+import { hasAnsiEscapes, renderAnsiToHtml } from "@yep-anywhere/shared";
 import type {
   CompletedBlock,
   StreamingCodeBlock,
@@ -23,6 +24,7 @@ import {
   VIDEO_EXTENSIONS,
   isLocalFilePath,
   localFileApiUrl,
+  localMediaApiUrl,
   renderSafeMarkdown,
   sanitizeUrl,
 } from "./safe-markdown.js";
@@ -103,12 +105,10 @@ export async function createAugmentGenerator(
       const code = extractStreamingCodeContent(block.content);
       const lang = block.lang ?? "";
 
-      const html = await renderCodeWithHighlighter(
-        code,
-        lang,
-        highlighter,
-        loadedLanguages,
-      );
+      // Avoid running Shiki over the whole growing code block on every token.
+      // Completed code blocks still get full syntax highlighting through
+      // processBlock once the closing fence arrives.
+      const html = renderPlainCodeBlock(code, lang);
       return { blockIndex, html, type: "code" };
     },
 
@@ -161,6 +161,13 @@ async function renderCodeWithHighlighter(
   highlighter: Highlighter,
   loadedLanguages: Set<string>,
 ): Promise<string> {
+  // Route colored terminal output through the ANSI renderer when the
+  // fence is tagged `ansi` or contains raw CSI bytes; otherwise shiki
+  // would render the escapes literally.
+  if (lang === "ansi" || hasAnsiEscapes(code)) {
+    return renderAnsiBlock(code);
+  }
+
   // Check if language is loaded and valid
   const isValidLang = lang && lang in bundledLanguages;
 
@@ -215,6 +222,16 @@ function renderPlainCodeBlock(code: string, lang: string): string {
 }
 
 /**
+ * Render an ANSI-colored code block. The inner renderer already escapes
+ * HTML special characters, so we just wrap its output in a matching
+ * `<pre class="shiki"><code>` shell for styling parity with shiki.
+ */
+function renderAnsiBlock(code: string): string {
+  const innerHtml = renderAnsiToHtml(code);
+  return `<pre class="shiki ansi-block"><code class="language-ansi">${innerHtml}</code></pre>`;
+}
+
+/**
  * Render a non-code markdown block with raw HTML disabled and sanitization.
  */
 function renderMarkdownBlock(block: CompletedBlock): string {
@@ -243,12 +260,15 @@ function renderInlineFormatting(text: string): string {
   result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label, href) => {
     if (isLocalFilePath(href)) {
       const ext = (href.split(".").pop() ?? "").toLowerCase();
-      const apiUrl = escapeHtml(localFileApiUrl(href));
       if (MEDIA_EXTENSIONS.has(ext)) {
+        const trimmedHref = href.trim();
+        const apiUrl = escapeHtml(localMediaApiUrl(trimmedHref));
+        const escapedPath = escapeHtml(trimmedHref);
         const mediaType = VIDEO_EXTENSIONS.has(ext) ? "video" : "image";
         const typeLabel = VIDEO_EXTENSIONS.has(ext) ? "video" : "image";
-        return `<a href="${apiUrl}" class="local-media-link" data-media-type="${mediaType}">${label}<span class="local-media-type">(${typeLabel})</span></a>`;
+        return `<span class="local-media-link-group"><button type="button" class="local-media-inline-toggle" data-media-path="${escapedPath}" data-media-type="${mediaType}" data-expanded="true" aria-label="Collapse ${mediaType}" aria-expanded="true" title="Collapse inline preview">-</button><a href="${apiUrl}" class="local-media-link" data-media-type="${mediaType}">${label}<span class="local-media-type">(${typeLabel})</span></a></span><span class="local-media-inline-preview" data-media-path="${escapedPath}" data-media-type="${mediaType}" data-expanded="true"></span>`;
       }
+      const apiUrl = escapeHtml(localFileApiUrl(href));
       return `<a href="${apiUrl}">${label}</a>`;
     }
     const safeHref = sanitizeUrl(href);

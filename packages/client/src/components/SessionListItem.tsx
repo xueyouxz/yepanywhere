@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import type { AgentActivity } from "../hooks/useFileActivity";
@@ -8,8 +8,14 @@ import type {
   ProviderName,
   SessionStatus,
 } from "../types";
+import {
+  buildBtwAsideParentHref,
+  getBtwAsideSessionDisplayTitle,
+  isBtwAsideSessionTitle,
+} from "../lib/btwAsideSessions";
 import { ContextUsageIndicator } from "./ContextUsageIndicator";
 import { SessionMenu } from "./SessionMenu";
+import { SessionShareModal } from "./SessionShareModal";
 import { SessionStatusBadge } from "./StatusBadge";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 
@@ -21,6 +27,7 @@ interface SessionListItemProps {
 
   // Optional display data
   fullTitle?: string | null;
+  initialPrompt?: string | null;
   projectName?: string;
   updatedAt?: string;
   hasUnread?: boolean;
@@ -31,6 +38,8 @@ interface SessionListItemProps {
   provider?: ProviderName;
   /** SSH host for remote execution (undefined = local) */
   executor?: string;
+  /** Parent session when this item is a YA-owned /btw aside. */
+  parentSessionId?: string;
 
   // Feature toggles
   mode: "card" | "compact";
@@ -65,6 +74,30 @@ interface SessionListItemProps {
 
   /** Number of messages in session (0 indicates brand new session) */
   messageCount?: number;
+
+  /** Creation time for age display in detailed lists (brief d/h/m) */
+  createdAt?: string;
+
+  /** Cached user vs system/assistant turn counts (for heavier list views) */
+  userTurnCount?: number;
+  systemTurnCount?: number;
+}
+
+async function copyTextToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
 }
 
 /**
@@ -87,6 +120,7 @@ export function SessionListItem({
   title,
   // Optional display data
   fullTitle,
+  initialPrompt,
   projectName,
   updatedAt,
   hasUnread: hasUnreadProp,
@@ -96,6 +130,7 @@ export function SessionListItem({
   status,
   provider,
   executor,
+  parentSessionId,
   // Feature toggles
   mode,
   showProjectName = false,
@@ -123,6 +158,9 @@ export function SessionListItem({
   basePath = "",
   // New session detection
   messageCount,
+  createdAt,
+  userTurnCount,
+  systemTurnCount,
 }: SessionListItemProps) {
   const navigate = useNavigate();
 
@@ -134,6 +172,7 @@ export function SessionListItem({
     undefined,
   );
   const [isEditing, setIsEditing] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [localTitle, setLocalTitle] = useState<string | undefined>(undefined);
@@ -151,6 +190,15 @@ export function SessionListItem({
     (messageCount === 0 || (messageCount == null && activity === "in-turn"));
   const displayTitle =
     localTitle ?? title ?? (isNewSession ? "New session" : "Untitled session");
+  const isBtwAsideSession =
+    !!parentSessionId ||
+    isBtwAsideSessionTitle(displayTitle) ||
+    isBtwAsideSessionTitle(fullTitle);
+  const visibleTitle =
+    isBtwAsideSession
+      ? getBtwAsideSessionDisplayTitle(displayTitle)
+      : displayTitle;
+  const copyPromptText = (initialPrompt ?? fullTitle ?? "").trim();
 
   // Focus input when entering edit mode
   useEffect(() => {
@@ -209,10 +257,12 @@ export function SessionListItem({
     }
   };
 
-  const handleRename = () => {
-    setRenameValue(displayTitle);
-    setIsEditing(true);
-  };
+  const handleCopyPrompt = useCallback(() => {
+    if (!copyPromptText) return;
+    void copyTextToClipboard(copyPromptText).catch((err) => {
+      console.error("Failed to copy initial prompt:", err);
+    });
+  }, [copyPromptText]);
 
   const handleCancelEditing = () => {
     if (isSavingRef.current) return;
@@ -306,17 +356,106 @@ export function SessionListItem({
     return new Date(timestamp).toLocaleDateString();
   };
 
+  // Brief age since creation for detailed (card) lists: d / h / m
+  // (separate from the activity-based "Any age" filter which uses updatedAt)
+  const formatBriefAge = (timestamp: string): string => {
+    const diffMs = Date.now() - new Date(timestamp).getTime();
+    if (diffMs < 0) return "0m";
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 60) return `${mins}m`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h`;
+    const days = Math.floor(hours / 24);
+    return `${days}d`;
+  };
+
   // Build CSS classes
   const liClasses = [
     "session-list-item",
     mode === "card" ? "session-list-item--card" : "session-list-item--compact",
     isCurrent && "current",
     hasUnread && "unread",
+    isBtwAsideSession && "btw-aside-session",
     isSelected && "selected",
     isArchived && "archived",
   ]
     .filter(Boolean)
     .join(" ");
+
+  const sessionHref = `${basePath}/projects/${projectId}/sessions/${sessionId}`;
+  const parentHref =
+    parentSessionId && isBtwAsideSession
+      ? buildBtwAsideParentHref(basePath, projectId, parentSessionId, sessionId)
+      : null;
+
+  const handleBtwBadgeClick = useCallback(
+    (e: React.MouseEvent<HTMLSpanElement>) => {
+      if (!parentHref) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.metaKey || e.ctrlKey || e.shiftKey) {
+        window.open(parentHref, "_blank", "noopener");
+        return;
+      }
+      navigate(parentHref);
+      onNavigate?.();
+    },
+    [navigate, onNavigate, parentHref],
+  );
+
+  const handleBtwBadgeKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLSpanElement>) => {
+      if (!parentHref || (e.key !== "Enter" && e.key !== " ")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      navigate(parentHref);
+      onNavigate?.();
+    },
+    [navigate, onNavigate, parentHref],
+  );
+
+  const handleSessionClick = useCallback(
+    (e: React.MouseEvent<HTMLAnchorElement>) => {
+      if (isSelectionMode) {
+        e.preventDefault();
+        onNavigate?.();
+        return;
+      }
+
+      if (e.metaKey || e.ctrlKey || e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        window.open(sessionHref, "_blank", "noopener");
+        return;
+      }
+
+      if (e.altKey) {
+        return;
+      }
+
+      onNavigate?.();
+    },
+    [isSelectionMode, onNavigate, sessionHref],
+  );
+
+  const handleSessionMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLAnchorElement>) => {
+      if (e.button === 1) {
+        e.preventDefault();
+      }
+    },
+    [],
+  );
+
+  const handleSessionAuxClick = useCallback(
+    (e: React.MouseEvent<HTMLAnchorElement>) => {
+      if (e.button !== 1) return;
+      e.preventDefault();
+      e.stopPropagation();
+      window.open(sessionHref, "_blank", "noopener");
+    },
+    [sessionHref],
+  );
 
   // Star icon SVG
   const StarIcon = ({
@@ -364,13 +503,10 @@ export function SessionListItem({
         />
       ) : (
         <Link
-          to={`${basePath}/projects/${projectId}/sessions/${sessionId}`}
-          onClick={(e) => {
-            if (isSelectionMode) {
-              e.preventDefault();
-            }
-            onNavigate?.();
-          }}
+          to={sessionHref}
+          onClick={handleSessionClick}
+          onMouseDown={handleSessionMouseDown}
+          onAuxClick={handleSessionAuxClick}
           title={fullTitle || displayTitle}
           className="session-list-item__link"
         >
@@ -380,7 +516,23 @@ export function SessionListItem({
               <strong className="session-list-item__title">
                 {isStarred && <StarIcon filled size={12} />}
                 {isNewSession && <ThinkingIndicator />}
-                {displayTitle}
+                {isBtwAsideSession && (
+                  <span
+                    className="session-badge session-badge-btw"
+                    title={
+                      parentHref
+                        ? "Open parent session with this /btw aside visible"
+                        : "/btw aside session"
+                    }
+                    role={parentHref ? "link" : undefined}
+                    tabIndex={parentHref ? 0 : undefined}
+                    onClick={handleBtwBadgeClick}
+                    onKeyDown={handleBtwBadgeKeyDown}
+                  >
+                    /btw
+                  </span>
+                )}
+                {visibleTitle}
                 {hasDraft && <span className="session-draft-badge">Draft</span>}
                 {isArchived && (
                   <span className="session-archived-badge">Archived</span>
@@ -393,6 +545,22 @@ export function SessionListItem({
                   </span>
                 )}
                 {showTimestamp && updatedAt && formatRelativeTime(updatedAt)}
+                {createdAt && (
+                  <span
+                    className="session-list-item__age"
+                    title="Age since creation (wall time / file creation or first parse). Separate from the 'Any age' filter which is based on time since last message/activity (updatedAt)."
+                  >
+                    Created {formatBriefAge(createdAt)} ago
+                  </span>
+                )}
+                {(userTurnCount != null || systemTurnCount != null) && (
+                  <span
+                    className="session-list-item__turns"
+                    title="User / system (assistant) turns (cached)"
+                  >
+                    U:{userTurnCount ?? 0} S:{systemTurnCount ?? 0}
+                  </span>
+                )}
                 {executor && (
                   <span
                     className="session-badge session-badge-executor"
@@ -426,7 +594,23 @@ export function SessionListItem({
                 {isStarred && <StarIcon filled />}
                 <span className="session-list-item__title-text">
                   {isNewSession && <ThinkingIndicator />}
-                  {displayTitle}
+                  {isBtwAsideSession && (
+                    <span
+                      className="session-badge session-badge-btw"
+                      title={
+                        parentHref
+                          ? "Open parent session with this /btw aside visible"
+                          : "/btw aside session"
+                      }
+                      role={parentHref ? "link" : undefined}
+                      tabIndex={parentHref ? 0 : undefined}
+                      onClick={handleBtwBadgeClick}
+                      onKeyDown={handleBtwBadgeKeyDown}
+                    >
+                      /btw
+                    </span>
+                  )}
+                  {visibleTitle}
                 </span>
                 {hasDraft && <span className="session-draft-badge">Draft</span>}
               </span>
@@ -457,14 +641,25 @@ export function SessionListItem({
             setRenameValue(displayTitle);
             setIsEditing(true);
           }}
+          onCopyPrompt={copyPromptText ? handleCopyPrompt : undefined}
           onClone={(newSessionId) => {
             navigate(
               `${basePath}/projects/${projectId}/sessions/${newSessionId}`,
             );
           }}
+          onShare={() => setShowShareModal(true)}
           useEllipsisIcon
           useFixedPositioning
           className="session-list-item__menu"
+        />
+      )}
+
+      {showShareModal && (
+        <SessionShareModal
+          projectId={projectId}
+          sessionId={sessionId}
+          title={displayTitle}
+          onClose={() => setShowShareModal(false)}
         />
       )}
     </li>

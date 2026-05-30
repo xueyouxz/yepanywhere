@@ -584,6 +584,40 @@ describe("ConnectionManager", () => {
       expect(sendPing).not.toHaveBeenCalled();
     });
 
+    it("skips visibility ping during critical operation", () => {
+      const { cm, reconnectFn, sendPing, visibility } = setup();
+      cm.start(reconnectFn, { sendPing });
+
+      const endCriticalOperation = cm.beginCriticalOperation("upload");
+
+      visibility.hide();
+      visibility.show();
+
+      expect(sendPing).not.toHaveBeenCalled();
+      expect(cm.state).toBe("connected");
+
+      endCriticalOperation();
+    });
+
+    it("critical operation cancels pending visibility pong timeout", () => {
+      const { cm, reconnectFn, sendPing, timers, visibility } = setup({
+        pongTimeoutMs: 5000,
+      });
+      cm.start(reconnectFn, { sendPing });
+
+      visibility.hide();
+      visibility.show();
+      expect(sendPing).toHaveBeenCalledWith("1");
+
+      const endCriticalOperation = cm.beginCriticalOperation("upload");
+      timers.advance(5000);
+
+      expect(cm.state).toBe("connected");
+      expect(reconnectFn).not.toHaveBeenCalled();
+
+      endCriticalOperation();
+    });
+
     it("stop() clears pending pong timeout", () => {
       const { cm, reconnectFn, sendPing, timers, visibility } = setup({
         pongTimeoutMs: 5000,
@@ -629,6 +663,22 @@ describe("ConnectionManager", () => {
       cm.forceReconnect(); // resets to 0 → schedules attempt 0 → attempts becomes 1
 
       // The key behavior: delay is base (1s), not escalated
+      expect(cm.state).toBe("reconnecting");
+    });
+
+    it("suppresses health-check reconnects during critical operation", () => {
+      const { cm, reconnectFn } = setup();
+      cm.start(reconnectFn);
+
+      const endCriticalOperation = cm.beginCriticalOperation("upload");
+      cm.forceReconnect("pong-timeout");
+
+      expect(cm.state).toBe("connected");
+      expect(reconnectFn).not.toHaveBeenCalled();
+
+      endCriticalOperation();
+      cm.forceReconnect("manual");
+
       expect(cm.state).toBe("reconnecting");
     });
   });

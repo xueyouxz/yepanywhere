@@ -1,12 +1,18 @@
 import {
+  HELPER_SIDE_MODEL_CHEAPEST,
+  HELPER_SIDE_MODEL_SAME_AS_MAIN,
+  PROMPT_SUGGESTION_MODES,
   type ModelInfo,
+  type PromptSuggestionMode,
   type ProviderName,
+  type RecapMode,
   resolveModel,
 } from "@yep-anywhere/shared";
 import {
   type ChangeEvent,
   type ClipboardEvent,
   type KeyboardEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -20,6 +26,7 @@ import { useToastContext } from "../contexts/ToastContext";
 import { useConnection } from "../hooks/useConnection";
 import { useDraftPersistence } from "../hooks/useDraftPersistence";
 import {
+  EFFORT_LEVEL_OPTIONS,
   getModelSetting,
   getThinkingSetting,
   useModelSettings,
@@ -29,14 +36,36 @@ import {
   getDefaultProvider,
   useProviders,
 } from "../hooks/useProviders";
+import {
+  getAttachmentUploadLongEdgePx,
+  useAttachmentUploadQuality,
+} from "../hooks/useAttachmentUploadQuality";
 import { useRemoteBasePath } from "../hooks/useRemoteBasePath";
 import { useRemoteExecutors } from "../hooks/useRemoteExecutors";
 import { useServerSettings } from "../hooks/useServerSettings";
 import { useI18n } from "../i18n";
+import { prepareImageUpload } from "../lib/imageAttachmentResize";
 import { hasCoarsePointer } from "../lib/deviceDetection";
-import type { PermissionMode } from "../types";
+import { logSessionUiTrace } from "../lib/diagnostics/uiTrace";
+import {
+  clearNewSessionPrefill,
+  getNewSessionPrefill,
+} from "../lib/newSessionPrefill";
+import {
+  getEstimatedServerOffsetMs,
+  getServerClockTimestamp,
+  measureServerLatencyMs,
+  recordServerClockSample,
+} from "../lib/serverClock";
+import {
+  getSpeechMethods,
+  isKnownSpeechMethodId,
+  type SpeechMethodId,
+} from "../lib/speechProviders/methods";
+import { useVersion } from "../hooks/useVersion";
+import { shortenPath } from "../lib/text";
+import type { PermissionMode, Project } from "../types";
 import { FilterDropdown, type FilterOption } from "./FilterDropdown";
-import { clearFabPrefill, getFabPrefill } from "./FloatingActionButton";
 import { VoiceInputButton, type VoiceInputButtonRef } from "./VoiceInputButton";
 
 interface PendingFile {
@@ -51,37 +80,184 @@ const MODE_ORDER: PermissionMode[] = [
   "plan",
   "bypassPermissions",
 ];
+const RECAP_MODE_ORDER: RecapMode[] = ["off", "native", "side-session"];
+const PROMPT_SUGGESTION_MODE_ORDER: PromptSuggestionMode[] = [
+  ...PROMPT_SUGGESTION_MODES,
+];
+const NEW_SESSION_DRAFT_KEY = "draft-new-session";
+const QUICK_PROJECT_COUNT = 10;
+const PROJECT_SUGGESTION_COUNT = 10;
 
 function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024) return `${bytes}\u202fb`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}\u202fkb`;
   if (bytes < 1024 * 1024 * 1024)
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    return `${Math.round((bytes / (1024 * 1024)) * 10) / 10}\u202fmb`;
+  return `${Math.round((bytes / (1024 * 1024 * 1024)) * 10) / 10}\u202fgb`;
 }
 
 function getPreferredModelId(
   models: ModelInfo[],
   preferredModelId?: string | null,
 ) {
-  const configuredModelId = preferredModelId ?? resolveModel(getModelSetting());
-
-  if (!configuredModelId) {
-    return models.find((m) => m.id === "default")?.id ?? null;
-  }
-
-  if (configuredModelId) {
-    const matchingPreferredModel = models.find(
-      (m) => m.id === configuredModelId,
-    );
+  if (preferredModelId) {
+    const matchingPreferredModel = models.find((m) => m.id === preferredModelId);
     if (matchingPreferredModel) return matchingPreferredModel.id;
   }
 
   return models[0]?.id ?? null;
 }
 
+function getPreferredProviderModelId(
+  providerName: ProviderName,
+  models: ModelInfo[],
+  defaults?: {
+    provider?: ProviderName;
+    model?: string;
+  } | null,
+) {
+  const sessionDefaultModel =
+    defaults?.provider === providerName ? defaults.model : undefined;
+  const legacyClaudeFallbackModel =
+    providerName === "claude" ? resolveModel(getModelSetting()) : undefined;
+
+  return getPreferredModelId(
+    models,
+    sessionDefaultModel ?? legacyClaudeFallbackModel,
+  );
+}
+
+function providerSupportsRecapMode(
+  provider: {
+    supportsRecaps?: boolean;
+    supportsNativeRecaps?: boolean;
+  } | null | undefined,
+  mode: RecapMode,
+): boolean {
+  if (mode === "off") return true;
+  if (mode === "native") return provider?.supportsNativeRecaps === true;
+  return provider?.supportsRecaps === true;
+}
+
+function getDefaultRecapMode(
+  provider: {
+    supportsRecaps?: boolean;
+    supportsNativeRecaps?: boolean;
+  } | null | undefined,
+  defaults?: { recapMode?: RecapMode } | null,
+): RecapMode {
+  if (
+    defaults?.recapMode &&
+    providerSupportsRecapMode(provider, defaults.recapMode)
+  ) {
+    return defaults.recapMode;
+  }
+  return provider?.supportsNativeRecaps ? "native" : "off";
+}
+
+function providerSupportsPromptSuggestionMode(
+  provider: { supportsNativePromptSuggestions?: boolean } | null | undefined,
+  mode: PromptSuggestionMode,
+): boolean {
+  if (mode === "off") return true;
+  return provider?.supportsNativePromptSuggestions === true;
+}
+
+function getDefaultPromptSuggestionMode(
+  provider: { supportsNativePromptSuggestions?: boolean } | null | undefined,
+  defaults?: { promptSuggestionMode?: PromptSuggestionMode } | null,
+): PromptSuggestionMode {
+  if (
+    defaults?.promptSuggestionMode &&
+    providerSupportsPromptSuggestionMode(
+      provider,
+      defaults.promptSuggestionMode,
+    )
+  ) {
+    return defaults.promptSuggestionMode;
+  }
+  return provider?.supportsNativePromptSuggestions ? "native" : "off";
+}
+
+function getDefaultHelperSideModel(
+  models: ModelInfo[],
+  defaults?: { helperSideModel?: string } | null,
+): string {
+  const defaultModel = defaults?.helperSideModel;
+  if (
+    defaultModel &&
+    (defaultModel === HELPER_SIDE_MODEL_CHEAPEST ||
+      defaultModel === HELPER_SIDE_MODEL_SAME_AS_MAIN ||
+      models.some((model) => model.id === defaultModel))
+  ) {
+    return defaultModel;
+  }
+  return HELPER_SIDE_MODEL_CHEAPEST;
+}
+
+function getProjectSortValue(project: Project): number {
+  return project.lastActivity ? new Date(project.lastActivity).getTime() : 0;
+}
+
+function sortProjectsForChooser(
+  projects: readonly Project[],
+  recentProjectIds: readonly string[] = [],
+): Project[] {
+  const recentRanks = new Map(
+    recentProjectIds.map((projectId, index) => [projectId, index]),
+  );
+
+  return [...projects].sort((a, b) => {
+    const recentRankA = recentRanks.get(a.id) ?? Number.POSITIVE_INFINITY;
+    const recentRankB = recentRanks.get(b.id) ?? Number.POSITIVE_INFINITY;
+    if (recentRankA !== recentRankB) return recentRankA - recentRankB;
+
+    const activityDiff = getProjectSortValue(b) - getProjectSortValue(a);
+    if (activityDiff !== 0) return activityDiff;
+    const nameDiff = a.name.localeCompare(b.name);
+    if (nameDiff !== 0) return nameDiff;
+    return a.path.localeCompare(b.path);
+  });
+}
+
+function normalizeProjectInput(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (trimmed.length > 1 && /[/\\]$/.test(trimmed)) {
+    return trimmed.slice(0, -1);
+  }
+  return trimmed;
+}
+
+function findProjectByInput(
+  projects: readonly Project[],
+  candidate: string,
+): Project | null {
+  const normalizedCandidate = normalizeProjectInput(candidate);
+  if (!normalizedCandidate) return null;
+
+  const exactPathMatch = projects.find(
+    (project) => project.path === normalizedCandidate,
+  );
+  if (exactPathMatch) return exactPathMatch;
+
+  const exactNameMatches = projects.filter(
+    (project) => project.name.toLowerCase() === normalizedCandidate.toLowerCase(),
+  );
+  if (exactNameMatches.length === 1) {
+    return exactNameMatches[0] ?? null;
+  }
+
+  return null;
+}
+
 export interface NewSessionFormProps {
-  projectId: string;
+  projectId?: string;
+  selectedProject?: Project | null;
+  projects?: Project[];
+  recentProjectIds?: string[];
+  projectsLoading?: boolean;
+  onProjectChange?: (projectId: string | null) => void;
   /** Whether to focus the textarea on mount (default: true) */
   autoFocus?: boolean;
   /** Number of rows for the textarea (default: 6) */
@@ -94,6 +270,11 @@ export interface NewSessionFormProps {
 
 export function NewSessionForm({
   projectId,
+  selectedProject,
+  projects = [],
+  recentProjectIds = [],
+  projectsLoading = false,
+  onProjectChange,
   autoFocus = true,
   rows = 6,
   placeholder,
@@ -102,14 +283,20 @@ export function NewSessionForm({
   const { t } = useI18n();
   const navigate = useNavigate();
   const basePath = useRemoteBasePath();
-  const [message, setMessage, draftControls] = useDraftPersistence(
-    `draft-new-session-${projectId}`,
-  );
+  const [message, setMessage, draftControls] =
+    useDraftPersistence(NEW_SESSION_DRAFT_KEY);
   const [mode, setMode] = useState<PermissionMode>("default");
   const [selectedProvider, setSelectedProvider] = useState<ProviderName | null>(
     null,
   );
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [selectedRecapMode, setSelectedRecapMode] =
+    useState<RecapMode>("off");
+  const [selectedPromptSuggestionMode, setSelectedPromptSuggestionMode] =
+    useState<PromptSuggestionMode>("off");
+  const [helperSideModel, setHelperSideModel] = useState<string>(
+    HELPER_SIDE_MODEL_CHEAPEST,
+  );
   // null = local, string = remote host
   const [selectedExecutor, setSelectedExecutor] = useState<string | null>(null);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
@@ -117,18 +304,39 @@ export function NewSessionForm({
   const [uploadProgress, setUploadProgress] = useState<
     Record<string, { uploaded: number; total: number }>
   >({});
+  const [attachmentQuality] = useAttachmentUploadQuality();
   const [interimTranscript, setInterimTranscript] = useState("");
   const [isSavingDefaults, setIsSavingDefaults] = useState(false);
+  const [isProjectChooserExpanded, setIsProjectChooserExpanded] =
+    useState(false);
+  const [projectInput, setProjectInput] = useState(
+    () => selectedProject?.path ?? "",
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const projectInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const voiceButtonRef = useRef<VoiceInputButtonRef>(null);
   const hasInitializedDefaultsRef = useRef(false);
+  const hasUserCustomizedDefaultsRef = useRef(false);
+  const lastSyncedProjectIdRef = useRef<string | null>(null);
 
   // Thinking toggle state
-  const { thinkingMode, cycleThinkingMode, thinkingLevel } = useModelSettings();
+  const {
+    effortLevel,
+    setEffortLevel,
+    thinkingMode,
+    cycleThinkingMode,
+    thinkingLevel,
+    voiceInputEnabled,
+    speechMethod,
+    setSpeechMethod,
+  } = useModelSettings();
 
   // Connection for uploads (uses WebSocket when enabled)
   const connection = useConnection();
+
+  // Server version for voiceBackends advertisement
+  const { version: versionInfo } = useVersion();
 
   // Toast for error messages
   const { showToast } = useToastContext();
@@ -158,17 +366,215 @@ export function NewSessionForm({
     plan: t("modePlanDescription"),
     bypassPermissions: t("modeBypassPermissionsDescription"),
   };
+  const recapModeLabels: Record<RecapMode, string> = {
+    off: t("recapModeOff"),
+    native: t("recapModeNative"),
+    "side-session": t("recapModeSideSession"),
+  };
+  const recapModeDescriptions: Record<RecapMode, string> = {
+    off: t("recapModeOffDescription"),
+    native: t("recapModeNativeDescription"),
+    "side-session": t("recapModeSideSessionDescription"),
+  };
+  const promptSuggestionModeLabels: Record<PromptSuggestionMode, string> = {
+    off: t("promptSuggestionModeOff"),
+    native: t("promptSuggestionModeNative"),
+  };
+  const promptSuggestionModeDescriptions: Record<
+    PromptSuggestionMode,
+    string
+  > = {
+    off: t("promptSuggestionModeOffDescription"),
+    native: t("promptSuggestionModeNativeDescription"),
+  };
 
   // Get models and capabilities for the currently selected provider
   const selectedProviderInfo = providers.find(
     (p) => p.name === selectedProvider,
   );
   const availableModels: ModelInfo[] = selectedProviderInfo?.models ?? [];
+  const helperSideModelOptions: FilterOption<string>[] = useMemo(
+    () => [
+      {
+        value: HELPER_SIDE_MODEL_CHEAPEST,
+        label: t("helperSideModelCheapest"),
+      },
+      {
+        value: HELPER_SIDE_MODEL_SAME_AS_MAIN,
+        label: t("helperSideModelSameAsMain"),
+        description: selectedModel ?? undefined,
+      },
+      ...availableModels.map((model) => ({
+        value: model.id,
+        label: model.name,
+        description: model.description,
+      })),
+    ],
+    [availableModels, selectedModel, t],
+  );
   // Default to true for backwards compatibility with providers that don't set these flags
   const supportsPermissionMode =
     selectedProviderInfo?.supportsPermissionMode ?? true;
   const supportsThinkingToggle =
     selectedProviderInfo?.supportsThinkingToggle ?? true;
+  const sortedProjects = useMemo(
+    () => sortProjectsForChooser(projects, recentProjectIds),
+    [projects, recentProjectIds],
+  );
+  const quickProjects = useMemo(
+    () => sortedProjects.slice(0, QUICK_PROJECT_COUNT),
+    [sortedProjects],
+  );
+  const normalizedProjectInput = normalizeProjectInput(projectInput);
+  const exactProjectMatch = useMemo(
+    () => findProjectByInput(projects, normalizedProjectInput),
+    [normalizedProjectInput, projects],
+  );
+  const projectMatches = useMemo(() => {
+    if (!normalizedProjectInput) {
+      return sortedProjects;
+    }
+
+    const query = normalizedProjectInput.toLowerCase();
+    return sortedProjects.filter((project) => {
+      return (
+        project.name.toLowerCase().includes(query) ||
+        project.path.toLowerCase().includes(query)
+      );
+    });
+  }, [normalizedProjectInput, sortedProjects]);
+  const projectSuggestions = useMemo(() => {
+    const source = normalizedProjectInput ? projectMatches : quickProjects;
+    return source.slice(0, PROJECT_SUGGESTION_COUNT);
+  }, [normalizedProjectInput, projectMatches, quickProjects]);
+  const projectSuggestionOptions = useMemo(
+    () =>
+      projectSuggestions.map((project) => (
+        <option key={project.id} value={project.path}>
+          {project.name}
+        </option>
+      )),
+    [projectSuggestions],
+  );
+  const hasCustomProjectPath =
+    Boolean(normalizedProjectInput) && exactProjectMatch === null;
+  const currentProjectSelection = exactProjectMatch ?? selectedProject ?? null;
+  const isDetachedProject =
+    !hasCustomProjectPath && currentProjectSelection === null;
+  const projectSummaryTitle =
+    currentProjectSelection?.name ?? t("newSessionProjectDetached");
+  const projectSummaryMeta = hasCustomProjectPath
+    ? normalizedProjectInput
+    : currentProjectSelection?.path ?? t("newSessionProjectDetachedHint");
+  const displayedProjectSummaryMeta =
+    hasCustomProjectPath || currentProjectSelection
+      ? shortenPath(projectSummaryMeta)
+      : projectSummaryMeta;
+
+  const handleProjectOptionSelect = useCallback(
+    (project: Project) => {
+      setProjectInput(project.path);
+      lastSyncedProjectIdRef.current = project.id;
+      onProjectChange?.(project.id);
+      setIsProjectChooserExpanded(false);
+    },
+    [onProjectChange],
+  );
+
+  const handleDetachedProject = useCallback(() => {
+    setProjectInput("");
+    lastSyncedProjectIdRef.current = null;
+    onProjectChange?.(null);
+    setIsProjectChooserExpanded(false);
+  }, [onProjectChange]);
+
+  const projectPanelRows = useMemo(() => {
+    if (!isProjectChooserExpanded) return null;
+
+    const rows: ReactNode[] = [
+      <button
+        key="detached"
+        type="button"
+        className={`new-session-project-option ${!normalizedProjectInput ? "selected" : ""}`}
+        onClick={handleDetachedProject}
+      >
+        <span className="new-session-project-option-name">
+          {t("newSessionProjectDetached")}
+        </span>
+        <span className="new-session-project-option-path">
+          {t("newSessionProjectDetachedHint")}
+        </span>
+      </button>,
+    ];
+
+    if (hasCustomProjectPath) {
+      rows.push(
+        <button
+          key="custom"
+          type="button"
+          className="new-session-project-option new-session-project-option-custom"
+          onClick={() => setIsProjectChooserExpanded(false)}
+        >
+          <span className="new-session-project-option-name">
+            {t("newSessionProjectUseTypedPath")}
+          </span>
+          <span className="new-session-project-option-path">
+            {normalizedProjectInput}
+          </span>
+        </button>,
+      );
+    }
+
+    if (projectsLoading) {
+      rows.push(
+        <div key="loading" className="new-session-project-empty">
+          {t("newSessionLoading")}
+        </div>,
+      );
+      return rows;
+    }
+
+    if (projectSuggestions.length === 0) {
+      rows.push(
+        <div key="no-matches" className="new-session-project-empty">
+          {t("newSessionProjectNoMatches")}
+        </div>,
+      );
+      return rows;
+    }
+
+    rows.push(
+      ...projectSuggestions.map((project) => (
+        <button
+          key={project.id}
+          type="button"
+          className={`new-session-project-option ${currentProjectSelection?.id === project.id && !hasCustomProjectPath ? "selected" : ""}`}
+          onClick={() => handleProjectOptionSelect(project)}
+          title={project.path}
+        >
+          <span className="new-session-project-option-name">
+            {project.name}
+          </span>
+          <span className="new-session-project-option-path">
+            {shortenPath(project.path)}
+          </span>
+        </button>
+      )),
+    );
+
+    return rows;
+  }, [
+    currentProjectSelection?.id,
+    handleDetachedProject,
+    handleProjectOptionSelect,
+    hasCustomProjectPath,
+    isProjectChooserExpanded,
+    normalizedProjectInput,
+    projectSuggestions,
+    projectsLoading,
+    setIsProjectChooserExpanded,
+    t,
+  ]);
 
   // Initialize provider/model/mode from saved defaults once settings and providers load.
   useEffect(() => {
@@ -181,6 +587,9 @@ export function NewSessionForm({
     }
 
     hasInitializedDefaultsRef.current = true;
+    if (hasUserCustomizedDefaultsRef.current) {
+      return;
+    }
 
     if (providers.length === 0) return;
 
@@ -199,10 +608,20 @@ export function NewSessionForm({
 
     if (!initialProvider) return;
 
+    const initialModels = initialProvider.models ?? [];
     setSelectedProvider(initialProvider.name);
     setSelectedModel(
-      getPreferredModelId(initialProvider.models ?? [], savedDefaults?.model),
+      getPreferredProviderModelId(
+        initialProvider.name,
+        initialModels,
+        savedDefaults,
+      ),
     );
+    setSelectedRecapMode(getDefaultRecapMode(initialProvider, savedDefaults));
+    setSelectedPromptSuggestionMode(
+      getDefaultPromptSuggestionMode(initialProvider, savedDefaults),
+    );
+    setHelperSideModel(getDefaultHelperSideModel(initialModels, savedDefaults));
     setMode(savedDefaults?.permissionMode ?? "default");
   }, [
     availableProviders,
@@ -212,15 +631,42 @@ export function NewSessionForm({
     settingsLoading,
   ]);
 
+  useEffect(() => {
+    const nextProjectId = projectId ?? null;
+    if (lastSyncedProjectIdRef.current === nextProjectId) {
+      return;
+    }
+
+    lastSyncedProjectIdRef.current = nextProjectId;
+    setProjectInput((prev) => prev || (selectedProject?.path ?? ""));
+  }, [projectId, selectedProject]);
+
   // When provider changes, reset model based on user settings
   const handleProviderSelect = (providerName: ProviderName) => {
+    hasUserCustomizedDefaultsRef.current = true;
     setSelectedProvider(providerName);
     const provider = providers.find((p) => p.name === providerName);
+    const providerModels = provider?.models ?? [];
     if (provider?.models && provider.models.length > 0) {
-      setSelectedModel(getPreferredModelId(provider.models));
+      setSelectedModel(
+        getPreferredProviderModelId(
+          providerName,
+          providerModels,
+          settings?.newSessionDefaults,
+        ),
+      );
     } else {
       setSelectedModel(null);
     }
+    setSelectedRecapMode(
+      getDefaultRecapMode(provider, settings?.newSessionDefaults),
+    );
+    setSelectedPromptSuggestionMode(
+      getDefaultPromptSuggestionMode(provider, settings?.newSessionDefaults),
+    );
+    setHelperSideModel(
+      getDefaultHelperSideModel(providerModels, settings?.newSessionDefaults),
+    );
   };
 
   // Build model options for FilterDropdown
@@ -248,8 +694,29 @@ export function NewSessionForm({
 
   // Handle model selection from FilterDropdown
   const handleModelSelect = useCallback((selected: string[]) => {
+    hasUserCustomizedDefaultsRef.current = true;
     setSelectedModel(selected[0] ?? null);
   }, []);
+
+  // Build speech-method options for FilterDropdown.
+  const speechMethodOptions = useMemo((): FilterOption<SpeechMethodId>[] => {
+    const serverBackends = versionInfo?.voiceBackends ?? [];
+    return getSpeechMethods(serverBackends).map((method) => ({
+      value: method.id,
+      label: method.label,
+      description: method.description,
+    }));
+  }, [versionInfo?.voiceBackends]);
+
+  const handleSpeechMethodSelect = useCallback(
+    (selected: string[]) => {
+      const next = selected[0];
+      if (next && isKnownSpeechMethodId(next)) {
+        setSpeechMethod(next);
+      }
+    },
+    [setSpeechMethod],
+  );
 
   // Combined display text: committed text + interim transcript
   const displayText = interimTranscript
@@ -274,12 +741,12 @@ export function NewSessionForm({
     }
   }, [autoFocus]);
 
-  // Check for FAB pre-fill on mount (when coming from FloatingActionButton)
+  // Check for opt-in new-session prefill on mount.
   useEffect(() => {
-    const prefill = getFabPrefill();
+    const prefill = getNewSessionPrefill();
     if (prefill) {
       setMessage(prefill);
-      clearFabPrefill();
+      clearNewSessionPrefill();
       // Focus and move cursor to end
       if (textareaRef.current) {
         textareaRef.current.focus();
@@ -287,6 +754,28 @@ export function NewSessionForm({
       }
     }
   }, [setMessage]);
+
+  const handleProjectInputKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (exactProjectMatch) {
+          handleProjectOptionSelect(exactProjectMatch);
+        } else if (normalizedProjectInput) {
+          setIsProjectChooserExpanded(false);
+        }
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        setIsProjectChooserExpanded(false);
+      }
+    },
+    [
+      exactProjectMatch,
+      handleProjectOptionSelect,
+      normalizedProjectInput,
+      setIsProjectChooserExpanded,
+    ],
+  );
 
   const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -315,6 +804,7 @@ export function NewSessionForm({
   };
 
   const handleModeSelect = (selectedMode: PermissionMode) => {
+    hasUserCustomizedDefaultsRef.current = true;
     setMode(selectedMode);
   };
 
@@ -325,6 +815,9 @@ export function NewSessionForm({
         provider: selectedProvider ?? undefined,
         model: selectedModel ?? undefined,
         permissionMode: mode,
+        recapMode: selectedRecapMode,
+        promptSuggestionMode: selectedPromptSuggestionMode,
+        helperSideModel,
       });
       showToast(t("newSessionDefaultsSaved"), "success");
     } catch (err) {
@@ -338,8 +831,11 @@ export function NewSessionForm({
     }
   }, [
     mode,
+    helperSideModel,
     selectedModel,
     selectedProvider,
+    selectedPromptSuggestionMode,
+    selectedRecapMode,
     showToast,
     t,
     updateServerSetting,
@@ -358,14 +854,31 @@ export function NewSessionForm({
     }
 
     const hasContent = finalMessage.trim() || pendingFiles.length > 0;
-    if (!projectId || !hasContent || isStarting) return;
+    if (!hasContent || isStarting) return;
 
     const trimmedMessage = finalMessage.trim();
+    const trimmedProjectInput = normalizeProjectInput(projectInput);
+    const actionAtMs = Date.now();
+    const clientTimestamp = getServerClockTimestamp(actionAtMs);
 
     setInterimTranscript("");
     setIsStarting(true);
 
     try {
+      let resolvedProjectId =
+        trimmedProjectInput
+          ? currentProjectSelection?.path === trimmedProjectInput
+            ? currentProjectSelection.id
+            : findProjectByInput(projects, trimmedProjectInput)?.id
+          : null;
+
+      if (trimmedProjectInput && !resolvedProjectId) {
+        const addProjectResult = await api.addProject(trimmedProjectInput);
+        resolvedProjectId = addProjectResult.project.id;
+        lastSyncedProjectIdRef.current = resolvedProjectId;
+        onProjectChange?.(resolvedProjectId);
+      }
+
       let sessionId: string;
       let processId: string;
       const uploadedFiles: UploadedFile[] = [];
@@ -378,32 +891,88 @@ export function NewSessionForm({
         thinking,
         provider: selectedProvider ?? undefined,
         executor: selectedExecutor ?? undefined,
+        recapMode: selectedRecapMode,
+        promptSuggestionMode: selectedPromptSuggestionMode,
+        helperSideModel,
       };
+      logSessionUiTrace("new-session-submit", {
+        projectId: resolvedProjectId ?? null,
+        detached: !resolvedProjectId,
+        mode,
+        model: selectedModel ?? null,
+        thinking,
+        provider: selectedProvider ?? null,
+        executor: selectedExecutor ?? null,
+        recapMode: selectedRecapMode,
+        promptSuggestionMode: selectedPromptSuggestionMode,
+        helperSideModel,
+        textLength: trimmedMessage.length,
+        pendingFileCount: pendingFiles.length,
+        clientTimestamp,
+        serverOffsetMs: getEstimatedServerOffsetMs(),
+      });
 
       if (pendingFiles.length > 0) {
         // Two-phase flow: create session first, then upload to real session folder
         // Step 1: Create the session without sending a message
-        const createResult = await api.createSession(projectId, sessionOptions);
+        const createRequestSentAtMs = Date.now();
+        const createResult = resolvedProjectId
+          ? await api.createSession(resolvedProjectId, sessionOptions)
+          : await api.createDetachedSession(sessionOptions);
+        const createResponseReceivedAtMs = Date.now();
+        const createTiming = recordServerClockSample({
+          clientRequestStartMs: createRequestSentAtMs,
+          clientResponseEndMs: createResponseReceivedAtMs,
+          serverTimestamp: createResult.serverTimestamp,
+        });
+        const activeProjectId = createResult.projectId;
         sessionId = createResult.sessionId;
         processId = createResult.processId;
+        resolvedProjectId = activeProjectId;
+        logSessionUiTrace("new-session-created", {
+          sessionId,
+          processId,
+          projectId: resolvedProjectId,
+          thinking,
+          mode,
+          serverTimestamp: createResult.serverTimestamp,
+          requestRttMs: createTiming?.roundTripMs ?? null,
+          estimatedServerOffsetMs: createTiming?.serverOffsetMs ?? null,
+        });
 
         // Step 2: Upload files to the real session folder
         for (const pendingFile of pendingFiles) {
           try {
+            const preparedImage = pendingFile.file.type.startsWith("image/")
+              ? await prepareImageUpload(
+                  pendingFile.file,
+                  getAttachmentUploadLongEdgePx(attachmentQuality),
+                )
+              : { file: pendingFile.file };
+            const uploadFile = preparedImage.file;
             const uploadedFile = await connection.upload(
-              projectId,
+              activeProjectId,
               sessionId,
-              pendingFile.file,
+              uploadFile,
               {
                 onProgress: (bytesUploaded) => {
                   setUploadProgress((prev) => ({
                     ...prev,
                     [pendingFile.id]: {
                       uploaded: bytesUploaded,
-                      total: pendingFile.file.size,
+                      total: uploadFile.size,
                     },
                   }));
                 },
+                ...(preparedImage.width !== undefined &&
+                preparedImage.height !== undefined
+                  ? {
+                      imageDimensions: {
+                        width: preparedImage.width,
+                        height: preparedImage.height,
+                      },
+                    }
+                  : {}),
               },
             );
             uploadedFiles.push(uploadedFile);
@@ -420,23 +989,81 @@ export function NewSessionForm({
         }
 
         // Step 3: Send the first message with attachments
-        await api.queueMessage(
+        const queueRequestSentAtMs = Date.now();
+        const queueResult = await api.queueMessage(
           sessionId,
           trimmedMessage,
           mode,
           uploadedFiles.length > 0 ? uploadedFiles : undefined,
           undefined, // tempId
           thinking, // Pass the captured thinking setting to avoid process restart
+          undefined,
+          undefined,
+          clientTimestamp,
         );
+        const queueResponseReceivedAtMs = Date.now();
+        const queueTiming = recordServerClockSample({
+          clientRequestStartMs: queueRequestSentAtMs,
+          clientResponseEndMs: queueResponseReceivedAtMs,
+          serverTimestamp: queueResult.serverTimestamp,
+        });
+        logSessionUiTrace("new-session-queued", {
+          sessionId,
+          processId,
+          projectId: resolvedProjectId,
+          clientTimestamp,
+          serverTimestamp: queueResult.serverTimestamp,
+          uploadWaitMs: queueRequestSentAtMs - actionAtMs,
+          requestRttMs: queueTiming?.roundTripMs ?? null,
+          estimatedServerOffsetMs: queueTiming?.serverOffsetMs ?? null,
+          clientToServerLatencyMs:
+            measureServerLatencyMs(clientTimestamp, queueResult.serverTimestamp),
+        });
       } else {
         // No files - use single-step flow for efficiency
-        const result = await api.startSession(
-          projectId,
-          trimmedMessage,
-          sessionOptions,
-        );
+        const startRequestSentAtMs = Date.now();
+        const result = resolvedProjectId
+          ? await api.startSession(
+              resolvedProjectId,
+              trimmedMessage,
+              sessionOptions,
+              undefined,
+              clientTimestamp,
+            )
+          : await api.startDetachedSession(
+              trimmedMessage,
+              sessionOptions,
+              undefined,
+              clientTimestamp,
+            );
+        const startResponseReceivedAtMs = Date.now();
+        const startTiming = recordServerClockSample({
+          clientRequestStartMs: startRequestSentAtMs,
+          clientResponseEndMs: startResponseReceivedAtMs,
+          serverTimestamp: result.serverTimestamp,
+        });
         sessionId = result.sessionId;
         processId = result.processId;
+        resolvedProjectId = result.projectId;
+        logSessionUiTrace("new-session-started", {
+          sessionId,
+          processId,
+          projectId: resolvedProjectId,
+          thinking,
+          mode,
+          provider: selectedProvider ?? null,
+          model: selectedModel ?? null,
+          clientTimestamp,
+          serverTimestamp: result.serverTimestamp,
+          requestRttMs: startTiming?.roundTripMs ?? null,
+          estimatedServerOffsetMs: startTiming?.serverOffsetMs ?? null,
+          clientToServerLatencyMs:
+            measureServerLatencyMs(clientTimestamp, result.serverTimestamp),
+        });
+      }
+
+      if (!resolvedProjectId) {
+        throw new Error("Missing project ID for new session");
       }
 
       // Clean up preview URLs
@@ -451,14 +1078,17 @@ export function NewSessionForm({
       // without waiting for getSession to complete
       // Also pass initial message as optimistic title (session name = first message)
       // Pass model/provider so ProviderBadge can render immediately
-      navigate(`${basePath}/projects/${projectId}/sessions/${sessionId}`, {
-        state: {
-          initialStatus: { state: "owned", processId },
-          initialTitle: trimmedMessage,
-          initialModel: selectedModel,
-          initialProvider: selectedProvider,
+      navigate(
+        `${basePath}/projects/${resolvedProjectId}/sessions/${sessionId}`,
+        {
+          state: {
+            initialStatus: { state: "owned", processId },
+            initialTitle: trimmedMessage,
+            initialModel: selectedModel,
+            initialProvider: selectedProvider,
+          },
         },
-      });
+      );
     } catch (err) {
       console.error("Failed to start session:", err);
       draftControls.restoreFromStorage();
@@ -467,9 +1097,26 @@ export function NewSessionForm({
       // Show user-visible error message
       let errorMessage = t("newSessionStartError");
       if (err instanceof Error) {
+        const providerDisplayName =
+          selectedProviderInfo?.displayName ?? selectedProvider ?? "Provider";
+        const lowerMessage = err.message.toLowerCase();
+        const status = (err as Error & { status?: number }).status;
+
         // Check for specific error types
         if (err.message.includes("Queue is full")) {
           errorMessage = t("newSessionServerBusy");
+        } else if (
+          lowerMessage.includes("invalid authentication credentials") ||
+          lowerMessage.includes("authentication_error") ||
+          lowerMessage.includes("please run /login") ||
+          (status === 401 &&
+            (selectedProvider === "claude" ||
+              selectedProvider === "gemini" ||
+              selectedProvider === "codex"))
+        ) {
+          errorMessage = t("newSessionProviderAuthError", {
+            provider: providerDisplayName,
+          });
         } else if (err.message.includes("503")) {
           errorMessage = t("newSessionServerCapacity");
         } else if (err.message.includes("404")) {
@@ -575,12 +1222,30 @@ export function NewSessionForm({
   }, []);
 
   const hasContent = message.trim() || pendingFiles.length > 0;
+  const canStart = Boolean(hasContent);
   const savedDefaults = settings?.newSessionDefaults;
+  const defaultRecapMode = getDefaultRecapMode(
+    selectedProviderInfo,
+    savedDefaults,
+  );
+  const defaultHelperSideModel = getDefaultHelperSideModel(
+    availableModels,
+    savedDefaults,
+  );
+  const defaultPromptSuggestionMode = getDefaultPromptSuggestionMode(
+    selectedProviderInfo,
+    savedDefaults,
+  );
+  const savedPromptSuggestionModeForMatch =
+    savedDefaults?.promptSuggestionMode ?? defaultPromptSuggestionMode;
   const defaultsMatchCurrent =
     (savedDefaults?.provider ?? undefined) ===
       (selectedProvider ?? undefined) &&
     (savedDefaults?.model ?? undefined) === (selectedModel ?? undefined) &&
-    (savedDefaults?.permissionMode ?? "default") === mode;
+    (savedDefaults?.permissionMode ?? "default") === mode &&
+    defaultRecapMode === selectedRecapMode &&
+    savedPromptSuggestionModeForMatch === selectedPromptSuggestionMode &&
+    defaultHelperSideModel === helperSideModel;
 
   // Shared input area with toolbar (textarea + attach/voice on left, send on right)
   const inputArea = (
@@ -636,72 +1301,110 @@ export function NewSessionForm({
             className="toolbar-button"
           />
           {supportsThinkingToggle && (
-            <button
-              type="button"
-              className={`toolbar-button thinking-toggle-button ${thinkingMode !== "off" ? `active ${thinkingMode}` : ""}`}
-              onClick={cycleThinkingMode}
-              disabled={isStarting}
-              title={
-                thinkingMode === "off"
-                  ? t("newSessionThinkingOff")
-                  : thinkingMode === "auto"
-                    ? t("newSessionThinkingAuto")
-                    : t("newSessionThinkingOn", { level: thinkingLevel })
-              }
-              aria-label={t("newSessionThinkingMode", { mode: thinkingMode })}
-            >
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
+            <>
+              <button
+                type="button"
+                className={`toolbar-button thinking-toggle-button ${thinkingMode !== "off" ? `active ${thinkingMode}` : ""}`}
+                onClick={cycleThinkingMode}
+                disabled={isStarting}
+                title={
+                  thinkingMode === "off"
+                    ? t("newSessionThinkingOff")
+                    : thinkingMode === "auto"
+                      ? t("newSessionThinkingAuto")
+                      : t("newSessionThinkingOn", { level: thinkingLevel })
+                }
+                aria-label={t("newSessionThinkingMode", { mode: thinkingMode })}
               >
-                <circle cx="12" cy="12" r="10" />
-                <polyline points="12 6 12 12 16 14" />
-                {thinkingMode === "auto" && (
-                  <g>
-                    <circle
-                      cx="19"
-                      cy="5"
-                      r="5.5"
-                      fill="currentColor"
-                      stroke="none"
-                    />
-                    <text
-                      x="19"
-                      y="5"
-                      textAnchor="middle"
-                      dominantBaseline="central"
-                      fill="var(--bg-primary, #1a1a2e)"
-                      fontSize="8"
-                      fontWeight="700"
-                      fontFamily="system-ui, sans-serif"
-                      stroke="none"
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                  {thinkingMode === "auto" && (
+                    <g>
+                      <circle
+                        cx="19"
+                        cy="5"
+                        r="5.5"
+                        fill="currentColor"
+                        stroke="none"
+                      />
+                      <text
+                        x="19"
+                        y="5"
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fill="var(--bg-primary, #1a1a2e)"
+                        fontSize="8"
+                        fontWeight="700"
+                        fontFamily="system-ui, sans-serif"
+                        stroke="none"
+                      >
+                        A
+                      </text>
+                    </g>
+                  )}
+                </svg>
+              </button>
+              {thinkingMode === "on" && (
+                <div
+                  className="new-session-effort-selector"
+                  aria-label={t("modelSettingsEffortTitle")}
+                >
+                  {EFFORT_LEVEL_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`new-session-effort-option ${
+                        effortLevel === option.value ? "active" : ""
+                      }`}
+                      onClick={() => setEffortLevel(option.value)}
+                      disabled={isStarting}
+                      title={option.description}
+                      aria-label={`${t("modelSettingsEffortTitle")}: ${option.label}`}
                     >
-                      A
-                    </text>
-                  </g>
-                )}
-              </svg>
-            </button>
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
         <button
           type="button"
           onClick={handleStartSession}
-          disabled={isStarting || !hasContent}
-          className="send-button"
+          disabled={isStarting || !canStart}
+          className="send-button new-session-submit-button"
           aria-label={t("newSessionStartAction")}
         >
           {isStarting ? (
             <span className="send-spinner" />
           ) : (
-            <span className="send-icon">↑</span>
+            <svg
+              className="send-icon new-session-submit-icon"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.25"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M12 19V5" />
+              <path d="m5 12 7-7 7 7" />
+            </svg>
           )}
         </button>
       </div>
@@ -757,6 +1460,295 @@ export function NewSessionForm({
     </>
   );
 
+  const projectChooser = (
+    <div
+      className={`new-session-project-chooser ${isProjectChooserExpanded ? "expanded" : ""}`}
+    >
+      <div className="new-session-project-controls">
+        <button
+          type="button"
+          className="new-session-project-summary"
+          onClick={() => setIsProjectChooserExpanded((prev) => !prev)}
+          aria-expanded={isProjectChooserExpanded}
+          aria-controls="new-session-project-panel"
+        >
+          <span className="new-session-project-summary-body">
+            <span className="new-session-project-summary-title">
+              {projectSummaryTitle}
+            </span>
+            <span
+              className="new-session-project-summary-path"
+              title={projectSummaryMeta}
+            >
+              {isDetachedProject ? (
+                <>
+                  <span className="new-session-project-summary-path-long">
+                    {t("newSessionProjectDetachedHint")}
+                  </span>
+                  <span className="new-session-project-summary-path-short">
+                    {t("newSessionProjectDetachedHintShort")}
+                  </span>
+                </>
+              ) : (
+                displayedProjectSummaryMeta
+              )}
+            </span>
+          </span>
+          <svg
+            className="new-session-project-summary-chevron"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+
+        <label className="new-session-project-inline-field">
+          <span className="new-session-project-inline-label">
+            {t("newSessionProjectPathLabel")}
+          </span>
+          <input
+            ref={projectInputRef}
+            type="text"
+            value={projectInput}
+            onChange={(e) => {
+              setProjectInput(e.target.value);
+              if (!isProjectChooserExpanded) {
+                setIsProjectChooserExpanded(true);
+              }
+            }}
+            onFocus={() => setIsProjectChooserExpanded(true)}
+            onKeyDown={handleProjectInputKeyDown}
+            placeholder={t("newSessionProjectPathPlaceholder")}
+            disabled={isStarting}
+            className="new-session-project-input"
+            spellCheck={false}
+            list="new-session-project-options"
+          />
+      </label>
+        <datalist id="new-session-project-options">
+          {projectSuggestionOptions}
+        </datalist>
+      </div>
+
+      {isProjectChooserExpanded && projectPanelRows && (
+        <div
+          id="new-session-project-panel"
+          className="new-session-project-panel"
+        >
+          <p className="new-session-project-field-hint">
+            {t("newSessionProjectPathHint")}
+          </p>
+
+          <div className="new-session-project-suggestions">
+            {projectPanelRows}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const providerSection =
+    !providersLoading && availableProviders.length > 1 ? (
+      <div className="new-session-provider-section">
+        <h3>{t("newSessionProviderTitle")}</h3>
+        <div className="provider-options">
+          {providers.map((p) => {
+            const isAvailable = p.installed && (p.authenticated || p.enabled);
+            const isSelected = selectedProvider === p.name;
+            return (
+              <button
+                key={p.name}
+                type="button"
+                className={`provider-option ${isSelected ? "selected" : ""} ${!isAvailable ? "disabled" : ""}`}
+                onClick={() => isAvailable && handleProviderSelect(p.name)}
+                disabled={isStarting || !isAvailable}
+                title={
+                  !isAvailable
+                    ? t("newSessionProviderUnavailable", {
+                        provider: p.displayName,
+                        reason: !p.installed
+                          ? t("newSessionProviderNotInstalled")
+                          : t("newSessionProviderNotAuthenticated"),
+                      })
+                    : p.displayName
+                }
+              >
+                <span className={`provider-option-dot provider-${p.name}`} />
+                <div className="provider-option-content">
+                  <span className="provider-option-label">{p.displayName}</span>
+                  {!isAvailable && (
+                    <span className="provider-option-status">
+                      {!p.installed
+                        ? t("newSessionProviderStatusNotInstalled")
+                        : t("newSessionProviderStatusNotAuthenticated")}
+                    </span>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    ) : null;
+  const modelSection =
+    selectedProvider && modelOptions.length > 0 ? (
+      <div className="new-session-model-section">
+        <h3>{t("newSessionModelTitle")}</h3>
+        <FilterDropdown
+          label={t("newSessionModelTitle")}
+          options={modelOptions}
+          selected={selectedModel ? [selectedModel] : []}
+          onChange={handleModelSelect}
+          multiSelect={false}
+          placeholder={t("newSessionModelPlaceholder")}
+        />
+      </div>
+    ) : null;
+  const recapSection = selectedProvider ? (
+    <div className="new-session-recap-section">
+      <h3>{t("newSessionRecapTitle")}</h3>
+      <div className="mode-options">
+        {RECAP_MODE_ORDER.map((modeValue) => {
+          const isAvailable = providerSupportsRecapMode(
+            selectedProviderInfo,
+            modeValue,
+          );
+          return (
+            <button
+              key={modeValue}
+              type="button"
+              className={`mode-option ${selectedRecapMode === modeValue ? "selected" : ""}`}
+              onClick={() => {
+                hasUserCustomizedDefaultsRef.current = true;
+                setSelectedRecapMode(modeValue);
+              }}
+              disabled={isStarting || !isAvailable}
+              title={recapModeDescriptions[modeValue]}
+            >
+              <span className={`mode-option-dot recap-${modeValue}`} />
+              <div className="mode-option-content">
+                <span className="mode-option-label">
+                  {recapModeLabels[modeValue]}
+                </span>
+                <span className="mode-option-desc">
+                  {recapModeDescriptions[modeValue]}
+                </span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      {selectedRecapMode === "side-session" && (
+        <div className="new-session-helper-model">
+          <h3>{t("helperSideModelTitle")}</h3>
+          <FilterDropdown
+            label={t("helperSideModelTitle")}
+            options={helperSideModelOptions}
+            selected={[helperSideModel]}
+            onChange={(selected) => {
+              hasUserCustomizedDefaultsRef.current = true;
+              setHelperSideModel(
+                selected[0] ?? HELPER_SIDE_MODEL_CHEAPEST,
+              );
+            }}
+            multiSelect={false}
+            placeholder={t("helperSideModelCheapest")}
+          />
+        </div>
+      )}
+    </div>
+  ) : null;
+  const promptSuggestionSection = selectedProvider ? (
+    <div className="new-session-recap-section">
+      <h3>{t("newSessionPromptSuggestionsTitle")}</h3>
+      <div className="mode-options">
+        {PROMPT_SUGGESTION_MODE_ORDER.map((modeValue) => {
+          const isAvailable = providerSupportsPromptSuggestionMode(
+            selectedProviderInfo,
+            modeValue,
+          );
+          return (
+            <button
+              key={modeValue}
+              type="button"
+              className={`mode-option ${selectedPromptSuggestionMode === modeValue ? "selected" : ""}`}
+              onClick={() => {
+                hasUserCustomizedDefaultsRef.current = true;
+                setSelectedPromptSuggestionMode(modeValue);
+              }}
+              disabled={isStarting || !isAvailable}
+              title={promptSuggestionModeDescriptions[modeValue]}
+            >
+              <span className={`mode-option-dot suggestion-${modeValue}`} />
+              <div className="mode-option-content">
+                <span className="mode-option-label">
+                  {promptSuggestionModeLabels[modeValue]}
+                </span>
+                <span className="mode-option-desc">
+                  {promptSuggestionModeDescriptions[modeValue]}
+                </span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  ) : null;
+  const permissionSection = supportsPermissionMode ? (
+    <div className="new-session-mode-section">
+      <h3>{t("newSessionModeTitle")}</h3>
+      <div className="mode-options">
+        {MODE_ORDER.map((m) => (
+          <button
+            key={m}
+            type="button"
+            className={`mode-option ${mode === m ? "selected" : ""}`}
+            onClick={() => handleModeSelect(m)}
+            disabled={isStarting}
+          >
+            <span className={`mode-option-dot mode-${m}`} />
+            <div className="mode-option-content">
+              <span className="mode-option-label">{modeLabels[m]}</span>
+              <span className="mode-option-desc">
+                {modeDescriptions[m]}
+              </span>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      <div className="new-session-defaults-bar">
+        <p className="new-session-defaults-copy">
+          {t("newSessionDefaultsDescription")}
+        </p>
+        <button
+          type="button"
+          className="new-session-defaults-button"
+          onClick={handleSaveDefaults}
+          disabled={
+            isStarting ||
+            isSavingDefaults ||
+            settingsLoading ||
+            !selectedProvider ||
+            defaultsMatchCurrent
+          }
+        >
+          {isSavingDefaults
+            ? t("newSessionDefaultsSaving")
+            : t("newSessionDefaultsAction")}
+        </button>
+      </div>
+    </div>
+  ) : null;
+
   // Compact mode: just the input area, no header or mode selector
   if (compact) {
     return (
@@ -774,69 +1766,40 @@ export function NewSessionForm({
       className={`new-session-form new-session-container ${interimTranscript ? "voice-recording" : ""}`}
     >
       <div className="new-session-header">
-        <h1>{t("newSessionHeaderTitle")}</h1>
         <p className="new-session-subtitle">{t("newSessionHeaderSubtitle")}</p>
       </div>
 
-      <div className="new-session-input-area">{inputArea}</div>
-
-      {/* Provider Selection */}
-      {!providersLoading && availableProviders.length > 1 && (
-        <div className="new-session-provider-section">
-          <h3>{t("newSessionProviderTitle")}</h3>
-          <div className="provider-options">
-            {providers.map((p) => {
-              const isAvailable = p.installed && (p.authenticated || p.enabled);
-              const isSelected = selectedProvider === p.name;
-              return (
-                <button
-                  key={p.name}
-                  type="button"
-                  className={`provider-option ${isSelected ? "selected" : ""} ${!isAvailable ? "disabled" : ""}`}
-                  onClick={() => isAvailable && handleProviderSelect(p.name)}
-                  disabled={isStarting || !isAvailable}
-                  title={
-                    !isAvailable
-                      ? t("newSessionProviderUnavailable", {
-                          provider: p.displayName,
-                          reason: !p.installed
-                            ? t("newSessionProviderNotInstalled")
-                            : t("newSessionProviderNotAuthenticated"),
-                        })
-                      : p.displayName
-                  }
-                >
-                  <span className={`provider-option-dot provider-${p.name}`} />
-                  <div className="provider-option-content">
-                    <span className="provider-option-label">
-                      {p.displayName}
-                    </span>
-                    {!isAvailable && (
-                      <span className="provider-option-status">
-                        {!p.installed
-                          ? t("newSessionProviderStatusNotInstalled")
-                          : t("newSessionProviderStatusNotAuthenticated")}
-                      </span>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+      <div className="new-session-top-layout">
+        <div className="new-session-main-stack">
+          <div className="new-session-input-area">{inputArea}</div>
         </div>
-      )}
+        <aside className="new-session-project-slot">{projectChooser}</aside>
+        {(providerSection ||
+          modelSection ||
+          recapSection ||
+          promptSuggestionSection ||
+          permissionSection) && (
+          <div className="new-session-provider-slot">
+            {providerSection}
+            {modelSection}
+            {recapSection}
+            {promptSuggestionSection}
+            {permissionSection}
+          </div>
+        )}
+      </div>
 
-      {/* Model Selection */}
-      {selectedProvider && modelOptions.length > 0 && (
-        <div className="new-session-model-section">
-          <h3>{t("newSessionModelTitle")}</h3>
+      {/* Voice transcription method */}
+      {voiceInputEnabled && speechMethodOptions.length > 1 && (
+        <div className="new-session-speech-section">
+          <h3>{t("newSessionSpeechTitle")}</h3>
           <FilterDropdown
-            label={t("newSessionModelTitle")}
-            options={modelOptions}
-            selected={selectedModel ? [selectedModel] : []}
-            onChange={handleModelSelect}
+            label={t("newSessionSpeechTitle")}
+            options={speechMethodOptions}
+            selected={[speechMethod]}
+            onChange={handleSpeechMethodSelect}
             multiSelect={false}
-            placeholder={t("newSessionModelPlaceholder")}
+            placeholder={t("newSessionSpeechPlaceholder")}
           />
         </div>
       )}
@@ -884,53 +1847,6 @@ export function NewSessionForm({
         </div>
       )}
 
-      {/* Permission Mode Selection - only for providers that support it */}
-      {supportsPermissionMode && (
-        <div className="new-session-mode-section">
-          <h3>{t("newSessionModeTitle")}</h3>
-          <div className="mode-options">
-            {MODE_ORDER.map((m) => (
-              <button
-                key={m}
-                type="button"
-                className={`mode-option ${mode === m ? "selected" : ""}`}
-                onClick={() => handleModeSelect(m)}
-                disabled={isStarting}
-              >
-                <span className={`mode-option-dot mode-${m}`} />
-                <div className="mode-option-content">
-                  <span className="mode-option-label">{modeLabels[m]}</span>
-                  <span className="mode-option-desc">
-                    {modeDescriptions[m]}
-                  </span>
-                </div>
-              </button>
-            ))}
-          </div>
-
-          <div className="new-session-defaults-bar">
-            <p className="new-session-defaults-copy">
-              {t("newSessionDefaultsDescription")}
-            </p>
-            <button
-              type="button"
-              className="new-session-defaults-button"
-              onClick={handleSaveDefaults}
-              disabled={
-                isStarting ||
-                isSavingDefaults ||
-                settingsLoading ||
-                !selectedProvider ||
-                defaultsMatchCurrent
-              }
-            >
-              {isSavingDefaults
-                ? t("newSessionDefaultsSaving")
-                : t("newSessionDefaultsAction")}
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -3,11 +3,11 @@ import { join } from "node:path";
 import {
   type AgentStatus,
   type ProviderName,
-  SESSION_TITLE_MAX_LENGTH,
   type UrlProjectId,
   getModelContextWindow,
   isIdeMetadata,
   stripIdeMetadata,
+  truncateSessionTitle,
 } from "@yep-anywhere/shared";
 import type {
   ContentBlock,
@@ -707,9 +707,7 @@ export class ClaudeSessionReader implements ISessionReader {
 
   private extractTitle(content: string | null): string | null {
     if (!content) return null;
-    const trimmed = content.trim();
-    if (trimmed.length <= SESSION_TITLE_MAX_LENGTH) return trimmed;
-    return `${trimmed.slice(0, SESSION_TITLE_MAX_LENGTH - 3)}...`;
+    return truncateSessionTitle(content) || null;
   }
 
   private extractContent(

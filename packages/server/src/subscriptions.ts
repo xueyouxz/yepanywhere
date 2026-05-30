@@ -46,6 +46,33 @@ export function normalizeStreamMessage(
   return message;
 }
 
+function hasToolResultContent(message: Record<string, unknown>): boolean {
+  const sdkMessage = message.message;
+  const content =
+    sdkMessage && typeof sdkMessage === "object" && "content" in sdkMessage
+      ? (sdkMessage as { content?: unknown }).content
+      : message.content;
+
+  return (
+    Array.isArray(content) &&
+    content.some(
+      (block) =>
+        block !== null &&
+        typeof block === "object" &&
+        (block as { type?: unknown }).type === "tool_result",
+    )
+  );
+}
+
+function isPlainUserEcho(message: Record<string, unknown>): boolean {
+  return (
+    message.type === "user" &&
+    message.tool_use_result === undefined &&
+    message.toolUseResult === undefined &&
+    !hasToolResultContent(message)
+  );
+}
+
 /**
  * Create a session subscription that forwards process events via `emit`.
  *
@@ -88,7 +115,10 @@ export function createSessionSubscription(
   const heartbeatInterval = setInterval(() => {
     try {
       if (!completed) {
-        emit("heartbeat", { timestamp: new Date().toISOString() });
+        emit("heartbeat", {
+          timestamp: new Date().toISOString(),
+          liveness: process.getLivenessSnapshot(),
+        });
       }
     } catch {
       clearInterval(heartbeatInterval);
@@ -108,9 +138,11 @@ export function createSessionSubscription(
           const message = normalizeStreamMessage(
             event.message as Record<string, unknown>,
           );
-          const aug = await getAugmenter();
-          await aug.processMessage(message);
-          emit("message", markSubagent(message));
+          const isStreamEvent = message.type === "stream_event";
+          const processAugments = async () => {
+            const aug = await getAugmenter();
+            await aug.processMessage(message);
+          };
 
           const startMessageId =
             extractMessageIdFromStart(message) ??
@@ -128,6 +160,18 @@ export function createSessionSubscription(
             );
           }
 
+          if (isStreamEvent || isPlainUserEcho(message)) {
+            // User echoes reconcile optimistic/deferred queue state; do not let
+            // markdown/tool augmentation delay that delivery signal.
+            emit("message", markSubagent(message));
+            void processAugments().catch((err) => {
+              options?.onError?.(err);
+            });
+          } else {
+            await processAugments();
+            emit("message", markSubagent(message));
+          }
+
           if (isStreamingComplete(message)) {
             currentStreamingMessageId = null;
             process.clearStreamingText();
@@ -138,11 +182,24 @@ export function createSessionSubscription(
         case "state-change":
           emit("status", {
             state: event.state.type,
+            liveness: process.getLivenessSnapshot(),
             ...(event.state.type === "waiting-input"
               ? { request: event.state.request }
               : {}),
           });
           break;
+
+        case "liveness-update": {
+          const currentState = process.state;
+          emit("status", {
+            state: currentState.type,
+            liveness: process.getLivenessSnapshot(),
+            ...(currentState.type === "waiting-input"
+              ? { request: currentState.request }
+              : {}),
+          });
+          break;
+        }
 
         case "mode-change":
           emit("mode-change", {
@@ -163,7 +220,11 @@ export function createSessionSubscription(
           break;
 
         case "deferred-queue":
-          emit("deferred-queue", { messages: event.messages });
+          emit("deferred-queue", {
+            messages: event.messages,
+            reason: event.reason,
+            tempId: event.tempId,
+          });
           break;
 
         case "complete":
@@ -191,6 +252,7 @@ export function createSessionSubscription(
     modeVersion: process.modeVersion,
     provider: process.provider,
     model: process.resolvedModel,
+    liveness: process.getLivenessSnapshot(),
     ...(currentState.type === "waiting-input"
       ? { request: currentState.request }
       : {}),

@@ -1,49 +1,58 @@
+import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { NewSessionForm } from "../components/NewSessionForm";
 import { PageHeader } from "../components/PageHeader";
-import { ProjectSelector } from "../components/ProjectSelector";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useProject, useProjects } from "../hooks/useProjects";
-import { resolvePreferredProjectId } from "../hooks/useRecentProject";
+import { useRecentSessions } from "../hooks/useRecentSessions";
 import { useI18n } from "../i18n";
 import { useNavigationLayout } from "../layouts";
+
+const RECENT_PROJECT_SESSION_LIMIT = 30;
 
 export function NewSessionPage() {
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
-  const projectId = searchParams.get("projectId");
+  const projectId = searchParams.get("projectId") ?? undefined;
   const { openSidebar, isWideScreen, toggleSidebar, isSidebarCollapsed } =
     useNavigationLayout();
 
-  // Get all projects to find default if no projectId specified
   const { projects, loading: projectsLoading } = useProjects();
-
-  // Use the provided projectId, or the preferred recent project when available
-  const effectiveProjectId = projectId || resolvePreferredProjectId(projects);
-
+  const { recentSessions } = useRecentSessions({
+    limit: RECENT_PROJECT_SESSION_LIMIT,
+  });
   const {
     project,
     loading: projectLoading,
     error,
-  } = useProject(effectiveProjectId ?? undefined);
+  } = useProject(projectId);
+  const selectedProject =
+    (projectId ? projects.find((candidate) => candidate.id === projectId) : null) ??
+    project;
+  const recentProjectIds = useMemo(
+    () => Array.from(new Set(recentSessions.map((session) => session.projectId))),
+    [recentSessions],
+  );
 
   // Update browser tab title (must be called unconditionally before any early returns)
-  useDocumentTitle(project?.name, t("newSessionTitle"));
+  useDocumentTitle(selectedProject?.name, t("newSessionTitle"));
 
   // Callback to update projectId in URL without navigation
-  const handleProjectChange = (newProjectId: string) => {
-    setSearchParams({ projectId: newProjectId }, { replace: true });
+  const handleProjectChange = (newProjectId: string | null) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (newProjectId) {
+      nextParams.set("projectId", newProjectId);
+    } else {
+      nextParams.delete("projectId");
+    }
+    setSearchParams(nextParams, { replace: true });
   };
 
-  const loading = projectLoading || projectsLoading;
-
-  // Guard against missing projectId (no projects available)
-  if (!effectiveProjectId && !projectsLoading && projects.length === 0) {
-    return <div className="error">{t("newSessionNoProjects")}</div>;
-  }
+  const loading = Boolean(projectId) && projectLoading && !selectedProject;
+  const renderError = !selectedProject ? error : null;
 
   // Render loading/error states
-  if (loading || error) {
+  if (loading || renderError) {
     return (
       <div
         className={
@@ -70,7 +79,7 @@ export function NewSessionPage() {
                 <div className="loading">{t("newSessionLoading")}</div>
               ) : (
                 <div className="error">
-                  {t("newSessionErrorPrefix")} {error?.message}
+                  {t("newSessionErrorPrefix")} {renderError?.message}
                 </div>
               )}
             </div>
@@ -92,16 +101,7 @@ export function NewSessionPage() {
         }
       >
         <PageHeader
-          title={project?.name ?? t("newSessionTitle")}
-          titleElement={
-            effectiveProjectId ? (
-              <ProjectSelector
-                currentProjectId={effectiveProjectId}
-                currentProjectName={project?.name}
-                onProjectChange={(p) => handleProjectChange(p.id)}
-              />
-            ) : undefined
-          }
+          title={t("newSessionTitle")}
           onOpenSidebar={openSidebar}
           onToggleSidebar={toggleSidebar}
           isWideScreen={isWideScreen}
@@ -109,10 +109,15 @@ export function NewSessionPage() {
         />
 
         <main className="page-scroll-container">
-          <div className="page-content-inner">
-            {effectiveProjectId && (
-              <NewSessionForm projectId={effectiveProjectId} />
-            )}
+          <div className="page-content-inner new-session-page-shell">
+            <NewSessionForm
+              projectId={projectId}
+              selectedProject={selectedProject}
+              projects={projects}
+              recentProjectIds={recentProjectIds}
+              projectsLoading={projectsLoading}
+              onProjectChange={handleProjectChange}
+            />
           </div>
         </main>
       </div>

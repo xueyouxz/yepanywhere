@@ -1,13 +1,17 @@
 import type { ProviderName, UrlProjectId } from "@yep-anywhere/shared";
-import type { ISessionIndexService } from "../indexes/types.js";
-import { canonicalizeProjectPath } from "../projects/paths.js";
+import type {
+  ISessionIndexService,
+  SessionIndexListOptions,
+} from "../indexes/types.js";
+import { GROK_SESSIONS_DIR, canonicalizeProjectPath } from "../projects/paths.js";
 import type { Project, SessionSummary } from "../supervisor/types.js";
 import { CodexSessionReader } from "./codex-reader.js";
 import { GeminiSessionReader } from "./gemini-reader.js";
+import { GrokSessionReader } from "./grok-reader.js";
 import { ClaudeSessionReader } from "./reader.js";
 import type { ISessionReader } from "./types.js";
 
-type ProviderGroup = "claude" | "codex" | "gemini" | "opencode";
+type ProviderGroup = "claude" | "codex" | "gemini" | "opencode" | "grok";
 
 export interface ProviderProjectCatalog {
   codexPaths: Set<string>;
@@ -23,13 +27,15 @@ export interface ProviderResolutionDeps {
   geminiSessionsDir?: string;
   geminiReaderFactory?: (projectPath: string) => GeminiSessionReader;
   geminiHashToCwd?: Promise<Map<string, string>>;
+  grokSessionsDir?: string;
+  grokReaderFactory?: (projectPath: string) => GrokSessionReader;
 }
 
 export interface SessionSource {
   provider: ProviderName;
   reader: ISessionReader;
   sessionDir: string;
-  kind: "primary" | "codex" | "gemini";
+  kind: "primary" | "codex" | "gemini" | "grok";
 }
 
 export interface ResolvedSessionSummary {
@@ -45,6 +51,7 @@ function normalizeProviderGroup(
   if (provider === "gemini" || provider === "gemini-acp") return "gemini";
   if (provider === "opencode") return "opencode";
   if (provider === "claude" || provider === "claude-ollama") return "claude";
+  if (provider === "grok" || provider === "grok-acp") return "grok";
   return null;
 }
 
@@ -67,6 +74,13 @@ function mayHaveGeminiSessions(
   }
   const provider = normalizeProviderGroup(project.provider);
   return provider === "claude" || provider === "codex";
+}
+
+function mayHaveGrokSessions(_project: Project): boolean {
+  // Grok sessions are keyed by cwd under ~/.grok/sessions, so the reader's
+  // project-path filter is the real membership test. Include it for every
+  // provider group so mixed-provider projects survive YA restarts.
+  return true;
 }
 
 function createClaudeSource(
@@ -125,6 +139,24 @@ function createGeminiSource(
   };
 }
 
+function createGrokSource(
+  project: Project,
+  deps: ProviderResolutionDeps,
+): SessionSource | null {
+  const reader =
+    deps.grokReaderFactory?.(project.path) ??
+    new GrokSessionReader({
+      sessionsDir: deps.grokSessionsDir ?? GROK_SESSIONS_DIR,
+      projectPath: project.path,
+    });
+  return {
+    provider: "grok",
+    reader,
+    sessionDir: deps.grokSessionsDir ?? GROK_SESSIONS_DIR,
+    kind: "grok",
+  };
+}
+
 function buildCandidateGroups(
   project: Project,
   preferredProvider: ProviderName | string | undefined,
@@ -148,6 +180,9 @@ function buildCandidateGroups(
   if (mayHaveGeminiSessions(project, catalog)) {
     pushGroup("gemini");
   }
+  if (mayHaveGrokSessions(project)) {
+    pushGroup("grok");
+  }
 
   return groups;
 }
@@ -166,6 +201,8 @@ function getSourceForGroup(
       return createCodexSource(project, deps);
     case "gemini":
       return createGeminiSource(project, deps, catalog);
+    case "grok":
+      return createGrokSource(project, deps);
   }
 }
 
@@ -197,19 +234,37 @@ function getSessionSources(
   return sources;
 }
 
+function filterActiveSessions(
+  sessions: SessionSummary[],
+  options?: SessionIndexListOptions,
+): SessionSummary[] {
+  const activeAfterMs = options?.activeAfterMs;
+  if (activeAfterMs === undefined) {
+    return sessions;
+  }
+  return sessions.filter(
+    (session) => Date.parse(session.updatedAt) >= activeAfterMs,
+  );
+}
+
 async function listSessionsForSource(
   project: Project,
   source: SessionSource,
   deps: ProviderResolutionDeps,
+  options?: SessionIndexListOptions,
 ): Promise<SessionSummary[]> {
   if (!deps.sessionIndexService) {
-    return source.reader.listSessions(project.id);
+    return filterActiveSessions(
+      await source.reader.listSessions(project.id),
+      options,
+    );
   }
 
   let sessions = await deps.sessionIndexService.getSessionsWithCache(
     source.sessionDir,
     project.id,
     source.reader,
+    options,
   );
 
   if (
@@ -222,6 +277,7 @@ async function listSessionsForSource(
         dir,
         project.id,
         mergedReader,
+        options,
       );
       sessions = [...sessions, ...merged];
     }
@@ -234,12 +290,18 @@ export async function listSessionsAcrossProviders(
   project: Project,
   deps: ProviderResolutionDeps,
   catalog?: ProviderProjectCatalog,
+  options?: SessionIndexListOptions,
 ): Promise<SessionSummary[]> {
   const sessions: SessionSummary[] = [];
   const seenSessionIds = new Set<string>();
 
   for (const source of getSessionSources(project, deps, undefined, catalog)) {
-    const sourceSessions = await listSessionsForSource(project, source, deps);
+    const sourceSessions = await listSessionsForSource(
+      project,
+      source,
+      deps,
+      options,
+    );
     for (const session of sourceSessions) {
       if (seenSessionIds.has(session.id)) continue;
       seenSessionIds.add(session.id);

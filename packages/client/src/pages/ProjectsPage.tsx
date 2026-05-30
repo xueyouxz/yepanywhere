@@ -8,6 +8,7 @@ import { useProjects } from "../hooks/useProjects";
 import { useRemoteBasePath } from "../hooks/useRemoteBasePath";
 import { useI18n } from "../i18n";
 import { useNavigationLayout } from "../layouts";
+import type { Project } from "../types";
 
 export function ProjectsPage() {
   const { t } = useI18n();
@@ -17,6 +18,10 @@ export function ProjectsPage() {
   const [newProjectPath, setNewProjectPath] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(
+    null,
+  );
   const navigate = useNavigate();
   const basePath = useRemoteBasePath();
 
@@ -78,6 +83,26 @@ export function ProjectsPage() {
       setAddError(err instanceof Error ? err.message : t("projectsAddFailed"));
     } finally {
       setAdding(false);
+    }
+  };
+
+  const handleDeleteProject = async (project: Project) => {
+    if (!confirm(t("projectsDeleteConfirm", { name: project.name }))) {
+      return;
+    }
+
+    setDeletingProjectId(project.id);
+    setDeleteError(null);
+
+    try {
+      await api.deleteProject(project.id);
+      await refetch();
+    } catch (err) {
+      setDeleteError(
+        err instanceof Error ? err.message : t("projectsDeleteFailed"),
+      );
+    } finally {
+      setDeletingProjectId(null);
     }
   };
 
@@ -171,6 +196,9 @@ export function ProjectsPage() {
                 </form>
               )}
             </div>
+            {deleteError && (
+              <div className="add-project-error">{deleteError}</div>
+            )}
 
             {isEmpty ? (
               <div className="inbox-empty">
@@ -201,6 +229,8 @@ export function ProjectsPage() {
                     }
                     thinkingCount={thinkingByProject.get(project.id) ?? 0}
                     basePath={basePath}
+                    onDeleteProject={handleDeleteProject}
+                    isDeleting={deletingProjectId === project.id}
                   />
                 ))}
               </ul>

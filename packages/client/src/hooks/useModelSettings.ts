@@ -6,6 +6,11 @@ import type {
 } from "@yep-anywhere/shared";
 import { useCallback, useState } from "react";
 import {
+  DEFAULT_SPEECH_METHOD,
+  type SpeechMethodId,
+  isKnownSpeechMethodId,
+} from "../lib/speechProviders/methods";
+import {
   LEGACY_KEYS,
   getServerScoped,
   setServerScoped,
@@ -21,10 +26,10 @@ export const MODEL_OPTIONS: { value: ModelOption; label: string }[] = [
   { value: "best", label: "Best" },
   { value: "sonnet", label: "Sonnet" },
   { value: "sonnet[1m]", label: "Sonnet 1M" },
-  { value: "opus", label: "Opus" },
-  { value: "opus[1m]", label: "Opus 1M" },
+  { value: "opus", label: "Opus 4.8" },
+  { value: "opus[1m]", label: "Opus 4.8 1M" },
   { value: "haiku", label: "Haiku" },
-  { value: "opusplan", label: "Opus Plan" },
+  { value: "opusplan", label: "Opus 4.8 Plan" },
 ];
 
 export const EFFORT_LEVEL_OPTIONS: {
@@ -120,6 +125,18 @@ function saveVoiceInputEnabled(enabled: boolean) {
   );
 }
 
+function loadSpeechMethod(): SpeechMethodId {
+  const stored = getServerScoped("speechMethod", LEGACY_KEYS.speechMethod);
+  if (stored && isKnownSpeechMethodId(stored)) {
+    return stored;
+  }
+  return DEFAULT_SPEECH_METHOD;
+}
+
+function saveSpeechMethod(method: SpeechMethodId) {
+  setServerScoped("speechMethod", method, LEGACY_KEYS.speechMethod);
+}
+
 /**
  * Hook to manage model and thinking preferences.
  */
@@ -132,6 +149,8 @@ export function useModelSettings() {
   const [voiceInputEnabled, setVoiceInputEnabledState] = useState<boolean>(
     loadVoiceInputEnabled,
   );
+  const [speechMethod, setSpeechMethodState] =
+    useState<SpeechMethodId>(loadSpeechMethod);
 
   const setModel = useCallback((m: ModelOption) => {
     setModelState(m);
@@ -166,6 +185,11 @@ export function useModelSettings() {
     saveVoiceInputEnabled(newEnabled);
   }, [voiceInputEnabled]);
 
+  const setSpeechMethod = useCallback((method: SpeechMethodId) => {
+    setSpeechMethodState(method);
+    saveSpeechMethod(method);
+  }, []);
+
   return {
     model,
     setModel,
@@ -180,6 +204,8 @@ export function useModelSettings() {
     voiceInputEnabled,
     setVoiceInputEnabled,
     toggleVoiceInput,
+    speechMethod,
+    setSpeechMethod,
   };
 }
 
@@ -215,4 +241,11 @@ export function getThinkingMode(): ThinkingMode {
  */
 export function getVoiceInputEnabled(): boolean {
   return loadVoiceInputEnabled();
+}
+
+/**
+ * Get the persisted speech method without React state.
+ */
+export function getSpeechMethod(): SpeechMethodId {
+  return loadSpeechMethod();
 }

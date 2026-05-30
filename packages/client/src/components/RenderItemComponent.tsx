@@ -1,5 +1,10 @@
-import { memo, useCallback } from "react";
+import { memo, useCallback, useRef } from "react";
+import {
+  MESSAGE_STALE_THRESHOLD_MS,
+  getLatestMessageTimestampMs,
+} from "../lib/messageAge";
 import type { RenderItem } from "../types/renderItems";
+import { MessageAge } from "./MessageAge";
 import { SessionSetupBlock } from "./blocks/SessionSetupBlock";
 import { TextBlock } from "./blocks/TextBlock";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
@@ -12,6 +17,11 @@ interface Props {
   thinkingExpanded: boolean;
   toggleThinkingExpanded: () => void;
   sessionProvider?: string;
+  onCorrectUserPrompt?: () => void;
+  onTrimBeforeUserPrompt?: () => void;
+  staleNowMs?: number;
+  latestVisibleTimestampMs?: number | null;
+  thinkingDurationMs?: number;
 }
 
 function getMessageIdLike(message: Record<string, unknown>): string {
@@ -126,7 +136,25 @@ export const RenderItemComponent = memo(function RenderItemComponent({
   thinkingExpanded,
   toggleThinkingExpanded,
   sessionProvider,
+  onCorrectUserPrompt,
+  onTrimBeforeUserPrompt,
+  staleNowMs,
+  latestVisibleTimestampMs,
+  thinkingDurationMs,
 }: Props) {
+  const staticAgeNowMsRef = useRef(Date.now());
+  const timestampMs = getLatestMessageTimestampMs(item.sourceMessages);
+  const hasTimestamp = timestampMs !== null;
+  const isLatestVisibleTimestamp =
+    hasTimestamp && latestVisibleTimestampMs === timestampMs;
+  const ageNowMs = isLatestVisibleTimestamp
+    ? (staleNowMs ?? Date.now())
+    : staticAgeNowMsRef.current;
+  const showAgeByDefault =
+    isLatestVisibleTimestamp &&
+    ageNowMs !== null &&
+    ageNowMs - timestampMs >= MESSAGE_STALE_THRESHOLD_MS;
+
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       // Don't interfere with text selection (important for mobile long-press)
@@ -170,6 +198,7 @@ export const RenderItemComponent = memo(function RenderItemComponent({
             status={item.status}
             isExpanded={thinkingExpanded}
             onToggle={toggleThinkingExpanded}
+            durationMs={thinkingDurationMs}
           />
         );
 
@@ -186,20 +215,40 @@ export const RenderItemComponent = memo(function RenderItemComponent({
         );
 
       case "user_prompt":
-        return <UserPromptBlock content={item.content} />;
+        return (
+          <UserPromptBlock
+            content={item.content}
+            onCorrect={onCorrectUserPrompt}
+            onTrimBefore={onTrimBeforeUserPrompt}
+          />
+        );
 
       case "session_setup":
         return <SessionSetupBlock title={item.title} prompts={item.prompts} />;
 
       case "system": {
+        if (item.subtype === "away_summary") {
+          return (
+            <div className="system-message-recap">
+              <span className="system-message-recap-mark">※</span>
+              <span className="system-message-recap-body">
+                {item.content}
+              </span>
+            </div>
+          );
+        }
+
         // Different styling for compacting vs completed compaction
         const isCompacting =
           item.subtype === "status" && item.status === "compacting";
         const isError = item.subtype === "error";
-        const icon = isError ? "!" : "⟳";
+        const isConfigAck = item.subtype === "config_ack";
+        const isHighlightedConfigAck =
+          isConfigAck && item.configChanged !== false;
+        const icon = isError ? "!" : isConfigAck ? "✓" : "⟳";
         return (
           <div
-            className={`system-message ${isCompacting ? "system-message-compacting" : ""} ${isError ? "system-message-error" : ""}`}
+            className={`system-message ${isCompacting ? "system-message-compacting" : ""} ${isError ? "system-message-error" : ""} ${isHighlightedConfigAck ? "system-message-config-ack" : ""}`}
           >
             <span
               className={`system-message-icon ${isCompacting ? "spinning" : ""}`}
@@ -219,12 +268,20 @@ export const RenderItemComponent = memo(function RenderItemComponent({
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: debug feature, shift+click only
     <div
-      className={item.isSubagent ? "subagent-item" : undefined}
+      className={[
+        "message-render-row",
+        hasTimestamp ? "has-message-age" : "",
+        showAgeByDefault ? "is-message-age-visible" : "",
+        item.isSubagent ? "subagent-item" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       data-render-type={item.type}
       data-render-id={item.id}
       onClick={handleClick}
     >
-      {renderContent()}
+      <div className="message-render-content">{renderContent()}</div>
+      <MessageAge timestampMs={timestampMs} nowMs={ageNowMs ?? Date.now()} />
     </div>
   );
 });

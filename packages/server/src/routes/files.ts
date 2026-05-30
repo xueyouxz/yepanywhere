@@ -1,6 +1,6 @@
 import type { Stats } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
-import { extname, normalize, resolve, sep } from "node:path";
+import { readFile, realpath, stat } from "node:fs/promises";
+import { extname, isAbsolute, normalize, relative, resolve } from "node:path";
 import {
   type FileContentResponse,
   type FileMetadata,
@@ -276,10 +276,10 @@ function isTextFile(filePath: string): boolean {
  * Validate and resolve file path, preventing directory traversal.
  * Returns null if the path is invalid or escapes the project root.
  */
-function resolveFilePath(
+async function resolveFilePath(
   projectRoot: string,
   relativePath: string,
-): string | null {
+): Promise<string | null> {
   // Normalize the path to handle . and ..
   const normalized = normalize(relativePath);
 
@@ -298,14 +298,38 @@ function resolveFilePath(
 
   // Verify the resolved path is still within project root
   const normalizedRoot = resolve(projectRoot);
-  if (
-    !resolved.startsWith(`${normalizedRoot}${sep}`) &&
-    resolved !== normalizedRoot
-  ) {
+  if (!isPathInsideDirectory(resolved, normalizedRoot)) {
     return null;
   }
 
-  return resolved;
+  const realRoot = await realpath(normalizedRoot).catch(() => null);
+  if (!realRoot) {
+    return null;
+  }
+
+  const realResolved = await realpath(resolved).catch(() => null);
+  if (!realResolved) {
+    return resolved;
+  }
+
+  // The lexical check above blocks ordinary traversal. This second check is
+  // the security boundary for symlinks inside a project; keeping it here keeps
+  // the file API simple while allowing normal in-project symlinks.
+  if (!isPathInsideDirectory(realResolved, realRoot)) {
+    return null;
+  }
+
+  return realResolved;
+}
+
+function isPathInsideDirectory(filePath: string, directory: string): boolean {
+  const relativePath = relative(resolve(directory), resolve(filePath));
+  return (
+    relativePath === "" ||
+    (relativePath !== "" &&
+      !relativePath.startsWith("..") &&
+      !isAbsolute(relativePath))
+  );
 }
 
 export function createFilesRoutes(deps: FilesDeps): Hono {
@@ -343,7 +367,7 @@ export function createFilesRoutes(deps: FilesDeps): Hono {
     const projectRoot = project.path;
 
     // Resolve and validate file path
-    const filePath = resolveFilePath(projectRoot, relativePath);
+    const filePath = await resolveFilePath(projectRoot, relativePath);
     if (!filePath) {
       return c.json({ error: "Invalid file path" }, 400);
     }
@@ -445,7 +469,7 @@ export function createFilesRoutes(deps: FilesDeps): Hono {
     const projectRoot = project.path;
 
     // Resolve and validate file path
-    const filePath = resolveFilePath(projectRoot, relativePath);
+    const filePath = await resolveFilePath(projectRoot, relativePath);
     if (!filePath) {
       return c.json({ error: "Invalid file path" }, 400);
     }

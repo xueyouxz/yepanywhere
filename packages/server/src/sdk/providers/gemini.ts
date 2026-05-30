@@ -79,6 +79,7 @@ export class GeminiProvider implements AgentProvider {
   readonly supportsPermissionMode = false;
   readonly supportsThinkingToggle = false;
   readonly supportsSlashCommands = false;
+  readonly supportsSteering = false;
 
   private readonly geminiPath?: string;
   private readonly timeout: number;
@@ -220,7 +221,7 @@ export class GeminiProvider implements AgentProvider {
     let isFirstMessage = true;
 
     // Process messages from the queue in a loop
-    const messageGen = queue.generator();
+    const messageGen = queue;
     for await (const message of messageGen) {
       if (signal.aborted) break;
 

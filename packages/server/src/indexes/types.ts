@@ -9,6 +9,11 @@ import type { UrlProjectId } from "@yep-anywhere/shared";
 import type { ISessionReader } from "../sessions/types.js";
 import type { SessionSummary } from "../supervisor/types.js";
 
+export interface SessionIndexListOptions {
+  /** Hide sessions whose cached updatedAt is older than this epoch-ms cutoff. */
+  activeAfterMs?: number;
+}
+
 /**
  * Common interface for session index services across providers.
  *
@@ -33,6 +38,7 @@ export interface ISessionIndexService {
     sessionDir: string,
     projectId: UrlProjectId,
     reader: ISessionReader,
+    options?: SessionIndexListOptions,
   ): Promise<SessionSummary[]>;
 
   /**

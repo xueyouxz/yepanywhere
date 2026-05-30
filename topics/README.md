@@ -1,0 +1,25 @@
+- new session project selection
+- Rich rendering for agent output via yepanywhere
+- Codex GPT-5.5 model and protocol compatibility
+- Pluggable speech recognition providers
+- Browser-load session UI reliability
+- Public read-only session shares
+- Approval and local access security hardening
+- Provider image sizing guidance
+- Attachment previews and same-browser cache
+- OpenCode ses_ session ID unification with YA session ID
+- MessageQueue batch delivery and steering UI
+- Message-control and queue intent (`/btw`, queue intent, later-interrupt state contract)
+- Emulated slash commands
+- Provider-agnostic /btw asides
+- Side session configuration
+- Prompt suggestions
+- Session liveness and queue intent
+- Provider process state machine
+- Compact-and-handoff guardrail (targeted provider/model policy)
+- Heartbeat ownership and timers
+- Claude provider control
+- Codex API provider as a future API-key-backed backend
+- Pixel-scale icon aesthetics
+- UI testing and screenshot regression checks
+- Provider/model compact glyph vocabulary (top-right status)

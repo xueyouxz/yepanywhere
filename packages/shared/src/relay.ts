@@ -174,6 +174,10 @@ export interface RelayUploadStart {
   size: number;
   /** MIME type */
   mimeType: string;
+  /** Image width in pixels, if known */
+  width?: number;
+  /** Image height in pixels, if known */
+  height?: number;
 }
 
 /** Client -> Server: Upload chunk */

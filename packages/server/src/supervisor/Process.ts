@@ -1,23 +1,43 @@
 import { randomUUID } from "node:crypto";
-import path from "node:path";
 import type {
   EffortLevel,
   ModelInfo,
   PermissionRules,
+  PromptSuggestionMode,
   ProviderName,
+  RecapMode,
+  SessionLivenessSnapshot,
   SlashCommand,
   ThinkingConfig,
   UrlProjectId,
 } from "@yep-anywhere/shared";
+import {
+  HELPER_SIDE_MODEL_CHEAPEST,
+  HELPER_SIDE_MODEL_SAME_AS_MAIN,
+} from "@yep-anywhere/shared";
 import { getLogger } from "../logging/logger.js";
+import { getProjectName } from "../projects/paths.js";
+import { concatUserMessages, INTERRUPT_PREAMBLE } from "../sdk/messageQueue.js";
 import type { MessageQueue } from "../sdk/messageQueue.js";
+import type { AgentProvider } from "../sdk/providers/types.js";
+import {
+  expandSlashCommandEmulation,
+  isSlashCommandSubmission,
+} from "../sdk/slashCommandEmulation.js";
 import type {
   PermissionMode,
+  ProviderActivitySnapshot,
+  ProviderLivenessProbeResult,
   SDKMessage,
   TimestampedSDKMessage,
   ToolApprovalResult,
   UserMessage,
 } from "../sdk/types.js";
+import {
+  buildSessionLivenessSnapshot,
+  type LivenessProbeResult,
+  type LivenessProcessState,
+} from "./liveness.js";
 import type {
   AgentActivity,
   InputRequest,
@@ -29,6 +49,39 @@ import type {
 import { DEFAULT_IDLE_TIMEOUT_MS } from "./types.js";
 
 type Listener = (event: ProcessEvent) => void;
+
+export interface DeferredMessagePlacement {
+  afterTempId?: string;
+  beforeTempId?: string;
+  replaceTempId?: string;
+}
+
+export interface TakenDeferredMessage {
+  message: UserMessage;
+  placement: DeferredMessagePlacement;
+}
+
+type DeferredQueueEntry = { message: UserMessage; timestamp: string };
+type RecentAssistantRecapEntry = {
+  completedAtMs: number;
+  text: string;
+};
+type PendingRecapRequest = {
+  provider: AgentProvider;
+  sinceMs: number | null;
+};
+
+const CODEX_NATIVE_SLASH_COMMAND_NAMES = new Set(["goal"]);
+
+function getCodexSkillCommandPrefix(provider: ProviderName): string | undefined {
+  return provider === "codex" || provider === "codex-oss" ? "@" : undefined;
+}
+
+function getKnownNativeSlashCommands(
+  provider: ProviderName,
+): ReadonlySet<string> | undefined {
+  return provider === "codex" ? CODEX_NATIVE_SLASH_COMMAND_NAMES : undefined;
+}
 
 /**
  * IMPORTANT: Never filter out messages by type before emitting to SSE!
@@ -49,6 +102,49 @@ export function shouldEmitMessage(_message: SDKMessage): boolean {
   return true;
 }
 
+function isClaudeSdkProvider(provider: ProviderName): boolean {
+  return provider === "claude" || provider === "claude-ollama";
+}
+
+function isClaudeSdkApiErrorMessage(
+  provider: ProviderName,
+  message: SDKMessage,
+): boolean {
+  return (
+    isClaudeSdkProvider(provider) &&
+    message.type === "assistant" &&
+    message.isApiErrorMessage === true
+  );
+}
+
+function extractMessageText(message: SDKMessage): string | undefined {
+  const content = message.message?.content;
+  if (typeof content === "string") {
+    return content.trim() || undefined;
+  }
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+  const text = content
+    .map((block) => (block.type === "text" ? block.text : undefined))
+    .filter((part): part is string => !!part)
+    .join("\n")
+    .trim();
+  return text || undefined;
+}
+
+function describeClaudeSdkApiError(message: SDKMessage): string {
+  const status = message.apiErrorStatus;
+  const statusText =
+    typeof status === "number" || typeof status === "string"
+      ? `status ${status}`
+      : "unknown status";
+  const detail = extractMessageText(message);
+  return detail
+    ? `Claude SDK API error (${statusText}): ${detail}`
+    : `Claude SDK API error (${statusText})`;
+}
+
 /**
  * Pending tool approval request.
  * The SDK's canUseTool callback creates this and waits for respondToInput.
@@ -65,10 +161,14 @@ export interface ProcessConstructorOptions extends ProcessOptions {
   abortFn?: () => void;
   /** Check if underlying CLI process is still alive (for stale detection) */
   isProcessAlive?: () => boolean;
+  /** Actively query provider/session status when passive evidence is stale. */
+  probeLivenessFn?: () => Promise<ProviderLivenessProbeResult>;
+  /** Passive raw provider/app-server event cadence, when available. */
+  getProviderActivityFn?: () => ProviderActivitySnapshot;
   /** Function to change max thinking tokens at runtime (SDK 0.2.7+) */
   setMaxThinkingTokensFn?: (tokens: number | null) => Promise<void>;
   /** Function to interrupt current turn gracefully (SDK 0.2.7+) */
-  interruptFn?: () => Promise<void>;
+  interruptFn?: () => Promise<void | boolean>;
   /**
    * Function to steer an active turn with additional user input.
    * Returns false when steering is unavailable and caller should enqueue.
@@ -80,6 +180,14 @@ export interface ProcessConstructorOptions extends ProcessOptions {
   supportedCommandsFn?: () => Promise<SlashCommand[]>;
   /** Function to change model mid-session (SDK 0.2.7+) */
   setModelFn?: (model?: string) => Promise<void>;
+  /** Deprecated compatibility flag; prefer recapMode. */
+  recapsEnabled?: boolean;
+  /** How this process should answer away-recap requests. */
+  recapMode?: RecapMode;
+  /** How this process should request native prompt suggestions. */
+  promptSuggestionMode?: PromptSuggestionMode;
+  /** Session-level helper side model for simulated helper features. */
+  helperSideModel?: string;
 }
 
 export class Process {
@@ -95,6 +203,8 @@ export class Process {
 
   private legacyQueue: UserMessage[] = [];
   private messageQueue: MessageQueue | null;
+  private deferredEditBarrier: { originalTempId: string; index: number } | null =
+    null;
   private abortFn: (() => void) | null;
   private _state: ProcessState = { type: "in-turn" };
   private listeners: Set<Listener> = new Set();
@@ -119,6 +229,25 @@ export class Process {
   private _streamingText = "";
   /** Message ID for current streaming response */
   private _streamingMessageId: string | null = null;
+
+  /**
+   * Rolling buffer of recent assistant text turns used as context for
+   * server-synthesized recaps. See topics/recaps.md. We capture text here
+   * rather than reading the JSONL because the recap path is hot and the
+   * buffer is bounded; older entries are dropped as new ones arrive.
+   */
+  private recentAssistantRecapEntries: RecentAssistantRecapEntry[] = [];
+  private static readonly RECENT_TEXT_MAX_ENTRIES = 15;
+  private static readonly RECENT_TEXT_MAX_CHARS_PER_ENTRY = 1500;
+  /**
+   * Guard against overlapping recap requests for the same process; the
+   * route handler short-circuits when a generation is already in flight.
+   */
+  private recapInFlight = false;
+  private pendingRecapRequest: PendingRecapRequest | null = null;
+  private _recapMode: RecapMode;
+  private _promptSuggestionMode: PromptSuggestionMode;
+  private _helperSideModel: string;
 
   /** Pending tool approval requests (from canUseTool callback) - supports concurrent approvals */
   private pendingToolApprovals: Map<string, PendingToolApproval> = new Map();
@@ -145,7 +274,7 @@ export class Process {
     | null;
 
   /** Function to interrupt current turn gracefully (SDK 0.2.7+) */
-  private interruptFn: (() => Promise<void>) | null;
+  private interruptFn: (() => Promise<void | boolean>) | null;
   /** Function to steer an active turn (provider-specific, currently Codex app-server) */
   private steerFn: ((message: UserMessage) => Promise<boolean>) | null;
 
@@ -154,6 +283,10 @@ export class Process {
 
   /** Function to get supported slash commands (SDK 0.2.7+) */
   private supportedCommandsFn: (() => Promise<SlashCommand[]>) | null;
+  private supportedCommandsCache: SlashCommand[] | null = null;
+  private supportedCommandsRefreshInFlight: Promise<
+    SlashCommand[] | null
+  > | null = null;
 
   /** Function to change model mid-session (SDK 0.2.7+) */
   private setModelFn: ((model?: string) => Promise<void>) | null;
@@ -164,9 +297,21 @@ export class Process {
 
   /** Timestamp of last SDK message received (for staleness detection) */
   private _lastMessageTime: Date;
+  /** Timestamp of last real provider/SDK message; null until one arrives. */
+  private _lastProviderMessageTime: Date | null;
+  /** Timestamp of last Process state transition. */
+  private _lastStateChangeTime: Date;
 
   /** Check if underlying CLI process is still alive (undefined = not available, fall back to time heuristic) */
   private _isProcessAlive: (() => boolean) | null;
+  /** Provider-specific active liveness probe, when available. */
+  private probeLivenessFn:
+    | (() => Promise<ProviderLivenessProbeResult>)
+    | null;
+  private getProviderActivityFn: (() => ProviderActivitySnapshot) | null;
+  private _lastLivenessProbe: LivenessProbeResult | null = null;
+  private _livenessProbeInFlight: Promise<LivenessProbeResult | null> | null =
+    null;
 
   /** OS PID of the spawned agent child process (supports deferred resolution) */
   private _pidResolver: number | (() => number | undefined) | undefined;
@@ -177,7 +322,7 @@ export class Process {
   private _contextWindow: number | undefined;
 
   /** Deferred message queue — messages queued while agent is in-turn, auto-sent when turn ends */
-  private deferredQueue: { message: UserMessage; timestamp: string }[] = [];
+  private deferredQueue: DeferredQueueEntry[] = [];
 
   /** Whether the process is held (soft pause) */
   private _isHeld = false;
@@ -219,7 +364,16 @@ export class Process {
     this._pidResolver = options.pid;
     this.setModelFn = options.setModelFn ?? null;
     this._isProcessAlive = options.isProcessAlive ?? null;
+    this.probeLivenessFn = options.probeLivenessFn ?? null;
+    this.getProviderActivityFn = options.getProviderActivityFn ?? null;
+    this._recapMode =
+      options.recapMode ?? (options.recapsEnabled ? "side-session" : "off");
+    this._promptSuggestionMode = options.promptSuggestionMode ?? "off";
+    this._helperSideModel =
+      options.helperSideModel ?? HELPER_SIDE_MODEL_CHEAPEST;
     this._lastMessageTime = new Date();
+    this._lastProviderMessageTime = null;
+    this._lastStateChangeTime = new Date();
 
     // Exit promise resolves when the CLI process fully terminates
     this._exitPromise = new Promise((resolve) => {
@@ -288,6 +442,47 @@ export class Process {
     return this._isProcessAlive?.();
   }
 
+  get canProbeLiveness(): boolean {
+    return this.probeLivenessFn !== null;
+  }
+
+  get canSteer(): boolean {
+    return this.steerFn !== null;
+  }
+
+  get lastLivenessProbe(): LivenessProbeResult | null {
+    return this._lastLivenessProbe;
+  }
+
+  get liveness(): SessionLivenessSnapshot {
+    return this.getLivenessSnapshot();
+  }
+
+  get recapMode(): RecapMode {
+    return this._recapMode;
+  }
+
+  get helperSideModel(): string {
+    return this._helperSideModel;
+  }
+
+  get promptSuggestionMode(): PromptSuggestionMode {
+    return this._promptSuggestionMode;
+  }
+
+  setRecapConfig(config: {
+    recapMode?: RecapMode;
+    helperSideModel?: string;
+  }): void {
+    if (config.recapMode !== undefined) {
+      this._recapMode = config.recapMode;
+    }
+    if (config.helperSideModel !== undefined) {
+      this._helperSideModel =
+        config.helperSideModel || HELPER_SIDE_MODEL_CHEAPEST;
+    }
+  }
+
   /** OS PID of the spawned agent child process */
   get pid(): number | undefined {
     if (typeof this._pidResolver === "function") {
@@ -303,8 +498,97 @@ export class Process {
     return this.legacyQueue.length;
   }
 
+  private get deferredQueueDepth(): number {
+    return this.deferredQueue.length;
+  }
+
+  getLivenessSnapshot(now = new Date()): SessionLivenessSnapshot {
+    const providerActivity = this.getProviderActivityFn?.();
+    return buildSessionLivenessSnapshot({
+      provider: this.provider,
+      state: this.toLivenessState(),
+      startedAt: this.startedAt,
+      lastStateChangeAt: this._lastStateChangeTime,
+      lastProviderMessageAt: this._lastProviderMessageTime,
+      lastRawProviderEventAt:
+        providerActivity?.lastRawProviderEventAt ?? null,
+      lastRawProviderEventSource:
+        providerActivity?.lastRawProviderEventSource ?? null,
+      lastLivenessProbe: this._lastLivenessProbe,
+      processAlive: this.isProcessAlive,
+      queueDepth: this.queueDepth,
+      deferredQueueDepth: this.deferredQueueDepth,
+      now,
+    });
+  }
+
+  private toLivenessState(): LivenessProcessState {
+    switch (this._state.type) {
+      case "waiting-input":
+        return { type: "waiting-input" };
+      case "terminated":
+        return { type: "terminated", reason: this._state.reason };
+      default:
+        return this._state;
+    }
+  }
+
+  async probeLiveness(): Promise<LivenessProbeResult | null> {
+    if (!this.probeLivenessFn) {
+      return null;
+    }
+    if (this._livenessProbeInFlight) {
+      return await this._livenessProbeInFlight;
+    }
+
+    this._livenessProbeInFlight = this.runLivenessProbe();
+    try {
+      return await this._livenessProbeInFlight;
+    } finally {
+      this._livenessProbeInFlight = null;
+    }
+  }
+
+  private async runLivenessProbe(): Promise<LivenessProbeResult> {
+    const checkedAt = new Date();
+    let result: ProviderLivenessProbeResult;
+    try {
+      if (!this.probeLivenessFn) {
+        result = {
+          status: "unavailable",
+          source: "process",
+          detail: "No provider liveness probe is available",
+          checkedAt,
+        };
+      } else {
+        result = await this.probeLivenessFn();
+      }
+    } catch (error) {
+      result = {
+        status: "error",
+        source: `${this.provider}:probe`,
+        detail: error instanceof Error ? error.message : String(error),
+        checkedAt,
+      };
+    }
+
+    const record: LivenessProbeResult = {
+      checkedAt: result.checkedAt ?? checkedAt,
+      status: result.status,
+      source: result.source,
+      ...(result.detail ? { detail: result.detail } : {}),
+    };
+    this._lastLivenessProbe = record;
+    this.emit({ type: "liveness-update" });
+    return record;
+  }
+
   get permissionMode(): PermissionMode {
     return this._permissionMode;
+  }
+
+  get permissions(): PermissionRules | undefined {
+    return this._permissions;
   }
 
   get modeVersion(): number {
@@ -357,7 +641,10 @@ export class Process {
    *
    * @returns true if the interrupt was triggered, false if not supported
    */
-  async interrupt(): Promise<boolean> {
+  async interrupt(options?: {
+    extraMessages?: UserMessage[];
+    preamble?: string;
+  }): Promise<boolean> {
     if (!this.interruptFn) {
       return false;
     }
@@ -374,13 +661,38 @@ export class Process {
       `Interrupting process: ${this._sessionId}`,
     );
 
-    await this.interruptFn();
-    return true;
+    const interrupted = await this.interruptFn();
+
+    // After interrupt, drain all queued messages (direct + deferred) and deliver
+    // as a single concatenated batch with the interrupt preamble so the agent
+    // knows to treat prior work as resumable.
+    if (interrupted !== false && this.messageQueue) {
+      const directDrained = this.messageQueue.drain();
+      const deferredDrained = this.deferredQueue.map((e) => e.message);
+      this.deferredQueue = [];
+      this.deferredEditBarrier = null;
+      this.emitDeferredQueueChange("promoted");
+
+      const all = [
+        ...directDrained,
+        ...deferredDrained,
+        ...(options?.extraMessages ?? []),
+      ];
+      if (all.length > 0) {
+        const combined = this.concatMessages(all, {
+          interrupted: true,
+          preamble: options?.preamble,
+        });
+        this.queueMessage(combined, { allowSteer: false });
+      }
+    }
+
+    return interrupted !== false;
   }
 
   /**
    * Change thinking mode at runtime via the deprecated setMaxThinkingTokens API.
-   * On Opus 4.6, 0 = disabled, any non-zero = adaptive.
+   * On Opus 4.6+, 0 = disabled, any non-zero = adaptive.
    * Only supported by Claude SDK 0.2.7+.
    *
    * @param tokens - Non-zero to enable adaptive thinking, undefined/0 to disable
@@ -455,7 +767,38 @@ export class Process {
     if (!this.supportedCommandsFn) {
       return null;
     }
-    return this.supportedCommandsFn();
+    return this.primeSupportedCommands();
+  }
+
+  async primeSupportedCommands(): Promise<SlashCommand[] | null> {
+    if (!this.supportedCommandsFn) {
+      return null;
+    }
+    if (this.supportedCommandsRefreshInFlight) {
+      return this.supportedCommandsRefreshInFlight;
+    }
+
+    const refresh = this.supportedCommandsFn()
+      .then((commands) => {
+        this.supportedCommandsCache = commands;
+        return commands;
+      })
+      .finally(() => {
+        if (this.supportedCommandsRefreshInFlight === refresh) {
+          this.supportedCommandsRefreshInFlight = null;
+        }
+      });
+    this.supportedCommandsRefreshInFlight = refresh;
+    return refresh;
+  }
+
+  async primeSupportedCommandsForMessage(
+    message: UserMessage,
+  ): Promise<void> {
+    if (!isSlashCommandSubmission(message.text)) {
+      return;
+    }
+    await this.primeSupportedCommands();
   }
 
   /**
@@ -704,7 +1047,7 @@ export class Process {
       sessionId: this._sessionId,
       projectId: this.projectId,
       projectPath: this.projectPath,
-      projectName: path.basename(this.projectPath),
+      projectName: getProjectName(this.projectPath),
       sessionTitle: null, // Will be populated by Supervisor with session data
       state: activity,
       startedAt: this.startedAt.toISOString(),
@@ -715,6 +1058,10 @@ export class Process {
       effort: this._effort,
       executor: this.executor,
       pid: this.pid,
+      liveness: this.getLivenessSnapshot(),
+      recapMode: this._recapMode,
+      promptSuggestionMode: this._promptSuggestionMode,
+      helperSideModel: this._helperSideModel,
     };
 
     // Add idleSince if idle
@@ -775,6 +1122,193 @@ export class Process {
   }
 
   /**
+   * Push the text of a completed assistant turn into the recap buffer.
+   * Per-entry length is capped so a long single turn does not dominate the
+   * buffer; total entries are bounded by RECENT_TEXT_MAX_ENTRIES. See
+   * topics/recaps.md.
+   */
+  private pushRecentAssistantText(text: string, completedAtMs: number): void {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return;
+    }
+    const capped =
+      trimmed.length > Process.RECENT_TEXT_MAX_CHARS_PER_ENTRY
+        ? `${trimmed.slice(0, Process.RECENT_TEXT_MAX_CHARS_PER_ENTRY)} …[truncated]`
+        : trimmed;
+    this.recentAssistantRecapEntries.push({ completedAtMs, text: capped });
+    while (
+      this.recentAssistantRecapEntries.length >
+      Process.RECENT_TEXT_MAX_ENTRIES
+    ) {
+      this.recentAssistantRecapEntries.shift();
+    }
+  }
+
+  /**
+   * Snapshot of recent assistant text used as context for a recap.
+   */
+  getRecentAssistantText(sinceMs?: number | null): string[] {
+    return this.recentAssistantRecapEntries
+      .filter(
+        (entry) =>
+          sinceMs === null ||
+          sinceMs === undefined ||
+          entry.completedAtMs > sinceMs,
+      )
+      .map((entry) => entry.text);
+  }
+
+  /**
+   * Emit a synthetic system message (no provider involvement) into the
+   * session's broadcast stream. Used for YA-side recaps so they reach SSE
+   * subscribers via the same path as provider-emitted messages, without
+   * touching the underlying JSONL transcript.
+   */
+  emitSyntheticSystemMessage(subtype: string, content: string): void {
+    const synthetic = this.withTimestamp({
+      type: "system",
+      subtype,
+      content,
+      session_id: this._sessionId,
+      uuid: randomUUID(),
+      isMeta: false,
+    } as unknown as SDKMessage);
+    this.currentBucket.push(synthetic);
+    this.emit({ type: "message", message: synthetic });
+  }
+
+  /**
+   * Run a server-side recap of recent assistant activity and emit the
+   * result as a synthetic `away_summary` system message. The provider is
+   * looked up by the caller (Supervisor) and passed in to keep Process
+   * free of provider-registry imports. See topics/recaps.md.
+   *
+   * Returns shape:
+   *  - `supported: false` — provider does not implement recaps.
+   *  - `supported: true, emitted: false` — supported but suppressed
+   *    (no recent activity, already in-flight, etc.).
+   *  - `supported: true, emitted: true` — recap was generated and emitted.
+   */
+  async requestRecap(
+    provider: AgentProvider,
+    options?: { sinceMs?: number | null },
+  ): Promise<{ supported: boolean; emitted: boolean; reason?: string }> {
+    if (this._recapMode === "off") {
+      return {
+        supported: true,
+        emitted: false,
+        reason: "recaps disabled for this session",
+      };
+    }
+    if (this._recapMode === "native") {
+      if (!provider.supportsNativeRecaps) {
+        return {
+          supported: false,
+          emitted: false,
+          reason: "provider does not support native recaps",
+        };
+      }
+      return {
+        supported: true,
+        emitted: false,
+        reason: "native recaps are provider-owned",
+      };
+    }
+    if (!provider.supportsRecaps || !provider.generateRecap) {
+      return {
+        supported: false,
+        emitted: false,
+        reason: "provider does not support recaps",
+      };
+    }
+    if (this.recapInFlight) {
+      return {
+        supported: true,
+        emitted: false,
+        reason: "recap already in flight",
+      };
+    }
+    const sinceMs = options?.sinceMs ?? null;
+    if (this._state.type === "in-turn") {
+      this.pendingRecapRequest = { provider, sinceMs };
+      return {
+        supported: true,
+        emitted: false,
+        reason: "recap deferred until turn completes",
+      };
+    }
+
+    return this.generateAndEmitRecap(provider, sinceMs);
+  }
+
+  private async generateAndEmitRecap(
+    provider: AgentProvider,
+    sinceMs: number | null,
+  ): Promise<{ supported: boolean; emitted: boolean; reason?: string }> {
+    if (!provider.supportsRecaps || !provider.generateRecap) {
+      return {
+        supported: false,
+        emitted: false,
+        reason: "provider does not support recaps",
+      };
+    }
+
+    const recent = this.getRecentAssistantText(sinceMs);
+    if (recent.length === 0) {
+      return {
+        supported: true,
+        emitted: false,
+        reason: "no recent assistant activity to summarize",
+      };
+    }
+
+    this.recapInFlight = true;
+    try {
+      const text = (
+        await provider.generateRecap(recent, {
+          model: this.resolveHelperSideModel(),
+        })
+      ).trim();
+      if (!text) {
+        return {
+          supported: true,
+          emitted: false,
+          reason: "provider returned empty recap",
+        };
+      }
+      this.emitSyntheticSystemMessage("away_summary", text);
+      return { supported: true, emitted: true };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const log = getLogger();
+      log.warn(
+        {
+          event: "session_recap_failed",
+          sessionId: this._sessionId,
+          processId: this.id,
+          projectId: this.projectId,
+          error: reason,
+        },
+        `Recap generation failed: ${reason}`,
+      );
+      return { supported: true, emitted: false, reason };
+    } finally {
+      this.recapInFlight = false;
+    }
+  }
+
+  private resolveHelperSideModel(): string | undefined {
+    if (this._helperSideModel === HELPER_SIDE_MODEL_CHEAPEST) {
+      return HELPER_SIDE_MODEL_CHEAPEST;
+    }
+    if (this._helperSideModel === HELPER_SIDE_MODEL_SAME_AS_MAIN) {
+      return this._resolvedModel ?? this.model;
+    }
+    return this._helperSideModel || undefined;
+  }
+
+  /**
    * Ensure every emitted/replayed message has a timestamp.
    * Some providers (notably Codex stream messages) omit this field.
    */
@@ -798,16 +1332,21 @@ export class Process {
    * Used for real SDK sessions where the initial message is passed directly
    * to the SDK but needs to be in history for SSE replay to late-joining clients.
    *
-   * @param text - The message text
+   * @param message - The user message, including attachments for replay
    * @param uuid - The UUID to use (should match what was passed to SDK)
    * @param tempId - Optional client temp ID for optimistic UI tracking
    */
-  addInitialUserMessage(text: string, uuid: string, tempId?: string): void {
+  addInitialUserMessage(
+    message: UserMessage,
+    uuid: string,
+    tempId?: string,
+  ): void {
     const sdkMessage = this.withTimestamp({
       type: "user",
       uuid,
       tempId,
-      message: { role: "user", content: text },
+      messageMetadata: message.metadata,
+      message: { role: "user", content: this.buildUserMessageContent(message) },
     } as SDKMessage);
 
     this.currentBucket.push(sdkMessage);
@@ -818,11 +1357,24 @@ export class Process {
    * Format file size for display.
    */
   private formatSize(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024) return `${bytes}\u202fb`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}\u202fkb`;
     if (bytes < 1024 * 1024 * 1024)
-      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+      return `${Math.round((bytes / (1024 * 1024)) * 10) / 10}\u202fmb`;
+    return `${Math.round((bytes / (1024 * 1024 * 1024)) * 10) / 10}\u202fgb`;
+  }
+
+  private formatUploadedFileReference(file: {
+    originalName: string;
+    size: number;
+    mimeType: string;
+    path: string;
+    width?: number;
+    height?: number;
+  }): string {
+    const dimensions =
+      file.width && file.height ? `, ${file.width}x${file.height}` : "";
+    return `- [${file.originalName.replaceAll("[", "\\[").replaceAll("]", "\\]")}](<${file.path}>) (${this.formatSize(file.size)}, ${file.mimeType}${dimensions})`;
   }
 
   /**
@@ -834,14 +1386,35 @@ export class Process {
 
     // Append attachment paths (same format as MessageQueue.toSDKMessage)
     if (message.attachments?.length) {
-      const lines = message.attachments.map(
-        (f) =>
-          `- ${f.originalName} (${this.formatSize(f.size)}, ${f.mimeType}): ${f.path}`,
+      const lines = message.attachments.map((file) =>
+        this.formatUploadedFileReference(file),
       );
-      text += `\n\nUser uploaded files:\n${lines.join("\n")}`;
+      text += `\n\nUser uploaded files in .attachments:\n${lines.join("\n")}`;
     }
 
     return text;
+  }
+
+  /**
+   * Concatenate multiple UserMessages into one, joined by `--------` separators.
+   * Used by interrupt to deliver all queued messages as a single batch.
+   */
+  private concatMessages(
+    messages: UserMessage[],
+    options?: { interrupted?: boolean; preamble?: string },
+  ): UserMessage {
+    return concatUserMessages(
+      messages,
+      options?.preamble ??
+        (options?.interrupted ? INTERRUPT_PREAMBLE : undefined),
+    );
+  }
+
+  private expandEmulatedSlashCommand(message: UserMessage): UserMessage {
+    return expandSlashCommandEmulation(message, this.supportedCommandsCache, {
+      unknownCommandPrefix: getCodexSkillCommandPrefix(this.provider),
+      nativeCommandNames: getKnownNativeSlashCommands(this.provider),
+    });
   }
 
   /**
@@ -851,7 +1424,10 @@ export class Process {
    *
    * @returns Object with success status and queue position or error
    */
-  queueMessage(message: UserMessage): {
+  queueMessage(
+    message: UserMessage,
+    options?: { allowSteer?: boolean },
+  ): {
     success: boolean;
     position?: number;
     error?: string;
@@ -873,18 +1449,21 @@ export class Process {
       };
     }
 
+    const providerMessage = this.expandEmulatedSlashCommand(message);
+
     // Create user message with UUID - this UUID will be used by both SSE and SDK
-    const uuid = randomUUID();
-    const messageWithUuid: UserMessage = { ...message, uuid };
+    const uuid = providerMessage.uuid ?? randomUUID();
+    const messageWithUuid: UserMessage = { ...providerMessage, uuid };
 
     // Build content that matches what the SDK will write to JSONL.
     // This ensures SSE/history messages can be deduplicated against JSONL.
-    const content = this.buildUserMessageContent(message);
+    const content = this.buildUserMessageContent(providerMessage);
 
     const sdkMessage = this.withTimestamp({
       type: "user",
       uuid,
       tempId: message.tempId,
+      messageMetadata: message.metadata,
       message: { role: "user", content },
     } as SDKMessage);
 
@@ -917,7 +1496,11 @@ export class Process {
 
     if (this.messageQueue) {
       // If provider supports in-turn steering, prefer that over queue-after-turn behavior.
-      if (this._state.type === "in-turn" && this.steerFn) {
+      if (
+        this._state.type === "in-turn" &&
+        this.steerFn &&
+        options?.allowSteer !== false
+      ) {
         const steerMessage: UserMessage = {
           ...messageWithUuid,
           // Mirror MessageQueue's attachment expansion for steer payloads.
@@ -958,7 +1541,7 @@ export class Process {
     }
 
     // Legacy behavior for mock SDK
-    this.legacyQueue.push(message);
+    this.legacyQueue.push(providerMessage);
     if (this._state.type === "idle") {
       this.processNextInQueue();
     }
@@ -967,15 +1550,108 @@ export class Process {
 
   /**
    * Add a message to the deferred queue.
-   * Deferred messages are held server-side and auto-sent when the agent's current turn ends.
+   * Deferred messages are held server-side and auto-sent when the agent reaches
+   * a safe delivery boundary. Idle processes can accept the message
+   * immediately; active turns keep the message editable until a later boundary
+   * such as a completed tool call or turn completion.
    */
-  deferMessage(message: UserMessage): { success: true } {
-    this.deferredQueue.push({
+  deferMessage(
+    message: UserMessage,
+    options?: {
+      promoteIfReady?: boolean;
+      placement?: DeferredMessagePlacement;
+    },
+  ): {
+    success: boolean;
+    deferred: boolean;
+    promoted?: boolean;
+    position?: number;
+    error?: string;
+  } {
+    const replaceTempId = options?.placement?.replaceTempId;
+    const replacesDeferredEdit =
+      !!replaceTempId &&
+      this.deferredEditBarrier?.originalTempId === replaceTempId;
+    if (replaceTempId && !replacesDeferredEdit) {
+      return {
+        success: false,
+        deferred: true,
+        error: "Deferred edit barrier does not match replacement message",
+      };
+    }
+    const deferredEditInsertionIndex = replacesDeferredEdit
+      ? Math.min(this.deferredEditBarrier?.index ?? 0, this.deferredQueue.length)
+      : null;
+
+    if (options?.promoteIfReady && this.messageQueue) {
+      if (this._state.type === "idle") {
+        const result = this.queueMessage(message);
+        if (!result.success) {
+          return {
+            success: false,
+            deferred: false,
+            error: result.error ?? "Failed to queue message",
+          };
+        }
+        if (replacesDeferredEdit) {
+          this.deferredEditBarrier = null;
+        }
+        this.emitDeferredQueueChange("promoted", message.tempId);
+        return {
+          success: true,
+          deferred: false,
+          promoted: true,
+          position: result.position,
+        };
+      }
+    }
+
+    const entry = {
       message,
       timestamp: new Date().toISOString(),
-    });
-    this.emitDeferredQueueChange();
-    return { success: true };
+    };
+    const insertionIndex = replacesDeferredEdit
+      ? (deferredEditInsertionIndex as number)
+      : this.getDeferredInsertionIndex(options?.placement);
+    this.deferredQueue.splice(insertionIndex, 0, entry);
+    if (replacesDeferredEdit) {
+      this.deferredEditBarrier = null;
+    }
+    this.emitDeferredQueueChange("queued", message.tempId);
+    return { success: true, deferred: true };
+  }
+
+  private getDeferredPlacement(index: number): DeferredMessagePlacement {
+    const afterTempId = this.deferredQueue[index - 1]?.message.tempId;
+    const beforeTempId = this.deferredQueue[index + 1]?.message.tempId;
+    return {
+      ...(afterTempId ? { afterTempId } : {}),
+      ...(beforeTempId ? { beforeTempId } : {}),
+    };
+  }
+
+  private getDeferredInsertionIndex(
+    placement?: DeferredMessagePlacement,
+  ): number {
+    if (placement?.beforeTempId) {
+      const beforeIndex = this.deferredQueue.findIndex(
+        (entry) => entry.message.tempId === placement.beforeTempId,
+      );
+      if (beforeIndex !== -1) {
+        return beforeIndex;
+      }
+    }
+
+    if (placement?.afterTempId) {
+      const afterIndex = this.deferredQueue.findIndex(
+        (entry) => entry.message.tempId === placement.afterTempId,
+      );
+      if (afterIndex !== -1) {
+        return afterIndex + 1;
+      }
+    }
+
+    return this.deferredQueue.length;
   }
 
   /**
@@ -987,7 +1663,49 @@ export class Process {
     );
     if (index === -1) return false;
     this.deferredQueue.splice(index, 1);
-    this.emitDeferredQueueChange();
+    if (this.deferredEditBarrier) {
+      if (index < this.deferredEditBarrier.index) {
+        this.deferredEditBarrier.index--;
+      } else if (this.deferredQueue.length <= this.deferredEditBarrier.index) {
+        this.deferredEditBarrier.index = this.deferredQueue.length;
+      }
+    }
+    this.emitDeferredQueueChange("cancelled", tempId);
+    return true;
+  }
+
+  /**
+   * Remove and return a deferred message so a client can edit it safely.
+   */
+  takeDeferredMessage(tempId: string): TakenDeferredMessage | null {
+    const index = this.deferredQueue.findIndex(
+      (entry) => entry.message.tempId === tempId,
+    );
+    if (index === -1) return null;
+    const placement = this.getDeferredPlacement(index);
+    const [entry] = this.deferredQueue.splice(index, 1);
+    this.deferredEditBarrier = { originalTempId: tempId, index };
+    this.emitDeferredQueueChange("edited", tempId);
+    if (!entry) return null;
+    return { message: entry.message, placement };
+  }
+
+  releaseDeferredEditBarrier(originalTempId?: string): boolean {
+    if (!this.deferredEditBarrier) return false;
+    if (
+      originalTempId &&
+      this.deferredEditBarrier.originalTempId !== originalTempId
+    ) {
+      return false;
+    }
+    this.deferredEditBarrier = null;
+    if (this._state.type === "idle") {
+      const promotion = this.promoteNextDeferredMessage({ allowSteer: false });
+      if (promotion === "promoted" || promotion === "failed") {
+        return true;
+      }
+    }
+    this.emitDeferredQueueChange("edited", originalTempId);
     return true;
   }
 
@@ -998,21 +1716,81 @@ export class Process {
     tempId?: string;
     content: string;
     timestamp: string;
+    attachments?: UserMessage["attachments"];
+    attachmentCount?: number;
+    metadata?: UserMessage["metadata"];
+    blockedByEdit?: boolean;
   }[] {
-    return this.deferredQueue.map((entry) => ({
-      tempId: entry.message.tempId,
-      content: entry.message.text,
-      timestamp: entry.timestamp,
-    }));
+    return this.deferredQueue.map((entry, index) => {
+      const attachmentCount =
+        (entry.message.attachments?.length ?? 0) +
+        (entry.message.images?.length ?? 0) +
+        (entry.message.documents?.length ?? 0);
+
+      return {
+        tempId: entry.message.tempId,
+        content: entry.message.text,
+        timestamp: entry.timestamp,
+        ...(entry.message.metadata ? { metadata: entry.message.metadata } : {}),
+        ...(entry.message.attachments?.length
+          ? { attachments: entry.message.attachments }
+          : {}),
+        ...(attachmentCount > 0 ? { attachmentCount } : {}),
+        ...(this.deferredEditBarrier &&
+        index >= this.deferredEditBarrier.index
+          ? { blockedByEdit: true }
+          : {}),
+      };
+    });
+  }
+
+  /**
+   * Remove all deferred messages so they can be handed to a replacement
+   * process after this process is hard-aborted.
+   */
+  drainDeferredMessages(
+    reason: "cancelled" | "promoted" = "promoted",
+  ): UserMessage[] {
+    if (this.deferredQueue.length === 0) {
+      this.deferredEditBarrier = null;
+      return [];
+    }
+
+    const drained = this.deferredQueue.map((entry) => entry.message);
+    const firstTempId = drained[0]?.tempId;
+    this.deferredQueue = [];
+    this.deferredEditBarrier = null;
+    this.emitDeferredQueueChange(reason, firstTempId);
+    return drained;
+  }
+
+  /**
+   * Remove user messages that YA accepted but the provider has not processed.
+   * This includes messages in the direct provider queue as well as editable
+   * deferred messages.
+   */
+  drainPendingUserMessages(
+    reason: "cancelled" | "promoted" = "promoted",
+  ): UserMessage[] {
+    const queuedMessages = this.messageQueue?.drain() ?? [];
+    return [
+      ...queuedMessages,
+      ...this.drainDeferredMessages(reason),
+    ];
   }
 
   /**
    * Emit a deferred-queue event with the current queue state.
    */
-  private emitDeferredQueueChange(): void {
+  private emitDeferredQueueChange(
+    reason?: "queued" | "cancelled" | "edited" | "promoted",
+    tempId?: string,
+  ): void {
     this.emit({
       type: "deferred-queue",
       messages: this.getDeferredQueueSummary(),
+      reason,
+      tempId,
     });
   }
 
@@ -1472,7 +2250,9 @@ export class Process {
         }
 
         const message = this.withTimestamp(result.value);
-        this._lastMessageTime = new Date();
+        const receivedAt = new Date();
+        this._lastMessageTime = receivedAt;
+        this._lastProviderMessageTime = receivedAt;
 
         // Store message in history for replay to late-joining clients.
         // Exclude stream_event messages - they're transient streaming deltas that
@@ -1490,6 +2270,16 @@ export class Process {
 
           if (!isDuplicate) {
             this.currentBucket.push(message);
+          }
+        }
+
+        // Capture assistant text for the recap buffer (topics/recaps.md).
+        // Stream_event partials are skipped — we only want completed assistant
+        // turns so the recap input is coherent.
+        if (message.type === "assistant") {
+          const text = extractMessageText(message);
+          if (text) {
+            this.pushRecentAssistantText(text, receivedAt.getTime());
           }
         }
 
@@ -1548,6 +2338,15 @@ export class Process {
           this.emit({ type: "message", message });
         }
 
+        if (isClaudeSdkApiErrorMessage(this.provider, message)) {
+          this.abortFn?.();
+          this.markTerminated(
+            "Claude SDK API error; restart required",
+            new Error(describeClaudeSdkApiError(message)),
+          );
+          return;
+        }
+
         // Handle special message types
         if (message.type === "system" && message.subtype === "input_request") {
           // Legacy mock SDK behavior - handle input_request message
@@ -1571,6 +2370,8 @@ export class Process {
             }
           }
           this.transitionToIdle();
+        } else if (this.isCompletedToolResultMessage(message)) {
+          this.promoteNextDeferredMessage({ allowSteer: true });
         }
       }
     } catch (error) {
@@ -1653,16 +2454,122 @@ export class Process {
 
   private transitionToIdle(): void {
     this.clearIdleTimer();
-    // Feed next deferred message before transitioning to idle
-    const next = this.deferredQueue.shift();
-    if (next) {
-      this.emitDeferredQueueChange();
-      this.queueMessage(next.message); // stays in-turn, SDK picks it up
+
+    // Promote deferred messages through queueMessage so clients receive the
+    // same user-message echoes as direct sends. MessageQueue still concatenates
+    // the queued provider input before the SDK consumes it.
+    if (this.promoteEligibleDeferredAfterTurn()) {
+      this.setState({ type: "in-turn" });
       return;
     }
+
     this.setState({ type: "idle", since: new Date() });
     this.startIdleTimer();
+    this.flushPendingRecapRequest();
     this.processNextInQueue();
+  }
+
+  private flushPendingRecapRequest(): void {
+    const pending = this.pendingRecapRequest;
+    if (!pending || this.recapInFlight || this._state.type !== "idle") {
+      return;
+    }
+    this.pendingRecapRequest = null;
+    void this.generateAndEmitRecap(pending.provider, pending.sinceMs);
+  }
+
+  /**
+   * Promote all deferred messages that may run after the completed turn.
+   * Returns true when at least one message was accepted by the direct queue.
+   */
+  private promoteEligibleDeferredAfterTurn(): boolean {
+    if (
+      this.deferredQueue.length === 0 ||
+      !this.messageQueue ||
+      this.deferredEditBarrier
+    ) {
+      return false;
+    }
+
+    const eligible = this.deferredQueue.splice(0);
+    const remaining: DeferredQueueEntry[] = [];
+    let promoted = false;
+
+    for (let index = 0; index < eligible.length; index++) {
+      const entry = eligible[index]!;
+      const result = this.queueMessage(entry.message, { allowSteer: false });
+      if (!result.success) {
+        remaining.push(entry, ...eligible.slice(index + 1));
+        break;
+      }
+      promoted = true;
+    }
+
+    if (remaining.length > 0) {
+      this.deferredQueue.unshift(...remaining);
+    }
+
+    if (promoted) {
+      this.deferredEditBarrier = null;
+      this.emitDeferredQueueChange("promoted");
+    } else if (remaining.length > 0) {
+      this.emitDeferredQueueChange("queued", remaining[0]?.message.tempId);
+    }
+
+    return promoted;
+  }
+
+  private promoteNextDeferredMessage(options: {
+    allowSteer: boolean;
+  }): "empty" | "blocked" | "promoted" | "failed" {
+    if (this.deferredEditBarrier?.index === 0) {
+      return "blocked";
+    }
+    const next = this.deferredQueue.shift();
+    if (!next) {
+      return "empty";
+    }
+    const shiftedBeforeBarrier = !!this.deferredEditBarrier;
+    if (this.deferredEditBarrier) {
+      this.deferredEditBarrier.index--;
+    }
+
+    const result = this.queueMessage(next.message, {
+      allowSteer: options.allowSteer,
+    });
+    if (!result.success) {
+      this.deferredQueue.unshift(next);
+      if (shiftedBeforeBarrier && this.deferredEditBarrier) {
+        this.deferredEditBarrier.index++;
+      }
+      this.emitDeferredQueueChange("queued", next.message.tempId);
+      return "failed";
+    }
+
+    this.emitDeferredQueueChange("promoted", next.message.tempId);
+    return "promoted";
+  }
+
+  private isCompletedToolResultMessage(message: SDKMessage): boolean {
+    if (
+      this._state.type !== "in-turn" ||
+      !this.messageQueue ||
+      !this.steerFn
+    ) {
+      return false;
+    }
+
+    const content = message.message?.content;
+    if (!Array.isArray(content)) {
+      return false;
+    }
+
+    return content.some(
+      (block) =>
+        typeof block === "object" &&
+        block !== null &&
+        block.type === "tool_result",
+    );
   }
 
   /**
@@ -1721,6 +2628,7 @@ export class Process {
 
   private setState(state: ProcessState): void {
     this._state = state;
+    this._lastStateChangeTime = new Date();
     this.emit({ type: "state-change", state });
   }
 

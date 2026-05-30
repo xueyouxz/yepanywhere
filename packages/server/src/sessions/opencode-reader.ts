@@ -5,9 +5,9 @@ import {
   type OpenCodeMessage,
   type OpenCodeSessionEntry,
   type OpenCodeStoredPart,
-  SESSION_TITLE_MAX_LENGTH,
   type UrlProjectId,
   getModelContextWindow,
+  truncateSessionTitle,
 } from "@yep-anywhere/shared";
 import type {
   ContextUsage,
@@ -541,8 +541,6 @@ export class OpenCodeSessionReader implements ISessionReader {
    */
   private truncateTitle(title: string | null): string | null {
     if (!title) return null;
-    const trimmed = title.trim();
-    if (trimmed.length <= SESSION_TITLE_MAX_LENGTH) return trimmed;
-    return `${trimmed.slice(0, SESSION_TITLE_MAX_LENGTH - 3)}...`;
+    return truncateSessionTitle(title) || null;
   }
 }

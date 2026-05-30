@@ -6,7 +6,7 @@
  */
 
 import type { UnifiedSession, UrlProjectId } from "@yep-anywhere/shared";
-import type { Message, Session, SessionSummary } from "../supervisor/types.js";
+import type { Message, SessionSummary } from "../supervisor/types.js";
 
 /**
  * Options for reading a session.
@@ -106,6 +106,7 @@ export interface ISessionReader {
    */
   listSessionFiles?(
     sessionDir: string,
+    options?: { activeAfterMs?: number },
   ): Promise<{ sessionId: string; filePath: string }[]>;
 
   /**

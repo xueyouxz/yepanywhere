@@ -57,6 +57,11 @@ async function waitForPortFile(
   throw new Error(`Timeout waiting for ${name} port file (${timeoutMs}ms)`);
 }
 
+function shouldStartRelay(): boolean {
+  const setting = process.env.YEP_E2E_START_RELAY?.toLowerCase();
+  return setting !== "0" && setting !== "false" && setting !== "no";
+}
+
 export default async function globalSetup() {
   const serverLogLevel = process.env.E2E_SERVER_LOG_LEVEL ?? "warn";
   const serverFileLogLevel =
@@ -153,54 +158,60 @@ export default async function globalSetup() {
     stdio: "inherit",
   });
 
-  // Start relay server for relay integration tests
-  const relayDataDir = join(E2E_TEST_DIR, "relay");
-  mkdirSync(relayDataDir, { recursive: true });
+  if (shouldStartRelay()) {
+    // Start relay server for relay integration tests
+    const relayDataDir = join(E2E_TEST_DIR, "relay");
+    mkdirSync(relayDataDir, { recursive: true });
 
-  console.log("[E2E] Starting relay server...");
-  const relayRoot = join(repoRoot, "packages", "relay");
-  const relayProcess = spawn(
-    "pnpm",
-    ["exec", "tsx", "--conditions", "source", "src/index.ts"],
-    {
-      cwd: relayRoot,
-      env: {
-        ...process.env,
-        RELAY_PORT: "0", // Auto-assign port
-        RELAY_PORT_FILE: RELAY_PORT_FILE,
-        RELAY_DATA_DIR: relayDataDir,
-        RELAY_LOG_LEVEL: "warn", // Reduce noise, port comes from file
-        RELAY_LOG_TO_FILE: "false",
+    console.log("[E2E] Starting relay server...");
+    const relayRoot = join(repoRoot, "packages", "relay");
+    const relayProcess = spawn(
+      "pnpm",
+      ["exec", "tsx", "--conditions", "source", "src/index.ts"],
+      {
+        cwd: relayRoot,
+        env: {
+          ...process.env,
+          RELAY_PORT: "0", // Auto-assign port
+          RELAY_PORT_FILE: RELAY_PORT_FILE,
+          RELAY_DATA_DIR: relayDataDir,
+          RELAY_LOG_LEVEL: "warn", // Reduce noise, port comes from file
+          RELAY_LOG_TO_FILE: "false",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
       },
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: true,
-    },
-  );
+    );
 
-  if (relayProcess.pid) {
-    writeFileSync(RELAY_PID_FILE, String(relayProcess.pid));
-  }
-
-  // Log stderr for debugging
-  relayProcess.stderr?.on("data", (data: Buffer) => {
-    const msg = data.toString();
-    if (!msg.includes("ExperimentalWarning")) {
-      console.error("[E2E Relay]", msg);
+    if (relayProcess.pid) {
+      writeFileSync(RELAY_PID_FILE, String(relayProcess.pid));
     }
-  });
 
-  relayProcess.on("error", (err) => {
-    console.error("[E2E Relay] Process error:", err);
-  });
+    // Log stderr for debugging
+    relayProcess.stderr?.on("data", (data: Buffer) => {
+      const msg = data.toString();
+      if (!msg.includes("ExperimentalWarning")) {
+        console.error("[E2E Relay]", msg);
+      }
+    });
 
-  // Wait for port file
-  const relayPort = await waitForPortFile(
-    RELAY_PORT_FILE,
-    "relay server",
-    30000,
-  );
-  console.log(`[E2E] Relay server on port ${relayPort}`);
-  relayProcess.unref();
+    relayProcess.on("error", (err) => {
+      console.error("[E2E Relay] Process error:", err);
+    });
+
+    // Wait for port file
+    const relayPort = await waitForPortFile(
+      RELAY_PORT_FILE,
+      "relay server",
+      30000,
+    );
+    console.log(`[E2E] Relay server on port ${relayPort}`);
+    relayProcess.unref();
+  } else {
+    console.log(
+      "[E2E] Skipping relay server startup (YEP_E2E_START_RELAY disabled)",
+    );
+  }
 
   // Start main server with PORT_FILE for port reporting
   console.log("[E2E] Starting main server...");

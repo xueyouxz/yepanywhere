@@ -5,12 +5,15 @@ import { UI_KEYS } from "../lib/storageKeys";
  * Hook to manage sidebar expanded/collapsed preference.
  * Persists to localStorage.
  */
-export function useSidebarPreference(): {
+export function useSidebarPreference(forceExpanded = false): {
   isExpanded: boolean;
   setIsExpanded: (expanded: boolean) => void;
   toggleExpanded: () => void;
 } {
   const [isExpanded, setIsExpandedState] = useState(() => {
+    if (forceExpanded) {
+      return true;
+    }
     if (typeof window !== "undefined") {
       const stored = localStorage.getItem(UI_KEYS.sidebarExpanded);
       // Default to expanded if no preference saved

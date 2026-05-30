@@ -2,13 +2,24 @@
  * Unit tests for CodexProvider.
  *
  * Tests provider detection, authentication checking, and message normalization
- * without requiring actual Codex CLI installation.
+ * without requiring actual Codex CLI installation. The real app-server
+ * contract check is opt-in via YA_CODEX_REAL_CONTRACT_TEST.
  */
 
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { spawn } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { preprocessMessages } from "../../../../client/src/lib/preprocessMessages.ts";
 import {
   CodexProvider,
   type CodexProviderConfig,
@@ -86,6 +97,8 @@ describe("CodexProvider", () => {
 
       expect(session.iterator).toBeDefined();
       expect(typeof session.abort).toBe("function");
+      expect(typeof session.interrupt).toBe("function");
+      expect(typeof session.probeLiveness).toBe("function");
       expect(session.queue).toBeDefined();
     });
 
@@ -116,6 +129,801 @@ describe("CodexProvider", () => {
     });
   });
 });
+
+describe("CodexProvider app-server lifecycle", () => {
+  it("uses the steered turn id for soft interrupt completion", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "codex-provider-lifecycle-"));
+    const logPath = join(tempDir, "fake-codex-requests.jsonl");
+    const codexPath = join(tempDir, "fake-codex.mjs");
+    writeFileSync(codexPath, buildFakeCodexAppServer(logPath), "utf-8");
+    chmodSync(codexPath, 0o755);
+
+    let session:
+      | Awaited<ReturnType<CodexProvider["startSession"]>>
+      | undefined;
+    let consume: Promise<void> | undefined;
+
+    try {
+      const testProvider = new CodexProvider({ codexPath });
+      session = await testProvider.startSession({
+        cwd: tempDir,
+        initialMessage: { text: "start a fake turn" },
+        effort: "low",
+      });
+
+      const messages: Array<Record<string, unknown>> = [];
+      consume = (async () => {
+        for await (const message of session?.iterator ?? []) {
+          messages.push(message);
+          if (message.type === "result") {
+            break;
+          }
+        }
+      })();
+
+      await waitForFakeCodexRequest(logPath, "turn/start");
+      expect(session.steer).toBeDefined();
+      expect(
+        await waitForSuccessfulSteer(session, {
+          text: "steer the fake turn",
+        }),
+      ).toBe(true);
+      await waitForFakeCodexRequest(logPath, "turn/steer");
+
+      await session.interrupt?.();
+      await consume;
+
+      const requests = readFakeCodexRequests(logPath);
+      const steerRequest = requests.find(
+        (request) => request.method === "turn/steer",
+      );
+      const interruptRequest = requests.find(
+        (request) => request.method === "turn/interrupt",
+      );
+
+      expect(steerRequest?.params).toMatchObject({
+        expectedTurnId: "turn-start",
+      });
+      expect(interruptRequest?.params).toMatchObject({
+        turnId: "turn-steered",
+      });
+      expect(
+        messages.some(
+          (message) =>
+            message.type === "system" && message.subtype === "turn_complete",
+        ),
+      ).toBe(true);
+      expect(messages.some((message) => message.type === "error")).toBe(false);
+    } finally {
+      session?.abort();
+      await consume?.catch(() => undefined);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts a clean Codex foreground-tool interrupt", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "codex-provider-tool-"));
+    const logPath = join(tempDir, "fake-codex-requests.jsonl");
+    const codexPath = join(tempDir, "fake-codex-active-tool.mjs");
+    writeFileSync(
+      codexPath,
+      buildFakeCodexAppServerWithActiveTool(logPath),
+      "utf-8",
+    );
+    chmodSync(codexPath, 0o755);
+
+    let session:
+      | Awaited<ReturnType<CodexProvider["startSession"]>>
+      | undefined;
+    let consume: Promise<void> | undefined;
+
+    try {
+      const testProvider = new CodexProvider({ codexPath });
+      session = await testProvider.startSession({
+        cwd: tempDir,
+        initialMessage: { text: "run a fake tool" },
+        effort: "low",
+      });
+
+      const messages: Array<Record<string, unknown>> = [];
+      consume = (async () => {
+        for await (const message of session?.iterator ?? []) {
+          messages.push(message);
+          if (message.type === "result") {
+            break;
+          }
+        }
+      })();
+
+      await waitForMessage(messages, (message) =>
+        JSON.stringify(message).includes("call-active"),
+      );
+      const activity = session.getProviderActivity?.();
+      expect(activity?.lastRawProviderEventAt).toBeInstanceOf(Date);
+      expect(activity?.lastRawProviderEventSource).toBe(
+        "codex:notification:rawResponseItem/completed",
+      );
+
+      await expect(session.interrupt?.()).resolves.toBe(true);
+      await consume;
+
+      const interruptRequest = readFakeCodexRequests(logPath).find(
+        (request) => request.method === "turn/interrupt",
+      );
+      expect(interruptRequest?.params).toMatchObject({
+        turnId: "turn-active",
+      });
+      expect(
+        messages.some(
+          (message) =>
+            JSON.stringify(message).includes("aborted by user after 1.0s"),
+        ),
+      ).toBe(true);
+    } finally {
+      session?.abort();
+      await consume?.catch(() => undefined);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts interrupt with a Codex background tool handle", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "codex-provider-background-"));
+    const logPath = join(tempDir, "fake-codex-requests.jsonl");
+    const codexPath = join(tempDir, "fake-codex-background-tool.mjs");
+    writeFileSync(
+      codexPath,
+      buildFakeCodexAppServerWithBackgroundTool(logPath),
+      "utf-8",
+    );
+    chmodSync(codexPath, 0o755);
+
+    let session:
+      | Awaited<ReturnType<CodexProvider["startSession"]>>
+      | undefined;
+    let consume: Promise<void> | undefined;
+
+    try {
+      const testProvider = new CodexProvider({ codexPath });
+      session = await testProvider.startSession({
+        cwd: tempDir,
+        initialMessage: { text: "run a fake background tool" },
+        effort: "low",
+      });
+
+      const messages: Array<Record<string, unknown>> = [];
+      consume = (async () => {
+        for await (const message of session?.iterator ?? []) {
+          messages.push(message);
+          if (message.type === "result") {
+            break;
+          }
+        }
+      })();
+
+      await waitForMessage(messages, (message) =>
+        JSON.stringify(message).includes("Process running with session ID"),
+      );
+
+      await expect(session.interrupt?.()).resolves.toBe(true);
+      await consume;
+
+      const interruptRequest = readFakeCodexRequests(logPath).find(
+        (request) => request.method === "turn/interrupt",
+      );
+      expect(interruptRequest?.params).toMatchObject({
+        turnId: "turn-background",
+      });
+    } finally {
+      session?.abort();
+      await consume?.catch(() => undefined);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses thread/read probe to reconcile a missed Codex completion", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "codex-provider-probe-"));
+    const logPath = join(tempDir, "fake-codex-requests.jsonl");
+    const codexPath = join(tempDir, "fake-codex-idle-probe.mjs");
+    writeFileSync(
+      codexPath,
+      buildFakeCodexAppServerWithIdleProbe(logPath),
+      "utf-8",
+    );
+    chmodSync(codexPath, 0o755);
+
+    let session:
+      | Awaited<ReturnType<CodexProvider["startSession"]>>
+      | undefined;
+    let consume: Promise<void> | undefined;
+
+    try {
+      const testProvider = new CodexProvider({ codexPath });
+      session = await testProvider.startSession({
+        cwd: tempDir,
+        initialMessage: { text: "run a fake turn that misses completion" },
+        effort: "low",
+      });
+
+      const messages: Array<Record<string, unknown>> = [];
+      consume = (async () => {
+        for await (const message of session?.iterator ?? []) {
+          messages.push(message);
+          if (message.type === "result") {
+            break;
+          }
+        }
+      })();
+
+      await waitForFakeCodexRequest(logPath, "turn/start");
+      const probe = await session.probeLiveness?.();
+
+      expect(probe).toMatchObject({
+        status: "idle",
+        source: "codex:thread/read",
+        detail: "thread.status:idle",
+      });
+      await consume;
+
+      const requests = readFakeCodexRequests(logPath);
+      expect(
+        requests.some((request) => request.method === "thread/read"),
+      ).toBe(true);
+      expect(
+        messages.some(
+          (message) =>
+            message.type === "system" && message.subtype === "turn_complete",
+        ),
+      ).toBe(true);
+      expect(messages.some((message) => message.type === "result")).toBe(true);
+      expect(messages.some((message) => message.type === "error")).toBe(false);
+    } finally {
+      session?.abort();
+      await consume?.catch(() => undefined);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports interrupt incomplete before Codex has an active turn", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "codex-provider-no-turn-"));
+    const logPath = join(tempDir, "fake-codex-requests.jsonl");
+    const codexPath = join(tempDir, "fake-codex-no-turn.mjs");
+    writeFileSync(codexPath, buildFakeCodexAppServer(logPath), "utf-8");
+    chmodSync(codexPath, 0o755);
+
+    let session:
+      | Awaited<ReturnType<CodexProvider["startSession"]>>
+      | undefined;
+
+    try {
+      const testProvider = new CodexProvider({ codexPath });
+      session = await testProvider.startSession({
+        cwd: tempDir,
+        effort: "low",
+      });
+
+      const firstMessage = await session.iterator.next();
+      expect(firstMessage.value).toMatchObject({
+        type: "system",
+        subtype: "init",
+      });
+
+      await expect(session.interrupt?.()).resolves.toBe(false);
+
+      const requests = readFakeCodexRequests(logPath);
+      expect(
+        requests.some((request) => request.method === "turn/interrupt"),
+      ).toBe(false);
+    } finally {
+      session?.abort();
+      await session?.iterator.return?.(undefined);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
+const describeRealCodexContract =
+  process.env.YA_CODEX_REAL_CONTRACT_TEST === "true" ? describe : describe.skip;
+
+describeRealCodexContract("Codex app-server real contract", () => {
+  it(
+    "verifies steer and interrupt against the installed Codex app-server",
+    async () => {
+      const repoRoot = join(
+        dirname(fileURLToPath(import.meta.url)),
+        "..",
+        "..",
+        "..",
+        "..",
+        "..",
+      );
+      const probePath = join(
+        repoRoot,
+        "scripts",
+        "probe-codex-app-server-turns.mjs",
+      );
+      const result = await runNodeProbe(probePath, repoRoot);
+
+      if (result.code !== 0) {
+        throw new Error(
+          [
+            `Codex app-server probe exited with code ${result.code}`,
+            "stdout:",
+            result.stdout.trim() || "(empty)",
+            "stderr:",
+            result.stderr.trim() || "(empty)",
+          ].join("\n"),
+        );
+      }
+      expect(result.stdout).toContain("turn/steer");
+      expect(result.stdout).toContain("turn/interrupt");
+      expect(result.stdout).toContain('"status": "interrupted"');
+    },
+    70_000,
+  );
+});
+
+function runNodeProbe(
+  probePath: string,
+  cwd: string,
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [probePath], {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        CODEX_PROBE_EFFORT: process.env.CODEX_PROBE_EFFORT ?? "low",
+        CODEX_PROBE_TIMEOUT_MS: process.env.CODEX_PROBE_TIMEOUT_MS ?? "20000",
+        CODEX_PROBE_INTERRUPT_DELAY_MS:
+          process.env.CODEX_PROBE_INTERRUPT_DELAY_MS ?? "800",
+      },
+    });
+    let stdout = "";
+    let stderr = "";
+    const timeout = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error("Timed out waiting for Codex app-server probe"));
+    }, 65_000);
+
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk.toString("utf-8");
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk.toString("utf-8");
+    });
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on("exit", (code) => {
+      clearTimeout(timeout);
+      resolve({ code, stdout, stderr });
+    });
+  });
+}
+
+function buildFakeCodexAppServer(logPath: string): string {
+  return `#!/usr/bin/env node
+import { appendFileSync } from "node:fs";
+
+const logPath = ${JSON.stringify(logPath)};
+let buffer = "";
+
+function write(payload) {
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...payload }) + "\\n");
+}
+
+function logRequest(message) {
+  appendFileSync(
+    logPath,
+    JSON.stringify({
+      id: message.id,
+      method: message.method,
+      params: message.params,
+    }) + "\\n",
+  );
+}
+
+function respond(id, result) {
+  write({ id, result });
+}
+
+function notify(method, params) {
+  write({ method, params });
+}
+
+function handleMessage(message) {
+  if (!message || typeof message !== "object") return;
+  logRequest(message);
+  if (message.id === undefined) return;
+
+  switch (message.method) {
+    case "initialize":
+      respond(message.id, { userAgent: "fake-codex" });
+      break;
+    case "thread/start":
+      respond(message.id, {
+        thread: { id: "thread-1" },
+        model: "gpt-5.4-mini",
+        reasoningEffort: "low",
+      });
+      break;
+    case "turn/start":
+      respond(message.id, {
+        turn: { id: "turn-start", status: "inProgress", error: null },
+      });
+      break;
+    case "turn/steer":
+      respond(message.id, { turnId: "turn-steered" });
+      break;
+    case "turn/interrupt":
+      respond(message.id, {});
+      notify("turn/completed", {
+        threadId: "thread-1",
+        turn: {
+          id: message.params.turnId,
+          items: [],
+          status: "interrupted",
+          error: null,
+          startedAt: null,
+          completedAt: null,
+          durationMs: null,
+        },
+      });
+      break;
+    default:
+      respond(message.id, {});
+      break;
+  }
+}
+
+process.stdin.on("data", (chunk) => {
+  buffer += chunk.toString("utf-8");
+  const lines = buffer.split("\\n");
+  buffer = lines.pop() || "";
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    handleMessage(JSON.parse(line));
+  }
+});
+`;
+}
+
+function buildFakeCodexAppServerWithIdleProbe(logPath: string): string {
+  return `#!/usr/bin/env node
+import { appendFileSync } from "node:fs";
+
+const logPath = ${JSON.stringify(logPath)};
+let buffer = "";
+
+function write(payload) {
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...payload }) + "\\n");
+}
+
+function logRequest(message) {
+  appendFileSync(
+    logPath,
+    JSON.stringify({
+      id: message.id,
+      method: message.method,
+      params: message.params,
+    }) + "\\n",
+  );
+}
+
+function respond(id, result) {
+  write({ id, result });
+}
+
+function handleMessage(message) {
+  if (!message || typeof message !== "object") return;
+  logRequest(message);
+  if (message.id === undefined) return;
+
+  switch (message.method) {
+    case "initialize":
+      respond(message.id, { userAgent: "fake-codex" });
+      break;
+    case "thread/start":
+      respond(message.id, {
+        thread: { id: "thread-1" },
+        model: "gpt-5.4-mini",
+        reasoningEffort: "low",
+      });
+      break;
+    case "turn/start":
+      respond(message.id, {
+        turn: { id: "turn-missed-completion", status: "inProgress", error: null },
+      });
+      break;
+    case "thread/read":
+      respond(message.id, {
+        thread: {
+          id: "thread-1",
+          status: { type: "idle" },
+          turns: [],
+        },
+      });
+      break;
+    default:
+      respond(message.id, {});
+      break;
+  }
+}
+
+process.stdin.on("data", (chunk) => {
+  buffer += chunk.toString("utf-8");
+  const lines = buffer.split("\\n");
+  buffer = lines.pop() || "";
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    handleMessage(JSON.parse(line));
+  }
+});
+`;
+}
+
+function buildFakeCodexAppServerWithActiveTool(logPath: string): string {
+  return `#!/usr/bin/env node
+import { appendFileSync } from "node:fs";
+
+const logPath = ${JSON.stringify(logPath)};
+let buffer = "";
+
+function write(payload) {
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...payload }) + "\\n");
+}
+
+function logRequest(message) {
+  appendFileSync(
+    logPath,
+    JSON.stringify({
+      id: message.id,
+      method: message.method,
+      params: message.params,
+    }) + "\\n",
+  );
+}
+
+function respond(id, result) {
+  write({ id, result });
+}
+
+function notify(method, params) {
+  write({ method, params });
+}
+
+function handleMessage(message) {
+  if (!message || typeof message !== "object") return;
+  logRequest(message);
+  if (message.id === undefined) return;
+
+  switch (message.method) {
+    case "initialize":
+      respond(message.id, { userAgent: "fake-codex" });
+      break;
+    case "thread/start":
+      respond(message.id, {
+        thread: { id: "thread-1" },
+        model: "gpt-5.4-mini",
+        reasoningEffort: "low",
+      });
+      break;
+    case "turn/start":
+      respond(message.id, {
+        turn: { id: "turn-active", status: "inProgress", error: null },
+      });
+      setTimeout(() => {
+        notify("rawResponseItem/completed", {
+          threadId: "thread-1",
+          turnId: "turn-active",
+          item: {
+            type: "function_call",
+            name: "exec_command",
+            call_id: "call-active",
+            arguments: "{\\"cmd\\":\\"sleep 20\\"}",
+          },
+        });
+      }, 0);
+      break;
+    case "turn/interrupt":
+      respond(message.id, {});
+      notify("rawResponseItem/completed", {
+        threadId: "thread-1",
+        turnId: message.params.turnId,
+        item: {
+          type: "function_call_output",
+          call_id: "call-active",
+          output: "aborted by user after 1.0s",
+        },
+      });
+      notify("turn/completed", {
+        threadId: "thread-1",
+        turn: {
+          id: message.params.turnId,
+          items: [],
+          status: "interrupted",
+          error: null,
+          startedAt: null,
+          completedAt: null,
+          durationMs: null,
+        },
+      });
+      break;
+    default:
+      respond(message.id, {});
+      break;
+  }
+}
+
+process.stdin.on("data", (chunk) => {
+  buffer += chunk.toString("utf-8");
+  const lines = buffer.split("\\n");
+  buffer = lines.pop() || "";
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    handleMessage(JSON.parse(line));
+  }
+});
+`;
+}
+
+function buildFakeCodexAppServerWithBackgroundTool(logPath: string): string {
+  return `#!/usr/bin/env node
+import { appendFileSync } from "node:fs";
+
+const logPath = ${JSON.stringify(logPath)};
+let buffer = "";
+
+function write(payload) {
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...payload }) + "\\n");
+}
+
+function logRequest(message) {
+  appendFileSync(
+    logPath,
+    JSON.stringify({
+      id: message.id,
+      method: message.method,
+      params: message.params,
+    }) + "\\n",
+  );
+}
+
+function respond(id, result) {
+  write({ id, result });
+}
+
+function notify(method, params) {
+  write({ method, params });
+}
+
+function handleMessage(message) {
+  if (!message || typeof message !== "object") return;
+  logRequest(message);
+  if (message.id === undefined) return;
+
+  switch (message.method) {
+    case "initialize":
+      respond(message.id, { userAgent: "fake-codex" });
+      break;
+    case "thread/start":
+      respond(message.id, {
+        thread: { id: "thread-1" },
+        model: "gpt-5.4-mini",
+        reasoningEffort: "low",
+      });
+      break;
+    case "turn/start":
+      respond(message.id, {
+        turn: { id: "turn-background", status: "inProgress", error: null },
+      });
+      setTimeout(() => {
+        notify("rawResponseItem/completed", {
+          threadId: "thread-1",
+          turnId: "turn-background",
+          item: {
+            type: "function_call",
+            name: "exec_command",
+            call_id: "call-background",
+            arguments: "{\\"cmd\\":\\"sleep 20\\",\\"tty\\":true}",
+          },
+        });
+        notify("rawResponseItem/completed", {
+          threadId: "thread-1",
+          turnId: "turn-background",
+          item: {
+            type: "function_call_output",
+            call_id: "call-background",
+            output: "Chunk ID: abc\\nWall time: 1.0 seconds\\nProcess running with session ID 123\\nOutput:\\n",
+          },
+        });
+      }, 0);
+      break;
+    case "turn/interrupt":
+      respond(message.id, {});
+      notify("turn/completed", {
+        threadId: "thread-1",
+        turn: {
+          id: message.params.turnId,
+          items: [],
+          status: "interrupted",
+          error: null,
+          startedAt: null,
+          completedAt: null,
+          durationMs: null,
+        },
+      });
+      break;
+    default:
+      respond(message.id, {});
+      break;
+  }
+}
+
+process.stdin.on("data", (chunk) => {
+  buffer += chunk.toString("utf-8");
+  const lines = buffer.split("\\n");
+  buffer = lines.pop() || "";
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    handleMessage(JSON.parse(line));
+  }
+});
+`;
+}
+
+function readFakeCodexRequests(
+  logPath: string,
+): Array<{ id?: number; method?: string; params?: Record<string, unknown> }> {
+  if (!existsSync(logPath)) return [];
+  return readFileSync(logPath, "utf-8")
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line));
+}
+
+async function waitForFakeCodexRequest(
+  logPath: string,
+  method: string,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 2000) {
+    if (readFakeCodexRequests(logPath).some((entry) => entry.method === method)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for fake Codex request: ${method}`);
+}
+
+async function waitForMessage(
+  messages: Array<Record<string, unknown>>,
+  predicate: (message: Record<string, unknown>) => boolean,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 2000) {
+    if (messages.some(predicate)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for fake Codex message");
+}
+
+async function waitForSuccessfulSteer(
+  session: Awaited<ReturnType<CodexProvider["startSession"]>>,
+  message: { text: string },
+): Promise<boolean> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 2000) {
+    if (await session.steer?.(message)) {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return false;
+}
 
 describe("CodexProvider Auth File Parsing", () => {
   let tempDir: string;
@@ -190,6 +998,16 @@ describe("CodexProvider Event Normalization", () => {
   // Test helper to create a provider and access internal methods
   function createTestProvider(): CodexProvider {
     return new CodexProvider();
+  }
+
+  function createLiveEventState() {
+    return {
+      streamingTextByItemKey: new Map<string, string>(),
+      streamingReasoningSummaryByItemKey: new Map<string, string[]>(),
+      streamingToolOutputByItemKey: new Map<string, string>(),
+      toolCallContexts: new Map<string, unknown>(),
+      resultBackedToolItemsByTurnId: new Map<string, Set<string>>(),
+    };
   }
 
   it("should have correct provider interface", () => {
@@ -410,12 +1228,911 @@ describe("CodexProvider Event Normalization", () => {
     });
   });
 
+  it("prefers reasoning summaries over raw reasoning content", () => {
+    const provider = createTestProvider() as unknown as {
+      normalizeThreadItem: (item: unknown) => Record<string, unknown> | null;
+    };
+
+    const normalized = provider.normalizeThreadItem({
+      id: "reason-1",
+      type: "reasoning",
+      summary: ["Short summary"],
+      content: ["internal raw reasoning"],
+    });
+
+    expect(normalized).toMatchObject({
+      id: "reason-1",
+      type: "reasoning",
+      text: "Short summary",
+    });
+  });
+
+  it("declares experimentalApi during initialize when enabled", () => {
+    const provider = createTestProvider() as unknown as {
+      createInitializeParams: (
+        experimentalApiEnabled: boolean,
+      ) => Record<string, unknown>;
+    };
+
+    const params = provider.createInitializeParams(true);
+
+    expect(params).toMatchObject({
+      clientInfo: {
+        title: null,
+        version: "dev",
+      },
+      capabilities: {
+        experimentalApi: true,
+      },
+    });
+    expect((params.clientInfo as { name?: unknown }).name).toEqual(
+      expect.any(String),
+    );
+  });
+
+  it("requests automatic reasoning summaries on turn start", () => {
+    const provider = createTestProvider() as unknown as {
+      createTurnStartParams: (
+        threadId: string,
+        userPrompt: string,
+        options: { effort?: unknown; thinking?: unknown },
+      ) => Record<string, unknown>;
+    };
+
+    const params = provider.createTurnStartParams("thread-1", "test prompt", {});
+
+    expect(params).toMatchObject({
+      threadId: "thread-1",
+      summary: "auto",
+    });
+  });
+
+  it("prefers GPT-5.5 over Codex's model/list default when available", () => {
+    const provider = createTestProvider() as unknown as {
+      normalizeModelList: (models: unknown[]) => Array<{
+        id: string;
+        name: string;
+        isDefault?: boolean;
+        defaultReasoningEffort?: string;
+        supportedReasoningEfforts?: Array<{
+          reasoningEffort: string;
+          description?: string;
+        }>;
+        inputModalities?: string[];
+        supportsPersonality?: boolean;
+      }>;
+    };
+
+    const models = provider.normalizeModelList([
+      {
+        id: "gpt-5.4",
+        model: "gpt-5.4",
+        displayName: "gpt-5.4",
+        description: "Strong model for everyday coding.",
+        isDefault: true,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: [
+          {
+            reasoningEffort: "low",
+            description: "Fast responses with lighter reasoning",
+          },
+          {
+            reasoningEffort: "medium",
+            description: "Balanced speed and reasoning",
+          },
+        ],
+        inputModalities: ["text", "image"],
+        supportsPersonality: true,
+      },
+      {
+        id: "gpt-5.5",
+        model: "gpt-5.5",
+        displayName: "GPT-5.5",
+        description: "Frontier model.",
+        isDefault: false,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: [
+          {
+            reasoningEffort: "high",
+            description: "Greater reasoning depth",
+          },
+        ],
+        inputModalities: ["text", "image"],
+        supportsPersonality: true,
+      },
+      {
+        id: "gpt-5.3-codex",
+        model: "gpt-5.3-codex",
+        upgrade: "gpt-5.4",
+        hidden: false,
+      },
+      {
+        id: "internal-hidden",
+        model: "internal-hidden",
+        hidden: true,
+      },
+    ]);
+
+    expect(models.map((model) => model.id)).toEqual([
+      "gpt-5.5",
+      "gpt-5.4",
+      "gpt-5.3-codex",
+    ]);
+    expect(models[0]).toMatchObject({
+      name: "GPT-5.5",
+      defaultReasoningEffort: "medium",
+      supportedReasoningEfforts: [
+        {
+          reasoningEffort: "high",
+          description: "Greater reasoning depth",
+        },
+      ],
+      inputModalities: ["text", "image"],
+      supportsPersonality: true,
+    });
+    expect(models[1]).toMatchObject({
+      isDefault: true,
+      inputModalities: ["text", "image"],
+    });
+  });
+
+  it("builds stable thread policy params with limited history", () => {
+    const provider = createTestProvider() as unknown as {
+      mapPermissionModeToThreadPolicy: (permissionMode?: string) => {
+        approvalPolicy: string;
+        sandbox: string;
+      };
+      createThreadStartParams: (
+        options: { model?: string; cwd: string },
+        policy: {
+          approvalPolicy: string;
+          sandbox: string;
+        },
+      ) => Record<string, unknown>;
+    };
+    const bypassPolicy =
+      provider.mapPermissionModeToThreadPolicy("bypassPermissions");
+
+    const start = provider.createThreadStartParams(
+      { model: "gpt-5.2-codex", cwd: "/tmp" },
+      { approvalPolicy: "on-request", sandbox: "workspace-write" },
+    );
+    const bypassStart = provider.createThreadStartParams(
+      { model: "gpt-5.5", cwd: "/tmp" },
+      bypassPolicy,
+    );
+
+    expect(start).toMatchObject({
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+      experimentalRawEvents: false,
+      persistExtendedHistory: false,
+    });
+    expect(bypassStart).toMatchObject({
+      approvalPolicy: "never",
+      sandbox: "danger-full-access",
+      experimentalRawEvents: false,
+      persistExtendedHistory: false,
+    });
+    expect(start.permissionProfile).toBeUndefined();
+    expect(bypassStart.permissionProfile).toBeUndefined();
+  });
+
+  it("builds stable resume params with limited history", () => {
+    const provider = createTestProvider() as unknown as {
+      createThreadResumeParams: (
+        options: { resumeSessionId?: string; model?: string; cwd: string },
+        sessionId: string,
+        policy: {
+          approvalPolicy: string;
+          sandbox: string;
+        },
+        experimentalApiEnabled?: boolean,
+      ) => Record<string, unknown>;
+    };
+
+    const resume = provider.createThreadResumeParams(
+      {
+        resumeSessionId: "thread-1",
+        model: "gpt-5.2-codex",
+        cwd: "/tmp",
+      },
+      "thread-1",
+      { approvalPolicy: "on-request", sandbox: "workspace-write" },
+    );
+
+    expect(resume).toMatchObject({
+      threadId: "thread-1",
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+      persistExtendedHistory: false,
+    });
+    expect(resume.excludeTurns).toBeUndefined();
+    expect(resume.permissionProfile).toBeUndefined();
+  });
+
+  it("uses experimental excludeTurns after Codex negotiation succeeds", () => {
+    const provider = createTestProvider() as unknown as {
+      createThreadResumeParams: (
+        options: { resumeSessionId?: string; model?: string; cwd: string },
+        sessionId: string,
+        policy: {
+          approvalPolicy: string;
+          sandbox: string;
+        },
+        experimentalApiEnabled?: boolean,
+      ) => Record<string, unknown>;
+    };
+
+    const resume = provider.createThreadResumeParams(
+      {
+        resumeSessionId: "thread-1",
+        model: "gpt-5.2-codex",
+        cwd: "/tmp",
+      },
+      "thread-1",
+      { approvalPolicy: "on-request", sandbox: "workspace-write" },
+      true,
+    );
+
+    expect(resume).toMatchObject({
+      threadId: "thread-1",
+      excludeTurns: true,
+      persistExtendedHistory: false,
+    });
+  });
+
+  it("pins thread-scope reasoning effort via config when effort is requested", () => {
+    const provider = createTestProvider() as unknown as {
+      createThreadStartParams: (
+        options: {
+          model?: string;
+          cwd: string;
+          effort?: string;
+          thinking?: { type: string };
+        },
+        policy: {
+          approvalPolicy: string;
+          sandbox: string;
+        },
+        experimentalApiEnabled?: boolean,
+      ) => Record<string, unknown>;
+      createThreadResumeParams: (
+        options: {
+          resumeSessionId?: string;
+          model?: string;
+          cwd: string;
+          effort?: string;
+          thinking?: { type: string };
+        },
+        sessionId: string,
+        policy: {
+          approvalPolicy: string;
+          sandbox: string;
+        },
+      ) => Record<string, unknown>;
+      createTurnStartParams: (
+        threadId: string,
+        userPrompt: string,
+        options: {
+          model?: string;
+          cwd: string;
+          effort?: string;
+          thinking?: { type: string };
+        },
+      ) => Record<string, unknown>;
+    };
+
+    const start = provider.createThreadStartParams(
+      { model: "gpt-5.4-codex", cwd: "/tmp", effort: "max" },
+      { approvalPolicy: "on-request", sandbox: "workspace-write" },
+    );
+    const resume = provider.createThreadResumeParams(
+      {
+        resumeSessionId: "thread-1",
+        model: "gpt-5.4-codex",
+        cwd: "/tmp",
+        effort: "high",
+      },
+      "thread-1",
+      { approvalPolicy: "on-request", sandbox: "workspace-write" },
+    );
+    const omitted = provider.createThreadStartParams(
+      { model: "gpt-5.4-codex", cwd: "/tmp" },
+      { approvalPolicy: "on-request", sandbox: "workspace-write" },
+    );
+    const disabled = provider.createThreadStartParams(
+      {
+        model: "gpt-5.4-codex",
+        cwd: "/tmp",
+        effort: "high",
+        thinking: { type: "disabled" },
+      },
+      { approvalPolicy: "on-request", sandbox: "workspace-write" },
+    );
+    const turn = provider.createTurnStartParams("thread-1", "hello", {
+      model: "gpt-5.4-codex",
+      cwd: "/tmp",
+      effort: "low",
+      thinking: { type: "adaptive" },
+    });
+    const disabledTurn = provider.createTurnStartParams("thread-1", "hello", {
+      model: "gpt-5.4-codex",
+      cwd: "/tmp",
+      effort: "high",
+      thinking: { type: "disabled" },
+    });
+
+    expect(start).toMatchObject({
+      config: { model_reasoning_effort: "xhigh" },
+    });
+    expect(resume).toMatchObject({
+      config: { model_reasoning_effort: "high" },
+    });
+    expect(omitted.config ?? null).toBeNull();
+    expect(disabled).toMatchObject({
+      config: { model_reasoning_effort: "none" },
+    });
+    expect(turn).toMatchObject({ effort: "low" });
+    expect(disabledTurn).toMatchObject({ effort: "none" });
+  });
+
+  it("accumulates agent message deltas into a stable streaming assistant message", () => {
+    const provider = createTestProvider() as unknown as {
+      convertNotificationToSDKMessages: (
+        notification: { method: string; params?: unknown },
+        sessionId: string,
+        usageByTurnId: Map<string, unknown>,
+        liveEventState: ReturnType<typeof createLiveEventState>,
+      ) => Array<Record<string, unknown>>;
+    };
+
+    const liveEventState = createLiveEventState();
+
+    const first = provider.convertNotificationToSDKMessages(
+      {
+        method: "item/agentMessage/delta",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          itemId: "item-1",
+          delta: "Hello",
+        },
+      },
+      "session-1",
+      new Map(),
+      liveEventState,
+    );
+    const second = provider.convertNotificationToSDKMessages(
+      {
+        method: "item/agentMessage/delta",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          itemId: "item-1",
+          delta: " world",
+        },
+      },
+      "session-1",
+      new Map(),
+      liveEventState,
+    );
+
+    expect(first[0]).toMatchObject({
+      type: "assistant",
+      session_id: "session-1",
+      uuid: "item-1-turn-1",
+      _isStreaming: true,
+      message: {
+        role: "assistant",
+        content: "Hello",
+      },
+    });
+    expect(second[0]).toMatchObject({
+      type: "assistant",
+      session_id: "session-1",
+      uuid: "item-1-turn-1",
+      _isStreaming: true,
+      message: {
+        role: "assistant",
+        content: "Hello world",
+      },
+    });
+  });
+
+  it("surfaces Codex context compaction thread items", () => {
+    const provider = createTestProvider() as unknown as {
+      convertNotificationToSDKMessages: (
+        notification: { method: string; params?: unknown },
+        sessionId: string,
+        usageByTurnId: Map<string, unknown>,
+        liveEventState: ReturnType<typeof createLiveEventState>,
+      ) => Array<Record<string, unknown>>;
+    };
+
+    const liveEventState = createLiveEventState();
+    const started = provider.convertNotificationToSDKMessages(
+      {
+        method: "item/started",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            id: "compact-1",
+            type: "contextCompaction",
+          },
+        },
+      },
+      "session-1",
+      new Map(),
+      liveEventState,
+    );
+    const completed = provider.convertNotificationToSDKMessages(
+      {
+        method: "item/completed",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            id: "compact-1",
+            type: "contextCompaction",
+          },
+        },
+      },
+      "session-1",
+      new Map(),
+      liveEventState,
+    );
+
+    expect(started[0]).toMatchObject({
+      type: "system",
+      subtype: "status",
+      session_id: "session-1",
+      uuid: "compact-1-turn-1",
+      status: "compacting",
+    });
+    expect(completed[0]).toMatchObject({
+      type: "system",
+      subtype: "compact_boundary",
+      session_id: "session-1",
+      uuid: "compact-1-turn-1",
+      content: "Context compacted",
+    });
+  });
+
+  it("surfaces raw Codex compaction response items as compact boundaries", () => {
+    const provider = createTestProvider() as unknown as {
+      convertNotificationToSDKMessages: (
+        notification: { method: string; params?: unknown },
+        sessionId: string,
+        usageByTurnId: Map<string, unknown>,
+        liveEventState: ReturnType<typeof createLiveEventState>,
+      ) => Array<Record<string, unknown>>;
+    };
+
+    const messages = provider.convertNotificationToSDKMessages(
+      {
+        method: "rawResponseItem/completed",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            type: "compaction",
+            encrypted_content: "opaque",
+          },
+        },
+      },
+      "session-1",
+      new Map(),
+      createLiveEventState(),
+    );
+
+    expect(messages[0]).toMatchObject({
+      type: "system",
+      subtype: "compact_boundary",
+      session_id: "session-1",
+      uuid: "codex-compaction-turn-1",
+      content: "Context compacted",
+    });
+  });
+
+  it("normalizes raw response function calls and outputs into tool messages", () => {
+    const provider = createTestProvider() as unknown as {
+      convertNotificationToSDKMessages: (
+        notification: { method: string; params?: unknown },
+        sessionId: string,
+        usageByTurnId: Map<string, unknown>,
+        liveEventState: ReturnType<typeof createLiveEventState>,
+      ) => Array<Record<string, unknown>>;
+    };
+
+    const liveEventState = createLiveEventState();
+    const toolUse = provider.convertNotificationToSDKMessages(
+      {
+        method: "rawResponseItem/completed",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            type: "function_call",
+            name: "exec_command",
+            call_id: "call-1",
+            arguments: '{"command":"pnpm lint"}',
+          },
+        },
+      },
+      "session-1",
+      new Map(),
+      liveEventState,
+    );
+    const toolResult = provider.convertNotificationToSDKMessages(
+      {
+        method: "rawResponseItem/completed",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            type: "function_call_output",
+            call_id: "call-1",
+            output: "Process exited with code 0",
+          },
+        },
+      },
+      "session-1",
+      new Map(),
+      liveEventState,
+    );
+
+    expect(toolUse[0]).toMatchObject({
+      type: "assistant",
+      session_id: "session-1",
+      uuid: "call-1-turn-1",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "call-1",
+            name: "Bash",
+            input: {
+              command: "pnpm lint",
+            },
+          },
+        ],
+      },
+    });
+    expect(toolResult[0]).toMatchObject({
+      type: "user",
+      session_id: "session-1",
+      uuid: "call-1-turn-1-result",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "call-1",
+            content: "Process exited with code 0",
+          },
+        ],
+      },
+    });
+  });
+
+  it("marks live result-backed tools incomplete when a turn completes first", () => {
+    const provider = createTestProvider() as unknown as {
+      convertNotificationToSDKMessages: (
+        notification: { method: string; params?: unknown },
+        sessionId: string,
+        usageByTurnId: Map<string, unknown>,
+        liveEventState: ReturnType<typeof createLiveEventState>,
+      ) => Array<Record<string, unknown>>;
+    };
+
+    const liveEventState = createLiveEventState();
+    const toolMessages = provider.convertNotificationToSDKMessages(
+      {
+        method: "item/started",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            id: "cmd-1",
+            type: "commandExecution",
+            command: "sleep 15",
+            status: "inProgress",
+          },
+        },
+      },
+      "session-1",
+      new Map(),
+      liveEventState,
+    );
+    const turnMessages = provider.convertNotificationToSDKMessages(
+      {
+        method: "turn/completed",
+        params: {
+          threadId: "thread-1",
+          turn: {
+            id: "turn-1",
+            items: [],
+            status: "interrupted",
+            error: null,
+            startedAt: null,
+            completedAt: null,
+            durationMs: null,
+          },
+        },
+      },
+      "session-1",
+      new Map(),
+      liveEventState,
+    );
+
+    expect(turnMessages[0]).toMatchObject({
+      type: "system",
+      subtype: "codex_tool_orphans",
+      orphanedToolUseIds: ["cmd-1"],
+    });
+
+    const renderItems = preprocessMessages([
+      ...toolMessages,
+      ...turnMessages,
+    ] as Parameters<typeof preprocessMessages>[0]);
+    expect(renderItems[0]).toMatchObject({
+      type: "tool_call",
+      id: "cmd-1",
+      status: "incomplete",
+    });
+  });
+
+  it("keeps Codex background process handles from reviving orphaned work", () => {
+    const provider = createTestProvider() as unknown as {
+      convertNotificationToSDKMessages: (
+        notification: { method: string; params?: unknown },
+        sessionId: string,
+        usageByTurnId: Map<string, unknown>,
+        liveEventState: ReturnType<typeof createLiveEventState>,
+      ) => Array<Record<string, unknown>>;
+    };
+
+    const liveEventState = createLiveEventState();
+    const toolUse = provider.convertNotificationToSDKMessages(
+      {
+        method: "rawResponseItem/completed",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            type: "function_call",
+            name: "exec_command",
+            call_id: "cmd-1",
+            arguments: '{"cmd":"sleep 20","tty":true}',
+          },
+        },
+      },
+      "session-1",
+      new Map(),
+      liveEventState,
+    );
+    const toolStarted = provider.convertNotificationToSDKMessages(
+      {
+        method: "item/started",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            id: "cmd-1",
+            type: "commandExecution",
+            command: "sleep 20",
+            status: "inProgress",
+          },
+        },
+      },
+      "session-1",
+      new Map(),
+      liveEventState,
+    );
+    const backgroundHandle = provider.convertNotificationToSDKMessages(
+      {
+        method: "rawResponseItem/completed",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            type: "function_call_output",
+            call_id: "cmd-1",
+            output:
+              "Chunk ID: abc\nWall time: 1.0 seconds\nProcess running with session ID 123\nOutput:\n",
+          },
+        },
+      },
+      "session-1",
+      new Map(),
+      liveEventState,
+    );
+    const turnMessages = provider.convertNotificationToSDKMessages(
+      {
+        method: "turn/completed",
+        params: {
+          threadId: "thread-1",
+          turn: {
+            id: "turn-1",
+            items: [],
+            status: "interrupted",
+            error: null,
+            startedAt: null,
+            completedAt: null,
+            durationMs: null,
+          },
+        },
+      },
+      "session-1",
+      new Map(),
+      liveEventState,
+    );
+
+    expect(turnMessages[0]).toMatchObject({
+      type: "system",
+      subtype: "codex_tool_orphans",
+      orphanedToolUseIds: ["cmd-1"],
+    });
+
+    const renderItems = preprocessMessages([
+      ...toolUse,
+      ...toolStarted,
+      ...backgroundHandle,
+      ...turnMessages,
+    ] as Parameters<typeof preprocessMessages>[0]);
+    expect(renderItems[0]).toMatchObject({
+      type: "tool_call",
+      id: "cmd-1",
+      status: "incomplete",
+    });
+  });
+
+  it("does not mark completed live result-backed tools orphaned", () => {
+    const provider = createTestProvider() as unknown as {
+      convertNotificationToSDKMessages: (
+        notification: { method: string; params?: unknown },
+        sessionId: string,
+        usageByTurnId: Map<string, unknown>,
+        liveEventState: ReturnType<typeof createLiveEventState>,
+      ) => Array<Record<string, unknown>>;
+    };
+
+    const liveEventState = createLiveEventState();
+    const toolStarted = provider.convertNotificationToSDKMessages(
+      {
+        method: "item/started",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            id: "cmd-1",
+            type: "commandExecution",
+            command: "printf done",
+            status: "inProgress",
+          },
+        },
+      },
+      "session-1",
+      new Map(),
+      liveEventState,
+    );
+    const toolCompleted = provider.convertNotificationToSDKMessages(
+      {
+        method: "item/completed",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            id: "cmd-1",
+            type: "commandExecution",
+            command: "printf done",
+            aggregatedOutput: "done",
+            exitCode: 0,
+            status: "completed",
+          },
+        },
+      },
+      "session-1",
+      new Map(),
+      liveEventState,
+    );
+    const turnMessages = provider.convertNotificationToSDKMessages(
+      {
+        method: "turn/completed",
+        params: {
+          threadId: "thread-1",
+          turn: {
+            id: "turn-1",
+            items: [],
+            status: "completed",
+            error: null,
+            startedAt: null,
+            completedAt: null,
+            durationMs: null,
+          },
+        },
+      },
+      "session-1",
+      new Map(),
+      liveEventState,
+    );
+
+    expect(
+      turnMessages.some((message) => message.subtype === "codex_tool_orphans"),
+    ).toBe(false);
+
+    const renderItems = preprocessMessages([
+      ...toolStarted,
+      ...toolCompleted,
+      ...turnMessages,
+    ] as Parameters<typeof preprocessMessages>[0]);
+    expect(renderItems[0]).toMatchObject({
+      type: "tool_call",
+      id: "cmd-1",
+      status: "complete",
+    });
+  });
+
+  it("normalizes dynamic tool calls with namespace and output content", () => {
+    const provider = createTestProvider() as unknown as {
+      convertItemToSDKMessages: (
+        item: unknown,
+        sessionId: string,
+        turnId: string,
+        sourceEvent: "item/started" | "item/completed",
+      ) => Array<Record<string, unknown>>;
+    };
+
+    const messages = provider.convertItemToSDKMessages(
+      {
+        id: "call-dynamic",
+        type: "dynamic_tool_call",
+        namespace: "web",
+        tool: "search",
+        arguments: { query: "codex release" },
+        status: "completed",
+        success: true,
+        content_items: [{ type: "inputText", text: "Search completed" }],
+      },
+      "session-1",
+      "turn-1",
+      "item/completed",
+    );
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.message).toMatchObject({
+      role: "assistant",
+      content: [
+        {
+          type: "tool_use",
+          id: "call-dynamic",
+          name: "web:search",
+          input: { query: "codex release" },
+        },
+      ],
+    });
+    expect(messages[1]?.message).toMatchObject({
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: "call-dynamic",
+          content: "Search completed",
+        },
+      ],
+    });
+  });
+
   it("does not emit rate limit errors when hasCredits is false but usage is below 100%", () => {
     const provider = createTestProvider() as unknown as {
       convertNotificationToSDKMessages: (
         notification: { method: string; params?: unknown },
         sessionId: string,
         usageByTurnId: Map<string, unknown>,
+        liveEventState: ReturnType<typeof createLiveEventState>,
       ) => Array<Record<string, unknown>>;
     };
 
@@ -438,6 +2155,7 @@ describe("CodexProvider Event Normalization", () => {
       },
       "session-1",
       new Map(),
+      createLiveEventState(),
     );
 
     expect(messages).toEqual([]);
@@ -449,6 +2167,7 @@ describe("CodexProvider Event Normalization", () => {
         notification: { method: string; params?: unknown },
         sessionId: string,
         usageByTurnId: Map<string, unknown>,
+        liveEventState: ReturnType<typeof createLiveEventState>,
       ) => Array<Record<string, unknown>>;
     };
 
@@ -471,6 +2190,7 @@ describe("CodexProvider Event Normalization", () => {
       },
       "session-1",
       new Map(),
+      createLiveEventState(),
     );
 
     expect(messages).toEqual([]);
@@ -482,6 +2202,7 @@ describe("CodexProvider Event Normalization", () => {
         notification: { method: string; params?: unknown },
         sessionId: string,
         usageByTurnId: Map<string, unknown>,
+        liveEventState: ReturnType<typeof createLiveEventState>,
       ) => Array<Record<string, unknown>>;
     };
 
@@ -501,6 +2222,7 @@ describe("CodexProvider Event Normalization", () => {
       },
       "session-1",
       new Map(),
+      createLiveEventState(),
     );
 
     expect(messages).toHaveLength(1);
@@ -509,6 +2231,58 @@ describe("CodexProvider Event Normalization", () => {
       session_id: "session-1",
       error:
         "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again later.",
+    });
+  });
+
+  it("grants requested permission profiles automatically in bypass mode", async () => {
+    const provider = createTestProvider() as unknown as {
+      handleServerRequestApproval: (
+        request: { method: string; id: number; params?: unknown },
+        options: { permissionMode?: string },
+        signal: AbortSignal,
+      ) => Promise<Record<string, unknown>>;
+    };
+
+    const response = await provider.handleServerRequestApproval(
+      {
+        method: "item/permissions/requestApproval",
+        id: 1,
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          itemId: "permission-1",
+          cwd: "/tmp/project",
+          reason: "Need unrestricted filesystem for GPU tooling",
+          permissions: {
+            network: { enabled: true },
+            fileSystem: {
+              entries: [
+                {
+                  path: { type: "special", value: { kind: "root" } },
+                  access: "write",
+                },
+              ],
+            },
+          },
+        },
+      },
+      { permissionMode: "bypassPermissions" },
+      new AbortController().signal,
+    );
+
+    expect(response).toMatchObject({
+      scope: "session",
+      permissions: {
+        network: { enabled: true },
+        fileSystem: {
+          entries: [
+            {
+              path: { type: "special", value: { kind: "root" } },
+              access: "write",
+            },
+          ],
+        },
+      },
     });
   });
 });

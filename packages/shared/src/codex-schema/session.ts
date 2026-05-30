@@ -27,6 +27,7 @@ export const CodexSessionMetaPayloadSchema = z.object({
   id: z.string(),
   timestamp: z.string(),
   cwd: z.string(),
+  forked_from_id: z.string().optional(),
   originator: z.string().optional(), // e.g. "codex_exec"
   cli_version: z.string().optional(),
   instructions: z.string().optional(),

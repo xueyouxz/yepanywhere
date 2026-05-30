@@ -5,6 +5,7 @@ import {
   isPolicySrpRequired,
   isPolicyTrustedWithoutSrp,
 } from "../../src/routes/ws-auth-policy.js";
+import { isLoopbackWsRequest } from "../../src/routes/ws-relay.js";
 
 describe("WebSocket Auth Policy", () => {
   it("returns srp_required for relay connections", () => {
@@ -92,5 +93,14 @@ describe("WebSocket Auth Policy", () => {
     for (const policy of notSrpRequiredPolicies) {
       expect(isPolicySrpRequired(policy)).toBe(false);
     }
+  });
+
+  it("requires both loopback TCP peer and loopback authority for loopback WS trust", () => {
+    expect(isLoopbackWsRequest("127.0.0.1", "localhost")).toBe(true);
+    expect(isLoopbackWsRequest("::ffff:127.0.0.1", "127.0.0.1")).toBe(true);
+
+    expect(isLoopbackWsRequest("203.0.113.10", "localhost")).toBe(false);
+    expect(isLoopbackWsRequest("127.0.0.1", "example.com")).toBe(false);
+    expect(isLoopbackWsRequest(null, "localhost")).toBe(false);
   });
 });

@@ -1,6 +1,9 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { accessSync, constants, existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
+import { promisify } from "node:util";
 import {
   type SDKMessage as AgentSDKMessage,
   type Query,
@@ -9,6 +12,7 @@ import {
   query,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
+  HELPER_SIDE_MODEL_CHEAPEST,
   type ModelInfo,
   type SlashCommand,
   getModelContextWindow,
@@ -25,7 +29,11 @@ import {
   translateHomePath,
 } from "../remote-spawn.js";
 import { getProjectDirFromCwd, syncSessionFile } from "../session-sync.js";
-import type { ContentBlock, SDKMessage } from "../types.js";
+import type {
+  ContentBlock,
+  ProviderLivenessProbeResult,
+  SDKMessage,
+} from "../types.js";
 import { filterEnvForChildProcess } from "./env-filter.js";
 import type {
   AgentProvider,
@@ -42,13 +50,105 @@ import type {
  * old time-only heuristic if the wrapper causes issues.
  */
 const USE_SPAWN_WRAPPER = true;
+const CLAUDE_LIVENESS_PROBE_TIMEOUT_MS = 5000;
+const CLAUDE_LIVENESS_PROBE_SOURCE = "claude:control/mcp_status";
+const execFileAsync = promisify(execFile);
+const requireFromHere = createRequire(import.meta.url);
+const requireFromClaudeSdk = createRequire(
+  requireFromHere.resolve("@anthropic-ai/claude-agent-sdk"),
+);
+let cachedLocalClaudeCodeExecutable: string | null | undefined;
+
+function isExecutableFile(filePath: string | undefined): filePath is string {
+  if (!filePath) return false;
+  try {
+    accessSync(filePath, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolvePathExecutable(command: string): string | undefined {
+  if (!command.trim()) return undefined;
+
+  if (command.includes("/") || command.includes("\\")) {
+    return isExecutableFile(command) ? command : undefined;
+  }
+
+  const pathEnv = process.env.PATH ?? "";
+  for (const dir of pathEnv.split(delimiter)) {
+    const candidate = join(dir, command);
+    if (isExecutableFile(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function hasGlibcRuntime(): boolean {
+  if (typeof process.report?.getReport !== "function") {
+    return false;
+  }
+  const report = process.report.getReport() as {
+    header?: { glibcVersionRuntime?: string };
+  };
+  return Boolean(report.header?.glibcVersionRuntime);
+}
+
+function getClaudeSdkNativePackageNames(): string[] {
+  const binaryArch = process.arch;
+  if (process.platform === "linux") {
+    const glibcPackage = `@anthropic-ai/claude-agent-sdk-linux-${binaryArch}`;
+    const muslPackage = `${glibcPackage}-musl`;
+    return hasGlibcRuntime()
+      ? [glibcPackage, muslPackage]
+      : [muslPackage, glibcPackage];
+  }
+
+  return [`@anthropic-ai/claude-agent-sdk-${process.platform}-${binaryArch}`];
+}
+
+export function resolveClaudeSdkNativeExecutable(): string | undefined {
+  const binaryName = process.platform === "win32" ? "claude.exe" : "claude";
+  for (const packageName of getClaudeSdkNativePackageNames()) {
+    try {
+      const executable = requireFromClaudeSdk.resolve(
+        `${packageName}/${binaryName}`,
+      );
+      if (isExecutableFile(executable)) {
+        return executable;
+      }
+    } catch {
+      // Optional package not installed for this platform.
+    }
+  }
+  return undefined;
+}
+
+function resolveLocalClaudeCodeExecutable(): string | undefined {
+  if (cachedLocalClaudeCodeExecutable !== undefined) {
+    return cachedLocalClaudeCodeExecutable ?? undefined;
+  }
+
+  const envExecutable =
+    process.env.CLAUDE_CODE_EXECUTABLE ?? process.env.CLAUDE_CODE_PATH;
+  const executable =
+    resolvePathExecutable(envExecutable ?? "") ??
+    resolveClaudeSdkNativeExecutable() ??
+    resolvePathExecutable("claude");
+
+  cachedLocalClaudeCodeExecutable = executable ?? null;
+  return executable;
+}
 
 /** Static fallback list of Claude models (used if probe fails) */
 const CLAUDE_MODELS_FALLBACK: ModelInfo[] = [
   {
     id: "default",
-    name: "Default (recommended)",
-    description: "Claude Code chooses the recommended model for your account",
+    name: "Default",
+    description:
+      "Uses Claude Code's saved default for new sessions, as set by /model",
     contextWindow: getModelContextWindow("default", "claude"),
   },
   {
@@ -71,14 +171,14 @@ const CLAUDE_MODELS_FALLBACK: ModelInfo[] = [
   },
   {
     id: "opus",
-    name: "Opus",
-    description: "Standard-context Opus for the most demanding reasoning",
+    name: "Opus 4.8",
+    description: "Standard-context Opus 4.8 for the most demanding reasoning",
     contextWindow: getModelContextWindow("opus", "claude"),
   },
   {
     id: "opus[1m]",
-    name: "Opus 1M",
-    description: "Opus with 1M context for the largest working sets",
+    name: "Opus 4.8 1M",
+    description: "Opus 4.8 with 1M context for the largest working sets",
     contextWindow: getModelContextWindow("opus[1m]", "claude"),
   },
   {
@@ -89,11 +189,34 @@ const CLAUDE_MODELS_FALLBACK: ModelInfo[] = [
   },
   {
     id: "opusplan",
-    name: "Opus Plan",
-    description: "Uses Opus for planning, then Sonnet for execution",
+    name: "Opus 4.8 Plan",
+    description: "Uses Opus 4.8 for planning, then Sonnet for execution",
     contextWindow: getModelContextWindow("opus", "claude"),
   },
 ];
+
+const CLAUDE_GOAL_LOOP_ALIAS_COMMAND: SlashCommand = {
+  name: "goal",
+  description: "Keep working toward a verifiable end state until it is met",
+  argumentHint: "<verifiable end state>",
+  emulation: {
+    providerText: "/loop wish {{argument}}",
+  },
+};
+
+function normalizedSlashCommandName(command: SlashCommand): string {
+  return command.name.trim().replace(/^\/+/, "").toLowerCase();
+}
+
+export function withClaudeGoalAlias(
+  commands: SlashCommand[],
+): SlashCommand[] {
+  const normalizedNames = new Set(commands.map(normalizedSlashCommandName));
+  if (normalizedNames.has("goal") || !normalizedNames.has("loop")) {
+    return commands;
+  }
+  return [...commands, CLAUDE_GOAL_LOOP_ALIAS_COMMAND];
+}
 
 function enrichClaudeModel(model: ModelInfo): ModelInfo {
   return {
@@ -130,6 +253,71 @@ let cachedModels: ModelInfo[] | null = null;
 /** Promise for in-flight probe (to avoid duplicate probes) */
 let probePromise: Promise<ModelInfo[]> | null = null;
 
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    timeout.unref?.();
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+export async function probeClaudeControlLiveness(
+  control: Pick<Query, "mcpServerStatus">,
+  options?: {
+    checkedAt?: Date;
+    timeoutMs?: number;
+    isProcessAlive?: () => boolean | undefined;
+  },
+): Promise<ProviderLivenessProbeResult> {
+  const checkedAt = options?.checkedAt ?? new Date();
+  const processAlive = options?.isProcessAlive?.();
+
+  if (processAlive === false) {
+    return {
+      status: "unavailable",
+      source: CLAUDE_LIVENESS_PROBE_SOURCE,
+      checkedAt,
+      detail: "Claude CLI process is not alive",
+    };
+  }
+
+  try {
+    await withTimeout(
+      control.mcpServerStatus(),
+      options?.timeoutMs ?? CLAUDE_LIVENESS_PROBE_TIMEOUT_MS,
+      "Claude SDK control liveness probe",
+    );
+    return {
+      status: "active",
+      source: CLAUDE_LIVENESS_PROBE_SOURCE,
+      checkedAt,
+      detail:
+        "Claude SDK control channel responded; direct turn status is not exposed",
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      source: CLAUDE_LIVENESS_PROBE_SOURCE,
+      checkedAt,
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 /**
  * Claude provider implementation using @anthropic-ai/claude-agent-sdk.
  *
@@ -144,6 +332,9 @@ export class ClaudeProvider implements AgentProvider {
   readonly supportsPermissionMode = true;
   readonly supportsThinkingToggle = true;
   readonly supportsSlashCommands = true;
+  readonly supportsSteering = false;
+  readonly supportsRecaps = true;
+  readonly supportsNativePromptSuggestions = true;
 
   /**
    * Check if Claude SDK is available.
@@ -164,16 +355,110 @@ export class ClaudeProvider implements AgentProvider {
 
   /**
    * Get detailed authentication status.
-   * If Claude CLI is installed, assume it's authenticated.
-   * The SDK handles auth internally and will error at session start if not authenticated.
+   * Uses environment/API-key and local Claude credentials heuristics.
+   * This is still only a local signal; upstream tokens can expire or be revoked.
    */
   async getAuthStatus(): Promise<AuthStatus> {
     const installed = await this.isClaudeCliInstalled();
-    return {
-      installed,
-      authenticated: installed,
-      enabled: installed,
-    };
+    if (!installed) {
+      return {
+        installed: false,
+        authenticated: false,
+        enabled: false,
+      };
+    }
+
+    const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+    if (apiKey) {
+      return {
+        installed: true,
+        authenticated: true,
+        enabled: true,
+      };
+    }
+
+    const cliAuthStatus = await this.getCliAuthStatus();
+    if (cliAuthStatus) {
+      return cliAuthStatus;
+    }
+
+    const credentialsPath = join(homedir(), ".claude", ".credentials.json");
+    if (!existsSync(credentialsPath)) {
+      return {
+        installed: true,
+        authenticated: false,
+        enabled: false,
+      };
+    }
+
+    try {
+      const parsed = JSON.parse(readFileSync(credentialsPath, "utf-8")) as {
+        claudeAiOauth?: {
+          accessToken?: string;
+          refreshToken?: string;
+          expiresAt?: number;
+        };
+      };
+
+      const oauth = parsed.claudeAiOauth;
+      const hasTokens = Boolean(oauth?.accessToken || oauth?.refreshToken);
+      if (!hasTokens) {
+        return {
+          installed: true,
+          authenticated: false,
+          enabled: false,
+        };
+      }
+
+      const expiresAt =
+        typeof oauth?.expiresAt === "number"
+          ? new Date(oauth.expiresAt)
+          : undefined;
+      const authenticated =
+        !expiresAt || expiresAt >= new Date() || Boolean(oauth?.refreshToken);
+
+      return {
+        installed: true,
+        authenticated,
+        enabled: authenticated,
+        expiresAt,
+      };
+    } catch {
+      return {
+        installed: true,
+        authenticated: false,
+        enabled: false,
+      };
+    }
+  }
+
+  private async getCliAuthStatus(): Promise<AuthStatus | null> {
+    try {
+      const cliInfo = detectClaudeCli();
+      const claudePath = cliInfo.path ?? "claude";
+      const { stdout } = await execFileAsync(claudePath, ["auth", "status"], {
+        encoding: "utf-8",
+        timeout: 5000,
+      });
+
+      const parsed = JSON.parse(stdout) as {
+        loggedIn?: boolean;
+        email?: string;
+      };
+
+      if (typeof parsed.loggedIn !== "boolean") {
+        return null;
+      }
+
+      return {
+        installed: true,
+        authenticated: parsed.loggedIn,
+        enabled: parsed.loggedIn,
+        user: parsed.email ? { email: parsed.email } : undefined,
+      };
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -261,11 +546,12 @@ export class ClaudeProvider implements AgentProvider {
     // while we query supportedModels() from the initialization handshake.
     // Resolves (rather than rejects) on abort to avoid unhandled rejections.
     async function* waitForever(): AsyncGenerator<never> {
-      await new Promise<never>((resolve) => {
+      await new Promise<void>((resolve) => {
         abortController.signal.addEventListener("abort", () =>
-          resolve(undefined as never),
+          resolve(),
         );
       });
+      yield* [];
     }
 
     try {
@@ -276,6 +562,7 @@ export class ClaudeProvider implements AgentProvider {
           abortController,
           permissionMode: "default",
           persistSession: false,
+          pathToClaudeCodeExecutable: resolveLocalClaudeCodeExecutable(),
           env: this.getEnv(),
         },
       });
@@ -283,7 +570,7 @@ export class ClaudeProvider implements AgentProvider {
       // The SDK's internal readMessages loop must be running for
       // the initialize control_response to be processed. Start
       // consuming the async iterator in the background.
-      const drain = (async () => {
+      void (async () => {
         try {
           for await (const _ of sdkQuery) {
             // drain
@@ -310,6 +597,145 @@ export class ClaudeProvider implements AgentProvider {
         })),
       );
     } finally {
+      abortController.abort();
+    }
+  }
+
+  /**
+   * Synthesize a short on-return recap from recent assistant text. See
+   * topics/recaps.md for the design rationale (SDK does not auto-emit
+   * recaps in --print mode, so YA generates one ephemerally).
+   *
+   * Runs a non-persisted helper query so nothing lands in the underlying
+   * session's JSONL. The `cheapest` helper token maps to Haiku for Claude.
+   * The recap text is bounded by the
+   * system prompt to roughly the Claude TUI's recap shape (≤40 words,
+   * 1–2 plain sentences). The trailing "(disable recaps in /config)"
+   * hint the TUI sometimes appends is a TUI affordance only — we do not
+   * generate it here, so consumers do not need to strip it from YA-side
+   * recaps; the renderer should still strip defensively in case the SDK
+   * later forwards a TUI-shaped recap unchanged.
+   */
+  async generateRecap(
+    recentAssistantText: string[],
+    options?: { model?: string },
+  ): Promise<string> {
+    const trimmed = recentAssistantText
+      .map((text) => text.trim())
+      .filter((text) => text.length > 0);
+    if (trimmed.length === 0) {
+      throw new Error("No recent assistant text to summarize");
+    }
+
+    // Bound the input. The recent buffer is already small per entry, but
+    // cap total to keep the ephemeral query cheap and well within the
+    // helper context window even on long sessions.
+    const MAX_TOTAL_CHARS = 6000;
+    let total = 0;
+    const tail: string[] = [];
+    for (let i = trimmed.length - 1; i >= 0; i--) {
+      const entry = trimmed[i] ?? "";
+      if (total + entry.length > MAX_TOTAL_CHARS) {
+        break;
+      }
+      tail.unshift(entry);
+      total += entry.length;
+    }
+    if (tail.length === 0) {
+      // The most recent entry alone exceeded the cap; take its tail.
+      const last = trimmed[trimmed.length - 1] ?? "";
+      tail.push(last.slice(-MAX_TOTAL_CHARS));
+    }
+
+    const transcript = tail
+      .map((text, idx) => `--- Assistant turn ${idx + 1} ---\n${text}`)
+      .join("\n\n");
+    const userPrompt = [
+      "The user stepped away and is coming back. Recap in under 40 words,",
+      "1-2 plain sentences, no markdown. Lead with the overall thrust of what",
+      "the assistant did or is doing; mention any pending next action.",
+      "Do not greet, do not ask a question, do not add a sign-off.",
+      "",
+      "Recent assistant output:",
+      transcript,
+    ].join("\n");
+
+    const abortController = new AbortController();
+    const RECAP_TIMEOUT_MS = 20_000;
+    const timeout = setTimeout(() => abortController.abort(), RECAP_TIMEOUT_MS);
+    timeout.unref?.();
+
+    async function* singlePrompt(): AsyncGenerator<{
+      type: "user";
+      message: { role: "user"; content: string };
+      parent_tool_use_id: null;
+      session_id: string;
+    }> {
+      yield {
+        type: "user",
+        message: { role: "user", content: userPrompt },
+        parent_tool_use_id: null,
+        session_id: "",
+      };
+    }
+
+    const helperModel =
+      options?.model === HELPER_SIDE_MODEL_CHEAPEST
+        ? "haiku"
+        : options?.model;
+
+    try {
+      const sdkQuery = query({
+        prompt: singlePrompt(),
+        options: {
+          cwd: homedir(),
+          abortController,
+          permissionMode: "default",
+          persistSession: false,
+          pathToClaudeCodeExecutable: resolveLocalClaudeCodeExecutable(),
+          env: this.getEnv(),
+          model: helperModel,
+          maxTurns: 1,
+          systemPrompt:
+            "You are a recap helper. Reply with the recap text only, no preamble.",
+        },
+      });
+
+      let text = "";
+      for await (const message of sdkQuery as AsyncIterable<AgentSDKMessage>) {
+        if (
+          message.type === "assistant" &&
+          typeof message.message?.content !== "undefined"
+        ) {
+          const content = message.message.content;
+          if (typeof content === "string") {
+            text += content;
+          } else if (Array.isArray(content)) {
+            for (const block of content) {
+              if (
+                block &&
+                typeof block === "object" &&
+                (block as { type?: string }).type === "text" &&
+                typeof (block as { text?: string }).text === "string"
+              ) {
+                text += (block as { text: string }).text;
+              }
+            }
+          }
+        }
+        if (message.type === "result") {
+          break;
+        }
+      }
+      const cleaned = text
+        .replace(/\s*\(disable recaps in \/config\)\s*$/u, "")
+        .trim();
+      if (!cleaned) {
+        throw new Error("Recap generation returned empty text");
+      }
+      return cleaned;
+    } finally {
+      clearTimeout(timeout);
       abortController.abort();
     }
   }
@@ -453,9 +879,12 @@ export class ClaudeProvider implements AgentProvider {
 
     // Create the SDK query with our message generator
     let sdkQuery: Query;
+    const pathToClaudeCodeExecutable = options.executor
+      ? undefined
+      : resolveLocalClaudeCodeExecutable();
     try {
       sdkQuery = query({
-        prompt: queue.generator(),
+        prompt: queue,
         options: {
           cwd: effectiveCwd,
           resume: options.resumeSessionId,
@@ -472,10 +901,12 @@ export class ClaudeProvider implements AgentProvider {
           systemPrompt: this.getSystemPrompt(options.globalInstructions),
           settingSources: ["user", "project", "local"],
           includePartialMessages: true,
+          promptSuggestions: options.promptSuggestions === true,
           // Model, thinking, and effort options
           model: options.model,
           thinking: options.thinking,
           effort: options.effort,
+          pathToClaudeCodeExecutable,
           // Filter env to exclude npm_*, yep-anywhere specific, and other irrelevant vars
           env: this.getEnv(),
           // Remote execution via SSH
@@ -510,18 +941,23 @@ export class ClaudeProvider implements AgentProvider {
       cwd: effectiveCwd,
       remoteEnv: options.remoteEnv,
     });
+    const isCapturedProcessAlive =
+      USE_SPAWN_WRAPPER && !options.executor
+        ? () =>
+            capturedProcess !== null &&
+            capturedProcess.exitCode === null &&
+            !capturedProcess.killed
+        : undefined;
 
     return {
       iterator: wrappedIterator,
       queue,
       abort: () => abortController.abort(),
-      isProcessAlive:
-        USE_SPAWN_WRAPPER && !options.executor
-          ? () =>
-              capturedProcess !== null &&
-              capturedProcess.exitCode === null &&
-              !capturedProcess.killed
-          : undefined,
+      isProcessAlive: isCapturedProcessAlive,
+      probeLiveness: () =>
+        probeClaudeControlLiveness(sdkQuery, {
+          isProcessAlive: isCapturedProcessAlive,
+        }),
       get pid() {
         return (capturedProcess as ChildProcess | null)?.pid;
       },
@@ -545,11 +981,13 @@ export class ClaudeProvider implements AgentProvider {
       supportedCommands: async (): Promise<SlashCommand[]> => {
         const commands = await sdkQuery.supportedCommands();
         // Map SDK SlashCommand to our SlashCommand (same fields, just normalize)
-        return commands.map((c) => ({
-          name: c.name,
-          description: c.description,
-          argumentHint: c.argumentHint || undefined,
-        }));
+        return withClaudeGoalAlias(
+          commands.map((c) => ({
+            name: c.name,
+            description: c.description,
+            argumentHint: c.argumentHint || undefined,
+          })),
+        );
       },
       setModel: (model?: string) => sdkQuery.setModel(model),
     };

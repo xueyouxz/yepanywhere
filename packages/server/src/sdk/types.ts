@@ -2,7 +2,13 @@
 
 // Re-export PermissionMode from shared
 export type { PermissionMode } from "@yep-anywhere/shared";
-import type { PermissionMode, UploadedFile } from "@yep-anywhere/shared";
+import type {
+  PermissionMode,
+  SlashCommand,
+  SessionLivenessProbeStatus,
+  UploadedFile,
+  UserMessageMetadata,
+} from "@yep-anywhere/shared";
 
 export interface ContentBlock {
   type: "text" | "tool_use" | "tool_result" | "image" | "thinking";
@@ -16,6 +22,8 @@ export interface ContentBlock {
   tool_use_id?: string;
   /** For tool_result blocks - the result content */
   content?: string;
+  /** For tool_result blocks - true when the tool failed */
+  is_error?: boolean;
 }
 
 /**
@@ -87,6 +95,8 @@ export interface UserMessage {
   uuid?: string;
   /** Client-generated temp ID for optimistic UI tracking. Echoed back in SSE. */
   tempId?: string;
+  /** YA-internal submission timing and delivery-intent metadata. */
+  metadata?: UserMessageMetadata;
 }
 
 export interface SDKSessionOptions {
@@ -120,10 +130,27 @@ export type CanUseTool = (
   options: { signal: AbortSignal },
 ) => Promise<ToolApprovalResult>;
 
+export interface ProviderLivenessProbeResult {
+  status: SessionLivenessProbeStatus;
+  source: string;
+  detail?: string;
+  checkedAt?: Date;
+}
+
+export interface ProviderActivitySnapshot {
+  lastRawProviderEventAt?: Date | null;
+  lastRawProviderEventSource?: string | null;
+}
+
 export interface StartSessionOptions {
   cwd: string;
   initialMessage?: UserMessage;
   resumeSessionId?: string;
+  /**
+   * Optional provider-visible client identity, used by providers that expose
+   * launcher identity in session metadata (currently Codex).
+   */
+  clientName?: string;
   permissionMode?: PermissionMode;
   /** Model to use (e.g., "sonnet", "opus", "haiku"). undefined = use CLI default */
   model?: string;
@@ -138,6 +165,8 @@ export interface StartSessionOptions {
   remoteEnv?: Record<string, string>;
   /** Global instructions to append to system prompt (from server settings) */
   globalInstructions?: string;
+  /** Native prompt-suggestion protocol opt-in for providers that support it. */
+  promptSuggestions?: boolean;
 }
 
 export interface StartSessionResult {
@@ -148,6 +177,10 @@ export interface StartSessionResult {
   isProcessAlive?: () => boolean;
   /** OS PID of the spawned agent child process (undefined if not available) */
   pid?: number | (() => number | undefined);
+  /** Actively query provider/session status when passive progress evidence is stale. */
+  probeLiveness?: () => Promise<ProviderLivenessProbeResult>;
+  /** Passive raw provider/app-server event cadence, when available. */
+  getProviderActivity?: () => ProviderActivitySnapshot;
   /**
    * Change max thinking tokens without restarting the session.
    * Pass null to disable thinking mode.
@@ -158,7 +191,7 @@ export interface StartSessionResult {
    * Interrupt the current turn gracefully without killing the process.
    * Only supported by Claude SDK 0.2.7+.
    */
-  interrupt?: () => Promise<void>;
+  interrupt?: () => Promise<void | boolean>;
   /**
    * Get the list of available models from the SDK.
    * Only supported by Claude SDK 0.2.7+.
@@ -170,9 +203,7 @@ export interface StartSessionResult {
    * Get the list of available slash commands from the SDK.
    * Only supported by Claude SDK 0.2.7+.
    */
-  supportedCommands?: () => Promise<
-    Array<{ name: string; description: string; argumentHint?: string }>
-  >;
+  supportedCommands?: () => Promise<SlashCommand[]>;
   /**
    * Change the model mid-session without restarting.
    * Only supported by Claude SDK 0.2.7+.

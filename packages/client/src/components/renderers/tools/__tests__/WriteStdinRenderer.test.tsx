@@ -130,6 +130,21 @@ describe("WriteStdinRenderer", () => {
     expect(screen.getByText(/line 2/)).toBeDefined();
   });
 
+  it("renders ANSI escapes from extracted shell output", () => {
+    const { container } = render(
+      <div>
+        {writeStdinRenderer.renderToolResult(
+          "Chunk ID: ff710e\nWall time: 0.0518 seconds\nProcess exited with code 0\nOutput:\nplain\n\u001b[32mgreen bold\u001b[0m\n",
+          false,
+          renderContext,
+        )}
+      </div>,
+    );
+
+    expect(screen.queryByText(/Chunk ID: ff710e/)).toBeNull();
+    expect(container.querySelector(".ansi-fg-green")).not.toBeNull();
+  });
+
   it("renders PTY-backed read output as a file modal opener", () => {
     const { container } = render(
       <div>

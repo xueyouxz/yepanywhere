@@ -1,4 +1,8 @@
 import { type ReactNode, useEffect } from "react";
+import { useLocation } from "react-router-dom";
+import { BottomOverscrollReload } from "./components/BottomOverscrollReload";
+import { ClientLogRecordingBadge } from "./components/ClientLogRecordingBadge";
+import { CodexUpdatePrompt } from "./components/CodexUpdatePrompt";
 import { ConnectionBar } from "./components/ConnectionBar";
 import { FloatingActionButton } from "./components/FloatingActionButton";
 import { ReloadBanner } from "./components/ReloadBanner";
@@ -23,6 +27,9 @@ interface Props {
  * Inner component that uses hooks requiring InboxContext.
  */
 function AppContent({ children }: Props) {
+  const location = useLocation();
+  const isSessionDetailRoute = /\/sessions\/[^/]+/.test(location.pathname);
+
   // Manage SSE connection based on auth state (prevents 401s on login page)
   useActivityBusConnection();
 
@@ -48,6 +55,7 @@ function AppContent({ children }: Props) {
   return (
     <>
       <ConnectionBar />
+      {!isSessionDetailRoute && <ClientLogRecordingBadge />}
       {isManualReloadMode && pendingReloads.backend && (
         <ReloadBanner
           target="backend"
@@ -64,6 +72,10 @@ function AppContent({ children }: Props) {
           onDismiss={() => dismiss("frontend")}
         />
       )}
+      <BottomOverscrollReload
+        disabled={isSessionDetailRoute}
+        onReload={reloadFrontend}
+      />
       {children}
       <FloatingActionButton />
     </>
@@ -87,6 +99,7 @@ export function App({ children }: Props) {
               {!isLoading && showWizard && (
                 <OnboardingWizard onComplete={completeOnboarding} />
               )}
+              {!isLoading && !showWizard && <CodexUpdatePrompt />}
             </SchemaValidationProvider>
           </InboxProvider>
         </AuthProvider>

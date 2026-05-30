@@ -23,7 +23,8 @@ export interface StaticServeOptions {
  * - index.html for all other routes (SPA fallback)
  */
 export function createStaticRoutes(options: StaticServeOptions): Hono {
-  const { distPath, basePath } = options;
+  const { basePath } = options;
+  const distPath = path.resolve(options.distPath);
   const app = new Hono();
 
   // Check if dist directory exists
@@ -46,11 +47,11 @@ export function createStaticRoutes(options: StaticServeOptions): Hono {
     }
 
     // Try to serve the exact file
-    const filePath = path.join(distPath, reqPath);
+    const requestFilePath = reqPath.startsWith("/") ? reqPath.slice(1) : reqPath;
+    const filePath = path.resolve(distPath, requestFilePath);
 
     // Security: ensure we're not escaping the dist directory
-    const normalizedFilePath = path.normalize(filePath);
-    if (!normalizedFilePath.startsWith(distPath)) {
+    if (!isPathInsideDirectory(filePath, distPath)) {
       return c.text("Forbidden", 403);
     }
 
@@ -112,6 +113,22 @@ export function createStaticRoutes(options: StaticServeOptions): Hono {
   });
 
   return app;
+}
+
+export function isPathInsideDirectory(
+  filePath: string,
+  directory: string,
+): boolean {
+  const relativePath = path.relative(
+    path.resolve(directory),
+    path.resolve(filePath),
+  );
+  return (
+    relativePath === "" ||
+    (!!relativePath &&
+      !relativePath.startsWith("..") &&
+      !path.isAbsolute(relativePath))
+  );
 }
 
 /**

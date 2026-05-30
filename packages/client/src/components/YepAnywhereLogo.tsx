@@ -1,7 +1,9 @@
+import { BrandWordmark } from "./BrandWordmark";
+
 /**
  * YepAnywhereLogo - Brand logo component with dark/light mode support.
  *
- * Displays the yep✓anywhere wordmark with the app icon.
+ * Displays the full yepanywhere wordmark with the app icon.
  * Automatically adapts colors based on current theme.
  */
 
@@ -62,8 +64,7 @@ export function YepAnywhereLogo({
         </svg>
       )}
       <span className="yep-anywhere-logo-text">
-        <span className="yep-anywhere-logo-yep">yep</span>
-        <span className="yep-anywhere-logo-anywhere">anywhere</span>
+        <BrandWordmark variant="full" />
       </span>
     </span>
   );

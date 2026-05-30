@@ -1,4 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
+import {
+  HELPER_SIDE_MODEL_CHEAPEST,
+  HELPER_SIDE_MODEL_SAME_AS_MAIN,
+  type PromptSuggestionMode,
+  type RecapMode,
+} from "@yep-anywhere/shared";
+import { useToastContext } from "../../contexts/ToastContext";
+import { useCodexUpdateStatus } from "../../hooks/useCodexUpdateStatus";
 import { useProviders } from "../../hooks/useProviders";
 import { useServerSettings } from "../../hooks/useServerSettings";
 import { useI18n } from "../../i18n";
@@ -155,6 +163,206 @@ function OllamaSystemPromptInput() {
   );
 }
 
+function CodexUpdatePanel() {
+  const { showToast } = useToastContext();
+  const { settings, updateSetting } = useServerSettings();
+  const {
+    status,
+    isChecking,
+    isInstalling,
+    error,
+    installOutput,
+    refresh,
+    install,
+  } = useCodexUpdateStatus();
+
+  const policy = settings?.codexUpdatePolicy ?? "notify";
+  const canAuto = status?.updateMethod === "npm";
+
+  const copy = useCallback(
+    async (text: string) => {
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast("Command copied", "success");
+      } catch {
+        showToast("Copy failed", "error");
+      }
+    },
+    [showToast],
+  );
+
+  if (!status || !status.installed || !status.latest) {
+    return null;
+  }
+
+  const updateAvailable = status.updateAvailable;
+
+  return (
+    <div style={{ marginTop: "var(--space-2)", width: "100%" }}>
+      <div
+        style={{
+          display: "flex",
+          gap: "var(--space-2)",
+          alignItems: "center",
+          flexWrap: "wrap",
+        }}
+      >
+        {updateAvailable ? (
+          <span>
+            <strong>Update available:</strong> {status.installed} →{" "}
+            {status.latest}
+          </span>
+        ) : (
+          <span className="settings-hint">
+            Codex CLI {status.installed} is up to date
+          </span>
+        )}
+        <button
+          type="button"
+          className="settings-button"
+          onClick={() => void refresh(true)}
+          disabled={isChecking}
+          style={{ marginLeft: "auto" }}
+        >
+          {isChecking ? "Checking…" : "Check now"}
+        </button>
+        {status.releaseUrl && updateAvailable && (
+          <a
+            href={status.releaseUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="settings-link"
+          >
+            Release notes
+          </a>
+        )}
+      </div>
+
+      {updateAvailable && (
+        <div
+          style={{
+            display: "flex",
+            gap: "var(--space-2)",
+            alignItems: "center",
+            marginTop: "var(--space-2)",
+            flexWrap: "wrap",
+          }}
+        >
+          {status.updateMethod === "npm" ? (
+            <button
+              type="button"
+              className="settings-button"
+              onClick={() => void install()}
+              disabled={isInstalling}
+            >
+              {isInstalling ? "Installing…" : "Update now"}
+            </button>
+          ) : (
+            <span className="settings-hint">
+              Update with your installer:
+            </span>
+          )}
+          {status.manualInstallCommand && (
+            <>
+              <code
+                style={{
+                  padding: "2px 6px",
+                  background: "var(--color-surface-raised, #f5f5f5)",
+                  borderRadius: 4,
+                  fontSize: "0.85em",
+                }}
+              >
+                {status.manualInstallCommand}
+              </code>
+              <button
+                type="button"
+                className="settings-button"
+                onClick={() => void copy(status.manualInstallCommand ?? "")}
+              >
+                Copy
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <p className="settings-hint" style={{ color: "var(--color-error)" }}>
+          {error}
+        </p>
+      )}
+      {installOutput && (
+        <details style={{ marginTop: "var(--space-2)" }}>
+          <summary className="settings-hint">Install output</summary>
+          <pre
+            style={{
+              fontSize: "0.8em",
+              whiteSpace: "pre-wrap",
+              maxHeight: 200,
+              overflow: "auto",
+            }}
+          >
+            {installOutput}
+          </pre>
+        </details>
+      )}
+
+      <fieldset
+        style={{
+          border: "none",
+          padding: 0,
+          marginTop: "var(--space-3)",
+          display: "flex",
+          gap: "var(--space-3)",
+          flexWrap: "wrap",
+        }}
+      >
+        <legend className="settings-hint" style={{ marginBottom: 4 }}>
+          Update policy
+        </legend>
+        {(["auto", "notify", "off"] as const).map((value) => {
+          const disabled = value === "auto" && !canAuto;
+          return (
+            <label
+              key={value}
+              style={{
+                display: "inline-flex",
+                gap: 4,
+                alignItems: "center",
+                opacity: disabled ? 0.55 : 1,
+                cursor: disabled ? "not-allowed" : "pointer",
+              }}
+              title={
+                disabled
+                  ? "Auto requires an npm-global install"
+                  : undefined
+              }
+            >
+              <input
+                type="radio"
+                name="codex-update-policy"
+                value={value}
+                checked={policy === value}
+                disabled={disabled}
+                onChange={() =>
+                  void updateSetting("codexUpdatePolicy", value)
+                }
+              />
+              <span>
+                {value === "auto"
+                  ? "Auto"
+                  : value === "notify"
+                    ? "Notify me"
+                    : "Off"}
+              </span>
+            </label>
+          );
+        })}
+      </fieldset>
+    </div>
+  );
+}
+
 function OllamaSettings() {
   const { settings } = useServerSettings();
   const useFullPrompt = settings?.ollamaUseFullSystemPrompt ?? false;
@@ -170,8 +378,19 @@ function OllamaSettings() {
 
 export function ProvidersSettings() {
   const { t } = useI18n();
+  const { showToast } = useToastContext();
   const { providers: serverProviders, loading: providersLoading } =
     useProviders();
+  const { settings, updateSetting } = useServerSettings();
+
+  const handleCopyClaudeLoginCommand = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText("claude auth login --claudeai");
+      showToast(t("providersClaudeLoginCommandCopied"), "success");
+    } catch {
+      showToast(t("providersClaudeLoginCommandCopyError"), "error");
+    }
+  }, [showToast, t]);
 
   // Merge server detection status with client-side metadata
   const registeredProviders = getAllProviders();
@@ -185,6 +404,50 @@ export function ProvidersSettings() {
       authenticated: serverInfo?.authenticated ?? false,
     };
   });
+  const newSessionDefaults = settings?.newSessionDefaults;
+  const defaultProviderInfo =
+    serverProviders.find((p) => p.name === newSessionDefaults?.provider) ??
+    serverProviders.find((p) => p.installed && (p.authenticated || p.enabled));
+  const defaultRecapMode =
+    newSessionDefaults?.recapMode ??
+    (defaultProviderInfo?.supportsNativeRecaps ? "native" : "off");
+  const storedPromptSuggestionMode = newSessionDefaults?.promptSuggestionMode;
+  const defaultPromptSuggestionMode =
+    storedPromptSuggestionMode === "off" ||
+    (storedPromptSuggestionMode === "native" &&
+      defaultProviderInfo?.supportsNativePromptSuggestions)
+      ? storedPromptSuggestionMode
+      : defaultProviderInfo?.supportsNativePromptSuggestions
+        ? "native"
+        : "off";
+  const defaultHelperSideModel =
+    newSessionDefaults?.helperSideModel ?? HELPER_SIDE_MODEL_CHEAPEST;
+  const recapModeLabels: Record<RecapMode, string> = {
+    off: t("recapModeOff"),
+    native: t("recapModeNative"),
+    "side-session": t("recapModeSideSession"),
+  };
+  const promptSuggestionModeLabels: Record<PromptSuggestionMode, string> = {
+    off: t("promptSuggestionModeOff"),
+    native: t("promptSuggestionModeNative"),
+  };
+  const isRecapModeAvailable = (mode: RecapMode) => {
+    if (mode === "off") return true;
+    if (mode === "native") return defaultProviderInfo?.supportsNativeRecaps === true;
+    return defaultProviderInfo?.supportsRecaps === true;
+  };
+  const isPromptSuggestionModeAvailable = (mode: PromptSuggestionMode) => {
+    if (mode === "off") return true;
+    return defaultProviderInfo?.supportsNativePromptSuggestions === true;
+  };
+  const updateNewSessionDefaults = async (
+    updates: NonNullable<typeof newSessionDefaults>,
+  ) => {
+    await updateSetting("newSessionDefaults", {
+      ...newSessionDefaults,
+      ...updates,
+    });
+  };
 
   return (
     <section className="settings-section">
@@ -192,6 +455,82 @@ export function ProvidersSettings() {
       <p className="settings-section-description">
         {t("providersSectionDescription")}
       </p>
+      <div className="settings-group">
+        <div className="settings-item model-settings-item">
+          <div className="settings-item-info">
+            <strong>{t("providersRecapDefaultsTitle")}</strong>
+            <p>{t("providersRecapDefaultsDescription")}</p>
+          </div>
+          <div className="font-size-selector model-settings-chip-group">
+            {(["off", "native", "side-session"] as RecapMode[]).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={`font-size-option ${defaultRecapMode === mode ? "active" : ""}`}
+                disabled={providersLoading || !isRecapModeAvailable(mode)}
+                onClick={() => void updateNewSessionDefaults({ recapMode: mode })}
+              >
+                {recapModeLabels[mode]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="settings-item model-settings-item">
+          <div className="settings-item-info">
+            <strong>{t("providersPromptSuggestionDefaultsTitle")}</strong>
+            <p>{t("providersPromptSuggestionDefaultsDescription")}</p>
+          </div>
+          <div className="font-size-selector model-settings-chip-group">
+            {(["off", "native"] as PromptSuggestionMode[]).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={`font-size-option ${defaultPromptSuggestionMode === mode ? "active" : ""}`}
+                disabled={
+                  providersLoading || !isPromptSuggestionModeAvailable(mode)
+                }
+                onClick={() =>
+                  void updateNewSessionDefaults({
+                    promptSuggestionMode: mode,
+                  })
+                }
+              >
+                {promptSuggestionModeLabels[mode]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <label className="settings-item model-settings-item">
+          <div className="settings-item-info">
+            <strong>{t("helperSideModelTitle")}</strong>
+            <p>{t("helperSideModelDescription")}</p>
+          </div>
+          <select
+            className="settings-select"
+            value={defaultHelperSideModel}
+            onChange={(event) =>
+              void updateNewSessionDefaults({
+                helperSideModel: event.target.value,
+              })
+            }
+            disabled={providersLoading}
+          >
+            <option value={HELPER_SIDE_MODEL_CHEAPEST}>
+              {t("helperSideModelCheapest")}
+            </option>
+            <option value={HELPER_SIDE_MODEL_SAME_AS_MAIN}>
+              {t("helperSideModelSameAsMain")}
+            </option>
+            {(defaultProviderInfo?.models ?? []).map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
       <div className="settings-group">
         {providerDisplayList.map((provider) => (
           <div key={provider.id} className="settings-item">
@@ -216,7 +555,27 @@ export function ProvidersSettings() {
                   ))}
                 </ul>
               )}
+              {provider.id === "claude" &&
+                provider.installed &&
+                !provider.authenticated && (
+                  <div style={{ marginTop: "var(--space-2)" }}>
+                    <p className="settings-hint">
+                      {t("providersClaudeLoginHint")}
+                    </p>
+                    <button
+                      type="button"
+                      className="settings-button"
+                      onClick={() => void handleCopyClaudeLoginCommand()}
+                      style={{ marginTop: "var(--space-2)" }}
+                    >
+                      {t("providersClaudeLoginCommandCopy")}
+                    </button>
+                  </div>
+                )}
               {provider.id === "claude-ollama" && <OllamaSettings />}
+              {provider.id === "codex" && provider.installed && (
+                <CodexUpdatePanel />
+              )}
             </div>
             {provider.metadata.website && (
               <a

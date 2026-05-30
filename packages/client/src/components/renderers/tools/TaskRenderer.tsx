@@ -14,6 +14,7 @@ import { classifyToolError } from "../../../lib/classifyToolError";
 import { preprocessMessages } from "../../../lib/preprocessMessages";
 import { validateToolResult } from "../../../lib/validateToolResult";
 import type { Message } from "../../../types";
+import type { ToolCallItem } from "../../../types/renderItems";
 import { RenderItemComponent } from "../../RenderItemComponent";
 import { SchemaWarning } from "../../SchemaWarning";
 import { ContentBlockRenderer } from "../ContentBlockRenderer";
@@ -169,7 +170,7 @@ function TaskInline({
   input: TaskInput;
   result: TaskResult | undefined;
   isError: boolean;
-  status: "pending" | "complete" | "error" | "aborted";
+  status: ToolCallItem["status"];
   toolUseId?: string;
 }) {
   const { projectId, sessionId } = useSessionMetadata();
@@ -374,6 +375,8 @@ function TaskInline({
     }
     if (status === "aborted")
       return { class: "badge-warning", text: "interrupted" };
+    if (status === "incomplete")
+      return { class: "badge-warning", text: "result unavailable" };
     if (isRunning) return { class: "badge-running", text: "running" };
     if (result?.status === "completed")
       return { class: "badge-success", text: "completed" };

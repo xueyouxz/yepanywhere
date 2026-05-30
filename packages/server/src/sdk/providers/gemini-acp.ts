@@ -96,6 +96,7 @@ export class GeminiACPProvider implements AgentProvider {
   readonly supportsPermissionMode = true;
   readonly supportsThinkingToggle = false;
   readonly supportsSlashCommands = false;
+  readonly supportsSteering = false;
 
   private readonly geminiPath?: string;
   private log = getLogger();
@@ -373,7 +374,7 @@ export class GeminiACPProvider implements AgentProvider {
       } as SDKMessage;
 
       // Process messages from the queue
-      const messageGen = queue.generator();
+      const messageGen = queue;
       let isFirstNewMessage = true;
       for await (const message of messageGen) {
         if (signal.aborted) break;

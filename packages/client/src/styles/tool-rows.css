@@ -95,6 +95,40 @@
   opacity: 0.7;
 }
 
+.tool-row.timeline-item.status-incomplete::before {
+  background: var(--timeline-dot-warning, #d7ba7d);
+  opacity: 0.7;
+}
+
+/* Clickable overlay on the timeline dot - expand/collapse Read/Edit rows */
+.timeline-dot-btn {
+  position: absolute;
+  left: -16px;
+  top: 3px;
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+  z-index: 1;
+}
+
+.timeline-dot-btn:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+  box-shadow: 0 0 0 1px var(--border-color, #444);
+}
+
+.timeline-dot-btn:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.timeline-dot-btn:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus-border, #007acc);
+}
+
 /* ==========================================================================
    Tool Call Rows - VS Code Style
    ========================================================================== */
@@ -128,6 +162,15 @@
   background: var(--bg-hover, #2a2a2a);
 }
 
+.ran-tool-row .tool-row-header {
+  border: 1px solid color-mix(in srgb, var(--border-color, #333) 70%, transparent);
+  background: color-mix(in srgb, var(--bg-code, #1f1f1f) 52%, transparent);
+}
+
+.ran-tool-row .tool-row-header:hover {
+  background: color-mix(in srgb, var(--bg-hover, #2a2a2a) 72%, transparent);
+}
+
 .tool-row-header:focus {
   outline: 1px solid var(--focus-border, #007acc);
   outline-offset: -1px;
@@ -151,6 +194,14 @@
   color: var(--text-muted, #888);
   display: flex;
   align-items: center;
+}
+
+.tool-incomplete-icon {
+  flex-shrink: 0;
+  color: var(--timeline-dot-warning, #d7ba7d);
+  font-weight: 700;
+  width: 14px;
+  text-align: center;
 }
 
 .spinner {
@@ -186,6 +237,40 @@
   text-overflow: ellipsis;
 }
 
+.ran-tool-row .tool-summary {
+  font-family: "SF Mono", Monaco, "Cascadia Code", "Consolas", monospace;
+  color: var(--text-primary, #ccc);
+}
+
+.tool-header-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border: 1px solid var(--border-color, #333);
+  border-radius: var(--radius-sm, 4px);
+  background: color-mix(in srgb, var(--bg-surface, #181818) 86%, transparent);
+  color: var(--text-muted, #888);
+  cursor: pointer;
+}
+
+.tool-header-copy:hover {
+  color: var(--text-primary, #ccc);
+  border-color: var(--border-strong, var(--border-color, #333));
+}
+
+.tool-header-copy:focus {
+  outline: 1px solid var(--focus-border, #007acc);
+  outline-offset: -1px;
+}
+
+.tool-header-copy.copied {
+  color: var(--app-yep-green, #059669);
+}
+
 /* Expand chevron */
 .expand-chevron {
   flex-shrink: 0;
@@ -202,17 +287,178 @@
 
 /* Collapsed preview area - shown when tool has preview but not expanded */
 .tool-row-collapsed-preview {
+  position: relative;
   margin-left: 24px;
   margin-top: 4px;
   cursor: pointer;
 }
 
+.tool-row-deferred-preview {
+  cursor: default;
+  pointer-events: none;
+}
+
+.tool-row-deferred-preview-box {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--tool-row-deferred-preview-height, 7rem);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 6px;
+  background:
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--text-muted) 18%, transparent) 0 2.5rem,
+      transparent 2.5rem
+    ),
+    color-mix(in srgb, var(--bg-code) 72%, transparent);
+  opacity: 0.35;
+}
+
 /* Expanded content area */
 .tool-row-content {
+  position: relative;
   margin-left: 24px;
   padding: 8px;
   border-left: 1px solid var(--border-color, #333);
+  transition: border-left-color 0.1s;
   animation: slideDown 0.15s ease-out;
+}
+
+/* Invisible wide strip over border-left — click anywhere along it to collapse */
+.tool-row-collapse-strip {
+  position: absolute;
+  left: -24px;
+  top: 0;
+  bottom: 0;
+  width: 32px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  z-index: 1;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.tool-row-collapse-strip:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.05));
+}
+
+.tool-row-content:has(.tool-row-collapse-strip:hover) {
+  border-left-color: var(--text-dimmed, #666);
+}
+
+.tool-row-collapsed-preview:has(.tool-row-collapse-strip:hover)
+  .bash-collapsed-preview {
+  border-color: var(--text-dimmed, #666);
+}
+
+/* Grouped read/search/list exploration rows */
+.explored-group {
+  position: relative;
+}
+
+.explored-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 20px;
+  padding: 2px 4px;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--text-primary, #ccc);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.explored-group-header:hover {
+  background: var(--bg-hover, #2a2a2a);
+}
+
+.explored-group-header:focus {
+  outline: 1px solid var(--focus-border, #007acc);
+  outline-offset: -1px;
+}
+
+.explored-group-title {
+  flex-shrink: 0;
+  font-size: var(--font-size-base);
+  font-weight: 600;
+}
+
+.explored-group-count {
+  color: var(--text-muted, #888);
+  font-size: var(--font-size-sm);
+}
+
+.explored-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 8.5rem;
+  margin-left: 24px;
+  margin-top: 2px;
+  padding: 2px 0 2px 8px;
+  border-left: 1px solid var(--border-color, #333);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.explored-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-height: 1.35rem;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.explored-entry:target,
+.explored-entry:hover {
+  background: color-mix(in srgb, var(--bg-hover, #2a2a2a) 60%, transparent);
+}
+
+.explored-entry-tool {
+  flex-shrink: 0;
+  width: 3.25rem;
+  color: var(--text-primary, #ccc);
+  font-size: var(--font-size-base);
+  font-weight: 500;
+}
+
+.explored-entry-summary {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted, #888);
+  font-size: var(--font-size-base);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explored-entry-summary .file-link-inline {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+.explored-entry-status {
+  flex-shrink: 0;
+  width: 0.8rem;
+  color: var(--text-muted, #888);
+  text-align: center;
+}
+
+.explored-entry.status-pending .explored-entry-status {
+  color: var(--timeline-dot-working, var(--app-spinner-foreground));
+}
+
+.explored-entry.status-error .explored-entry-status {
+  color: var(--timeline-dot-error, var(--error-color));
 }
 
 @keyframes slideDown {
@@ -256,7 +502,15 @@
   opacity: 0.7;
 }
 
+.tool-row.status-incomplete {
+  opacity: 0.85;
+}
+
 .tool-row.status-aborted .tool-summary {
+  color: var(--text-muted, #888);
+}
+
+.tool-row.status-incomplete .tool-summary {
   color: var(--text-muted, #888);
 }
 
@@ -270,6 +524,11 @@
 }
 
 .tool-aborted-label {
+  color: var(--text-muted, #888);
+  font-style: italic;
+}
+
+.tool-incomplete-label {
   color: var(--text-muted, #888);
   font-style: italic;
 }

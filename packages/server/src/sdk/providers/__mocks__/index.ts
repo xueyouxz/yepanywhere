@@ -53,6 +53,7 @@ export {
   createOpenCodeToolScenario,
   createOpenCodeErrorScenario,
 } from "./opencode.js";
+export { MockGrokProvider, createGrokScenario } from "./grok.js";
 
 // Factory functions
 export {

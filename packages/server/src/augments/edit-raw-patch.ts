@@ -29,6 +29,30 @@ function extractFilePath(line: string): string | undefined {
   return undefined;
 }
 
+function extractFileHeader(
+  line: string,
+): { operation: "update" | "add" | "delete"; filePath: string } | undefined {
+  if (line.startsWith("*** Update File:")) {
+    return {
+      operation: "update",
+      filePath: line.slice("*** Update File:".length).trim(),
+    };
+  }
+  if (line.startsWith("*** Add File:")) {
+    return {
+      operation: "add",
+      filePath: line.slice("*** Add File:".length).trim(),
+    };
+  }
+  if (line.startsWith("*** Delete File:")) {
+    return {
+      operation: "delete",
+      filePath: line.slice("*** Delete File:".length).trim(),
+    };
+  }
+  return undefined;
+}
+
 function countOldLines(lines: string[]): number {
   let count = 0;
   for (const line of lines) {
@@ -175,9 +199,41 @@ function parsePatchLines(
       break;
     }
 
-    const headerFilePath = extractFilePath(line);
-    if (!filePath && headerFilePath) {
-      filePath = headerFilePath;
+    const fileHeader = extractFileHeader(line);
+    if (fileHeader) {
+      if (!filePath) {
+        filePath = fileHeader.filePath;
+      }
+      if (requireApplyMarkers && fileHeader.operation === "add") {
+        const hunkLines: string[] = [];
+        i++;
+        while (i < lines.length) {
+          const hunkLine = lines[i] ?? "";
+          if (
+            hunkLine === PATCH_END_MARKER ||
+            hunkLine.startsWith("*** Update File:") ||
+            hunkLine.startsWith("*** Add File:") ||
+            hunkLine.startsWith("*** Delete File:")
+          ) {
+            break;
+          }
+          if (hunkLine.startsWith("+")) {
+            hunkLines.push(hunkLine);
+          }
+          i++;
+        }
+        if (hunkLines.length > 0) {
+          structuredPatch.push({
+            oldStart: nextOldStart,
+            oldLines: 0,
+            newStart: nextNewStart,
+            newLines: hunkLines.length,
+            lines: hunkLines,
+          });
+          nextNewStart += hunkLines.length;
+        }
+        continue;
+      }
       i++;
       continue;
     }

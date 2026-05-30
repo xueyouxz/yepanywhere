@@ -2,9 +2,11 @@ import { createReadStream } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
+import type { ProjectScanner } from "../projects/scanner.js";
 
 interface LocalImageDeps {
   allowedPaths: string[];
+  scanner?: Pick<ProjectScanner, "listProjects">;
 }
 
 const MEDIA_EXTENSIONS: Record<string, string> = {
@@ -52,7 +54,27 @@ export function createLocalImageRoutes(deps: LocalImageDeps) {
         }),
       );
     }
-    return resolvedAllowedPaths;
+    if (!deps.scanner) {
+      return resolvedAllowedPaths;
+    }
+
+    const projects = await deps.scanner.listProjects();
+    const projectPaths = await Promise.all(
+      projects.map(async (project) => {
+        try {
+          return await realpath(project.path);
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    return Array.from(
+      new Set([
+        ...resolvedAllowedPaths,
+        ...projectPaths.filter((path): path is string => Boolean(path)),
+      ]),
+    );
   }
 
   routes.get("/", async (c) => {

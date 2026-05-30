@@ -6,6 +6,7 @@ import {
 } from "./implementations/CodexProvider";
 import { GeminiACPProvider } from "./implementations/GeminiACPProvider";
 import { GeminiProvider } from "./implementations/GeminiProvider";
+import { GrokProvider } from "./implementations/GrokProvider";
 import { OpenCodeProvider } from "./implementations/OpenCodeProvider";
 import type { Provider, ProviderMetadata } from "./types";
 
@@ -14,6 +15,7 @@ const providers: Record<string, Provider> = {
   "claude-ollama": new ClaudeOllamaProvider(),
   gemini: new GeminiProvider(),
   "gemini-acp": new GeminiACPProvider(),
+  grok: new GrokProvider(),
   codex: new CodexProvider(),
   "codex-oss": new CodexOssProvider(),
   opencode: new OpenCodeProvider(),

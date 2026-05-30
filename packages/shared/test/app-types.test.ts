@@ -36,7 +36,7 @@ describe("getModelContextWindow", () => {
     expect(getModelContextWindow("opus[1m]")).toBe(
       CLAUDE_EXTENDED_CONTEXT_WINDOW,
     );
-    expect(getModelContextWindow("claude-opus-4-6[1m]")).toBe(
+    expect(getModelContextWindow("claude-opus-4-8[1m]")).toBe(
       CLAUDE_EXTENDED_CONTEXT_WINDOW,
     );
   });

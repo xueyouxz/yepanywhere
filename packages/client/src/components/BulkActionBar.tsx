@@ -59,7 +59,7 @@ export function BulkActionBar({
     }
 
     return (
-      <div className="bulk-action-bar">
+      <div className="bulk-action-bar bulk-action-bar--filtered">
         <div className="bulk-action-bar__actions">
           <button
             type="button"

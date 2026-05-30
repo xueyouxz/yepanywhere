@@ -132,7 +132,6 @@ const TOOL_PROMPT_DRAFT_PREFIX = "draft-tool-prompt-";
 
 /**
  * Hook to persist draft text for tool approval feedback.
- * ("Tell Claude what to do instead" in ToolApprovalPanel)
  * Keyed by sessionId, not by specific tool call.
  *
  * @param sessionId - The session ID

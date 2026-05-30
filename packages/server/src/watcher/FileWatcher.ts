@@ -35,7 +35,6 @@ export class FileWatcher {
   private rescanTimer: NodeJS.Timeout | null = null;
   private rescanInProgress = false;
   private periodicRescanTimer: NodeJS.Timeout | null = null;
-  private knownFiles: Set<string> = new Set();
   private knownFileMtimes: Map<string, number> = new Map();
 
   constructor(options: FileWatcherOptions) {
@@ -114,7 +113,6 @@ export class FileWatcher {
       clearInterval(this.periodicRescanTimer);
       this.periodicRescanTimer = null;
     }
-    this.knownFiles.clear();
     this.knownFileMtimes.clear();
 
     getLogger().info("[FileWatcher] Stopped");
@@ -128,10 +126,8 @@ export class FileWatcher {
   }
 
   private scanExistingFiles(): void {
-    this.knownFiles.clear();
     this.knownFileMtimes.clear();
     this.scanDir(this.watchDir, this.knownFileMtimes);
-    this.knownFiles = new Set(this.knownFileMtimes.keys());
   }
 
   private scanDir(dir: string, index: Map<string, number>): void {
@@ -182,9 +178,8 @@ export class FileWatcher {
     const fileExists = fs.existsSync(fullPath);
 
     if (!fileExists) {
-      if (this.knownFiles.has(fullPath)) {
+      if (this.knownFileMtimes.has(fullPath)) {
         changeType = "delete";
-        this.knownFiles.delete(fullPath);
         this.knownFileMtimes.delete(fullPath);
       } else {
         // File never existed from our POV, skip
@@ -199,7 +194,7 @@ export class FileWatcher {
         return;
       }
 
-      if (this.knownFiles.has(fullPath)) {
+      if (this.knownFileMtimes.has(fullPath)) {
         const previousMtime = this.knownFileMtimes.get(fullPath);
         if (previousMtime === mtimeMs) {
           // No meaningful change; skip duplicate callback.
@@ -208,7 +203,6 @@ export class FileWatcher {
         changeType = "modify";
       } else {
         changeType = "create";
-        this.knownFiles.add(fullPath);
       }
       this.knownFileMtimes.set(fullPath, mtimeMs);
     }
@@ -283,7 +277,6 @@ export class FileWatcher {
       }
 
       this.knownFileMtimes = current;
-      this.knownFiles = new Set(current.keys());
     } finally {
       this.rescanInProgress = false;
     }

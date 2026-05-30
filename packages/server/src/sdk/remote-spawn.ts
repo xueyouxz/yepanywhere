@@ -165,6 +165,20 @@ export async function checkRemotePath(
   }
 }
 
+export async function ensureRemoteDirectory(
+  host: string,
+  path: string,
+): Promise<void> {
+  const result = await runSSHCommand(
+    host,
+    `mkdir -p '${escapeShell(path)}'`,
+    5000,
+  );
+  if (!result.success) {
+    throw new Error(result.error ?? `Failed to create remote directory: ${path}`);
+  }
+}
+
 /**
  * Test SSH connection to a remote host.
  * Checks:
@@ -350,15 +364,19 @@ export function createRemoteSpawn(
     let remoteCommand = command;
     let remoteArgs = args;
     const firstArg = args[0];
+    const isSdkNativeClaude =
+      command.includes("claude-agent-sdk") &&
+      /[/\\]claude(?:\.exe)?$/.test(command);
     if (
-      command === "node" &&
-      firstArg &&
-      firstArg.includes("claude-agent-sdk") &&
-      firstArg.endsWith("cli.js")
+      (command === "node" &&
+        firstArg &&
+        firstArg.includes("claude-agent-sdk") &&
+        firstArg.endsWith("cli.js")) ||
+      isSdkNativeClaude
     ) {
-      // Replace "node /path/to/cli.js --flags" with "claude --flags"
+      // Replace local SDK executables with the remote's installed CLI.
       remoteCommand = "claude";
-      remoteArgs = args.slice(1); // Skip the cli.js path
+      remoteArgs = isSdkNativeClaude ? args : args.slice(1);
       log.debug(
         {
           event: "remote_spawn_rewrite",

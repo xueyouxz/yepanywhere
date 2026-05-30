@@ -1,13 +1,24 @@
 import {
+  ALL_PERMISSION_MODES,
   type MarkdownAugment,
+  type ContextUsage,
   type ProviderName,
+  type SessionLivenessSnapshot,
+  type UploadedFile,
+  type UserMessageMetadata,
   getModelContextWindow,
 } from "@yep-anywhere/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
+import { logSessionUiTrace } from "../lib/diagnostics/uiTrace";
 import { getMessageId } from "../lib/mergeMessages";
 import { findPendingTasks } from "../lib/pendingTasks";
 import { extractSessionIdFromFileEvent } from "../lib/sessionFile";
+import {
+  LEGACY_KEYS,
+  getServerScoped,
+  setServerScoped,
+} from "../lib/storageKeys";
 import type {
   InputRequest,
   Message,
@@ -17,12 +28,12 @@ import type {
 import {
   type FileChangeEvent,
   type ProcessStateEvent,
+  type SessionMetadataChangedEvent,
   type SessionStatusEvent,
   type SessionUpdatedEvent,
   useFileActivity,
 } from "./useFileActivity";
 import {
-  type AgentContentMap,
   type SessionLoadResult,
   useSessionMessages,
 } from "./useSessionMessages";
@@ -39,6 +50,129 @@ export type ProcessState = "idle" | "in-turn" | "waiting-input" | "hold";
 export type { AgentContent, AgentContentMap } from "./useSessionMessages";
 
 const THROTTLE_MS = 500;
+const STREAM_ACTIVITY_TOKEN_UPDATE_MS = 500;
+const STREAM_LIVENESS_UPDATE_MS = 500;
+const FALLBACK_STREAM_LONG_SILENCE_THRESHOLD_MS = 300_000;
+const RECAP_AWAY_THRESHOLD_MS = 5 * 60 * 1000;
+const RECAP_REQUEST_COOLDOWN_MS = 30_000;
+
+function hasUserVisibleStreamProgress(streamEvent: Record<string, unknown>): boolean {
+  // "user-visible liveness": only content chunks that can render visible text/thinking
+  // count as actual progress for stale->live transition.
+  const eventType = streamEvent.type;
+  if (typeof eventType !== "string") {
+    return false;
+  }
+
+  if (eventType === "content_block_delta") {
+    const delta = streamEvent.delta;
+    if (!delta || typeof delta !== "object") {
+      return false;
+    }
+    const text = (delta as Record<string, unknown>).text;
+    const thinking = (delta as Record<string, unknown>).thinking;
+    return (
+      (typeof text === "string" && text.length > 0) ||
+      (typeof thinking === "string" && thinking.length > 0)
+    );
+  }
+
+  if (eventType === "content_block_start") {
+    const contentBlock = streamEvent.content_block;
+    if (!contentBlock || typeof contentBlock !== "object") {
+      return false;
+    }
+    const text = (contentBlock as Record<string, unknown>).text;
+    const thinking = (contentBlock as Record<string, unknown>).thinking;
+    return (
+      (typeof text === "string" && text.length > 0) ||
+      (typeof thinking === "string" && thinking.length > 0)
+    );
+  }
+
+  return false;
+}
+
+function isPermissionMode(value: unknown): value is PermissionMode {
+  return (
+    typeof value === "string" &&
+    ALL_PERMISSION_MODES.includes(value as PermissionMode)
+  );
+}
+
+function loadStickyPermissionMode(): PermissionMode {
+  try {
+    const stored = getServerScoped("permissionMode", LEGACY_KEYS.permissionMode);
+    return isPermissionMode(stored) ? stored : "default";
+  } catch {
+    return "default";
+  }
+}
+
+function getContextUsageFromTokenUsageMessage(
+  message: Record<string, unknown>,
+  fallbackModel?: string,
+  fallbackProvider?: ProviderName,
+): ContextUsage | undefined {
+  const usage =
+    message.usage && typeof message.usage === "object"
+      ? (message.usage as Record<string, unknown>)
+      : null;
+  const inputTokens =
+    usage && typeof usage.input_tokens === "number" ? usage.input_tokens : null;
+  if (inputTokens === null) {
+    return undefined;
+  }
+
+  const outputTokens =
+    usage && typeof usage.output_tokens === "number"
+      ? usage.output_tokens
+      : undefined;
+  const cacheReadTokens =
+    usage && typeof usage.cached_input_tokens === "number"
+      ? usage.cached_input_tokens
+      : undefined;
+
+  const contextWindowCandidate =
+    message.model_context_window &&
+    typeof message.model_context_window === "number" &&
+    Number.isFinite(message.model_context_window)
+      ? message.model_context_window
+      : getModelContextWindow(fallbackModel, fallbackProvider);
+  const contextWindow =
+    contextWindowCandidate > 0 ? contextWindowCandidate : undefined;
+
+  return {
+    inputTokens,
+    percentage:
+      contextWindow && contextWindow > 0
+        ? (inputTokens / contextWindow) * 100
+        : 0,
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+  };
+}
+
+function saveStickyPermissionMode(mode: PermissionMode): void {
+  try {
+    setServerScoped("permissionMode", mode, LEGACY_KEYS.permissionMode);
+  } catch {
+    // Ignore storage failures; the in-memory selection still applies this turn.
+  }
+}
+
+function parseProcessState(value: unknown): ProcessState | null {
+  if (
+    value === "idle" ||
+    value === "in-turn" ||
+    value === "waiting-input" ||
+    value === "hold"
+  ) {
+    return value;
+  }
+  return null;
+}
 
 // Re-export StreamingMarkdownCallbacks for consumers
 export type { StreamingMarkdownCallbacks } from "./useStreamingContent";
@@ -48,8 +182,10 @@ export interface PendingMessage {
   tempId: string;
   content: string;
   timestamp: string;
+  clientOrder?: number;
   /** Display status text (e.g. "Uploading...", "Sending..."). Defaults to "Sending..." */
   status?: string;
+  attachments?: UploadedFile[];
 }
 
 /** Deferred message queued server-side, waiting for agent's turn to end */
@@ -57,6 +193,29 @@ export interface DeferredMessage {
   tempId?: string;
   content: string;
   timestamp: string;
+  clientOrder?: number;
+  metadata?: UserMessageMetadata;
+  attachmentCount?: number;
+  attachments?: UploadedFile[];
+  mode?: PermissionMode;
+  blockedByEdit?: boolean;
+  deliveryState?: "queued" | "sending" | "recovered" | "verifying";
+}
+
+interface DeliveredUserEcho {
+  tempId?: string;
+  content: string;
+}
+
+const CONCATENATED_USER_TURN_SEPARATOR = "\n\n--------\n\n";
+const USER_ECHO_CLOCK_SKEW_MS = 60_000;
+
+function parseMessageTimestampMs(value: unknown): number | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const timestampMs = Date.parse(value);
+  return Number.isFinite(timestampMs) ? timestampMs : null;
 }
 
 function extractUserMessageText(
@@ -65,7 +224,7 @@ function extractUserMessageText(
   const message = sdkMessage.message as
     | { content?: unknown; role?: unknown }
     | undefined;
-  const content = message?.content;
+  const content = message?.content ?? sdkMessage.content;
 
   if (typeof content === "string") {
     const trimmed = content.trim();
@@ -88,11 +247,406 @@ function extractUserMessageText(
   return null;
 }
 
+function userTextContainsDeferredContent(
+  userText: string,
+  deferredContent: string,
+): boolean {
+  const normalizedUserText = userText.trim();
+  const normalizedDeferredContent = deferredContent.trim();
+  if (!normalizedUserText || !normalizedDeferredContent) {
+    return false;
+  }
+
+  if (
+    normalizedUserText === normalizedDeferredContent ||
+    normalizedUserText.startsWith(`${normalizedDeferredContent}\n\n`)
+  ) {
+    return true;
+  }
+
+  return normalizedUserText
+    .split(CONCATENATED_USER_TURN_SEPARATOR)
+    .some((part) => {
+      const normalizedPart = part.trim();
+      return (
+        normalizedPart === normalizedDeferredContent ||
+        normalizedPart.startsWith(`${normalizedDeferredContent}\n\n`)
+      );
+    });
+}
+
+const DEFERRED_DRAFT_KEY_PREFIX = "queued-message-";
+
+function getDeferredStorageKey(sessionId: string): string {
+  return `${DEFERRED_DRAFT_KEY_PREFIX}${sessionId}`;
+}
+
+function normalizeDeferredMessage(value: unknown): DeferredMessage | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const content = typeof record.content === "string" ? record.content : "";
+  const timestamp =
+    typeof record.timestamp === "string" ? record.timestamp : "";
+  if (!content || !timestamp) {
+    return null;
+  }
+
+  const attachments = Array.isArray(record.attachments)
+    ? (record.attachments as UploadedFile[])
+    : undefined;
+  const attachmentCount =
+    typeof record.attachmentCount === "number"
+      ? record.attachmentCount
+      : attachments?.length;
+  const mode =
+    record.mode === "default" ||
+    record.mode === "acceptEdits" ||
+    record.mode === "plan" ||
+    record.mode === "bypassPermissions"
+      ? record.mode
+      : undefined;
+  const deliveryState =
+    record.deliveryState === "sending" || record.deliveryState === "recovered"
+      ? record.deliveryState
+      : record.deliveryState === "verifying"
+        ? record.deliveryState
+      : "queued";
+
+  return {
+    tempId: typeof record.tempId === "string" ? record.tempId : undefined,
+    content,
+    timestamp,
+    ...(typeof record.clientOrder === "number" &&
+    Number.isFinite(record.clientOrder)
+      ? { clientOrder: record.clientOrder }
+      : {}),
+    ...(attachmentCount ? { attachmentCount } : {}),
+    ...(attachments ? { attachments } : {}),
+    ...(mode ? { mode } : {}),
+    ...(record.blockedByEdit === true ? { blockedByEdit: true } : {}),
+    deliveryState,
+  };
+}
+
+function loadDeferredMessages(sessionId: string): DeferredMessage[] {
+  if (typeof localStorage === "undefined") {
+    return [];
+  }
+  try {
+    const raw = localStorage.getItem(getDeferredStorageKey(sessionId));
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .map((item) => normalizeDeferredMessage(item))
+      .filter((item): item is DeferredMessage => item !== null);
+  } catch {
+    return [];
+  }
+}
+
+function saveDeferredMessages(
+  sessionId: string,
+  messages: DeferredMessage[],
+): void {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  try {
+    const key = getDeferredStorageKey(sessionId);
+    if (messages.length === 0) {
+      localStorage.removeItem(key);
+    } else {
+      localStorage.setItem(key, JSON.stringify(messages));
+    }
+  } catch {
+    // localStorage may be unavailable or full; in-memory state still protects
+    // the current page from dropping the user's queued text.
+  }
+}
+
+function removeEchoedQueueMessage<T extends { tempId?: string; content: string }>(
+  messages: T[],
+  tempId?: string,
+  incomingText?: string | null,
+): T[] {
+  let next = messages;
+  if (tempId) {
+    next = next.filter((message) => message.tempId !== tempId);
+  }
+
+  if (!incomingText) {
+    return next;
+  }
+
+  return next.filter(
+    (message) => !userTextContainsDeferredContent(incomingText, message.content),
+  );
+}
+
+function mergeDeferredMessages(
+  current: DeferredMessage[],
+  incoming: DeferredMessage[],
+  meta?: {
+    reason?: "queued" | "cancelled" | "edited" | "promoted";
+    tempId?: string;
+    source?: "connected" | "event" | "rest";
+  },
+): DeferredMessage[] {
+  const mergeDeferredSummary = (
+    incomingMessage: DeferredMessage,
+    previous: DeferredMessage | undefined,
+    deliveryState: DeferredMessage["deliveryState"],
+  ): DeferredMessage => {
+    const attachments = previous?.attachments;
+    const attachmentCount =
+      incomingMessage.attachmentCount ??
+      previous?.attachmentCount ??
+      attachments?.length;
+    const clientOrder = previous?.clientOrder ?? incomingMessage.clientOrder;
+
+    return {
+      ...incomingMessage,
+      ...(clientOrder !== undefined ? { clientOrder } : {}),
+      ...(attachmentCount ? { attachmentCount } : {}),
+      ...(attachments ? { attachments } : {}),
+      ...(previous?.mode ? { mode: previous.mode } : {}),
+      ...(deliveryState ? { deliveryState } : {}),
+    };
+  };
+
+  const removedTempId =
+    meta?.reason === "cancelled" || meta?.reason === "edited"
+      ? meta.tempId
+      : undefined;
+  const incomingByTempId = new Map(
+    incoming
+      .filter((message) => message.tempId)
+      .map((message) => [message.tempId as string, message]),
+  );
+  const currentByTempId = new Map(
+    current
+      .filter((message) => message.tempId)
+      .map((message) => [message.tempId as string, message]),
+  );
+  if (meta?.reason === "queued" && incoming.length > 0) {
+    const usedIncoming = new Set<string>();
+    const ordered: DeferredMessage[] = incoming
+      .filter((message) => message.tempId !== removedTempId)
+      .map((message) => {
+        if (message.tempId) {
+          usedIncoming.add(message.tempId);
+        }
+        const previous = message.tempId
+          ? currentByTempId.get(message.tempId)
+          : undefined;
+        return mergeDeferredSummary(message, previous, "queued");
+      });
+    for (const message of current) {
+      if (message.tempId && message.tempId === removedTempId) {
+        continue;
+      }
+      if (message.tempId && usedIncoming.has(message.tempId)) {
+        continue;
+      }
+      ordered.push(message);
+    }
+    return ordered;
+  }
+  const usedIncoming = new Set<string>();
+  const merged: DeferredMessage[] = [];
+
+  for (const message of current) {
+    if (message.tempId && message.tempId === removedTempId) {
+      continue;
+    }
+
+    const incomingMatch = message.tempId
+      ? incomingByTempId.get(message.tempId)
+      : undefined;
+    if (incomingMatch) {
+      usedIncoming.add(message.tempId as string);
+      merged.push(mergeDeferredSummary(incomingMatch, message, "queued"));
+      continue;
+    }
+
+    const fallbackState =
+      message.deliveryState === "recovered" || message.deliveryState === "sending"
+        ? message.deliveryState
+        : undefined;
+    const deliveryState =
+      meta?.reason === "promoted" &&
+      (meta.tempId
+        ? message.tempId === meta.tempId
+        : incoming.length === 0)
+        ? "sending"
+        : meta?.source === "connected"
+          ? fallbackState ??
+            (message.tempId ? "verifying" : "recovered")
+          : message.deliveryState;
+    merged.push({
+      ...message,
+      ...(deliveryState ? { deliveryState } : {}),
+    });
+  }
+
+  for (const message of incoming) {
+    if (message.tempId && usedIncoming.has(message.tempId)) {
+      continue;
+    }
+    if (message.tempId && message.tempId === removedTempId) {
+      continue;
+    }
+    merged.push({ ...message, deliveryState: "queued" });
+  }
+
+  return merged;
+}
+
+function upsertDeferredMessage(
+  messages: DeferredMessage[],
+  nextMessage: DeferredMessage,
+): DeferredMessage[] {
+  if (!nextMessage.tempId) {
+    return [...messages, nextMessage];
+  }
+  const index = messages.findIndex(
+    (message) => message.tempId === nextMessage.tempId,
+  );
+  if (index === -1) {
+    return [...messages, nextMessage];
+  }
+  return messages.map((message, i) =>
+    i === index ? { ...message, ...nextMessage } : message,
+  );
+}
+
+function userTurnMatchesDeferred(
+  message: Message,
+  deferred: DeferredMessage,
+): boolean {
+  if (message.type !== "user" && message.role !== "user") {
+    return false;
+  }
+  if (deferred.tempId && message.tempId === deferred.tempId) {
+    return true;
+  }
+  const text = extractUserMessageText(message as Record<string, unknown>);
+  if (!text) {
+    return false;
+  }
+  return userTextContainsDeferredContent(text, deferred.content);
+}
+
+function deliveredEchoMatchesDeferred(
+  echo: DeliveredUserEcho,
+  deferred: DeferredMessage,
+): boolean {
+  if (deferred.tempId && echo.tempId === deferred.tempId) {
+    return true;
+  }
+  const echoText = echo.content.trim();
+  if (!echoText) {
+    return false;
+  }
+  return userTextContainsDeferredContent(echoText, deferred.content);
+}
+
+function removeDeliveredDeferredMessages(
+  deferredMessages: DeferredMessage[],
+  messages: Message[],
+  deliveredEchoes: DeliveredUserEcho[] = [],
+): DeferredMessage[] {
+  if (
+    deferredMessages.length === 0 ||
+    (messages.length === 0 && deliveredEchoes.length === 0)
+  ) {
+    return deferredMessages;
+  }
+  const recentMessages = messages.slice(-30);
+  const filtered = deferredMessages.filter(
+    (deferred) =>
+      !recentMessages.some((message) =>
+        userTurnMatchesDeferred(message, deferred),
+      ) &&
+      !deliveredEchoes.some((echo) =>
+        deliveredEchoMatchesDeferred(echo, deferred),
+      ),
+  );
+  return filtered.length === deferredMessages.length
+    ? deferredMessages
+    : filtered;
+}
+
+function userTurnMatchesPending(
+  message: Message,
+  pending: PendingMessage,
+): boolean {
+  if (message.type !== "user" && message.role !== "user") {
+    return false;
+  }
+  if (message.tempId === pending.tempId) {
+    return true;
+  }
+
+  const text = extractUserMessageText(message as Record<string, unknown>);
+  if (!text || !userTextContainsDeferredContent(text, pending.content)) {
+    return false;
+  }
+
+  const messageTimestampMs = parseMessageTimestampMs(message.timestamp);
+  const pendingTimestampMs = parseMessageTimestampMs(pending.timestamp);
+  if (messageTimestampMs === null || pendingTimestampMs === null) {
+    return false;
+  }
+
+  return messageTimestampMs + USER_ECHO_CLOCK_SKEW_MS >= pendingTimestampMs;
+}
+
+function removeDeliveredPendingMessages(
+  pendingMessages: PendingMessage[],
+  messages: Message[],
+): PendingMessage[] {
+  if (pendingMessages.length === 0 || messages.length === 0) {
+    return pendingMessages;
+  }
+
+  const recentMessages = messages.slice(-30);
+  const filtered = pendingMessages.filter(
+    (pending) =>
+      !recentMessages.some((message) =>
+        userTurnMatchesPending(message, pending),
+      ),
+  );
+  return filtered.length === pendingMessages.length
+    ? pendingMessages
+    : filtered;
+}
+
+function summarizeDeferredMessages(messages: DeferredMessage[]): Array<{
+  tempId?: string;
+  deliveryState?: DeferredMessage["deliveryState"];
+  blockedByEdit?: boolean;
+}> {
+  return messages.map((message) => ({
+    tempId: message.tempId,
+    deliveryState: message.deliveryState,
+    blockedByEdit: message.blockedByEdit,
+  }));
+}
+
 export function useSession(
   projectId: string,
   sessionId: string,
   initialStatus?: { owner: "self"; processId: string },
   streamingMarkdownCallbacks?: StreamingMarkdownCallbacks,
+  options?: { tailTurns?: number; tailFrom?: string },
 ) {
   // Use initial status if provided (from navigation state) to connect stream immediately
   const [status, setStatus] = useState<SessionStatus>(
@@ -117,18 +671,156 @@ export function useSession(
   const [lastStreamActivityAt, setLastStreamActivityAt] = useState<
     string | null
   >(null);
+  const streamActivityRef = useRef<{
+    lastUpdateMs: number;
+    pendingIso: string | null;
+    timer: ReturnType<typeof setTimeout> | null;
+  }>({
+    lastUpdateMs: Number.NEGATIVE_INFINITY,
+    pendingIso: null,
+    timer: null,
+  });
+
+  const noteStreamActivity = useCallback((immediate = false) => {
+    const nowMs = Date.now();
+    const iso = new Date(nowMs).toISOString();
+    const ref = streamActivityRef.current;
+    const elapsedMs = nowMs - ref.lastUpdateMs;
+
+    if (immediate || elapsedMs >= STREAM_ACTIVITY_TOKEN_UPDATE_MS) {
+      if (ref.timer) {
+        clearTimeout(ref.timer);
+        ref.timer = null;
+      }
+      ref.pendingIso = null;
+      ref.lastUpdateMs = nowMs;
+      setLastStreamActivityAt(iso);
+      return;
+    }
+
+    ref.pendingIso = iso;
+    if (!ref.timer) {
+      ref.timer = setTimeout(() => {
+        const pendingIso = ref.pendingIso;
+        ref.pendingIso = null;
+        ref.timer = null;
+        ref.lastUpdateMs = Date.now();
+        if (pendingIso) {
+          setLastStreamActivityAt(pendingIso);
+        }
+      }, STREAM_ACTIVITY_TOKEN_UPDATE_MS - elapsedMs);
+    }
+  }, []);
+
+  const buildStreamProgressLiveness = useCallback(
+    (nowMs: number, previous: SessionLivenessSnapshot | null) => {
+      const now = new Date(nowMs).toISOString();
+      const previousEvidence = previous?.evidence ?? [];
+      const evidence = Array.from(
+        new Set([...previousEvidence, "stream_event"]),
+      );
+
+      return {
+        checkedAt: now,
+        derivedStatus: "verified-progressing" as const,
+        activeWorkKind: previous?.activeWorkKind ?? "agent-turn",
+        state: previous?.state ?? "in-turn",
+        evidence,
+        lastProviderMessageAt: previous?.lastProviderMessageAt ?? null,
+        lastRawProviderEventAt: now,
+        lastRawProviderEventSource: "stream_event",
+        lastStateChangeAt: previous?.lastStateChangeAt ?? now,
+        lastVerifiedProgressAt: now,
+        lastVerifiedIdleAt: previous?.lastVerifiedIdleAt ?? null,
+        lastLivenessProbeAt: previous?.lastLivenessProbeAt ?? null,
+        lastLivenessProbeStatus: previous?.lastLivenessProbeStatus ?? null,
+        lastLivenessProbeSource: previous?.lastLivenessProbeSource ?? null,
+        ...(previous?.lastLivenessProbeDetail
+          ? { lastLivenessProbeDetail: previous.lastLivenessProbeDetail }
+          : {}),
+        silenceMs: 0,
+        longSilenceThresholdMs:
+          previous?.longSilenceThresholdMs ??
+          FALLBACK_STREAM_LONG_SILENCE_THRESHOLD_MS,
+        processAlive: previous?.processAlive ?? true,
+        queueDepth: previous?.queueDepth ?? 0,
+        deferredQueueDepth: previous?.deferredQueueDepth ?? 0,
+      };
+    },
+    [],
+  );
+
+  const noteStreamProgressLiveness = useCallback(() => {
+    const nowMs = Date.now();
+
+    setSessionLiveness((previous) => {
+      const nowVerifiedProgressMs = Date.parse(
+        previous?.lastVerifiedProgressAt ?? previous?.checkedAt ?? "",
+      );
+
+      if (
+        previous &&
+        previous.derivedStatus === "verified-progressing" &&
+        Number.isFinite(nowVerifiedProgressMs) &&
+        nowMs - nowVerifiedProgressMs < STREAM_LIVENESS_UPDATE_MS
+      ) {
+        return previous;
+      }
+
+      return buildStreamProgressLiveness(nowMs, previous);
+    });
+  }, [buildStreamProgressLiveness]);
+
+  useEffect(() => {
+    return () => {
+      const timer = streamActivityRef.current.timer;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, []);
 
   // Pending messages queue - messages waiting for server confirmation
   // These are displayed separately from the main message list
   const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);
 
   // Deferred messages queue - messages queued server-side waiting for agent's turn to end
-  const [deferredMessages, setDeferredMessages] = useState<DeferredMessage[]>(
-    [],
+  const [deferredMessages, setDeferredMessagesState] = useState<
+    DeferredMessage[]
+  >(() => loadDeferredMessages(sessionId));
+
+  useEffect(() => {
+    setDeferredMessagesState(loadDeferredMessages(sessionId));
+  }, [sessionId]);
+
+  const setDeferredMessages = useCallback(
+    (
+      update:
+        | DeferredMessage[]
+        | ((messages: DeferredMessage[]) => DeferredMessage[]),
+    ) => {
+      setDeferredMessagesState((current) => {
+        const next = typeof update === "function" ? update(current) : update;
+        saveDeferredMessages(sessionId, next);
+        if (next !== current) {
+          logSessionUiTrace("deferred-state", {
+            sessionId,
+            beforeCount: current.length,
+            afterCount: next.length,
+            before: summarizeDeferredMessages(current),
+            after: summarizeDeferredMessages(next),
+          });
+        }
+        return next;
+      });
+    },
+    [sessionId],
   );
 
   // Compacting state - true when context is being compressed
   const [isCompacting, setIsCompacting] = useState(false);
+  const [sessionLiveness, setSessionLiveness] =
+    useState<SessionLivenessSnapshot | null>(null);
 
   // Markdown augments loaded from REST response (keyed by message ID)
   const [markdownAugments, setMarkdownAugments] = useState<
@@ -136,19 +828,68 @@ export function useSession(
   >({});
 
   // Permission mode state: localMode is UI-selected, serverMode is confirmed by server
-  const [localMode, setLocalMode] = useState<PermissionMode>("default");
-  const [serverMode, setServerMode] = useState<PermissionMode>("default");
+  const [localMode, setLocalMode] = useState<PermissionMode>(
+    loadStickyPermissionMode,
+  );
+  const [, setServerMode] = useState<PermissionMode>("default");
   const [modeVersion, setModeVersion] = useState<number>(0);
+  const localModeRef = useRef<PermissionMode>(localMode);
   // Track whether we've already processed a stream "connected" event in this mount.
   // For Codex providers, the first connected-event catch-up fetch can duplicate
   // freshly streamed messages because JSONL and stream IDs are not yet aligned.
   const hasHandledConnectedEventRef = useRef(false);
+  const hiddenSinceMsRef = useRef<number | null>(null);
+  const lastRecapRequestMsRef = useRef<number | null>(null);
+  const liveProcessId = status.owner === "self" ? status.processId : null;
 
   // Reset connected-event tracking when switching sessions.
   // biome-ignore lint/correctness/useExhaustiveDependencies: effect intentionally runs on session switches
   useEffect(() => {
     hasHandledConnectedEventRef.current = false;
+    setSessionLiveness(null);
   }, [sessionId]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const handleVisibilityChange = () => {
+      const nowMs = Date.now();
+      if (document.visibilityState === "hidden") {
+        hiddenSinceMsRef.current = nowMs;
+        return;
+      }
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      const hiddenSinceMs = hiddenSinceMsRef.current;
+      hiddenSinceMsRef.current = null;
+      if (hiddenSinceMs === null || !liveProcessId) {
+        return;
+      }
+
+      const hiddenDurationMs = nowMs - hiddenSinceMs;
+      const previousRequestMs = lastRecapRequestMsRef.current;
+      const isCoolingDown =
+        previousRequestMs !== null &&
+        nowMs - previousRequestMs < RECAP_REQUEST_COOLDOWN_MS;
+      if (hiddenDurationMs < RECAP_AWAY_THRESHOLD_MS || isCoolingDown) {
+        return;
+      }
+
+      lastRecapRequestMsRef.current = nowMs;
+      void api.requestRecap(liveProcessId, hiddenSinceMs).catch((error) => {
+        console.warn("Failed to request recap:", error);
+      });
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [liveProcessId]);
 
   // Slash commands available for this session (from init message)
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
@@ -156,17 +897,30 @@ export function useSession(
   const [sessionTools, setSessionTools] = useState<string[]>([]);
   // MCP servers available for this session (from init message)
   const [mcpServers, setMcpServers] = useState<string[]>([]);
+  const [promptSuggestion, setPromptSuggestion] = useState<string | null>(null);
   const lastKnownModeVersionRef = useRef<number>(0);
 
+  useEffect(() => {
+    localModeRef.current = localMode;
+  }, [localMode]);
+
   // Apply server mode update only if version is >= our last known version
-  // This syncs both local and server mode to the confirmed value
+  // This syncs local mode only when the server update is authoritative.
   const applyServerModeUpdate = useCallback(
     (mode: PermissionMode, version: number) => {
       if (version >= lastKnownModeVersionRef.current) {
         lastKnownModeVersionRef.current = version;
         setServerMode(mode);
-        setLocalMode(mode); // Sync local to server-confirmed mode
         setModeVersion(version);
+        const preserveStickyMode =
+          mode === "default" &&
+          version === 0 &&
+          localModeRef.current !== "default";
+        if (!preserveStickyMode) {
+          localModeRef.current = mode;
+          setLocalMode(mode);
+          saveStickyPermissionMode(mode);
+        }
       }
     },
     [],
@@ -236,21 +990,44 @@ export function useSession(
     setToolUseToAgent,
     setMessages,
     fetchNewMessages,
-    fetchSessionMetadata,
     pagination,
     loadingOlder,
     loadOlderMessages,
   } = useSessionMessages({
     projectId,
     sessionId,
+    tailTurns: options?.tailTurns,
+    tailFrom: options?.tailFrom,
     onLoadComplete: handleLoadComplete,
     onLoadError: handleLoadError,
   });
+  const deliveredUserEchoesRef = useRef<DeliveredUserEcho[]>([]);
+  const nextClientOrderRef = useRef(0);
+
+  useEffect(() => {
+    deliveredUserEchoesRef.current = [];
+    nextClientOrderRef.current = 0;
+  }, [sessionId]);
+
+  useEffect(() => {
+    setPendingMessages((prev) =>
+      removeDeliveredPendingMessages(prev, messages),
+    );
+    setDeferredMessages((prev) =>
+      removeDeliveredDeferredMessages(
+        prev,
+        messages,
+        deliveredUserEchoesRef.current,
+      ),
+    );
+  }, [messages, setDeferredMessages]);
 
   // Update local mode (UI selection) and sync to server if process is active
   const setPermissionMode = useCallback(
     async (mode: PermissionMode) => {
+      localModeRef.current = mode;
       setLocalMode(mode);
+      saveStickyPermissionMode(mode);
 
       // If there's an active process, immediately sync to server
       if (status.owner === "self" || status.owner === "external") {
@@ -304,29 +1081,120 @@ export function useSession(
 
   // Add a message to the pending queue
   // Generates a tempId that will be sent to the server and echoed back in stream
-  const addPendingMessage = useCallback((content: string): string => {
-    const tempId = `temp-${Date.now()}`;
-    setPendingMessages((prev) => [
-      ...prev,
-      { tempId, content, timestamp: new Date().toISOString() },
-    ]);
-    return tempId;
-  }, []);
+  const addPendingMessage = useCallback(
+    (
+      content: string,
+      attachments?: UploadedFile[],
+      timestamp = new Date().toISOString(),
+    ): { tempId: string; clientOrder: number } => {
+      const clientOrder = nextClientOrderRef.current++;
+      const tempId = `temp-${Date.now()}-${clientOrder}`;
+      logSessionUiTrace("pending-add", {
+        sessionId,
+        tempId,
+        clientOrder,
+        textLength: content.length,
+      });
+      setPendingMessages((prev) => [
+        ...prev,
+        {
+          tempId,
+          content,
+          timestamp,
+          clientOrder,
+          ...(attachments?.length ? { attachments } : {}),
+        },
+      ]);
+      return { tempId, clientOrder };
+    },
+    [sessionId],
+  );
 
   // Remove a pending message by tempId (used when server confirms or send fails)
-  const removePendingMessage = useCallback((tempId: string) => {
-    setPendingMessages((prev) => prev.filter((p) => p.tempId !== tempId));
-  }, []);
+  const removePendingMessage = useCallback(
+    (tempId: string) => {
+      logSessionUiTrace("pending-remove", { sessionId, tempId });
+      setPendingMessages((prev) => prev.filter((p) => p.tempId !== tempId));
+    },
+    [sessionId],
+  );
 
   // Update a pending message's fields (e.g. status text)
   const updatePendingMessage = useCallback(
     (tempId: string, updates: Partial<PendingMessage>) => {
+      logSessionUiTrace("pending-update", {
+        sessionId,
+        tempId,
+        hasStatus: updates.status !== undefined,
+      });
       setPendingMessages((prev) =>
         prev.map((p) => (p.tempId === tempId ? { ...p, ...updates } : p)),
       );
     },
-    [],
+    [sessionId],
   );
+
+  const addDeferredMessage = useCallback(
+    (message: DeferredMessage) => {
+      setDeferredMessages((prev) =>
+        removeDeliveredDeferredMessages(
+          upsertDeferredMessage(prev, {
+            ...message,
+            deliveryState: message.deliveryState ?? "queued",
+          }),
+          messages,
+          deliveredUserEchoesRef.current,
+        ),
+      );
+    },
+    [messages, setDeferredMessages],
+  );
+
+  const syncDeferredMessages = useCallback(
+    (
+      incomingMessages: DeferredMessage[],
+      meta?: {
+        reason?: "queued" | "cancelled" | "edited" | "promoted";
+        tempId?: string;
+        source?: "connected" | "event" | "rest";
+      },
+    ) => {
+      logSessionUiTrace("deferred-sync", {
+        sessionId,
+        reason: meta?.reason ?? null,
+        source: meta?.source ?? null,
+        tempId: meta?.tempId ?? null,
+        incoming: summarizeDeferredMessages(incomingMessages),
+      });
+      setDeferredMessages((prev) =>
+        removeDeliveredDeferredMessages(
+          mergeDeferredMessages(prev, incomingMessages, meta),
+          messages,
+          deliveredUserEchoesRef.current,
+        ),
+      );
+    },
+    [messages, setDeferredMessages],
+  );
+
+  const removeDeferredMessage = useCallback(
+    (tempId: string) => {
+      setDeferredMessages((prev) =>
+        prev.filter((message) => message.tempId !== tempId),
+      );
+    },
+    [setDeferredMessages],
+  );
+
+  useEffect(() => {
+    setDeferredMessages((prev) =>
+      removeDeliveredDeferredMessages(
+        prev,
+        messages,
+        deliveredUserEchoesRef.current,
+      ),
+    );
+  }, [messages, setDeferredMessages]);
 
   // Track if we've loaded pending agents for this session
   const pendingAgentsLoadedRef = useRef<string | null>(null);
@@ -501,14 +1369,70 @@ export function useSession(
     [sessionId, setSession],
   );
 
+  const handleSessionMetadataChange = useCallback(
+    (event: SessionMetadataChangedEvent) => {
+      if (event.sessionId !== sessionId) return;
+
+      setSession((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          ...(event.title !== undefined && { customTitle: event.title }),
+          ...(event.archived !== undefined && { isArchived: event.archived }),
+          ...(event.starred !== undefined && { isStarred: event.starred }),
+          ...(event.parentSessionId !== undefined && {
+            parentSessionId: event.parentSessionId ?? undefined,
+          }),
+          ...(event.heartbeatTurnsEnabled !== undefined && {
+            heartbeatTurnsEnabled: event.heartbeatTurnsEnabled,
+          }),
+          ...(event.heartbeatTurnsAfterMinutes !== undefined && {
+            heartbeatTurnsAfterMinutes:
+              event.heartbeatTurnsAfterMinutes ?? undefined,
+          }),
+          ...(event.heartbeatTurnText !== undefined && {
+            heartbeatTurnText: event.heartbeatTurnText ?? undefined,
+          }),
+          ...(event.heartbeatForceAfterMinutes !== undefined && {
+            heartbeatForceAfterMinutes:
+              event.heartbeatForceAfterMinutes ?? undefined,
+          }),
+        };
+      });
+    },
+    [sessionId, setSession],
+  );
+
   // Listen for session status changes via stream
   const handleSessionStatusChange = useCallback(
     (event: SessionStatusEvent) => {
-      if (event.sessionId === sessionId) {
-        setStatus(event.ownership);
+      if (event.sessionId !== sessionId) return;
+
+      const ownershipDropped =
+        status.owner !== "none" && event.ownership.owner === "none";
+
+      logSessionUiTrace("activity-session-status", {
+        sessionId,
+        previousOwner: status.owner,
+        nextOwner: event.ownership.owner,
+        processId:
+          event.ownership.owner === "self"
+            ? event.ownership.processId
+            : null,
+        permissionMode:
+          event.ownership.owner === "self"
+            ? event.ownership.permissionMode
+            : null,
+      });
+      setStatus(event.ownership);
+
+      if (ownershipDropped) {
+        setProcessState("idle");
+        setPendingInputRequest(null);
+        throttledFetch();
       }
     },
-    [sessionId],
+    [sessionId, status.owner, throttledFetch],
   );
 
   // Listen for process state changes via activity bus as a backup for session stream
@@ -525,6 +1449,11 @@ export function useSession(
         event.activity === "waiting-input" ||
         event.activity === "hold"
       ) {
+        logSessionUiTrace("activity-process-state", {
+          sessionId,
+          activity: event.activity,
+          pendingInputType: event.pendingInputType ?? null,
+        });
         setProcessState(event.activity);
       }
 
@@ -557,9 +1486,25 @@ export function useSession(
     fetchNewMessages();
     try {
       const data = await api.getSessionMetadata(projectId, sessionId);
+      const metadataProcessState = parseProcessState(
+        (data.ownership as { state?: unknown }).state,
+      );
       setStatus(data.ownership);
+      if (metadataProcessState) {
+        setProcessState(metadataProcessState);
+      }
       if (data.ownership.owner === "none") {
         setProcessState("idle");
+        setPendingInputRequest(null);
+      } else if (
+        metadataProcessState === "waiting-input" &&
+        data.pendingInputRequest
+      ) {
+        setPendingInputRequest(data.pendingInputRequest);
+      } else if (
+        metadataProcessState &&
+        metadataProcessState !== "waiting-input"
+      ) {
         setPendingInputRequest(null);
       }
     } catch {
@@ -570,6 +1515,7 @@ export function useSession(
   useFileActivity({
     onSessionStatusChange: handleSessionStatusChange,
     onFileChange: handleFileChange,
+    onSessionMetadataChange: handleSessionMetadataChange,
     onSessionUpdated: handleSessionUpdated,
     onProcessStateChange: handleProcessStateChange,
     onReconnect: handleActivityReconnect,
@@ -645,12 +1591,15 @@ export function useSession(
   // Subscribe to live updates
   const handleStreamMessage = useCallback(
     (data: { eventType: string; [key: string]: unknown }) => {
+      logSessionUiTrace("session-stream-dispatch", {
+        sessionId,
+        eventType: data.eventType,
+        sdkType: typeof data.type === "string" ? data.type : undefined,
+        subtype: typeof data.subtype === "string" ? data.subtype : undefined,
+        state: typeof data.state === "string" ? data.state : undefined,
+        tempId: typeof data.tempId === "string" ? data.tempId : undefined,
+      });
       if (data.eventType === "message") {
-        // Track stream activity for engagement tracking
-        // This ensures sessions are marked as "seen" even when receiving
-        // subagent content (which doesn't update parent session file mtime)
-        setLastStreamActivityAt(new Date().toISOString());
-
         // The message event contains the SDK message directly
         // Pass through all fields without stripping
         const sdkMessage = data as Record<string, unknown> & {
@@ -669,6 +1618,20 @@ export function useSession(
         const msgType =
           typeof sdkMessage.type === "string" ? sdkMessage.type : undefined;
         const msgRole = sdkMessage.role as Message["role"] | undefined;
+        const hasUserVisibleLiveness =
+          msgType === "stream_event" &&
+          hasUserVisibleStreamProgress(
+            (sdkMessage.event as Record<string, unknown>) ?? {},
+          );
+
+        // Track stream activity for engagement/freshness UI. Queue state,
+        // status, and full user/assistant messages stay immediate; only
+        // token-level stream_event freshness is coalesced.
+        noteStreamActivity(msgType !== "stream_event");
+
+        if (hasUserVisibleLiveness) {
+          noteStreamProgressLiveness();
+        }
 
         // Handle stream_event messages (partial content from streaming API)
         // Delegate to useStreamingContent hook
@@ -676,6 +1639,15 @@ export function useSession(
           if (handleStreamEvent(sdkMessage)) {
             return; // Event was handled, don't process as regular message
           }
+        }
+
+        // Predicted next-user-prompt suggestion: store and don't add to message list
+        if (msgType === "prompt_suggestion") {
+          const suggestion = sdkMessage.suggestion;
+          if (typeof suggestion === "string" && suggestion.trim()) {
+            setPromptSuggestion(suggestion);
+          }
+          return;
         }
 
         // For assistant messages, clear streaming state and remove ALL streaming placeholders
@@ -739,6 +1711,23 @@ export function useSession(
           }
         }
 
+        // Handle synthetic token usage messages from provider-specific
+        // notifications so context usage reflects actual provider state.
+        if (msgType === "system" && sdkMessage.subtype === "token_usage") {
+          const usage = getContextUsageFromTokenUsageMessage(
+            sdkMessage,
+            session?.model,
+            session?.provider,
+          );
+          if (usage) {
+            setSession((prev) =>
+              prev ? { ...prev, contextUsage: usage } : prev,
+            );
+          }
+          // Token usage messages are telemetry, not transcript content.
+          return;
+        }
+
         // Handle status messages (compacting indicator)
         if (msgType === "system" && sdkMessage.subtype === "status") {
           const status = sdkMessage.status as "compacting" | null;
@@ -754,22 +1743,38 @@ export function useSession(
         }
 
         // Handle tempId for pending message resolution
-        // When server echoes back tempId, remove from pending queue
+        // When server echoes back tempId, remove from pending/deferred queues.
+        // Deferred promotion should also be reflected by a deferred-queue event,
+        // but this reconciles clients that miss that event across reconnects.
         const tempId = sdkMessage.tempId as string | undefined;
-        if (msgType === "user" && tempId) {
-          removePendingMessage(tempId);
-        } else if (msgType === "user") {
-          // Fallback for providers that omit tempId on user echo:
-          // clear one matching optimistic pending message by content.
+        if (msgType === "user") {
+          setPromptSuggestion(null);
           const incomingText = extractUserMessageText(sdkMessage);
-          if (incomingText) {
-            setPendingMessages((prev) => {
-              const idx = prev.findIndex(
-                (p) => p.content.trim() === incomingText,
-              );
-              if (idx === -1) return prev;
-              return prev.filter((_, i) => i !== idx);
-            });
+          if (tempId || incomingText) {
+            deliveredUserEchoesRef.current = [
+              ...deliveredUserEchoesRef.current,
+              { ...(tempId ? { tempId } : {}), content: incomingText ?? "" },
+            ].slice(-50);
+          }
+          logSessionUiTrace("user-echo", {
+            sessionId,
+            tempId: tempId ?? null,
+            textLength: incomingText?.length ?? 0,
+          });
+          if (tempId) {
+            removePendingMessage(tempId);
+            setDeferredMessages((prev) =>
+              removeEchoedQueueMessage(prev, tempId, incomingText),
+            );
+          } else if (incomingText) {
+            // Fallback for providers that omit tempId on user echo:
+            // clear one matching optimistic or deferred message by content.
+            setPendingMessages((prev) =>
+              removeEchoedQueueMessage(prev, undefined, incomingText),
+            );
+            setDeferredMessages((prev) =>
+              removeEchoedQueueMessage(prev, undefined, incomingText),
+            );
           }
         }
 
@@ -797,7 +1802,11 @@ export function useSession(
           eventType: string;
           state: string;
           request?: InputRequest;
+          liveness?: SessionLivenessSnapshot;
         };
+        if (statusData.liveness) {
+          setSessionLiveness(statusData.liveness);
+        }
         // Track process state (in-turn, idle, waiting-input, hold)
         if (
           statusData.state === "idle" ||
@@ -805,6 +1814,11 @@ export function useSession(
           statusData.state === "waiting-input" ||
           statusData.state === "hold"
         ) {
+          logSessionUiTrace("stream-status", {
+            sessionId,
+            state: statusData.state,
+            hasRequest: !!statusData.request,
+          });
           setProcessState(statusData.state as ProcessState);
         }
         // Capture pending input request when waiting for user input
@@ -823,17 +1837,52 @@ export function useSession(
           // Clear pending request when state changes away from waiting-input
           setPendingInputRequest(null);
         }
+      } else if (data.eventType === "heartbeat") {
+        const heartbeatData = data as {
+          eventType: string;
+          liveness?: SessionLivenessSnapshot;
+        };
+        if (heartbeatData.liveness) {
+          setSessionLiveness(heartbeatData.liveness);
+        }
       } else if (data.eventType === "deferred-queue") {
         const deferredData = data as {
           eventType: string;
           messages: DeferredMessage[];
+          reason?: "queued" | "cancelled" | "edited" | "promoted";
+          tempId?: string;
         };
-        setDeferredMessages(deferredData.messages ?? []);
+        logSessionUiTrace("stream-deferred-queue", {
+          sessionId,
+          reason: deferredData.reason ?? null,
+          tempId: deferredData.tempId ?? null,
+          incoming: summarizeDeferredMessages(deferredData.messages ?? []),
+        });
+        syncDeferredMessages(deferredData.messages ?? [], {
+          reason: deferredData.reason,
+          tempId: deferredData.tempId,
+        });
+        const sessionProvider = session?.provider;
+        const needsDeferredPromotionCatchUp =
+          deferredData.reason === "promoted" &&
+          (deferredData.messages?.length ?? 0) === 0 &&
+          sessionProvider !== "codex" &&
+          sessionProvider !== "codex-oss";
+        if (
+          needsDeferredPromotionCatchUp
+        ) {
+          throttledFetch();
+          // A second call asks the existing throttle for a trailing catch-up in
+          // case the provider user echo lands just after the promotion event.
+          throttledFetch();
+        }
       } else if (data.eventType === "complete") {
+        logSessionUiTrace("stream-complete", { sessionId });
         setProcessState("idle");
         setStatus({ owner: "none" });
+        setSessionLiveness(null);
         setPendingInputRequest(null);
-        setDeferredMessages([]);
+        throttledFetch();
       } else if (data.eventType === "connected") {
         // Sync state and permission mode from connected event
         const connectedData = data as {
@@ -846,7 +1895,9 @@ export function useSession(
           provider?: ProviderName;
           model?: string;
           deferredMessages?: DeferredMessage[];
+          liveness?: SessionLivenessSnapshot;
         };
+        setSessionLiveness(connectedData.liveness ?? null);
 
         // Update actual session ID if server reports a different one
         // This handles the temp→real ID transition when createSession returns
@@ -854,6 +1905,16 @@ export function useSession(
         // Check both the connected event's sessionId and the request's sessionId
         const serverSessionId =
           connectedData.sessionId ?? connectedData.request?.sessionId;
+        logSessionUiTrace("stream-connected", {
+          sessionId,
+          serverSessionId: serverSessionId ?? null,
+          state: connectedData.state ?? null,
+          permissionMode: connectedData.permissionMode ?? null,
+          modeVersion: connectedData.modeVersion ?? null,
+          provider: connectedData.provider ?? null,
+          model: connectedData.model ?? null,
+          deferredCount: connectedData.deferredMessages?.length ?? 0,
+        });
         if (serverSessionId && serverSessionId !== sessionId) {
           setActualSessionId(serverSessionId);
         }
@@ -878,10 +1939,29 @@ export function useSession(
           connectedData.permissionMode &&
           connectedData.modeVersion !== undefined
         ) {
+          const shouldReapplyStickyMode =
+            connectedData.permissionMode === "default" &&
+            connectedData.modeVersion === 0 &&
+            localModeRef.current !== "default";
           applyServerModeUpdate(
             connectedData.permissionMode,
             connectedData.modeVersion,
           );
+          if (shouldReapplyStickyMode) {
+            const desiredMode = localModeRef.current;
+            void api
+              .setPermissionMode(serverSessionId ?? sessionId, desiredMode)
+              .then((result) => {
+                if (result.modeVersion >= lastKnownModeVersionRef.current) {
+                  lastKnownModeVersionRef.current = result.modeVersion;
+                  setServerMode(result.permissionMode);
+                  setModeVersion(result.modeVersion);
+                }
+              })
+              .catch((err) => {
+                console.warn("Failed to reapply permission mode:", err);
+              });
+          }
         }
 
         // Update session with provider/model from connected event (belt-and-suspenders)
@@ -902,8 +1982,12 @@ export function useSession(
           });
         }
 
-        // Sync deferred messages from connected event
-        setDeferredMessages(connectedData.deferredMessages ?? []);
+        // Sync deferred messages from connected event. Missing server entries
+        // are kept as recoverable local scratchpad state until delivery is
+        // confirmed by a user-message echo or explicit cancel/edit.
+        syncDeferredMessages(connectedData.deferredMessages ?? [], {
+          source: "connected",
+        });
 
         // Fetch messages from JSONL since last known message.
         // For Codex providers, skip the very first connected-event fetch because
@@ -997,8 +2081,11 @@ export function useSession(
       applyServerModeUpdate,
       sessionId,
       handleStreamEvent,
+      noteStreamActivity,
       clearStreaming,
       removePendingMessage,
+      setDeferredMessages,
+      syncDeferredMessages,
       streamingMarkdownCallbacks,
       handleStreamMessageEvent,
       handleStreamSubagentMessage,
@@ -1007,7 +2094,9 @@ export function useSession(
       setMessages,
       setSession,
       fetchNewMessages,
+      throttledFetch,
       session?.provider,
+      session?.model,
     ],
   );
 
@@ -1017,14 +2106,32 @@ export function useSession(
   const handleStreamError = useCallback(async () => {
     try {
       const data = await api.getSessionMetadata(projectId, sessionId);
+      const metadataProcessState = parseProcessState(
+        (data.ownership as { state?: unknown }).state,
+      );
       if (data.ownership.owner !== "self") {
         setStatus({ owner: "none" });
         setProcessState("idle");
+        setPendingInputRequest(null);
+        return;
+      }
+      setStatus(data.ownership);
+      if (metadataProcessState) {
+        setProcessState(metadataProcessState);
+        if (
+          metadataProcessState === "waiting-input" &&
+          data.pendingInputRequest
+        ) {
+          setPendingInputRequest(data.pendingInputRequest);
+        } else if (metadataProcessState !== "waiting-input") {
+          setPendingInputRequest(null);
+        }
       }
     } catch {
       // If session fetch fails, assume process is dead
       setStatus({ owner: "none" });
       setProcessState("idle");
+      setPendingInputRequest(null);
     }
   }, [projectId, sessionId]);
 
@@ -1060,9 +2167,11 @@ export function useSession(
     markdownAugments, // Pre-rendered markdown HTML from REST response (keyed by blockId)
     status,
     processState,
+    sessionLiveness,
     isCompacting, // True when context is being compressed
     isHeld: processState === "hold", // Derived from process state
     pendingInputRequest,
+    setIsCompacting,
     actualSessionId, // Real session ID from server (may differ from URL during temp→real transition)
     permissionMode: localMode, // UI-selected mode (sent with next message)
     modeVersion,
@@ -1074,6 +2183,7 @@ export function useSession(
     lastStreamActivityAt, // Last stream message timestamp for engagement tracking
     setStatus,
     setProcessState,
+    setPendingInputRequest,
     setPermissionMode,
     setHold, // Set hold (soft pause) state
     pendingMessages, // Messages waiting for server confirmation
@@ -1081,9 +2191,14 @@ export function useSession(
     removePendingMessage, // Remove from pending by tempId
     updatePendingMessage, // Update pending message fields (e.g. status)
     deferredMessages, // Messages queued server-side waiting for agent turn to end
+    addDeferredMessage, // Persist a queued message immediately after REST success
+    syncDeferredMessages, // Merge authoritative server queue summaries
+    removeDeferredMessage, // Remove queued scratchpad text after cancel/edit
     slashCommands, // Available slash commands from init message
     sessionTools, // Available tools from init message
     mcpServers, // Available MCP servers from init message
+    promptSuggestion, // Predicted next user prompt from prompt_suggestion SDK message
+    dismissPromptSuggestion: () => setPromptSuggestion(null),
     pagination, // Compact-boundary pagination metadata
     loadingOlder, // Whether older messages are being loaded
     loadOlderMessages, // Load next chunk of older messages

@@ -6,12 +6,14 @@ import {
   reconcileCodexLinearMessages,
 } from "../lib/codexLinearMessages";
 import {
+  findMessageIndexById,
   getMessageId,
   mergeJSONLMessages,
   mergeStreamMessage,
 } from "../lib/mergeMessages";
+import { markReloadPerfPhase } from "../lib/diagnostics/reloadPerfProbe";
 import { getProvider } from "../providers/registry";
-import type { Message, Session, SessionStatus } from "../types";
+import type { Message, SessionMetadata, SessionStatus } from "../types";
 
 /** Content from a subagent (Task tool) */
 export interface AgentContent {
@@ -29,7 +31,7 @@ export type AgentContentMap = Record<string, AgentContent>;
 
 /** Result from initial session load */
 export interface SessionLoadResult {
-  session: Session;
+  session: SessionMetadata;
   status: SessionStatus;
   pendingInputRequest?: unknown;
   slashCommands?: Array<{
@@ -43,6 +45,8 @@ export interface SessionLoadResult {
 export interface UseSessionMessagesOptions {
   projectId: string;
   sessionId: string;
+  tailTurns?: number;
+  tailFrom?: string;
   /** Called when initial load completes with session data */
   onLoadComplete?: (result: SessionLoadResult) => void;
   /** Called on load error */
@@ -60,9 +64,9 @@ export interface UseSessionMessagesResult {
   /** Whether initial load is in progress */
   loading: boolean;
   /** Session data from initial load */
-  session: Session | null;
+  session: SessionMetadata | null;
   /** Set session data (for stream connected event) */
-  setSession: React.Dispatch<React.SetStateAction<Session | null>>;
+  setSession: React.Dispatch<React.SetStateAction<SessionMetadata | null>>;
   /** Handle streaming content updates (for useStreamingContent) */
   handleStreamingUpdate: (message: Message, agentId?: string) => void;
   /** Handle stream message event (buffered until initial load completes) */
@@ -89,23 +93,84 @@ export interface UseSessionMessagesResult {
   loadOlderMessages: () => Promise<void>;
 }
 
-function isCodexProvider(provider?: string): boolean {
-  return provider === "codex" || provider === "codex-oss";
+interface SessionLoadCacheEntry {
+  messages: Message[];
+  session: SessionMetadata;
+  pagination?: PaginationInfo;
+  agentContent: AgentContentMap;
+  toolUseToAgentEntries: Array<[string, string]>;
+  lastMessageId?: string;
+  maxPersistedTimestampMs: number;
 }
 
-function getMessageRole(message: Message): string {
-  const nestedRole = (message.message as { role?: unknown } | undefined)?.role;
-  if (nestedRole === "user" || nestedRole === "assistant") {
-    return nestedRole;
+interface SessionLoadCacheGlobal {
+  __YA_SESSION_LOAD_CACHE__?: Map<string, SessionLoadCacheEntry>;
+}
+
+function cloneForCache<T>(value: T): T {
+  if (typeof structuredClone === "function") {
+    return structuredClone(value);
   }
-  if (
-    message.role === "user" ||
-    message.role === "assistant" ||
-    message.role === "system"
-  ) {
-    return message.role;
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function getSessionLoadCache(): Map<string, SessionLoadCacheEntry> {
+  const globalCache = globalThis as typeof globalThis & SessionLoadCacheGlobal;
+  if (!globalCache.__YA_SESSION_LOAD_CACHE__) {
+    globalCache.__YA_SESSION_LOAD_CACHE__ = new Map();
   }
-  return "unknown";
+  return globalCache.__YA_SESSION_LOAD_CACHE__;
+}
+
+function getSessionLoadCacheKey(projectId: string, sessionId: string): string {
+  return `${projectId}:${sessionId}`;
+}
+
+function getSessionLoadVariantKey(options: {
+  projectId: string;
+  sessionId: string;
+  tailTurns?: number;
+  tailFrom?: string;
+}): string {
+  const variant = [
+    options.tailTurns !== undefined ? `tailTurns=${options.tailTurns}` : "",
+    options.tailFrom ? `tailFrom=${options.tailFrom}` : "",
+  ]
+    .filter(Boolean)
+    .join("&");
+  return variant
+    ? `${options.projectId}:${options.sessionId}?${variant}`
+    : getSessionLoadCacheKey(options.projectId, options.sessionId);
+}
+
+function readSessionLoadCache(
+  projectId: string,
+  sessionId: string,
+  tailTurns?: number,
+  tailFrom?: string,
+): SessionLoadCacheEntry | undefined {
+  if (typeof window === "undefined") return undefined;
+  return getSessionLoadCache().get(
+    getSessionLoadVariantKey({ projectId, sessionId, tailTurns, tailFrom }),
+  );
+}
+
+function writeSessionLoadCache(
+  projectId: string,
+  sessionId: string,
+  entry: SessionLoadCacheEntry,
+  tailTurns?: number,
+  tailFrom?: string,
+): void {
+  if (typeof window === "undefined") return;
+  getSessionLoadCache().set(
+    getSessionLoadVariantKey({ projectId, sessionId, tailTurns, tailFrom }),
+    cloneForCache(entry),
+  );
+}
+
+function isCodexProvider(provider?: string): boolean {
+  return provider === "codex" || provider === "codex-oss";
 }
 
 function isEmptyAssistantContent(message: Message): boolean {
@@ -155,17 +220,38 @@ function isEmptyAssistantContent(message: Message): boolean {
 export function useSessionMessages(
   options: UseSessionMessagesOptions,
 ): UseSessionMessagesResult {
-  const { projectId, sessionId, onLoadComplete, onLoadError } = options;
+  const {
+    projectId,
+    sessionId,
+    tailTurns,
+    tailFrom,
+    onLoadComplete,
+    onLoadError,
+  } = options;
+  const cachedLoad = readSessionLoadCache(
+    projectId,
+    sessionId,
+    tailTurns,
+    tailFrom,
+  );
 
   // Core state
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [agentContent, setAgentContent] = useState<AgentContentMap>({});
-  const [toolUseToAgent, setToolUseToAgent] = useState<Map<string, string>>(
-    () => new Map(),
+  const [messages, setMessages] = useState<Message[]>(
+    () => cachedLoad?.messages ?? [],
   );
-  const [loading, setLoading] = useState(true);
-  const [session, setSession] = useState<Session | null>(null);
-  const [pagination, setPagination] = useState<PaginationInfo | undefined>();
+  const [agentContent, setAgentContent] = useState<AgentContentMap>(
+    () => cachedLoad?.agentContent ?? {},
+  );
+  const [toolUseToAgent, setToolUseToAgent] = useState<Map<string, string>>(
+    () => new Map(cachedLoad?.toolUseToAgentEntries ?? []),
+  );
+  const [loading, setLoading] = useState(!cachedLoad);
+  const [session, setSession] = useState<SessionMetadata | null>(
+    () => cachedLoad?.session ?? null,
+  );
+  const [pagination, setPagination] = useState<PaginationInfo | undefined>(
+    () => cachedLoad?.pagination,
+  );
   const [loadingOlder, setLoadingOlder] = useState(false);
 
   // Buffering: queue stream messages until initial load completes
@@ -257,7 +343,7 @@ export function useSessionMessages(
           status: "running" as const,
         };
         const incomingId = getMessageId(incoming);
-        if (existing.messages.some((m) => getMessageId(m) === incomingId)) {
+        if (findMessageIndexById(existing.messages, incomingId) !== -1) {
           return prev;
         }
         return {
@@ -286,19 +372,60 @@ export function useSessionMessages(
     }
   }, [processStreamMessage, processStreamSubagentMessage]);
 
-  // Initial load
+  // Initial load. When a warm in-tab cache exists, the REST request is an
+  // incremental refresh after the cached tail; merge that delta instead of
+  // replacing the cached transcript.
   useEffect(() => {
+    const warmLoad = readSessionLoadCache(
+      projectId,
+      sessionId,
+      tailTurns,
+      tailFrom,
+    );
+    markReloadPerfPhase("session_initial_load_start", {
+      projectId,
+      sessionId,
+      tailCompactions: 2,
+      tailTurns,
+      tailFrom,
+    });
     initialLoadCompleteRef.current = false;
     streamBufferRef.current = [];
-    maxPersistedTimestampMsRef.current = Number.NEGATIVE_INFINITY;
-    setLoading(true);
-    setAgentContent({});
+    if (warmLoad) {
+      maxPersistedTimestampMsRef.current = warmLoad.maxPersistedTimestampMs;
+      providerRef.current = warmLoad.session.provider;
+      lastMessageIdRef.current = warmLoad.lastMessageId;
+      setMessages(warmLoad.messages);
+      setAgentContent(warmLoad.agentContent);
+      setToolUseToAgent(new Map(warmLoad.toolUseToAgentEntries));
+      setSession(warmLoad.session);
+      setPagination(warmLoad.pagination);
+      setLoading(false);
+    } else {
+      maxPersistedTimestampMsRef.current = Number.NEGATIVE_INFINITY;
+      providerRef.current = undefined;
+      lastMessageIdRef.current = undefined;
+      setLoading(true);
+      setAgentContent({});
+      setToolUseToAgent(new Map());
+      setSession(null);
+      setPagination(undefined);
+    }
 
     api
-      .getSession(projectId, sessionId, undefined, { tailCompactions: 2 })
+      .getSession(projectId, sessionId, lastMessageIdRef.current, {
+        tailCompactions: 2,
+        tailTurns,
+        tailFrom,
+      })
       .then((data) => {
+        markReloadPerfPhase("session_initial_load_data_ready", {
+          messages: data.messages.length,
+          provider: data.session.provider,
+          totalMessages: data.pagination?.totalMessageCount,
+          hasOlderMessages: data.pagination?.hasOlderMessages,
+        });
         setSession(data.session);
-        setPagination(data.pagination);
         providerRef.current = data.session.provider;
 
         // Tag messages from JSONL as authoritative
@@ -307,17 +434,35 @@ export function useSessionMessages(
           _source: "jsonl" as const,
         }));
         updatePersistedTimestampWatermark(taggedMessages);
-        setMessages(
-          isCodexProvider(data.session.provider)
+        const warmMessages = warmLoad?.messages;
+        const shouldMergeWarmDelta =
+          warmMessages !== undefined && Boolean(lastMessageIdRef.current);
+        const loadedMessages = shouldMergeWarmDelta
+          ? (() => {
+              const result = mergeJSONLMessages(warmMessages, taggedMessages, {
+                skipDagOrdering: !getProvider(data.session.provider)
+                  .capabilities.supportsDag,
+              });
+              return isCodexProvider(data.session.provider)
+                ? reconcileCodexLinearMessages(result.messages)
+                : result.messages;
+            })()
+          : isCodexProvider(data.session.provider)
             ? reconcileCodexLinearMessages(taggedMessages)
-            : taggedMessages,
-        );
+            : taggedMessages;
+        setMessages(loadedMessages);
+        setPagination(data.pagination ?? warmLoad?.pagination);
+        markReloadPerfPhase("session_initial_messages_state_queued", {
+          messages: taggedMessages.length,
+          totalMessages: loadedMessages.length,
+          provider: data.session.provider,
+        });
 
         // Update lastMessageIdRef synchronously to avoid race condition:
         // stream "connected" event calls fetchNewMessages() immediately, but the
         // useEffect that normally updates lastMessageIdRef runs asynchronously.
         // Without this, fetchNewMessages() would use undefined and refetch everything.
-        const lastMessage = taggedMessages[taggedMessages.length - 1];
+        const lastMessage = loadedMessages[loadedMessages.length - 1];
         if (lastMessage) {
           lastMessageIdRef.current = getMessageId(lastMessage);
         }
@@ -327,6 +472,25 @@ export function useSessionMessages(
         flushBuffer();
 
         setLoading(false);
+        markReloadPerfPhase("session_initial_load_complete", {
+          messages: taggedMessages.length,
+        });
+
+        writeSessionLoadCache(
+          projectId,
+          sessionId,
+          {
+            messages: loadedMessages,
+            session: data.session,
+            pagination: data.pagination ?? warmLoad?.pagination,
+            agentContent: {},
+            toolUseToAgentEntries: [],
+            lastMessageId: lastMessageIdRef.current,
+            maxPersistedTimestampMs: maxPersistedTimestampMsRef.current,
+          },
+          tailTurns,
+          tailFrom,
+        );
 
         // Notify parent
         onLoadComplete?.({
@@ -337,12 +501,17 @@ export function useSessionMessages(
         });
       })
       .catch((err) => {
+        markReloadPerfPhase("session_initial_load_error", {
+          message: err instanceof Error ? err.message : String(err),
+        });
         setLoading(false);
         onLoadError?.(err);
       });
   }, [
     projectId,
     sessionId,
+    tailTurns,
+    tailFrom,
     onLoadComplete,
     onLoadError,
     flushBuffer,
@@ -362,8 +531,9 @@ export function useSessionMessages(
             messages: [],
             status: "running" as const,
           };
-          const existingIdx = existing.messages.findIndex(
-            (m) => getMessageId(m) === messageId,
+          const existingIdx = findMessageIndexById(
+            existing.messages,
+            messageId,
           );
 
           if (existingIdx >= 0) {
@@ -384,9 +554,7 @@ export function useSessionMessages(
 
       // Route to main messages
       setMessages((prev) => {
-        const existingIdx = prev.findIndex(
-          (m) => getMessageId(m) === messageId,
-        );
+        const existingIdx = findMessageIndexById(prev, messageId);
         if (existingIdx >= 0) {
           const updated = [...prev];
           updated[existingIdx] = streamingMessage;
@@ -439,37 +607,58 @@ export function useSessionMessages(
     [],
   );
 
+  const fetchNewMessagesInFlightRef = useRef<Promise<void> | null>(null);
+
   // Fetch new messages incrementally (for file change events)
-  const fetchNewMessages = useCallback(async () => {
-    try {
-      const data = await api.getSession(
-        projectId,
-        sessionId,
-        lastMessageIdRef.current,
-      );
-      if (data.messages.length > 0) {
-        updatePersistedTimestampWatermark(data.messages);
-        setMessages((prev) => {
-          const result = mergeJSONLMessages(prev, data.messages, {
-            skipDagOrdering: !getProvider(data.session.provider).capabilities
-              .supportsDag,
-          });
-          return isCodexProvider(data.session.provider)
-            ? reconcileCodexLinearMessages(result.messages)
-            : result.messages;
-        });
-      }
-      // Update session metadata (including title, model, contextUsage) which may have changed
-      // For new sessions, prev may be null if JSONL didn't exist on initial load
-      setSession((prev) =>
-        prev
-          ? { ...prev, ...data.session, messages: prev.messages }
-          : data.session,
-      );
-    } catch {
-      // Silent fail for incremental updates
+  const fetchNewMessages = useCallback(() => {
+    if (fetchNewMessagesInFlightRef.current) {
+      return fetchNewMessagesInFlightRef.current;
     }
-  }, [projectId, sessionId, updatePersistedTimestampWatermark]);
+
+    const request = (async () => {
+      try {
+        const data = await api.getSession(
+          projectId,
+          sessionId,
+          lastMessageIdRef.current,
+        );
+        if (data.messages.length > 0) {
+          updatePersistedTimestampWatermark(data.messages);
+          setMessages((prev) => {
+            const result = mergeJSONLMessages(prev, data.messages, {
+              skipDagOrdering: !getProvider(data.session.provider).capabilities
+                .supportsDag,
+            });
+            return isCodexProvider(data.session.provider)
+              ? reconcileCodexLinearMessages(result.messages)
+              : result.messages;
+          });
+        }
+        // Update session metadata (including title, model, contextUsage) which may have changed
+        // For new sessions, prev may be null if JSONL didn't exist on initial load
+        setSession((prev) =>
+          prev
+            ? { ...prev, ...data.session }
+            : data.session,
+        );
+      } catch {
+        // Silent fail for incremental updates
+      }
+    })();
+
+    fetchNewMessagesInFlightRef.current = request;
+    void request.finally(() => {
+      if (fetchNewMessagesInFlightRef.current === request) {
+        fetchNewMessagesInFlightRef.current = null;
+      }
+    });
+
+    return request;
+  }, [
+    projectId,
+    sessionId,
+    updatePersistedTimestampWatermark,
+  ]);
 
   // Load older messages (previous chunk before the current truncation point)
   const loadOlderMessages = useCallback(async () => {
@@ -499,7 +688,12 @@ export function useSessionMessages(
     } finally {
       setLoadingOlder(false);
     }
-  }, [projectId, sessionId, pagination, updatePersistedTimestampWatermark]);
+  }, [
+    projectId,
+    sessionId,
+    pagination,
+    updatePersistedTimestampWatermark,
+  ]);
 
   // Fetch session metadata only
   const fetchSessionMetadata = useCallback(async () => {
@@ -508,8 +702,8 @@ export function useSessionMessages(
       // For new sessions, prev may be null if JSONL didn't exist on initial load
       setSession((prev) =>
         prev
-          ? { ...prev, ...data.session, messages: prev.messages }
-          : { ...data.session, messages: [] },
+          ? { ...prev, ...data.session }
+          : data.session,
       );
     } catch {
       // Silent fail for metadata updates

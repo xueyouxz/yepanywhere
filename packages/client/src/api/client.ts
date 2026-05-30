@@ -2,17 +2,27 @@ import type {
   AgentActivity,
   BrowserProfilesResponse,
   ConnectionsResponse,
+  CreatePublicSessionShareRequest,
+  CreatePublicSessionShareResponse,
   DeviceInfo,
   EnrichedRecentEntry,
   FileContentResponse,
+  FreezePublicSessionLiveSharesResponse,
   GitStatusInfo,
   NewSessionDefaults,
   PendingInputType,
+  PromptSuggestionMode,
   ProviderInfo,
   ProviderName,
+  RecapMode,
+  PublicSessionShareSessionStatusResponse,
+  PublicSessionShareViewerActionResponse,
+  RevokePublicSessionSharesResponse,
+  SessionLivenessSnapshot,
   SlashCommand,
   ThinkingOption,
   UploadedFile,
+  UserMessageMetadata,
 } from "@yep-anywhere/shared";
 import { authEvents } from "../lib/authEvents";
 import { getGlobalConnection, isRemoteClient } from "../lib/connection";
@@ -22,9 +32,8 @@ import type {
   Message,
   PermissionMode,
   Project,
-  Session,
+  SessionMetadata,
   SessionStatus,
-  SessionSummary,
 } from "../types";
 
 /** Pagination metadata for compact-boundary-based session loading */
@@ -34,6 +43,8 @@ export interface PaginationInfo {
   returnedMessageCount: number;
   truncatedBeforeMessageId?: string;
   totalCompactions: number;
+  totalUserTurns?: number;
+  truncatedBy?: "compact_boundary" | "user_turn";
 }
 
 /**
@@ -67,6 +78,7 @@ export interface InboxResponse {
 export interface GlobalSessionItem {
   id: string;
   title: string | null;
+  fullTitle: string | null;
   createdAt: string;
   updatedAt: string;
   messageCount: number;
@@ -80,6 +92,10 @@ export interface GlobalSessionItem {
   customTitle?: string;
   isArchived?: boolean;
   isStarred?: boolean;
+  /** Parent session when this item is a YA-owned /btw aside. */
+  parentSessionId?: string;
+  /** Initial prompt text accepted by YA for new-session recovery/copy. */
+  initialPrompt?: string;
   /** SSH host alias for remote execution (undefined = local) */
   executor?: string;
 }
@@ -94,6 +110,21 @@ export interface GlobalSessionStats {
   providerCounts: Partial<Record<ProviderName, number>>;
   /** Counts per executor host (non-archived only, "local" key for sessions without executor) */
   executorCounts: Record<string, number>;
+}
+
+export interface DeferredQueueMessage {
+  tempId?: string;
+  content: string;
+  timestamp: string;
+  metadata?: UserMessageMetadata;
+  attachmentCount?: number;
+  blockedByEdit?: boolean;
+}
+
+export interface DeferredMessagePlacement {
+  beforeTempId?: string;
+  afterTempId?: string;
+  replaceTempId?: string;
 }
 
 /** Minimal project info for filter dropdowns */
@@ -122,6 +153,12 @@ export interface SessionOptions {
   provider?: ProviderName;
   /** SSH host alias for remote execution (undefined = local) */
   executor?: string;
+  /** Recap behavior for future away-return triggers in this session. */
+  recapMode?: RecapMode;
+  /** Prompt suggestion behavior for this session. */
+  promptSuggestionMode?: PromptSuggestionMode;
+  /** Session-level helper side model for simulated helper features. */
+  helperSideModel?: string;
 }
 
 export type { UploadedFile } from "@yep-anywhere/shared";
@@ -258,6 +295,8 @@ export interface VersionInfo {
   resumeProtocolVersion?: number;
   /** Feature capabilities supported by the server. Undefined on older servers. */
   capabilities?: string[];
+  /** Server-routed speech backend ids validated by the server. */
+  voiceBackends?: string[];
   /** Device bridge availability and update state. Undefined on older servers. */
   deviceBridgeState?:
     | "available"
@@ -372,11 +411,24 @@ export const api = {
   getProject: (projectId: string) =>
     fetchJSON<{ project: Project }>(`/projects/${projectId}`),
 
+  deleteProject: (projectId: string) =>
+    fetchJSON<{ removed: boolean; projectId: string; path: string }>(
+      `/projects/${projectId}`,
+      {
+        method: "DELETE",
+      },
+    ),
+
   getSession: (
     projectId: string,
     sessionId: string,
     afterMessageId?: string,
-    options?: { tailCompactions?: number; beforeMessageId?: string },
+    options?: {
+      tailCompactions?: number;
+      beforeMessageId?: string;
+      tailTurns?: number;
+      tailFrom?: string;
+    },
   ) => {
     const params = new URLSearchParams();
     if (afterMessageId) params.set("afterMessageId", afterMessageId);
@@ -384,9 +436,12 @@ export const api = {
       params.set("tailCompactions", String(options.tailCompactions));
     if (options?.beforeMessageId)
       params.set("beforeMessageId", options.beforeMessageId);
+    if (options?.tailTurns !== undefined)
+      params.set("tailTurns", String(options.tailTurns));
+    if (options?.tailFrom) params.set("tailFrom", options.tailFrom);
     const qs = params.toString();
     return fetchJSON<{
-      session: Session;
+      session: SessionMetadata;
       messages: Message[];
       ownership: SessionStatus;
       pendingInputRequest?: InputRequest | null;
@@ -401,7 +456,7 @@ export const api = {
    */
   getSessionMetadata: (projectId: string, sessionId: string) =>
     fetchJSON<{
-      session: Session;
+      session: SessionMetadata;
       ownership: SessionStatus;
       pendingInputRequest?: InputRequest | null;
       slashCommands?: SlashCommand[] | null;
@@ -430,12 +485,18 @@ export const api = {
     message: string,
     options?: SessionOptions,
     attachments?: UploadedFile[],
+    clientTimestamp?: number,
+    messageMetadata?: UserMessageMetadata,
   ) =>
     fetchJSON<{
       sessionId: string;
       processId: string;
+      projectId: string;
+      provider?: ProviderName;
+      model?: string;
       permissionMode: PermissionMode;
       modeVersion: number;
+      serverTimestamp: number;
     }>(`/projects/${projectId}/sessions`, {
       method: "POST",
       body: JSON.stringify({
@@ -445,7 +506,12 @@ export const api = {
         thinking: options?.thinking,
         provider: options?.provider,
         executor: options?.executor,
+        recapMode: options?.recapMode,
+        promptSuggestionMode: options?.promptSuggestionMode,
+        helperSideModel: options?.helperSideModel,
         attachments,
+        clientTimestamp,
+        messageMetadata,
       }),
     }),
 
@@ -457,8 +523,10 @@ export const api = {
     fetchJSON<{
       sessionId: string;
       processId: string;
+      projectId: string;
       permissionMode: PermissionMode;
       modeVersion: number;
+      serverTimestamp: number;
     }>(`/projects/${projectId}/sessions/create`, {
       method: "POST",
       body: JSON.stringify({
@@ -467,6 +535,63 @@ export const api = {
         thinking: options?.thinking,
         provider: options?.provider,
         executor: options?.executor,
+        recapMode: options?.recapMode,
+        promptSuggestionMode: options?.promptSuggestionMode,
+        helperSideModel: options?.helperSideModel,
+      }),
+    }),
+
+  startDetachedSession: (
+    message: string,
+    options?: SessionOptions,
+    attachments?: UploadedFile[],
+    clientTimestamp?: number,
+    messageMetadata?: UserMessageMetadata,
+  ) =>
+    fetchJSON<{
+      sessionId: string;
+      processId: string;
+      projectId: string;
+      permissionMode: PermissionMode;
+      modeVersion: number;
+      serverTimestamp: number;
+    }>(`/sessions`, {
+      method: "POST",
+      body: JSON.stringify({
+        message,
+        mode: options?.mode,
+        model: options?.model,
+        thinking: options?.thinking,
+        provider: options?.provider,
+        executor: options?.executor,
+        recapMode: options?.recapMode,
+        promptSuggestionMode: options?.promptSuggestionMode,
+        helperSideModel: options?.helperSideModel,
+        attachments,
+        clientTimestamp,
+        messageMetadata,
+      }),
+    }),
+
+  createDetachedSession: (options?: SessionOptions) =>
+    fetchJSON<{
+      sessionId: string;
+      processId: string;
+      projectId: string;
+      permissionMode: PermissionMode;
+      modeVersion: number;
+      serverTimestamp: number;
+    }>(`/sessions/create`, {
+      method: "POST",
+      body: JSON.stringify({
+        mode: options?.mode,
+        model: options?.model,
+        thinking: options?.thinking,
+        provider: options?.provider,
+        executor: options?.executor,
+        recapMode: options?.recapMode,
+        promptSuggestionMode: options?.promptSuggestionMode,
+        helperSideModel: options?.helperSideModel,
       }),
     }),
 
@@ -477,11 +602,14 @@ export const api = {
     options?: SessionOptions,
     attachments?: UploadedFile[],
     tempId?: string,
+    clientTimestamp?: number,
+    messageMetadata?: UserMessageMetadata,
   ) =>
     fetchJSON<{
       processId: string;
       permissionMode: PermissionMode;
       modeVersion: number;
+      serverTimestamp: number;
     }>(`/projects/${projectId}/sessions/${sessionId}/resume`, {
       method: "POST",
       body: JSON.stringify({
@@ -491,8 +619,46 @@ export const api = {
         thinking: options?.thinking,
         provider: options?.provider,
         executor: options?.executor,
+        recapMode: options?.recapMode,
+        promptSuggestionMode: options?.promptSuggestionMode,
+        helperSideModel: options?.helperSideModel,
         attachments,
         tempId,
+        clientTimestamp,
+        messageMetadata,
+      }),
+    }),
+
+  restartSession: (
+    projectId: string,
+    sessionId: string,
+    options?: SessionOptions & { reason?: string },
+  ) =>
+    fetchJSON<{
+      sessionId: string;
+      processId: string;
+      projectId: string;
+      provider?: ProviderName;
+      title?: string;
+      permissionMode: PermissionMode;
+      modeVersion: number;
+      restartedFrom: string;
+      oldProcessId?: string;
+      oldProcessInterrupted: boolean;
+      oldProcessAbortDeferred: boolean;
+      oldProcessAborted: boolean;
+    }>(`/projects/${projectId}/sessions/${sessionId}/restart`, {
+      method: "POST",
+      body: JSON.stringify({
+        mode: options?.mode,
+        model: options?.model,
+        thinking: options?.thinking,
+        provider: options?.provider,
+        executor: options?.executor,
+        recapMode: options?.recapMode,
+        promptSuggestionMode: options?.promptSuggestionMode,
+        helperSideModel: options?.helperSideModel,
+        reason: options?.reason,
       }),
     }),
 
@@ -504,12 +670,20 @@ export const api = {
     tempId?: string,
     thinking?: ThinkingOption,
     deferred?: boolean,
+    placement?: DeferredMessagePlacement,
+    clientTimestamp?: number,
+    messageMetadata?: UserMessageMetadata,
   ) =>
     fetchJSON<{
       queued: boolean;
+      compactQueued?: boolean;
       restarted?: boolean;
       processId?: string;
       deferred?: boolean;
+      promoted?: boolean;
+      position?: number;
+      deferredMessages?: DeferredQueueMessage[];
+      serverTimestamp: number;
     }>(`/sessions/${sessionId}/messages`, {
       method: "POST",
       body: JSON.stringify({
@@ -519,6 +693,11 @@ export const api = {
         tempId,
         thinking,
         deferred,
+        insertBeforeTempId: placement?.beforeTempId,
+        insertAfterTempId: placement?.afterTempId,
+        replaceDeferredTempId: placement?.replaceTempId,
+        clientTimestamp,
+        messageMetadata,
       }),
     }),
 
@@ -528,16 +707,58 @@ export const api = {
       { method: "DELETE" },
     ),
 
+  editDeferredMessage: (sessionId: string, tempId: string) =>
+    fetchJSON<{
+      message: string;
+      tempId?: string;
+      mode?: PermissionMode;
+      attachments?: UploadedFile[];
+      placement?: DeferredMessagePlacement;
+    }>(`/sessions/${sessionId}/deferred/${encodeURIComponent(tempId)}/edit`, {
+      method: "POST",
+    }),
+
+  releaseDeferredEditBarrier: (sessionId: string, tempId: string) =>
+    fetchJSON<{ released: boolean; deferredMessages?: DeferredQueueMessage[] }>(
+      `/sessions/${sessionId}/deferred/${encodeURIComponent(tempId)}/edit/release`,
+      { method: "POST" },
+    ),
+
   abortProcess: (processId: string) =>
     fetchJSON<{ aborted: boolean }>(`/processes/${processId}/abort`, {
       method: "POST",
     }),
 
   interruptProcess: (processId: string) =>
-    fetchJSON<{ interrupted: boolean; supported: boolean }>(
+    fetchJSON<{ interrupted: boolean; supported: boolean; aborted?: boolean }>(
       `/processes/${processId}/interrupt`,
       { method: "POST" },
     ),
+
+  requestRecap: (processId: string, hiddenSinceMs?: number) =>
+    fetchJSON<{ supported: boolean; emitted: boolean; reason?: string }>(
+      `/processes/${processId}/recap`,
+      {
+        method: "POST",
+        ...(hiddenSinceMs === undefined
+          ? {}
+          : { body: JSON.stringify({ hiddenSinceMs }) }),
+      },
+    ),
+
+  setProcessRecapConfig: (
+    processId: string,
+    config: { recapMode?: RecapMode; helperSideModel?: string },
+  ) =>
+    fetchJSON<{
+      success: boolean;
+      processId: string;
+      recapMode: RecapMode;
+      helperSideModel: string;
+    }>(`/processes/${processId}/recap-config`, {
+      method: "POST",
+      body: JSON.stringify(config),
+    }),
 
   getProcessModels: (processId: string) =>
     fetchJSON<{
@@ -545,10 +766,25 @@ export const api = {
     }>(`/processes/${processId}/models`),
 
   setProcessModel: (processId: string, model?: string) =>
-    fetchJSON<{ success: boolean; model?: string }>(
+    fetchJSON<{ success: boolean; processId: string; model?: string }>(
       `/processes/${processId}/model`,
       { method: "POST", body: JSON.stringify({ model }) },
     ),
+
+  setProcessConfig: (
+    processId: string,
+    config: { model?: string; thinking?: ThinkingOption },
+  ) =>
+    fetchJSON<{
+      success: boolean;
+      processId: string;
+      model?: string;
+      thinking?: { type: string };
+      effort?: string;
+    }>(`/processes/${processId}/config`, {
+      method: "POST",
+      body: JSON.stringify(config),
+    }),
 
   respondToInput: (
     sessionId: string,
@@ -557,10 +793,18 @@ export const api = {
     answers?: Record<string, string>,
     feedback?: string,
   ) =>
-    fetchJSON<{ accepted: boolean }>(`/sessions/${sessionId}/input`, {
-      method: "POST",
-      body: JSON.stringify({ requestId, response, answers, feedback }),
-    }),
+    fetchJSON<{ accepted: boolean; pendingInputRequest?: InputRequest | null }>(
+      `/sessions/${sessionId}/input`,
+      {
+        method: "POST",
+        body: JSON.stringify({ requestId, response, answers, feedback }),
+      },
+    ),
+
+  getPendingInputRequest: (sessionId: string) =>
+    fetchJSON<{ request: InputRequest | null }>(
+      `/sessions/${sessionId}/pending-input`,
+    ),
 
   setPermissionMode: (sessionId: string, mode: PermissionMode) =>
     fetchJSON<{ permissionMode: PermissionMode; modeVersion: number }>(
@@ -594,6 +838,10 @@ export const api = {
         thinking?: { type: string };
         effort?: string;
         model?: string;
+        liveness?: SessionLivenessSnapshot;
+        recapMode?: RecapMode;
+        promptSuggestionMode?: PromptSuggestionMode;
+        helperSideModel?: string;
       } | null;
     }>(`/sessions/${sessionId}/process`),
 
@@ -619,7 +867,16 @@ export const api = {
 
   updateSessionMetadata: (
     sessionId: string,
-    updates: { title?: string; archived?: boolean; starred?: boolean },
+    updates: {
+      title?: string;
+      archived?: boolean;
+      starred?: boolean;
+      parentSessionId?: string | null;
+      heartbeatTurnsEnabled?: boolean;
+      heartbeatTurnsAfterMinutes?: number | null;
+      heartbeatTurnText?: string | null;
+      heartbeatForceAfterMinutes?: number | null;
+    },
   ) =>
     fetchJSON<{ updated: boolean }>(`/sessions/${sessionId}/metadata`, {
       method: "PUT",
@@ -635,6 +892,7 @@ export const api = {
     sessionId: string,
     title?: string,
     provider?: string,
+    parentSessionId?: string,
   ) =>
     fetchJSON<{
       sessionId: string;
@@ -643,7 +901,7 @@ export const api = {
       provider: string;
     }>(`/projects/${projectId}/sessions/${sessionId}/clone`, {
       method: "POST",
-      body: JSON.stringify({ title, provider }),
+      body: JSON.stringify({ title, provider, parentSessionId }),
     }),
 
   // Push notification API
@@ -938,6 +1196,20 @@ export const api = {
       ),
     }),
 
+  // Codex CLI update checker
+  getCodexUpdateStatus: (force?: boolean) =>
+    fetchJSON<{ status: CodexUpdateStatus }>(
+      `/codex/updates${force ? "?force=true" : ""}`,
+    ),
+
+  installCodexUpdate: () =>
+    fetchJSON<{
+      success: boolean;
+      output: string;
+      status: CodexUpdateStatus;
+      error?: string;
+    }>("/codex/updates/install", { method: "POST" }),
+
   // Remote executors API
   getRemoteExecutors: () =>
     fetchJSON<{ executors: string[] }>("/settings/remote-executors"),
@@ -962,6 +1234,54 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ html, title }),
     }),
+
+  getPublicShareStatus: () =>
+    fetchJSON<{ configured: boolean; requiresRelay: boolean }>(
+      "/public-shares/status",
+    ),
+
+  getPublicSessionShareStatus: (projectId: string, sessionId: string) =>
+    fetchJSON<PublicSessionShareSessionStatusResponse>(
+      `/public-shares/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}`,
+    ),
+
+  createPublicSessionShare: (body: CreatePublicSessionShareRequest) =>
+    fetchJSON<CreatePublicSessionShareResponse>("/public-shares", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  revokePublicSessionShares: (projectId: string, sessionId: string) =>
+    fetchJSON<RevokePublicSessionSharesResponse>(
+      `/public-shares/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}`,
+      { method: "DELETE" },
+    ),
+
+  freezePublicSessionLiveShares: (projectId: string, sessionId: string) =>
+    fetchJSON<FreezePublicSessionLiveSharesResponse>(
+      `/public-shares/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/freeze-live`,
+      { method: "POST" },
+    ),
+
+  freezePublicSessionViewerToken: (
+    projectId: string,
+    sessionId: string,
+    viewerId: string,
+  ) =>
+    fetchJSON<PublicSessionShareViewerActionResponse>(
+      `/public-shares/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/viewers/${encodeURIComponent(viewerId)}/freeze`,
+      { method: "POST" },
+    ),
+
+  disconnectPublicSessionViewerToken: (
+    projectId: string,
+    sessionId: string,
+    viewerId: string,
+  ) =>
+    fetchJSON<PublicSessionShareViewerActionResponse>(
+      `/public-shares/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/viewers/${encodeURIComponent(viewerId)}`,
+      { method: "DELETE" },
+    ),
 
   // Device bridge API
   getDevices: () => fetchJSON<DeviceInfo[]>("/devices"),
@@ -1028,6 +1348,8 @@ export interface ServerSettings {
   serviceWorkerEnabled: boolean;
   /** Whether remote SRP resume sessions should be persisted to disk */
   persistRemoteSessionsToDisk: boolean;
+  /** Whether the server is requesting browser clients to upload diagnostic logs */
+  clientLogCollectionRequested?: boolean;
   /** SSH host aliases for remote executors */
   remoteExecutors?: string[];
   /** SSH host aliases for ChromeOS device bridge targets */
@@ -1036,6 +1358,10 @@ export interface ServerSettings {
   allowedHosts?: string;
   /** Free-form instructions appended to the system prompt for all sessions */
   globalInstructions?: string;
+  /** Default idle minutes before an opted-in session queues a heartbeat turn */
+  heartbeatTurnsAfterMinutes?: number;
+  /** Default text queued as the synthetic heartbeat user turn */
+  heartbeatTurnText?: string;
   /** Ollama server URL for claude-ollama provider */
   ollamaUrl?: string;
   /** Custom system prompt for Ollama provider */
@@ -1054,4 +1380,20 @@ export interface ServerSettings {
   lifecycleWebhookToken?: string;
   /** When true, include dryRun=true in lifecycle webhook payloads */
   lifecycleWebhookDryRun?: boolean;
+  /** How the server handles Codex CLI updates */
+  codexUpdatePolicy?: "auto" | "notify" | "off";
+}
+
+/** Status from the server's Codex CLI update checker */
+export interface CodexUpdateStatus {
+  installed: string | null;
+  installedPath: string | null;
+  installedPackage: string | null;
+  updateMethod: "npm" | "manual";
+  manualInstallCommand: string | null;
+  latest: string | null;
+  releaseUrl: string | null;
+  updateAvailable: boolean;
+  lastCheckedAt: number | null;
+  error: string | null;
 }

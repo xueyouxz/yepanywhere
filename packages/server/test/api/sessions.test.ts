@@ -565,6 +565,7 @@ describe("Sessions API", () => {
       expect(inputRes.status).toBe(200);
       const json = await inputRes.json();
       expect(json.accepted).toBe(true);
+      expect(json.pendingInputRequest).toBeNull();
     });
 
     it("accepts deny response with correct requestId", async () => {

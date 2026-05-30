@@ -281,6 +281,60 @@ describe("SessionMetadataService", () => {
 
       expect(service.getMetadata("session-1")).toEqual({ isArchived: true });
     });
+
+    it("stores per-session heartbeat settings and preserves other metadata", async () => {
+      await service.initialize();
+      await service.setTitle("session-1", "Heartbeat Session");
+
+      await service.updateMetadata("session-1", {
+        heartbeatTurnsEnabled: true,
+        heartbeatTurnsAfterMinutes: 7,
+        heartbeatTurnText: "session heartbeat override",
+      });
+
+      expect(service.getMetadata("session-1")).toEqual({
+        customTitle: "Heartbeat Session",
+        heartbeatTurnsEnabled: true,
+        heartbeatTurnsAfterMinutes: 7,
+        heartbeatTurnText: "session heartbeat override",
+      });
+    });
+
+    it("clears heartbeat overrides while keeping the session opt-in flag", async () => {
+      await service.initialize();
+
+      await service.updateMetadata("session-1", {
+        heartbeatTurnsEnabled: true,
+        heartbeatTurnsAfterMinutes: 9,
+        heartbeatTurnText: "override",
+      });
+      await service.updateMetadata("session-1", {
+        heartbeatTurnsAfterMinutes: null,
+        heartbeatTurnText: null,
+      });
+
+      expect(service.getMetadata("session-1")).toEqual({
+        heartbeatTurnsEnabled: true,
+      });
+    });
+
+    it("stores and clears a parent session link", async () => {
+      await service.initialize();
+
+      await service.updateMetadata("session-1", {
+        parentSessionId: "  parent-session  ",
+      });
+
+      expect(service.getMetadata("session-1")).toEqual({
+        parentSessionId: "parent-session",
+      });
+
+      await service.updateMetadata("session-1", {
+        parentSessionId: null,
+      });
+
+      expect(service.getMetadata("session-1")).toBeUndefined();
+    });
   });
 
   describe("clearSession", () => {

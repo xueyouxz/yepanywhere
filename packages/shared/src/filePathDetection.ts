@@ -421,6 +421,10 @@ export function transformFilePathsToHtml(
       }
 
       const { detected } = segment;
+      const lineInfo =
+        detected.lineNumber !== undefined
+          ? `:${detected.lineNumber}${detected.columnNumber !== undefined ? `:${detected.columnNumber}` : ""}`
+          : "";
       const dataAttrs = [
         `data-file-path="${escapeHtml(detected.filePath)}"`,
         detected.lineNumber !== undefined
@@ -433,7 +437,7 @@ export function transformFilePathsToHtml(
         .filter(Boolean)
         .join(" ");
 
-      return `<a class="file-link" ${dataAttrs}>${escapeHtml(detected.match)}</a>`;
+      return `<a class="file-link" ${dataAttrs} title="${escapeHtml(detected.filePath)}${escapeHtml(lineInfo)}">${escapeHtml(detected.match)}</a>`;
     })
     .join("");
 }

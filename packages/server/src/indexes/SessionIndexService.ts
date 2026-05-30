@@ -23,7 +23,10 @@ import { getLogger } from "../logging/logger.js";
 import type { ISessionReader } from "../sessions/types.js";
 import type { SessionSummary } from "../supervisor/types.js";
 import type { EventBus, FileChangeEvent } from "../watcher/index.js";
-import type { ISessionIndexService } from "./types.js";
+import type {
+  ISessionIndexService,
+  SessionIndexListOptions,
+} from "./types.js";
 
 const logger = getLogger();
 const LOG_CACHE_PERF = process.env.SESSION_INDEX_LOG_PERF === "true";
@@ -389,8 +392,23 @@ export class SessionIndexService implements ISessionIndexService {
     sessionDir: string,
     projectId: UrlProjectId,
     reader?: ISessionReader,
+    options?: SessionIndexListOptions,
   ): string {
-    return `${this.getScopeKey(sessionDir, reader)}::${projectId}`;
+    return `${this.getScopeKey(sessionDir, reader)}::${projectId}::activeAfter=${options?.activeAfterMs ?? "all"}`;
+  }
+
+  private getValidationKey(
+    sessionDir: string,
+    reader?: ISessionReader,
+    options?: SessionIndexListOptions,
+  ): string {
+    return `${this.getScopeKey(sessionDir, reader)}::activeAfter=${options?.activeAfterMs ?? "all"}`;
+  }
+
+  private getScopeKeyFromKnownKey(key: string): string {
+    const marker = "::activeAfter=";
+    const markerIndex = key.lastIndexOf(marker);
+    return markerIndex === -1 ? key : key.slice(0, markerIndex);
   }
 
   private getTitleLoadKey(
@@ -434,9 +452,9 @@ export class SessionIndexService implements ISessionIndexService {
       ...this.dirtySessionsByDir.keys(),
     ]);
 
-    for (const scopeKey of knownScopeKeys) {
-      if (scopeKey.startsWith(prefix)) {
-        this.dirtyDirs.add(scopeKey);
+    for (const knownKey of knownScopeKeys) {
+      if (knownKey.startsWith(prefix)) {
+        this.dirtyDirs.add(this.getScopeKeyFromKnownKey(knownKey));
       }
     }
   }
@@ -444,11 +462,19 @@ export class SessionIndexService implements ISessionIndexService {
   private buildSummariesFromIndex(
     index: SessionIndexState,
     projectId: UrlProjectId,
+    options?: SessionIndexListOptions,
   ): SessionSummary[] {
     const summaries: SessionSummary[] = [];
+    const activeAfterMs = options?.activeAfterMs;
 
     for (const [sessionId, cached] of Object.entries(index.sessions)) {
       if (cached.isEmpty) continue;
+      if (
+        activeAfterMs !== undefined &&
+        Date.parse(cached.updatedAt) < activeAfterMs
+      ) {
+        continue;
+      }
       summaries.push({
         id: sessionId,
         projectId,
@@ -660,6 +686,7 @@ export class SessionIndexService implements ISessionIndexService {
     projectId: UrlProjectId,
     reader: ISessionReader,
     index: SessionIndexState,
+    options?: SessionIndexListOptions,
   ): Promise<{
     summaries: SessionSummary[];
     statCalls: number;
@@ -677,7 +704,7 @@ export class SessionIndexService implements ISessionIndexService {
       // otherwise use default JSONL filename-based discovery.
       let sessionFiles: { sessionId: string; filePath: string }[];
       if (reader.listSessionFiles) {
-        sessionFiles = await reader.listSessionFiles(sessionDir);
+        sessionFiles = await reader.listSessionFiles(sessionDir, options);
       } else {
         const files = await fs.readdir(sessionDir);
         sessionFiles = files
@@ -689,7 +716,9 @@ export class SessionIndexService implements ISessionIndexService {
       }
 
       const STAT_BATCH = 100;
-      const allStats: (Stats | null)[] = new Array(sessionFiles.length);
+      const allStats: (Stats | null)[] = Array.from({
+        length: sessionFiles.length,
+      });
       for (let b = 0; b < sessionFiles.length; b += STAT_BATCH) {
         const end = Math.min(b + STAT_BATCH, sessionFiles.length);
         const batch = await Promise.all(
@@ -728,6 +757,12 @@ export class SessionIndexService implements ISessionIndexService {
           cached.indexedBytes === size
         ) {
           if (cached.isEmpty) continue;
+          if (
+            options?.activeAfterMs !== undefined &&
+            Date.parse(cached.updatedAt) < options.activeAfterMs
+          ) {
+            continue;
+          }
           summaries.push({
             id: sessionId,
             projectId,
@@ -750,7 +785,12 @@ export class SessionIndexService implements ISessionIndexService {
         parseCalls += 1;
         const summary = await reader.getSessionSummary(sessionId, projectId);
         if (summary) {
-          summaries.push(summary);
+          if (
+            options?.activeAfterMs === undefined ||
+            Date.parse(summary.updatedAt) >= options.activeAfterMs
+          ) {
+            summaries.push(summary);
+          }
           index.sessions[sessionId] = this.toCachedSummary(
             summary,
             mtime,
@@ -764,7 +804,7 @@ export class SessionIndexService implements ISessionIndexService {
       }
 
       for (const sessionId of Object.keys(index.sessions)) {
-        if (!seenSessionIds.has(sessionId)) {
+        if (!options?.activeAfterMs && !seenSessionIds.has(sessionId)) {
           delete index.sessions[sessionId];
           indexChanged = true;
         }
@@ -779,7 +819,7 @@ export class SessionIndexService implements ISessionIndexService {
           new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
       );
       this.lastFullValidationAt.set(
-        this.getScopeKey(sessionDir, reader),
+        this.getValidationKey(sessionDir, reader, options),
         Date.now(),
       );
       this.clearDirDirtyState(sessionDir, reader);
@@ -824,8 +864,14 @@ export class SessionIndexService implements ISessionIndexService {
     sessionDir: string,
     projectId: UrlProjectId,
     reader: ISessionReader,
+    options?: SessionIndexListOptions,
   ): Promise<SessionSummary[]> {
-    const loadKey = this.getScopedLoadKey(sessionDir, projectId, reader);
+    const loadKey = this.getScopedLoadKey(
+      sessionDir,
+      projectId,
+      reader,
+      options,
+    );
     const inFlight = this.inFlightSessionLoads.get(loadKey);
     if (inFlight) {
       return inFlight;
@@ -835,6 +881,7 @@ export class SessionIndexService implements ISessionIndexService {
       sessionDir,
       projectId,
       reader,
+      options,
     );
     this.inFlightSessionLoads.set(loadKey, promise);
 
@@ -851,12 +898,14 @@ export class SessionIndexService implements ISessionIndexService {
     sessionDir: string,
     projectId: UrlProjectId,
     reader: ISessionReader,
+    options?: SessionIndexListOptions,
   ): Promise<SessionSummary[]> {
     const start = Date.now();
     const scopeKey = this.getScopeKey(sessionDir, reader);
+    const validationKey = this.getValidationKey(sessionDir, reader, options);
     const index = await this.loadIndex(sessionDir, projectId, reader);
     const now = Date.now();
-    const lastFullValidation = this.lastFullValidationAt.get(scopeKey) ?? 0;
+    const lastFullValidation = this.lastFullValidationAt.get(validationKey) ?? 0;
     const hasDirDirty = this.dirtyDirs.has(scopeKey);
     const dirtySessions = this.dirtySessionsByDir.get(scopeKey);
     const hasDirtySessions = Boolean(dirtySessions && dirtySessions.size > 0);
@@ -868,7 +917,7 @@ export class SessionIndexService implements ISessionIndexService {
 
     // Fast path: no dirty signals and recent full validation.
     if (!fullValidationDue && !hasDirDirty && !hasDirtySessions) {
-      const summaries = this.buildSummariesFromIndex(index, projectId);
+      const summaries = this.buildSummariesFromIndex(index, projectId, options);
       this.recordCallStats("fast", Date.now() - start, 0, 0, sessionDir);
       return summaries;
     }
@@ -884,7 +933,7 @@ export class SessionIndexService implements ISessionIndexService {
       if (incremental.indexChanged) {
         await this.saveIndex(sessionDir, reader);
       }
-      const summaries = this.buildSummariesFromIndex(index, projectId);
+      const summaries = this.buildSummariesFromIndex(index, projectId, options);
       this.recordCallStats(
         "incremental",
         Date.now() - start,
@@ -900,6 +949,7 @@ export class SessionIndexService implements ISessionIndexService {
       projectId,
       reader,
       index,
+      options,
     );
     this.recordCallStats(
       "full",
@@ -980,7 +1030,6 @@ export class SessionIndexService implements ISessionIndexService {
     sessionId: string,
     reader: ISessionReader,
   ): Promise<string | null> {
-    const scopeKey = this.getScopeKey(sessionDir, reader);
     const index = await this.loadIndex(sessionDir, projectId, reader);
     const cached = index.sessions[sessionId];
     const filePath =

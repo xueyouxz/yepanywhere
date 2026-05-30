@@ -8,36 +8,13 @@ import {
 import { useLocation, useNavigate } from "react-router-dom";
 import { useDraftPersistence } from "../hooks/useDraftPersistence";
 import { useFabVisibility } from "../hooks/useFabVisibility";
-import { useProjects } from "../hooks/useProjects";
-import {
-  resolvePreferredProjectId,
-  setRecentProjectId,
-} from "../hooks/useRecentProject";
+import { setRecentProjectId } from "../hooks/useRecentProject";
+import { setNewSessionPrefill } from "../lib/newSessionPrefill";
 import { useRemoteBasePath } from "../hooks/useRemoteBasePath";
 import { useI18n } from "../i18n";
 import { VoiceInputButton } from "./VoiceInputButton";
 
 const FAB_DRAFT_KEY = "fab-draft";
-const FAB_PREFILL_KEY = "fab-prefill";
-
-/**
- * Set pre-fill text for NewSessionForm to read on mount.
- * This is how FAB hands off the draft to the full form.
- */
-export function getFabPrefill(): string | null {
-  if (typeof window === "undefined") return null;
-  return sessionStorage.getItem(FAB_PREFILL_KEY);
-}
-
-export function clearFabPrefill(): void {
-  if (typeof window === "undefined") return;
-  sessionStorage.removeItem(FAB_PREFILL_KEY);
-}
-
-function setFabPrefill(text: string): void {
-  if (typeof window === "undefined") return;
-  sessionStorage.setItem(FAB_PREFILL_KEY, text);
-}
 
 /**
  * Floating Action Button for quick session creation.
@@ -53,7 +30,6 @@ export function FloatingActionButton() {
   const [message, setMessage, draftControls] =
     useDraftPersistence(FAB_DRAFT_KEY);
   const [interimTranscript, setInterimTranscript] = useState("");
-  const { projects } = useProjects();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -95,24 +71,21 @@ export function FloatingActionButton() {
     const trimmed = message.trim();
     if (!trimmed) return;
 
-    // Get project to navigate to (prefer current project, then recent, then any)
-    const targetProjectId =
-      projectIdFromUrl ?? resolvePreferredProjectId(projects);
-    if (!targetProjectId) {
-      // No project context - can't proceed
-      return;
-    }
-
     // Store the message for NewSessionForm to pick up
-    setFabPrefill(trimmed);
+    setNewSessionPrefill(trimmed);
     draftControls.clearDraft();
     setIsExpanded(false);
 
     // Navigate to new session page
-    navigate(
-      `${basePath}/new-session?projectId=${encodeURIComponent(targetProjectId)}`,
-    );
-  }, [message, projectIdFromUrl, navigate, draftControls, basePath, projects]);
+    if (projectIdFromUrl) {
+      navigate(
+        `${basePath}/new-session?projectId=${encodeURIComponent(projectIdFromUrl)}`,
+      );
+      return;
+    }
+
+    navigate(`${basePath}/new-session`);
+  }, [message, projectIdFromUrl, navigate, draftControls, basePath]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -131,16 +104,8 @@ export function FloatingActionButton() {
   );
 
   const handleButtonClick = useCallback(() => {
-    // Check if we have a valid project target (prefer current project, then recent, then any)
-    const targetProjectId =
-      projectIdFromUrl ?? resolvePreferredProjectId(projects);
-    if (!targetProjectId) {
-      // No project context - navigate to projects page instead
-      navigate(`${basePath}/projects`);
-      return;
-    }
     setIsExpanded(true);
-  }, [projectIdFromUrl, navigate, basePath, projects]);
+  }, []);
 
   // Voice input handlers
   const handleVoiceTranscript = useCallback(
@@ -165,9 +130,15 @@ export function FloatingActionButton() {
     ? message + (message.trimEnd() ? " " : "") + interimTranscript
     : message;
 
-  // Hide (but don't unmount) when not visible or on new-session page
+  // Hide (but don't unmount) when not visible, on new-session page, or while
+  // supervising an active session. On session pages it duplicates the sidebar
+  // new-session affordance and competes with the real composer.
   // This preserves expanded state and draft across navigation
-  const isHidden = !fabVisibility || location.pathname.endsWith("/new-session");
+  const isSessionPage = /\/sessions\/[^/]+/.test(location.pathname);
+  const isHidden =
+    !fabVisibility ||
+    location.pathname.endsWith("/new-session") ||
+    isSessionPage;
 
   const { right, bottom, maxWidth } = fabVisibility ?? {
     right: 24,

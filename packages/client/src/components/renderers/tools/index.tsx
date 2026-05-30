@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { ToolCallItem } from "../../../types/renderItems";
 import type { RenderContext } from "../types";
 import type { ToolRenderer } from "./types";
 
@@ -109,7 +110,7 @@ class ToolRendererRegistry {
     input: unknown,
     result: unknown,
     isError: boolean,
-    status: "pending" | "complete" | "error" | "aborted",
+    status: ToolCallItem["status"],
     context: RenderContext,
   ): ReactNode {
     const renderer = this.get(toolName);

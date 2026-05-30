@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { Toast as ToastType } from "../hooks/useToast";
 
 interface Props {
@@ -14,6 +15,11 @@ export function ToastContainer({ toasts, onDismiss }: Props) {
         <div
           key={toast.id}
           className={`toast toast-${toast.type}`}
+          style={
+            {
+              "--toast-fade-duration": toast.action ? "7s" : "3s",
+            } as CSSProperties
+          }
           onClick={() => onDismiss(toast.id)}
           onKeyDown={(e) => e.key === "Enter" && onDismiss(toast.id)}
           role="alert"

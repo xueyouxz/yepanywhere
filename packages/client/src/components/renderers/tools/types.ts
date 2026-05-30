@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { ToolCallItem } from "../../../types/renderItems";
 import type { ContentBlock, RenderContext } from "../types";
 
 /**
@@ -372,7 +373,7 @@ export interface ToolRenderer<TInput = unknown, TResult = unknown> {
     input: TInput,
     result: TResult | undefined,
     isError: boolean,
-    status: "pending" | "complete" | "error" | "aborted",
+    status: ToolCallItem["status"],
     context: RenderContext,
   ): ReactNode;
 }

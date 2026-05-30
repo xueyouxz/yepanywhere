@@ -58,7 +58,7 @@ describe("cloneCodexSession", () => {
     const [metaLine, messageLine] = clonedContent.trim().split("\n");
     const meta = JSON.parse(metaLine) as {
       type: string;
-      payload: { id: string };
+      payload: { id: string; forked_from_id?: string };
     };
     const message = JSON.parse(messageLine) as {
       payload: { type: string; message: string };
@@ -66,6 +66,7 @@ describe("cloneCodexSession", () => {
 
     expect(meta.type).toBe("session_meta");
     expect(meta.payload.id).toBe("cloned-session");
+    expect(meta.payload.forked_from_id).toBe("source-session");
     expect(message.payload).toEqual({
       type: "user_message",
       message: "Hello from Codex",

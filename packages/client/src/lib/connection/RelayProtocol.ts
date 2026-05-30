@@ -18,6 +18,7 @@ import type {
 } from "@yep-anywhere/shared";
 import { getOrCreateBrowserProfileId } from "../storageKeys";
 import { generateUUID } from "../uuid";
+import { connectionManager } from "./ConnectionManager";
 import type { StreamHandlers, Subscription, UploadOptions } from "./types";
 import { SubscriptionError } from "./types";
 
@@ -27,7 +28,11 @@ import { SubscriptionError } from "./types";
  */
 export interface RelayTransport {
   sendMessage(msg: RemoteClientMessage): void;
-  sendUploadChunk(uploadId: string, offset: number, chunk: Uint8Array): void;
+  sendUploadChunk(
+    uploadId: string,
+    offset: number,
+    chunk: Uint8Array,
+  ): void | Promise<void>;
   ensureConnected(): Promise<void>;
   isConnected(): boolean;
 }
@@ -630,72 +635,84 @@ export class RelayProtocol {
     file: File,
     options?: UploadOptions,
   ): Promise<UploadedFile> {
-    await this.transport.ensureConnected();
+    const endCriticalOperation =
+      connectionManager.beginCriticalOperation("upload");
+    try {
+      await this.transport.ensureConnected();
 
-    const uploadId = generateId();
-    const chunkSize = options?.chunkSize ?? DEFAULT_CHUNK_SIZE;
+      const uploadId = generateId();
+      const chunkSize = options?.chunkSize ?? DEFAULT_CHUNK_SIZE;
 
-    const uploadPromise = new Promise<UploadedFile>((resolve, reject) => {
-      this.pendingUploads.set(uploadId, {
-        resolve,
-        reject,
-        onProgress: options?.onProgress,
+      const uploadPromise = new Promise<UploadedFile>((resolve, reject) => {
+        this.pendingUploads.set(uploadId, {
+          resolve,
+          reject,
+          onProgress: options?.onProgress,
+        });
+
+        if (options?.signal) {
+          options.signal.addEventListener("abort", () => {
+            this.pendingUploads.delete(uploadId);
+            reject(new Error("Upload aborted"));
+          });
+        }
       });
 
-      if (options?.signal) {
-        options.signal.addEventListener("abort", () => {
-          this.pendingUploads.delete(uploadId);
-          reject(new Error("Upload aborted"));
-        });
-      }
-    });
+      try {
+        const startMsg: RelayUploadStart = {
+          type: "upload_start",
+          uploadId,
+          projectId,
+          sessionId,
+          filename: file.name,
+          size: file.size,
+          mimeType: file.type || "application/octet-stream",
+          ...(options?.imageDimensions?.width !== undefined
+            ? { width: options.imageDimensions.width }
+            : {}),
+          ...(options?.imageDimensions?.height !== undefined
+            ? { height: options.imageDimensions.height }
+            : {}),
+        };
+        this.transport.sendMessage(startMsg);
 
-    try {
-      const startMsg: RelayUploadStart = {
-        type: "upload_start",
-        uploadId,
-        projectId,
-        sessionId,
-        filename: file.name,
-        size: file.size,
-        mimeType: file.type || "application/octet-stream",
-      };
-      this.transport.sendMessage(startMsg);
+        let offset = 0;
+        const reader = file.stream().getReader();
 
-      let offset = 0;
-      const reader = file.stream().getReader();
+        while (true) {
+          if (options?.signal?.aborted) {
+            reader.cancel();
+            throw new Error("Upload aborted");
+          }
 
-      while (true) {
-        if (options?.signal?.aborted) {
-          reader.cancel();
-          throw new Error("Upload aborted");
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          let chunkOffset = 0;
+          while (chunkOffset < value.length) {
+            const chunkEnd = Math.min(chunkOffset + chunkSize, value.length);
+            const chunk = value.slice(chunkOffset, chunkEnd);
+
+            await this.transport.sendUploadChunk(uploadId, offset, chunk);
+
+            offset += chunk.length;
+            chunkOffset = chunkEnd;
+          }
         }
 
-        const { done, value } = await reader.read();
-        if (done) break;
+        const endMsg: RelayUploadEnd = {
+          type: "upload_end",
+          uploadId,
+        };
+        this.transport.sendMessage(endMsg);
 
-        let chunkOffset = 0;
-        while (chunkOffset < value.length) {
-          const chunkEnd = Math.min(chunkOffset + chunkSize, value.length);
-          const chunk = value.slice(chunkOffset, chunkEnd);
-
-          this.transport.sendUploadChunk(uploadId, offset, chunk);
-
-          offset += chunk.length;
-          chunkOffset = chunkEnd;
-        }
+        return await uploadPromise;
+      } catch (err) {
+        this.pendingUploads.delete(uploadId);
+        throw err;
       }
-
-      const endMsg: RelayUploadEnd = {
-        type: "upload_end",
-        uploadId,
-      };
-      this.transport.sendMessage(endMsg);
-
-      return await uploadPromise;
-    } catch (err) {
-      this.pendingUploads.delete(uploadId);
-      throw err;
+    } finally {
+      endCriticalOperation();
     }
   }
 

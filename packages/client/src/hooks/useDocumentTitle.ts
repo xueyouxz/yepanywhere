@@ -1,3 +1,4 @@
+import { sanitizeSessionTitle } from "@yep-anywhere/shared";
 import { useEffect } from "react";
 
 const BASE_TITLE = "Yep Anywhere";
@@ -23,14 +24,16 @@ export function useDocumentTitle(
     let title = BASE_TITLE;
 
     if (projectName) {
+      const safeProjectName = sanitizeSessionTitle(projectName);
       if (sessionName) {
+        const safeSessionName = sanitizeSessionTitle(sessionName);
         // Both project and session - truncate both
-        const truncatedProject = truncate(projectName, 10);
-        const truncatedSession = truncate(sessionName, 20);
+        const truncatedProject = truncate(safeProjectName, 10);
+        const truncatedSession = truncate(safeSessionName, 20);
         title = `${truncatedProject} - ${truncatedSession}`;
       } else {
         // Project only - show full name
-        title = projectName;
+        title = safeProjectName;
       }
     }
 

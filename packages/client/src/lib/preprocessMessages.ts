@@ -10,12 +10,19 @@ import type {
 } from "../types/renderItems";
 import { getMessageId } from "./mergeMessages";
 
+const AWAY_SUMMARY_HINT_SUFFIX_RE =
+  /\s*\(disable recaps in \/config\)\s*$/u;
+
+export function stripAwaySummaryHintSuffix(content: string): string {
+  return content.replace(AWAY_SUMMARY_HINT_SUFFIX_RE, "");
+}
+
 /**
- * When true, indicates the session has an active tool approval request.
- * All orphaned tools will be treated as pending (not interrupted).
+ * When true, indicates the session has active tool work or approval.
+ * Orphaned tools in the current trailing user turn are treated as pending.
  *
- * This handles the case where multiple tools are queued for approval -
- * only the first is sent to the client, but all are waiting in the server queue.
+ * This handles the case where multiple tools are queued for approval while
+ * still allowing older orphaned tools from prior turns to render interrupted.
  */
 export type ActiveToolApproval = boolean;
 
@@ -43,20 +50,12 @@ export function preprocessMessages(
   const items: RenderItem[] = [];
   const toolCallIndices = new Map<string, number>(); // tool_use_id → index in items
   const pendingToolCalls = new Map<string, number>(); // tool_use_id → index in items
+  const configAckState = { lastSignature: null as string | null };
 
-  // Collect all orphaned tool IDs from messages (set by server DAG filtering)
-  // If there's an active tool approval, skip orphan detection entirely -
-  // all tools without results are pending (either current or queued for approval)
-  const orphanedToolIds = new Set<string>();
-  if (!augments?.activeToolApproval) {
-    for (const msg of messages) {
-      if (msg.orphanedToolUseIds) {
-        for (const id of msg.orphanedToolUseIds) {
-          orphanedToolIds.add(id);
-        }
-      }
-    }
-  }
+  const orphanedToolIds = collectOrphanedToolIds(
+    messages,
+    augments?.activeToolApproval === true,
+  );
 
   for (const msg of messages) {
     processMessage(
@@ -65,6 +64,7 @@ export function preprocessMessages(
       toolCallIndices,
       pendingToolCalls,
       orphanedToolIds,
+      configAckState,
       augments,
     );
   }
@@ -73,10 +73,49 @@ export function preprocessMessages(
   return collapseSessionSetupRuns(enrichedItems);
 }
 
+function collectOrphanedToolIds(
+  messages: Message[],
+  suppressCurrentTurnOrphans: boolean,
+): Set<string> {
+  const orphanedToolIds = new Set<string>();
+  const suppressFromIndex = suppressCurrentTurnOrphans
+    ? findLastUserPromptMessageIndex(messages)
+    : messages.length;
+
+  for (let index = 0; index < messages.length; index++) {
+    const msg = messages[index];
+    if (!msg?.orphanedToolUseIds) {
+      continue;
+    }
+
+    if (suppressCurrentTurnOrphans && index >= suppressFromIndex) {
+      continue;
+    }
+
+    for (const id of msg.orphanedToolUseIds) {
+      orphanedToolIds.add(id);
+    }
+  }
+
+  return orphanedToolIds;
+}
+
+function findLastUserPromptMessageIndex(messages: Message[]): number {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const msg = messages[index];
+    if (msg && isUserPromptMessage(msg)) {
+      return index;
+    }
+  }
+  return 0;
+}
+
 const SESSION_SETUP_PREFIXES = [
   "# AGENTS.md instructions",
   "<environment_context>",
 ];
+
+const INTERNAL_REASONING_PLACEHOLDER = "Reasoning [internal]";
 
 function getPromptText(content: string | ContentBlock[]): string {
   if (typeof content === "string") {
@@ -89,6 +128,37 @@ function getPromptText(content: string | ContentBlock[]): string {
     )
     .map((block) => block.text)
     .join("\n");
+}
+
+function getPreprocessMessageContent(
+  msg: Message,
+): string | ContentBlock[] | undefined {
+  return (
+    (msg.message as { content?: string | ContentBlock[] } | undefined)
+      ?.content ?? msg.content
+  );
+}
+
+function isUserPromptMessage(msg: Message): boolean {
+  const content = getPreprocessMessageContent(msg);
+  const role =
+    (msg.message as { role?: "user" | "assistant" } | undefined)?.role ??
+    msg.role;
+  const isUserMessage = msg.type === "user" || role === "user";
+  if (!isUserMessage) {
+    return false;
+  }
+  if (Array.isArray(content)) {
+    return !content.every((block) => block.type === "tool_result");
+  }
+  return typeof content === "string";
+}
+
+function isDisplayableThinking(
+  thinking: string | undefined,
+): thinking is string {
+  const trimmed = thinking?.trim();
+  return !!trimmed && trimmed !== INTERNAL_REASONING_PLACEHOLDER;
 }
 
 function isSessionSetupPrompt(item: UserPromptItem): boolean {
@@ -161,6 +231,7 @@ function processMessage(
   toolCallIndices: Map<string, number>,
   pendingToolCalls: Map<string, number>,
   orphanedToolIds: Set<string>,
+  configAckState: { lastSignature: string | null },
   augments?: PreprocessAugments,
 ): void {
   const msgId = getMessageId(msg);
@@ -186,20 +257,46 @@ function processMessage(
   if (msg.type === "system") {
     const subtype = (msg as { subtype?: string }).subtype ?? "unknown";
     // Render compact_boundary as a visible system message
-    if (subtype === "compact_boundary" || subtype === "turn_aborted") {
+    if (
+      subtype === "compact_boundary" ||
+      subtype === "turn_aborted" ||
+      subtype === "config_ack" ||
+      subtype === "away_summary"
+    ) {
+      const configSignature =
+        subtype === "config_ack" ? getConfigAckSignature(msg) : null;
+      const content =
+        typeof msg.content === "string"
+          ? msg.content
+          : subtype === "turn_aborted"
+            ? "Turn aborted"
+            : subtype === "config_ack"
+              ? "Configuration updated"
+              : subtype === "away_summary"
+                ? "Recap unavailable"
+                : "Context compacted";
       const systemItem: SystemItem = {
         type: "system",
         id: msgId,
         subtype,
         content:
-          typeof msg.content === "string"
-            ? msg.content
-            : subtype === "turn_aborted"
-              ? "Turn aborted"
-              : "Context compacted",
+          subtype === "away_summary"
+            ? stripAwaySummaryHintSuffix(content)
+            : content,
         sourceMessages: [msg],
+        ...(subtype === "config_ack"
+          ? {
+              configChanged:
+                msg.configMismatch === true &&
+                configSignature !== null &&
+                configSignature !== configAckState.lastSignature,
+            }
+          : {}),
       };
       items.push(systemItem);
+      if (subtype === "config_ack" && configSignature !== null) {
+        configAckState.lastSignature = configSignature;
+      }
     }
     // Status messages (compacting indicator) are transient - handled separately via isCompacting state
     // Skip other system entries (init, status, etc.) - they're internal
@@ -327,13 +424,14 @@ function processMessage(
         });
       }
     } else if (block.type === "thinking") {
-      if (block.thinking?.trim()) {
+      const thinking = block.thinking;
+      if (isDisplayableThinking(thinking)) {
         items.push({
           type: "thinking",
           id: blockId,
-          thinking: block.thinking,
+          thinking,
           signature: undefined,
-          status: "complete",
+          status: msg._isStreaming ? "streaming" : "complete",
           sourceMessages: [msg],
           isSubagent: msg.isSubagent,
         });
@@ -354,7 +452,10 @@ function processMessage(
           continue;
         }
 
-        // Check if this tool call is orphaned (process killed before result)
+        // Check if this tool call is missing a result after the turn boundary.
+        // That is not the same as an explicit interruption: Codex/YA may have
+        // missed the result event even though a side effect, such as an edit,
+        // landed in the filesystem.
         const isOrphaned = orphanedToolIds.has(block.id);
         const toolCall: ToolCallItem = {
           type: "tool_call",
@@ -362,7 +463,7 @@ function processMessage(
           toolName: block.name,
           toolInput: block.input,
           toolResult: undefined,
-          status: isOrphaned ? "aborted" : "pending",
+          status: isOrphaned ? "incomplete" : "pending",
           sourceMessages: [msg],
           isSubagent: msg.isSubagent,
         };
@@ -373,6 +474,17 @@ function processMessage(
       }
     }
   }
+}
+
+function getConfigAckSignature(msg: Message): string | null {
+  const configModel =
+    typeof msg.configModel === "string" ? msg.configModel.trim() : "";
+  const configThinking =
+    typeof msg.configThinking === "string" ? msg.configThinking.trim() : "";
+  if (configModel || configThinking) {
+    return `${configModel}::${configThinking}`;
+  }
+  return typeof msg.content === "string" ? msg.content.trim() : null;
 }
 
 function appendSourceMessage(
@@ -521,21 +633,82 @@ function attachToolResult(
     isError: block.is_error || false,
     structured,
   };
+  const isBackgroundProcessResult = isBackgroundProcessToolResult(
+    block,
+    item.toolName,
+  );
+  const isInterruptedProcessResult = isInterruptedToolResult(
+    block,
+    resultData,
+    item.toolName,
+  );
 
   // Create a new ToolCallItem to ensure React sees the change
+  let status: ToolCallItem["status"] = "complete";
+  if (isInterruptedProcessResult || item.status === "aborted") {
+    status = "aborted";
+  } else if (isBackgroundProcessResult) {
+    status = item.status === "incomplete" ? "incomplete" : "pending";
+  } else if (block.is_error) {
+    status = "error";
+  }
   const updatedItem: ToolCallItem = {
     type: "tool_call",
     id: item.id,
     toolName: item.toolName,
     toolInput: item.toolInput,
     toolResult: resultData,
-    status: block.is_error ? "error" : "complete",
+    status,
     sourceMessages: appendSourceMessage(item, resultMessage).sourceMessages,
     isSubagent: item.isSubagent,
   };
 
   items[index] = updatedItem;
-  pendingToolCalls.delete(toolUseId);
+  if (!isBackgroundProcessResult && !isInterruptedProcessResult) {
+    pendingToolCalls.delete(toolUseId);
+  }
+}
+
+function isBackgroundProcessToolResult(
+  block: ContentBlock,
+  toolName: string,
+): boolean {
+  if (toolName !== "Bash") {
+    return false;
+  }
+  const content = typeof block.content === "string" ? block.content : "";
+  if (!content) {
+    return false;
+  }
+  return (
+    /(?:^|\n)\s*(?:Process\s+running\s+with\s+session\s+ID|session(?:\s+id)?)\s*:?\s*\d+\b/i.test(
+      content,
+    ) &&
+    !/(?:^|\n)\s*(?:Exit code:|Process exited with code)\s*-?\d+\b/i.test(
+      content,
+    )
+  );
+}
+
+function isInterruptedToolResult(
+  block: ContentBlock,
+  result: ToolResultData,
+  toolName: string,
+): boolean {
+  if (toolName !== "Bash") {
+    return false;
+  }
+  if (
+    result.structured &&
+    typeof result.structured === "object" &&
+    (result.structured as { interrupted?: unknown }).interrupted === true
+  ) {
+    return true;
+  }
+  const content = typeof block.content === "string" ? block.content : "";
+  return /(?:^|\n)\s*(?:aborted by user|interrupted by user)(?:\s|$)/i.test(
+    content,
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

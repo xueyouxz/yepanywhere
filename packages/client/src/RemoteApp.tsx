@@ -17,7 +17,9 @@
  */
 
 import { type ReactNode, useEffect, useMemo, useState } from "react";
-import { Navigate, Outlet } from "react-router-dom";
+import { Navigate, Outlet, useLocation } from "react-router-dom";
+import { BottomOverscrollReload } from "./components/BottomOverscrollReload";
+import { ClientLogRecordingBadge } from "./components/ClientLogRecordingBadge";
 import { ConnectionBar } from "./components/ConnectionBar";
 import { FloatingActionButton } from "./components/FloatingActionButton";
 import { HostOfflineModal } from "./components/HostOfflineModal";
@@ -49,6 +51,7 @@ interface Props {
  * RelayConnectionGate (relay mode) once connected.
  */
 export function ConnectedAppContent({ children }: { children: ReactNode }) {
+  const location = useLocation();
   useRemoteActivityBusConnection();
   const { currentRelayUsername } = useRemoteConnection();
   const { version: versionInfo } = useVersion();
@@ -64,6 +67,7 @@ export function ConnectedAppContent({ children }: { children: ReactNode }) {
     unsafeToRestart,
     workerActivity,
   } = useReloadNotifications();
+  const isSessionDetailRoute = /\/sessions\/[^/]+/.test(location.pathname);
 
   const showRelayResumeWarning = useMemo(() => {
     if (dismissedRelayResumeWarning) return false;
@@ -119,6 +123,10 @@ export function ConnectedAppContent({ children }: { children: ReactNode }) {
           onDismiss={() => dismiss("frontend")}
         />
       )}
+      <BottomOverscrollReload
+        disabled={isSessionDetailRoute}
+        onReload={reloadFrontend}
+      />
       {children}
       <FloatingActionButton />
     </>
@@ -132,10 +140,18 @@ export function ConnectedAppContent({ children }: { children: ReactNode }) {
 export function UnauthenticatedGate() {
   const { connection, isIntentionalDisconnect } = useRemoteConnection();
   const basePath = useRemoteBasePath();
+  const location = useLocation();
+
+  const loginParams = new URLSearchParams(location.search);
+  const returnTo = loginParams.get("returnTo");
+  const safeReturnTo =
+    returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//")
+      ? returnTo
+      : null;
 
   // If connected and user didn't intentionally disconnect, redirect to app
   if (connection && !isIntentionalDisconnect) {
-    return <Navigate to={`${basePath}/projects`} replace />;
+    return <Navigate to={safeReturnTo ?? `${basePath}/projects`} replace />;
   }
 
   return <Outlet />;
@@ -158,6 +174,8 @@ export function ConnectionGate() {
     clearAutoResumeError,
     retryAutoResume,
   } = useRemoteConnection();
+  const location = useLocation();
+  const returnTo = `${location.pathname}${location.search}${location.hash}`;
 
   // During reconnection, stay on the current page — don't redirect to /login.
   // ConnectionManager is the source of truth; React connection state may be stale.
@@ -189,7 +207,12 @@ export function ConnectionGate() {
       );
     }
 
-    return <Navigate to="/login" replace />;
+    return (
+      <Navigate
+        to={`/login?returnTo=${encodeURIComponent(returnTo)}`}
+        replace
+      />
+    );
   }
 
   // Connected - render child routes with connected-state hooks
@@ -205,11 +228,15 @@ export function ConnectionGate() {
  * Must be rendered inside InboxProvider.
  */
 function RemoteAppInner({ children }: Props) {
+  const location = useLocation();
+  const isSessionDetailRoute = /\/sessions\/[^/]+/.test(location.pathname);
+
   useNeedsAttentionBadge();
 
   return (
     <>
       <ConnectionBar />
+      {!isSessionDetailRoute && <ClientLogRecordingBadge />}
       {children}
     </>
   );

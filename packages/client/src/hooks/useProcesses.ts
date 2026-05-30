@@ -4,6 +4,7 @@ import type {
   AgentActivity,
   ContextUsage,
   ProviderName,
+  SessionLivenessSnapshot,
   UrlProjectId,
 } from "../types";
 
@@ -29,6 +30,8 @@ export interface ProcessInfo {
   provider?: ProviderName;
   /** Context window usage from the last assistant message */
   contextUsage?: ContextUsage;
+  /** Provider/session progress evidence, separate from transport liveness. */
+  liveness?: SessionLivenessSnapshot;
 }
 
 interface ProcessesResponse {

@@ -81,16 +81,19 @@ export async function cloneClaudeSession(
 /**
  * Clone a Codex session by copying the JSONL file with a new session ID.
  *
- * Codex sessions are linear (no DAG). Only the first line (session_meta)
- * contains the session ID in `payload.id`; all other lines are copied as-is.
+ * Codex sessions are linear (no DAG). The first line (session_meta) contains
+ * the session ID in `payload.id`; clones also record `payload.forked_from_id`
+ * so callers can distinguish branched sessions from unrelated rollouts.
  *
  * @param sourceFilePath - Full path to the source JSONL file
  * @param newSessionId - Optional new session ID (generated if not provided)
+ * @param forkedFromSessionId - Optional source session ID for fork metadata
  * @returns Clone result with new session ID and entry count
  */
 export async function cloneCodexSession(
   sourceFilePath: string,
   newSessionId?: string,
+  forkedFromSessionId?: string,
 ): Promise<CloneResult> {
   const content = await readFile(sourceFilePath, "utf-8");
   const trimmed = content.trim();
@@ -112,7 +115,14 @@ export async function cloneCodexSession(
         typeof entry.payload === "object" &&
         entry.payload !== null
       ) {
-        (entry.payload as Record<string, unknown>).id = targetId;
+        const payload = entry.payload as Record<string, unknown>;
+        const sourceId =
+          forkedFromSessionId ??
+          (typeof payload.id === "string" ? payload.id : undefined);
+        payload.id = targetId;
+        if (sourceId && sourceId !== targetId) {
+          payload.forked_from_id = sourceId;
+        }
       }
       return JSON.stringify(entry);
     } catch {

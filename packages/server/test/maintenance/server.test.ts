@@ -1,3 +1,4 @@
+import * as http from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   startMaintenanceServer,
@@ -22,6 +23,35 @@ describe("Maintenance Server", () => {
   ): Promise<Response> => {
     return globalThis.fetch(`http://localhost:${port}${path}`, options);
   };
+
+  const requestWithHost = async (
+    path: string,
+    host: string,
+    headers: Record<string, string> = {},
+  ): Promise<{ status: number; body: string }> =>
+    new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          hostname: "localhost",
+          port,
+          path,
+          method: "GET",
+          headers: { ...headers, Host: host },
+        },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+          res.on("end", () =>
+            resolve({
+              status: res.statusCode ?? 0,
+              body: Buffer.concat(chunks).toString("utf8"),
+            }),
+          );
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
 
   describe("GET /health", () => {
     it("returns ok status", async () => {
@@ -164,6 +194,20 @@ describe("Maintenance Server", () => {
       // Default fetch doesn't send Origin for same-origin
       const res = await fetch("/health");
       expect(res.status).toBe(200);
+    });
+
+    it("rejects non-loopback Host without relying on Origin", async () => {
+      const res = await requestWithHost("/health", `example.com:${port}`);
+      expect(res.status).toBe(403);
+      expect(JSON.parse(res.body).error).toBe("Forbidden");
+    });
+
+    it("rejects same-origin-looking Origin when Host is not loopback", async () => {
+      const res = await requestWithHost("/health", `example.com:${port}`, {
+        Origin: `http://example.com:${port}`,
+        "Sec-Fetch-Site": "same-origin",
+      });
+      expect(res.status).toBe(403);
     });
 
     it("rejects OPTIONS preflight", async () => {

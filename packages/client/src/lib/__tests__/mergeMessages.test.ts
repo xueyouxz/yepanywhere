@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "../../types";
 import {
+  findMessageIndexById,
   getMessageContent,
   getMessageId,
   mergeJSONLMessages,
@@ -57,6 +58,20 @@ describe("getMessageContent", () => {
   it("returns undefined when no content exists", () => {
     const msg: Message = { id: "1" };
     expect(getMessageContent(msg)).toBeUndefined();
+  });
+});
+
+describe("findMessageIndexById", () => {
+  it("finds the tail message without requiring callers to scan from the front", () => {
+    const messages: Message[] = [
+      { id: "msg-1" },
+      { id: "msg-2" },
+      { id: "msg-3" },
+    ];
+
+    expect(findMessageIndexById(messages, "msg-3")).toBe(2);
+    expect(findMessageIndexById(messages, "msg-1")).toBe(0);
+    expect(findMessageIndexById(messages, "missing")).toBe(-1);
   });
 });
 

@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ZodError } from "zod";
+import { useOptionalSessionMetadata } from "../../../contexts/SessionMetadataContext";
 import { useSchemaValidationContext } from "../../../contexts/SchemaValidationContext";
+import { makeDisplayPath } from "../../../lib/text";
 import { validateToolResult } from "../../../lib/validateToolResult";
 import { SchemaWarning } from "../../SchemaWarning";
+import { FilePathDisplay } from "../../ui/FilePathDisplay";
 import { Modal } from "../../ui/Modal";
 import type { ToolRenderer, WriteInput, WriteResult } from "./types";
 
@@ -50,11 +53,12 @@ function truncateHighlightedHtml(html: string, maxLines: number): string {
  * Write tool use - shows file path being written
  */
 function WriteToolUse({ input }: { input: WriteInput }) {
-  const fileName = getFileName(input.file_path);
+  const meta = useOptionalSessionMetadata();
+  const displayPath = makeDisplayPath(input.file_path, meta?.projectPath);
   const lineCount = input.content.split("\n").length;
   return (
     <div className="write-tool-use">
-      <span className="file-path">{fileName}</span>
+      <span className="file-path"><FilePathDisplay displayPath={displayPath} /></span>
       <span className="write-info">{lineCount} lines</span>
     </div>
   );
@@ -164,6 +168,7 @@ function WriteToolResult({
   isError: boolean;
   input?: WriteInputWithAugment;
 }) {
+  const meta = useOptionalSessionMetadata();
   const [isExpanded, setIsExpanded] = useState(false);
   const { enabled, reportValidationError, isToolIgnored } =
     useSchemaValidationContext();
@@ -210,14 +215,14 @@ function WriteToolResult({
   const { file } = result;
   const lines = file.content.split("\n");
   const needsCollapse = lines.length > MAX_LINES_COLLAPSED;
-  const fileName = getFileName(file.filePath);
+  const displayPath = makeDisplayPath(file.filePath, meta?.projectPath);
 
   // Use highlighted HTML if available from input augment
   if (input?._highlightedContentHtml) {
     return (
       <div className="write-result">
         <div className="file-header">
-          <span className="file-path">{fileName}</span>
+          <span className="file-path"><FilePathDisplay displayPath={displayPath} /></span>
           <span className="file-range">{file.numLines} lines written</span>
           {showValidationWarning && validationErrors && (
             <SchemaWarning toolName="Write" errors={validationErrors} />
@@ -246,7 +251,7 @@ function WriteToolResult({
   return (
     <div className="write-result">
       <div className="file-header">
-        <span className="file-path">{fileName}</span>
+        <span className="file-path"><FilePathDisplay displayPath={displayPath} /></span>
         <span className="file-range">{file.numLines} lines written</span>
         {showValidationWarning && validationErrors && (
           <SchemaWarning toolName="Write" errors={validationErrors} />
@@ -326,10 +331,12 @@ function WriteCollapsedPreview({
     setIsModalOpen(false);
   }, []);
 
+  const meta = useOptionalSessionMetadata();
+
   // Use result data if available, otherwise fall back to input
   const content = result?.file?.content ?? input.content;
   const filePath = result?.file?.filePath ?? input.file_path;
-  const fileName = getFileName(filePath);
+  const displayPath = makeDisplayPath(filePath, meta?.projectPath);
   const lines = content.split("\n");
   const lineCount = result?.file?.numLines ?? lines.length;
   const isTruncated = lines.length > PREVIEW_LINES;
@@ -372,6 +379,8 @@ function WriteCollapsedPreview({
         onClick={handleClick}
       >
         <div className="write-preview-lines">
+          <FilePathDisplay displayPath={displayPath} />
+          {" · "}
           {lineCount} lines
           {showValidationWarning && validationErrors && (
             <SchemaWarning toolName="Write" errors={validationErrors} />
@@ -396,7 +405,7 @@ function WriteCollapsedPreview({
       </button>
       {isModalOpen && (
         <Modal
-          title={<span className="file-path">{fileName}</span>}
+          title={<span className="file-path"><FilePathDisplay displayPath={displayPath} /></span>}
           onClose={handleClose}
         >
           <WriteModalContent

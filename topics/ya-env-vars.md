@@ -1,0 +1,79 @@
+# YA environment variables
+
+> The environment variables Yep Anywhere reads, and the naming
+> conventions that distinguish YA-private secrets (consumed and stripped
+> on load) from plain YA config toggles and inherited system vars.
+
+Topic: ya-env-vars
+
+`packages/server/src/config.ts` (`loadConfig`) is the source of truth for
+the full set and exact defaults; this doc curates the *meaningful*
+operator-facing vars and the conventions. Deep tuning knobs (session-index
+timings, codex rescan intervals, cache TTLs) live only in `config.ts`.
+
+## Naming conventions
+
+- **`YA_<module>__<NAME>` — YA-private secret, consume-and-strip.** Read
+  for a YA subsystem, then **deleted from `process.env` on load** so it can
+  never leak into a spawned child CLI (`harvestYaModuleEnv` in
+  `packages/server/src/yaModuleEnv.ts`; read via `getModuleEnv(module)`).
+  Module and name split on the **first** `__`. This protects credentials
+  whose bare names another vendor's CLI would honor — see the billing
+  footgun in [cost-efficiency.md](cost-efficiency.md).
+- **`YA_<NAME>` — YA-specific config toggle (non-secret).** Meaningful only
+  inside YA; not a credential, so it is read normally (not stripped) and
+  has no `__`. New YA-only toggles should take this prefix;
+  `YA_VOICE_BACKENDS` is the first (renamed from `VOICE_BACKENDS`).
+- **`YEP_ANYWHERE_*` — pre-existing internal prefix** (profile, data dir).
+  Excluded from child env by `filterEnvForChildProcess`.
+- **Unprefixed** (`PORT`, `VOICE_INPUT`, `ENABLED_PROVIDERS`, `LOG_*`,
+  `WHISPER_*`, …) — historical YA config that predates the `YA_` prefix.
+  Candidates to migrate to `YA_` for consistency; not yet done.
+
+## Meaningful variables
+
+### Ports & instance
+| Var | Meaning |
+|-----|---------|
+| `PORT` | Base port (default 3400). Main = PORT+0, maintenance = PORT+1, vite = PORT+2. |
+| `MAINTENANCE_PORT` | Override maintenance port (0 disables). |
+| `VITE_PORT` | Override vite dev port. |
+| `YEP_ANYWHERE_PROFILE` | Profile suffix → `~/.yep-anywhere-<profile>/`. |
+| `YEP_ANYWHERE_DATA_DIR` | Full data-dir path override. |
+| `CLAUDE_CONFIG_DIR` | Claude Code config dir (sessions scanned from `<dir>/projects/`). |
+
+### Providers & features
+| Var | Meaning |
+|-----|---------|
+| `ENABLED_PROVIDERS` | Comma list of exposed providers (empty = all). |
+| `VOICE_INPUT` | `false` disables the mic button server-side. |
+| `YA_VOICE_BACKENDS` | Explicit local/test speech backends (`ya-whisper`, `ya-dummy`). Cloud backends auto-enable on key presence instead. |
+
+### Speech credentials & engine (the `stt` module)
+| Var | Meaning |
+|-----|---------|
+| `YA_stt__XAI_API_KEY` | xAI key → `ya-grok` backend; auto-enables when set. |
+| `YA_stt__DEEPGRAM_API_KEY` | Deepgram key → `ya-deepgram` backend; auto-enables when set. |
+| `WHISPER_MODEL` / `WHISPER_DEVICE` / `WHISPER_COMPUTE_TYPE` | Local Whisper tuning. |
+
+See [pluggable-speech-recognition.md](pluggable-speech-recognition.md) for
+backend semantics and [cost-efficiency.md](cost-efficiency.md) for the
+metered-vs-free and billing-isolation rules.
+
+### Logging & diagnostics
+| Var | Meaning |
+|-----|---------|
+| `LOG_LEVEL` / `LOG_FILE_LEVEL` | Minimum console / file log level. |
+| `LOG_TO_FILE` | `true` enables file logging. |
+| `LOG_DIR` / `LOG_FILE` | Log directory / filename overrides. |
+| `LOG_PRETTY` | `false` disables pretty console logs. |
+| `PROXY_DEBUG` | Enable proxy debug logging at startup. |
+
+### Auth & serving
+| Var | Meaning |
+|-----|---------|
+| `AUTH_DISABLED` | `true` bypasses auth (recovery only). |
+| `AUTH_COOKIE_SECRET` | Override auth cookie secret. |
+| `SERVE_FRONTEND` | `false` runs API-only (no static client). |
+| `MAX_UPLOAD_SIZE_MB` / `MAX_QUEUE_SIZE` | Upload / queue limits. |
+| `ALLOWED_IMAGE_PATHS` | Extra dirs allowed for local image serving. |

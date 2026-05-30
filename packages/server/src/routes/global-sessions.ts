@@ -5,20 +5,20 @@
  * this returns a flat list suitable for navigation/sidebar use.
  */
 
-import {
-  type ProviderName,
-  getSessionDisplayTitle,
-} from "@yep-anywhere/shared";
+import type { ProviderName } from "@yep-anywhere/shared";
 import { Hono } from "hono";
 import type { SessionIndexService } from "../indexes/index.js";
+import type { SessionIndexListOptions } from "../indexes/types.js";
 import type { SessionMetadataService } from "../metadata/SessionMetadataService.js";
 import type { NotificationService } from "../notifications/index.js";
 import type { CodexSessionScanner } from "../projects/codex-scanner.js";
 import type { GeminiSessionScanner } from "../projects/gemini-scanner.js";
+import { isDetachedProjectPath } from "../projects/paths.js";
 import type { ProjectScanner } from "../projects/scanner.js";
 import type { CodexSessionReader } from "../sessions/codex-reader.js";
 import type { GeminiSessionReader } from "../sessions/gemini-reader.js";
 import { listSessionsAcrossProviders } from "../sessions/provider-resolution.js";
+import type { GrokSessionReader } from "../sessions/grok-reader.js";
 import type { ISessionReader } from "../sessions/types.js";
 import type { ExternalSessionTracker } from "../supervisor/ExternalSessionTracker.js";
 import type { Supervisor } from "../supervisor/Supervisor.js";
@@ -31,6 +31,10 @@ import type {
 } from "../supervisor/types.js";
 import type { BusEvent, EventBus } from "../watcher/index.js";
 import { buildProviderProjectCatalog } from "./provider-catalog.js";
+import {
+  getActiveSessionIndexOptions,
+  isSessionAutoArchived,
+} from "./session-list-options.js";
 
 export interface GlobalSessionsDeps {
   scanner: ProjectScanner;
@@ -52,14 +56,20 @@ export interface GlobalSessionsDeps {
   geminiSessionsDir?: string;
   /** Optional shared Gemini reader factory for cross-provider session lookups */
   geminiReaderFactory?: (projectPath: string) => GeminiSessionReader;
+  /** Grok sessions directory (defaults to ~/.grok/sessions) */
+  grokSessionsDir?: string;
+  grokReaderFactory?: (projectPath: string) => GrokSessionReader;
   /** Event bus for cache invalidation */
   eventBus?: EventBus;
+  /** Sessions older than this many days are hidden from default scans. 0 disables. */
+  sessionAutoArchiveDays?: number;
 }
 
 export interface GlobalSessionItem {
   // From cache (cheap)
   id: string;
   title: string | null;
+  fullTitle: string | null;
   createdAt: string;
   updatedAt: string;
   messageCount: number;
@@ -75,6 +85,10 @@ export interface GlobalSessionItem {
   customTitle?: string;
   isArchived?: boolean;
   isStarred?: boolean;
+  /** Parent session when this item is a YA-owned /btw aside. */
+  parentSessionId?: string;
+  /** Initial prompt text accepted by YA for new-session recovery/copy. */
+  initialPrompt?: string;
   /** SSH host alias for remote execution (undefined = local) */
   executor?: string;
 }
@@ -157,9 +171,13 @@ export function createGlobalSessionsRoutes(deps: GlobalSessionsDeps): Hono {
     });
   }
 
+  const getDefaultListOptions = (): SessionIndexListOptions | undefined =>
+    getActiveSessionIndexOptions(deps.sessionAutoArchiveDays);
+
   const listSessionsForProject = async (
     project: Project,
     providerCatalog: Awaited<ReturnType<typeof buildProviderProjectCatalog>>,
+    options?: SessionIndexListOptions,
   ): Promise<SessionSummary[]> => {
     return listSessionsAcrossProviders(
       project,
@@ -171,8 +189,11 @@ export function createGlobalSessionsRoutes(deps: GlobalSessionsDeps): Hono {
         geminiSessionsDir: deps.geminiSessionsDir,
         geminiReaderFactory: deps.geminiReaderFactory,
         geminiHashToCwd: providerCatalog.geminiHashToCwd,
+        grokSessionsDir: deps.grokSessionsDir,
+        grokReaderFactory: deps.grokReaderFactory,
       },
       providerCatalog,
+      options,
     );
   };
 
@@ -185,11 +206,21 @@ export function createGlobalSessionsRoutes(deps: GlobalSessionsDeps): Hono {
       geminiScanner: deps.geminiScanner,
     });
 
+    const statsListOptions = getDefaultListOptions();
+    const statsAutoArchiveAfterMs = statsListOptions?.activeAfterMs;
+
     for (const project of projects) {
-      const sessions = await listSessionsForProject(project, providerCatalog);
+      const sessions = await listSessionsForProject(
+        project,
+        providerCatalog,
+        statsListOptions,
+      );
       for (const session of sessions) {
         const metadata = deps.sessionMetadataService?.getMetadata(session.id);
-        const isArchived = metadata?.isArchived ?? session.isArchived ?? false;
+        const isArchived =
+          metadata?.isArchived ??
+          session.isArchived ??
+          isSessionAutoArchived(session, statsAutoArchiveAfterMs);
         const isStarred = metadata?.isStarred ?? session.isStarred ?? false;
         const executor = metadata?.executor;
 
@@ -283,6 +314,7 @@ export function createGlobalSessionsRoutes(deps: GlobalSessionsDeps): Hono {
 
     // Build project options for filter dropdown (from all projects, sorted by name)
     const projectOptions: ProjectOption[] = allProjects
+      .filter((project) => !isDetachedProjectPath(project.path))
       .map((p) => ({ id: p.id, name: p.name }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -294,16 +326,30 @@ export function createGlobalSessionsRoutes(deps: GlobalSessionsDeps): Hono {
       geminiScanner: deps.geminiScanner,
     });
 
+    const defaultListOptions = getDefaultListOptions();
+    const listOptions = includeArchived ? undefined : defaultListOptions;
+    const autoArchiveAfterMs = defaultListOptions?.activeAfterMs;
+
     for (const project of projects) {
-      const sessions = await listSessionsForProject(project, providerCatalog);
+      const sessions = await listSessionsForProject(
+        project,
+        providerCatalog,
+        listOptions,
+      );
 
       // Enrich each session
       for (const session of sessions) {
         // Get session metadata
         const metadata = deps.sessionMetadataService?.getMetadata(session.id);
-        const isArchived = metadata?.isArchived ?? session.isArchived ?? false;
+        const isArchived =
+          metadata?.isArchived ??
+          session.isArchived ??
+          isSessionAutoArchived(session, autoArchiveAfterMs);
         const isStarred = metadata?.isStarred ?? session.isStarred ?? false;
         const customTitle = metadata?.customTitle ?? session.customTitle;
+        const parentSessionId =
+          metadata?.parentSessionId ?? session.parentSessionId;
+        const initialPrompt = metadata?.initialPrompt ?? session.fullTitle;
         const executor = metadata?.executor;
 
         // Get unread status
@@ -359,8 +405,16 @@ export function createGlobalSessionsRoutes(deps: GlobalSessionsDeps): Hono {
           const projectNameMatch = project.name
             .toLowerCase()
             .includes(searchQuery);
+          const initialPromptMatch = initialPrompt
+            ?.toLowerCase()
+            .includes(searchQuery);
 
-          if (!titleMatch && !customTitleMatch && !projectNameMatch) {
+          if (
+            !titleMatch &&
+            !customTitleMatch &&
+            !projectNameMatch &&
+            !initialPromptMatch
+          ) {
             continue;
           }
         }
@@ -368,6 +422,7 @@ export function createGlobalSessionsRoutes(deps: GlobalSessionsDeps): Hono {
         allSessions.push({
           id: session.id,
           title: session.title,
+          fullTitle: session.fullTitle,
           createdAt: session.createdAt,
           updatedAt: session.updatedAt,
           messageCount: session.messageCount,
@@ -381,6 +436,8 @@ export function createGlobalSessionsRoutes(deps: GlobalSessionsDeps): Hono {
           customTitle,
           isArchived,
           isStarred,
+          parentSessionId,
+          initialPrompt: initialPrompt ?? undefined,
           executor,
         });
       }

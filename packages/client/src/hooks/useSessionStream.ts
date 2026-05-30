@@ -6,11 +6,32 @@ import {
   getWebSocketConnection,
   isNonRetryableError,
 } from "../lib/connection";
+import { logSessionUiTrace } from "../lib/diagnostics/uiTrace";
 
 interface UseSessionStreamOptions {
   onMessage: (data: { eventType: string; [key: string]: unknown }) => void;
   onError?: (error: Event) => void;
   onOpen?: () => void;
+}
+
+function summarizeStreamPayload(
+  eventType: string,
+  data: unknown,
+): Record<string, unknown> {
+  const record =
+    data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  return {
+    eventType,
+    sdkType: typeof record.type === "string" ? record.type : undefined,
+    subtype: typeof record.subtype === "string" ? record.subtype : undefined,
+    role: typeof record.role === "string" ? record.role : undefined,
+    state: typeof record.state === "string" ? record.state : undefined,
+    reason: typeof record.reason === "string" ? record.reason : undefined,
+    tempId: typeof record.tempId === "string" ? record.tempId : undefined,
+    deferredCount: Array.isArray(record.messages)
+      ? record.messages.length
+      : undefined,
+  };
 }
 
 export function useSessionStream(
@@ -32,6 +53,7 @@ export function useSessionStream(
       // Reset tracking when sessionId becomes null so we can reconnect later
       // (e.g., when status goes idle → owned again for the same session)
       mountedSessionIdRef.current = null;
+      logSessionUiTrace("session-stream-disabled");
       return;
     }
 
@@ -103,6 +125,11 @@ export function useSessionStream(
             connectionManager.recordHeartbeat();
             return;
           }
+          logSessionUiTrace("session-stream-event", {
+            sessionId,
+            eventId: eventId ?? null,
+            ...summarizeStreamPayload(eventType, data),
+          });
           if (eventId) {
             lastEventIdRef.current = eventId;
           }
@@ -113,12 +140,18 @@ export function useSessionStream(
         },
         onOpen: () => {
           if (isStale()) return;
+          logSessionUiTrace("session-stream-open", { sessionId });
           setConnected(true);
           connectionManager.markConnected();
           optionsRef.current.onOpen?.();
         },
         onError: (error: Error) => {
           if (isStale()) return;
+          logSessionUiTrace("session-stream-error", {
+            sessionId,
+            message: error.message,
+            nonRetryable: isNonRetryableError(error),
+          });
           setConnected(false);
           wsSubscriptionRef.current = null;
           mountedSessionIdRef.current = null;
@@ -137,12 +170,17 @@ export function useSessionStream(
         onClose: () => {
           if (cleaningUpRef.current) return;
           if (isStale()) return;
+          logSessionUiTrace("session-stream-close", { sessionId });
           setConnected(false);
           wsSubscriptionRef.current = null;
           mountedSessionIdRef.current = null;
         },
       };
 
+      logSessionUiTrace("session-stream-subscribe", {
+        sessionId,
+        lastEventId: lastEventIdRef.current ?? null,
+      });
       sub = connection.subscribeSession(
         sessionId,
         handlers,
@@ -157,6 +195,10 @@ export function useSessionStream(
   useEffect(() => {
     return connectionManager.on("stateChange", (state) => {
       if (state === "reconnecting" || state === "disconnected") {
+        logSessionUiTrace("session-stream-transport-state", {
+          sessionId,
+          state,
+        });
         // Proactively tear down the session subscription. Without this,
         // the "connected" stateChange can fire before the old subscription's
         // onClose, causing the !wsSubscriptionRef.current guard to skip
@@ -171,6 +213,7 @@ export function useSessionStream(
         mountedSessionIdRef.current = null;
       }
       if (state === "connected" && sessionId && !wsSubscriptionRef.current) {
+        logSessionUiTrace("session-stream-transport-reconnect", { sessionId });
         connect();
       }
     });
@@ -179,6 +222,7 @@ export function useSessionStream(
   // Force reconnect (e.g., after process restart)
   const reconnect = useCallback(() => {
     if (!sessionId) return;
+    logSessionUiTrace("session-stream-reconnect-requested", { sessionId });
     if (wsSubscriptionRef.current) {
       const old = wsSubscriptionRef.current;
       wsSubscriptionRef.current = null;

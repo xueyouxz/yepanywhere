@@ -16,7 +16,8 @@
 // Version constant for controlled updates
 // Increment this when making intentional SW changes
 // Browsers reinstall SW only when file content changes
-const SW_VERSION = "1.0.4";
+const SW_VERSION = "1.0.5";
+const FRONTEND_RELOAD_QUERY_PARAM = "__ya_reload";
 
 // Resolve asset URLs relative to SW scope (handles /remote/ deployment)
 function assetUrl(path) {
@@ -146,8 +147,12 @@ async function clearSwLogs() {
  */
 self.addEventListener("fetch", (event) => {
   if (event.request.mode === "navigate") {
+    const url = new URL(event.request.url);
+    const cacheMode = url.searchParams.has(FRONTEND_RELOAD_QUERY_PARAM)
+      ? "reload"
+      : "no-cache";
     event.respondWith(
-      fetch(event.request, { cache: "no-cache" }).catch(() =>
+      fetch(event.request, { cache: cacheMode }).catch(() =>
         fetch(event.request),
       ),
     );

@@ -1,5 +1,6 @@
 import type { ProviderName } from "@yep-anywhere/shared";
-import { MODEL_OPTIONS } from "../hooks/useModelSettings";
+import { getIndicatorToneFromProcess } from "../lib/modelConfigIndicator";
+import { getModelIndicatorModelLabel } from "../lib/modelIndicatorText";
 
 const PROVIDER_COLORS: Record<ProviderName, string> = {
   claude: "var(--provider-claude)", // Claude orange
@@ -8,6 +9,7 @@ const PROVIDER_COLORS: Record<ProviderName, string> = {
   "codex-oss": "var(--provider-codex)", // OpenAI green (same as codex)
   gemini: "var(--provider-gemini)", // Google blue
   "gemini-acp": "var(--provider-gemini)", // Google blue (same as gemini)
+  grok: "var(--provider-grok)", // xAI Grok
   opencode: "var(--provider-opencode)", // OpenCode purple
 };
 
@@ -18,6 +20,7 @@ const PROVIDER_LABELS: Record<ProviderName, string> = {
   "codex-oss": "CodexOSS",
   gemini: "Gemini",
   "gemini-acp": "Gemini ACP",
+  grok: "Grok",
   opencode: "OpenCode",
 };
 
@@ -27,6 +30,10 @@ interface ProviderBadgeProps {
   compact?: boolean;
   /** Model name to display alongside provider (e.g., "opus", "sonnet") */
   model?: string;
+  /** Current thinking mode for live process config */
+  thinking?: { type: string };
+  /** Current effort level for live process config */
+  effort?: string;
   /** Whether the session is actively thinking/processing */
   isThinking?: boolean;
   className?: string;
@@ -40,60 +47,61 @@ export function ProviderBadge({
   provider,
   compact = false,
   model,
+  thinking,
+  effort,
   isThinking = false,
   className = "",
 }: ProviderBadgeProps) {
   const color = PROVIDER_COLORS[provider];
   const label = PROVIDER_LABELS[provider];
 
-  // Format model name for display
-  const getModelLabel = (modelName: string | undefined): string | null => {
-    if (!modelName) return null;
-    if (modelName === "default") return null;
-    const isExtendedContext = modelName.includes("[1m]");
+  const isGptModel =
+    provider === "codex" &&
+    typeof model === "string" &&
+    model.toLowerCase().startsWith("gpt-");
 
-    // Check if it's a known short model option (e.g., "opus", "sonnet")
-    const knownModel = MODEL_OPTIONS.find((o) => o.value === modelName);
-    if (knownModel && knownModel.value !== "default") {
-      return knownModel.label;
+  const effortTone = isGptModel
+    ? getIndicatorToneFromProcess(thinking, effort)
+    : null;
+
+  const effortLabel = (() => {
+    if (!isGptModel) return null;
+    if (!thinking && !effort) return null;
+    if (!thinking || thinking.type === "disabled") return "Off";
+    if (!effort) return "Auto";
+    switch (effort) {
+      case "low":
+        return "Low";
+      case "medium":
+        return "Med";
+      case "high":
+        return "High";
+      case "max":
+      case "xhigh":
+        return "Max";
+      default:
+        return effort;
     }
+  })();
 
-    // Parse full model IDs like "claude-opus-4-5-20251101" or "claude-sonnet-4-20250514"
-    // Extract the model family (opus, sonnet, haiku) from the full ID
-    const claudeMatch = modelName.match(/claude-(\w+)-/);
-    if (claudeMatch?.[1]) {
-      const family = claudeMatch[1];
-      // Check if the extracted family is a known model
-      const familyModel = MODEL_OPTIONS.find((o) => o.value === family);
-      if (familyModel) {
-        return isExtendedContext
-          ? `${familyModel.label} 1M`
-          : familyModel.label;
-      }
-      // Capitalize unknown family
-      const capitalized = family.charAt(0).toUpperCase() + family.slice(1);
-      return isExtendedContext ? `${capitalized} 1M` : capitalized;
-    }
+  // Compact glyph label for the badge body (full text preserved in title)
+  const effectiveModel = !model || model === "default" ? undefined : model;
+  const glyphLabel =
+    getModelIndicatorModelLabel(provider, effectiveModel) || label;
 
-    // For other models, capitalize first letter
-    const capitalized = modelName.charAt(0).toUpperCase() + modelName.slice(1);
-    return isExtendedContext ? `${capitalized} 1M` : capitalized;
-  };
-
-  const modelLabel = getModelLabel(model);
+  const fullTitle = effectiveModel ?? label;
 
   if (compact) {
     return (
       <span
         className={`provider-badge-stripe ${className}`}
         style={{ backgroundColor: color }}
-        title={modelLabel ? `${label} (${modelLabel})` : label}
-        aria-label={`Provider: ${label}${modelLabel ? ` (${modelLabel})` : ""}`}
+        title={fullTitle}
+        aria-label={fullTitle}
       />
     );
   }
 
-  // When thinking, dot is always orange with pulse animation
   const dotClass = isThinking
     ? "provider-badge-dot-inline thinking"
     : "provider-badge-dot-inline";
@@ -105,10 +113,20 @@ export function ProviderBadge({
     <span
       className={`provider-badge ${className}`}
       style={{ borderColor: color, color }}
+      title={fullTitle}
+      aria-label={fullTitle}
     >
       <span className={dotClass} style={dotStyle} />
-      <span className="provider-badge-label">{label}</span>
-      {modelLabel && <span className="provider-badge-model">{modelLabel}</span>}
+      <span className="provider-badge-label">{glyphLabel}</span>
+      {effortLabel && effortTone && (
+        <span className="provider-badge-effort" title={`Effort: ${effortLabel}`}>
+          <span
+            className={`provider-badge-effort-dot tone-${effortTone}`}
+            aria-hidden="true"
+          />
+          <span className="provider-badge-effort-label">{effortLabel}</span>
+        </span>
+      )}
     </span>
   );
 }

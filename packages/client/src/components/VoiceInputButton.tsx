@@ -6,6 +6,7 @@ import {
   useImperativeHandle,
 } from "react";
 import { useModelSettings } from "../hooks/useModelSettings";
+import { useRemoteBasePath } from "../hooks/useRemoteBasePath";
 import {
   SPEECH_STATUS_LABELS,
   useSpeechRecognition,
@@ -56,8 +57,9 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
   ref: ForwardedRef<VoiceInputButtonRef>,
 ) {
   const { t } = useI18n();
-  const { voiceInputEnabled } = useModelSettings();
+  const { voiceInputEnabled, speechMethod } = useModelSettings();
   const { version: versionInfo } = useVersion();
+  const basePath = useRemoteBasePath();
   const serverVoiceEnabled =
     versionInfo?.capabilities?.includes("voiceInput") ?? true;
   const viewportWidth = useViewportWidth();
@@ -89,6 +91,8 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
     error,
     interimTranscript,
   } = useSpeechRecognition({
+    speechMethod,
+    basePath,
     onResult: handleResult,
     onInterimResult: handleInterim,
   });

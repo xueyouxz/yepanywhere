@@ -17,6 +17,8 @@ export interface ServerSettings {
   serviceWorkerEnabled: boolean;
   /** Whether remote SRP resume sessions should be persisted to disk (default: false/in-memory only) */
   persistRemoteSessionsToDisk: boolean;
+  /** Whether the server is requesting browser clients to upload diagnostic logs */
+  clientLogCollectionRequested: boolean;
   /** SSH host aliases for remote executors (from ~/.ssh/config) */
   remoteExecutors?: string[];
   /** SSH host aliases for ChromeOS device-bridge targets */
@@ -25,6 +27,10 @@ export interface ServerSettings {
   allowedHosts?: string;
   /** Free-form instructions appended to the system prompt for all sessions */
   globalInstructions?: string;
+  /** Default idle minutes before an opted-in session queues a heartbeat turn */
+  heartbeatTurnsAfterMinutes?: number;
+  /** Default text queued as the synthetic heartbeat user turn */
+  heartbeatTurnText?: string;
   /** Ollama server URL for claude-ollama provider (default: http://localhost:11434) */
   ollamaUrl?: string;
   /** Custom system prompt for Ollama provider (overrides the default minimal prompt) */
@@ -43,14 +49,29 @@ export interface ServerSettings {
   lifecycleWebhookToken?: string;
   /** When true, include dryRun=true in lifecycle webhook payloads */
   lifecycleWebhookDryRun?: boolean;
+  /**
+   * How the server handles Codex CLI updates:
+   * - "auto": automatically run `npm install -g <pkg>@latest` when an update
+   *   is available and the install was done via npm (best effort, logs only).
+   * - "notify": surface a banner in the UI but do nothing automatically.
+   * - "off": don't check or surface updates.
+   */
+  codexUpdatePolicy?: "auto" | "notify" | "off";
 }
+
+export const CODEX_UPDATE_POLICIES = ["auto", "notify", "off"] as const;
+export type CodexUpdatePolicy = (typeof CODEX_UPDATE_POLICIES)[number];
 
 /** Default settings */
 export const DEFAULT_SERVER_SETTINGS: ServerSettings = {
   serviceWorkerEnabled: true,
   persistRemoteSessionsToDisk: false,
+  clientLogCollectionRequested: false,
+  heartbeatTurnsAfterMinutes: 15,
+  heartbeatTurnText: "heartbeat",
   lifecycleWebhooksEnabled: false,
   lifecycleWebhookDryRun: true,
+  codexUpdatePolicy: "notify",
 };
 
 /** Stored state with version for migrations */

@@ -45,10 +45,15 @@ const SUBSET_EXPORTS = [
   { name: "SandboxMode", file: "v2/SandboxMode.ts" },
   { name: "ThreadStartParams", file: "v2/ThreadStartParams.ts" },
   { name: "ThreadResumeParams", file: "v2/ThreadResumeParams.ts" },
+  { name: "ThreadReadParams", file: "v2/ThreadReadParams.ts" },
   { name: "TurnStartParams", file: "v2/TurnStartParams.ts" },
+  { name: "TurnSteerParams", file: "v2/TurnSteerParams.ts" },
+  { name: "TurnInterruptParams", file: "v2/TurnInterruptParams.ts" },
   { name: "ThreadStartResponse", file: "v2/ThreadStartResponse.ts" },
   { name: "ThreadResumeResponse", file: "v2/ThreadResumeResponse.ts" },
   { name: "TurnStartResponse", file: "v2/TurnStartResponse.ts" },
+  { name: "TurnSteerResponse", file: "v2/TurnSteerResponse.ts" },
+  { name: "TurnInterruptResponse", file: "v2/TurnInterruptResponse.ts" },
   {
     name: "CommandExecutionRequestApprovalParams",
     file: "v2/CommandExecutionRequestApprovalParams.ts",
@@ -73,10 +78,39 @@ const SUBSET_EXPORTS = [
     name: "ToolRequestUserInputResponse",
     file: "v2/ToolRequestUserInputResponse.ts",
   },
+  {
+    name: "PermissionsRequestApprovalParams",
+    file: "v2/PermissionsRequestApprovalParams.ts",
+  },
+  {
+    name: "PermissionsRequestApprovalResponse",
+    file: "v2/PermissionsRequestApprovalResponse.ts",
+  },
   { name: "ItemStartedNotification", file: "v2/ItemStartedNotification.ts" },
   {
     name: "ItemCompletedNotification",
     file: "v2/ItemCompletedNotification.ts",
+  },
+  {
+    name: "RawResponseItemCompletedNotification",
+    file: "v2/RawResponseItemCompletedNotification.ts",
+  },
+  {
+    name: "AgentMessageDeltaNotification",
+    file: "v2/AgentMessageDeltaNotification.ts",
+  },
+  { name: "PlanDeltaNotification", file: "v2/PlanDeltaNotification.ts" },
+  {
+    name: "CommandExecutionOutputDeltaNotification",
+    file: "v2/CommandExecutionOutputDeltaNotification.ts",
+  },
+  {
+    name: "FileChangeOutputDeltaNotification",
+    file: "v2/FileChangeOutputDeltaNotification.ts",
+  },
+  {
+    name: "ReasoningSummaryTextDeltaNotification",
+    file: "v2/ReasoningSummaryTextDeltaNotification.ts",
   },
   {
     name: "ThreadTokenUsageUpdatedNotification",
@@ -292,7 +326,13 @@ function main() {
   try {
     mkdirSync(generatedTypesDir, { recursive: true });
 
-    runCodex(["app-server", "generate-ts", "--out", generatedTypesDir]);
+    runCodex([
+      "app-server",
+      "generate-ts",
+      "--experimental",
+      "--out",
+      generatedTypesDir,
+    ]);
     writeSubsetArtifacts(
       generatedTypesDir,
       generatedSubsetDir,

@@ -76,6 +76,7 @@ describe("StreamCoordinator", () => {
       expect(result1.augments).toHaveLength(1);
       expect(result1.augments[0]?.type).toBe("code");
       expect(result1.augments[0]?.blockIndex).toBe(0);
+      expect(result1.augments[0]?.html).not.toContain("<span");
       expect(result1.pendingHtml).toBe(""); // No pending when streaming code block
 
       const result2 = await coordinator.onChunk("const x = 1;\n");
@@ -83,11 +84,13 @@ describe("StreamCoordinator", () => {
       expect(result2.augments[0]?.type).toBe("code");
       expect(result2.augments[0]?.blockIndex).toBe(0); // Same block index
       expect(result2.augments[0]?.html).toContain("const");
+      expect(result2.augments[0]?.html).not.toContain("<span");
 
       const result3 = await coordinator.onChunk("```\n");
       expect(result3.augments).toHaveLength(1);
       expect(result3.augments[0]?.type).toBe("code");
       expect(result3.augments[0]?.blockIndex).toBe(0); // Still same block index
+      expect(result3.augments[0]?.html).toContain("<span");
     });
   });
 
@@ -448,6 +451,18 @@ describe("StreamCoordinator", () => {
       // Should have streaming augments while in code block, then final completion
       const totalAugments = augmentsByChunk.reduce((a, b) => a + b, 0);
       expect(totalAugments).toBeGreaterThan(1); // Multiple updates during streaming
+    });
+
+    it("stops live-rendering very large open code fences", async () => {
+      await coordinator.onChunk("```markdown\n");
+      const result = await coordinator.onChunk("x".repeat(25_000));
+
+      expect(result.augments).toHaveLength(0);
+      expect(result.pendingHtml).toBe("");
+
+      const flushResult = await coordinator.flush();
+      expect(flushResult.augments).toHaveLength(1);
+      expect(flushResult.augments[0]?.type).toBe("code");
     });
 
     it("transitions from streaming to completed correctly", async () => {

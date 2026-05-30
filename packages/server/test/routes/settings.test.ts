@@ -13,6 +13,7 @@ describe("Settings Routes", () => {
     settings = {
       serviceWorkerEnabled: true,
       persistRemoteSessionsToDisk: false,
+      clientLogCollectionRequested: false,
     };
 
     mockServerSettingsService = {
@@ -174,6 +175,25 @@ describe("Settings Routes", () => {
         lifecycleWebhookUrl: "https://example.com/hook",
         lifecycleWebhookToken: "secret",
         lifecycleWebhookDryRun: false,
+      });
+    });
+
+    it("accepts server-requested client log collection", async () => {
+      const routes = createSettingsRoutes({
+        serverSettingsService: mockServerSettingsService,
+      });
+
+      const response = await routes.request("/", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientLogCollectionRequested: true,
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(mockServerSettingsService.updateSettings).toHaveBeenCalledWith({
+        clientLogCollectionRequested: true,
       });
     });
   });

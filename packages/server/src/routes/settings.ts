@@ -5,15 +5,26 @@
 import {
   ALL_PERMISSION_MODES,
   ALL_PROVIDERS,
+  HELPER_SIDE_MODEL_CHEAPEST,
+  HELPER_SIDE_MODEL_SAME_AS_MAIN,
+  PROMPT_SUGGESTION_MODES,
+  RECAP_MODES,
   type NewSessionDefaults,
   type PermissionMode,
+  type PromptSuggestionMode,
   type ProviderName,
+  type RecapMode,
 } from "@yep-anywhere/shared";
 import { Hono } from "hono";
 import { testSSHConnection } from "../sdk/remote-spawn.js";
 import type {
+  CodexUpdatePolicy,
   ServerSettings,
   ServerSettingsService,
+} from "../services/ServerSettingsService.js";
+import {
+  CODEX_UPDATE_POLICIES,
+  DEFAULT_SERVER_SETTINGS,
 } from "../services/ServerSettingsService.js";
 import {
   isValidSshHostAlias,
@@ -118,6 +129,62 @@ function parseNewSessionDefaults(
     }
   }
 
+  if ("recapMode" in input) {
+    if (
+      input.recapMode !== undefined &&
+      input.recapMode !== null &&
+      input.recapMode !== "" &&
+      !RECAP_MODES.includes(input.recapMode as RecapMode)
+    ) {
+      return null;
+    }
+    if (typeof input.recapMode === "string" && input.recapMode.length > 0) {
+      parsed.recapMode = input.recapMode as RecapMode;
+    }
+  }
+
+  if ("promptSuggestionMode" in input) {
+    if (
+      input.promptSuggestionMode !== undefined &&
+      input.promptSuggestionMode !== null &&
+      input.promptSuggestionMode !== "" &&
+      !PROMPT_SUGGESTION_MODES.includes(
+        input.promptSuggestionMode as PromptSuggestionMode,
+      )
+    ) {
+      return null;
+    }
+    if (
+      typeof input.promptSuggestionMode === "string" &&
+      input.promptSuggestionMode.length > 0
+    ) {
+      parsed.promptSuggestionMode =
+        input.promptSuggestionMode as PromptSuggestionMode;
+    }
+  }
+
+  if ("helperSideModel" in input) {
+    if (
+      input.helperSideModel !== undefined &&
+      input.helperSideModel !== null &&
+      input.helperSideModel !== "" &&
+      typeof input.helperSideModel !== "string"
+    ) {
+      return null;
+    }
+    if (
+      typeof input.helperSideModel === "string" &&
+      input.helperSideModel.length > 0
+    ) {
+      parsed.helperSideModel =
+        input.helperSideModel === HELPER_SIDE_MODEL_SAME_AS_MAIN
+          ? HELPER_SIDE_MODEL_SAME_AS_MAIN
+          : input.helperSideModel === HELPER_SIDE_MODEL_CHEAPEST
+            ? HELPER_SIDE_MODEL_CHEAPEST
+            : input.helperSideModel.slice(0, 200);
+    }
+  }
+
   return Object.keys(parsed).length > 0 ? parsed : undefined;
 }
 
@@ -156,6 +223,9 @@ export function createSettingsRoutes(deps: SettingsRoutesDeps): Hono {
     }
     if (typeof body.persistRemoteSessionsToDisk === "boolean") {
       updates.persistRemoteSessionsToDisk = body.persistRemoteSessionsToDisk;
+    }
+    if (typeof body.clientLogCollectionRequested === "boolean") {
+      updates.clientLogCollectionRequested = body.clientLogCollectionRequested;
     }
 
     // Handle remoteExecutors array
@@ -205,6 +275,40 @@ export function createSettingsRoutes(deps: SettingsRoutesDeps): Hono {
         updates.globalInstructions = undefined;
       } else if (typeof body.globalInstructions === "string") {
         updates.globalInstructions = body.globalInstructions.slice(0, 10000);
+      }
+    }
+
+    if ("heartbeatTurnsAfterMinutes" in body) {
+      if (
+        body.heartbeatTurnsAfterMinutes === undefined ||
+        body.heartbeatTurnsAfterMinutes === null
+      ) {
+        updates.heartbeatTurnsAfterMinutes =
+          DEFAULT_SERVER_SETTINGS.heartbeatTurnsAfterMinutes;
+      } else if (
+        typeof body.heartbeatTurnsAfterMinutes === "number" &&
+        Number.isInteger(body.heartbeatTurnsAfterMinutes) &&
+        body.heartbeatTurnsAfterMinutes >= 1 &&
+        body.heartbeatTurnsAfterMinutes <= 1440
+      ) {
+        updates.heartbeatTurnsAfterMinutes = body.heartbeatTurnsAfterMinutes;
+      } else {
+        return c.json(
+          { error: "heartbeatTurnsAfterMinutes must be an integer between 1 and 1440" },
+          400,
+        );
+      }
+    }
+
+    if ("heartbeatTurnText" in body) {
+      if (
+        body.heartbeatTurnText === undefined ||
+        body.heartbeatTurnText === null ||
+        body.heartbeatTurnText === ""
+      ) {
+        updates.heartbeatTurnText = DEFAULT_SERVER_SETTINGS.heartbeatTurnText;
+      } else if (typeof body.heartbeatTurnText === "string") {
+        updates.heartbeatTurnText = body.heartbeatTurnText.slice(0, 200);
       }
     }
 
@@ -280,6 +384,28 @@ export function createSettingsRoutes(deps: SettingsRoutesDeps): Hono {
         updates.lifecycleWebhookToken = body.lifecycleWebhookToken.slice(
           0,
           5000,
+        );
+      }
+    }
+
+    if ("codexUpdatePolicy" in body) {
+      if (
+        body.codexUpdatePolicy === undefined ||
+        body.codexUpdatePolicy === null
+      ) {
+        updates.codexUpdatePolicy =
+          DEFAULT_SERVER_SETTINGS.codexUpdatePolicy;
+      } else if (
+        typeof body.codexUpdatePolicy === "string" &&
+        CODEX_UPDATE_POLICIES.includes(
+          body.codexUpdatePolicy as CodexUpdatePolicy,
+        )
+      ) {
+        updates.codexUpdatePolicy = body.codexUpdatePolicy as CodexUpdatePolicy;
+      } else {
+        return c.json(
+          { error: "codexUpdatePolicy must be one of: auto, notify, off" },
+          400,
         );
       }
     }

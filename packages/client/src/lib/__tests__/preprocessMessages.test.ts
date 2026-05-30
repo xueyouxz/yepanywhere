@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Message } from "../../types";
-import { preprocessMessages } from "../preprocessMessages";
+import {
+  preprocessMessages,
+  stripAwaySummaryHintSuffix,
+} from "../preprocessMessages";
 
 describe("preprocessMessages", () => {
   it("pairs tool_use with tool_result", () => {
@@ -487,6 +490,55 @@ describe("preprocessMessages", () => {
     expect(items[1]?.type).toBe("text");
   });
 
+  it("thinking blocks are 'streaming' when message is streaming, 'complete' otherwise", () => {
+    const thinkingContent = [
+      { type: "thinking" as const, thinking: "Let me think..." },
+      { type: "text" as const, text: "My response." },
+    ];
+
+    const streamingItems = preprocessMessages([
+      {
+        id: "msg-1",
+        role: "assistant",
+        content: thinkingContent,
+        timestamp: "2024-01-01T00:00:00Z",
+        _isStreaming: true,
+      } as Message,
+    ]);
+    const completeItems = preprocessMessages([
+      {
+        id: "msg-1",
+        role: "assistant",
+        content: thinkingContent,
+        timestamp: "2024-01-01T00:00:00Z",
+      },
+    ]);
+
+    const streamingThinking = streamingItems[0];
+    const completeThinking = completeItems[0];
+    expect(streamingThinking?.type === "thinking" && streamingThinking.status).toBe("streaming");
+    expect(completeThinking?.type === "thinking" && completeThinking.status).toBe("complete");
+  });
+
+  it("hides internal reasoning placeholders but keeps real text", () => {
+    const messages: Message[] = [
+      {
+        id: "msg-1",
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "Reasoning [internal]" },
+          { type: "text", text: "Here is my response." },
+        ],
+        timestamp: "2024-01-01T00:00:00Z",
+      },
+    ];
+
+    const items = preprocessMessages(messages);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.type).toBe("text");
+  });
+
   it("handles user prompts with string content", () => {
     const messages: Message[] = [
       {
@@ -798,6 +850,85 @@ describe("preprocessMessages", () => {
     });
   });
 
+  it("renders away summaries without the Claude config hint suffix", () => {
+    expect(
+      stripAwaySummaryHintSuffix(
+        "Finished the route and started tests (disable recaps in /config)  \n",
+      ),
+    ).toBe("Finished the route and started tests");
+
+    const messages: Message[] = [
+      {
+        id: "msg-recap-1",
+        type: "system",
+        subtype: "away_summary",
+        content: "Ran typecheck (disable recaps in /config)\n",
+        timestamp: "2024-01-01T00:00:00Z",
+      },
+    ];
+
+    const items = preprocessMessages(messages);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      type: "system",
+      subtype: "away_summary",
+      content: "Ran typecheck",
+    });
+  });
+
+  it("only highlights config_ack messages for new mismatches", () => {
+    const messages: Message[] = [
+      {
+        id: "cfg-1",
+        type: "system",
+        subtype: "config_ack",
+        content: "Codex acknowledged config: gpt-5.4 · effort high",
+        configModel: "gpt-5.4",
+        configThinking: "effort high",
+        configMismatch: true,
+        timestamp: "2024-01-01T00:00:00Z",
+      },
+      {
+        id: "cfg-2",
+        type: "system",
+        subtype: "config_ack",
+        content: "Codex acknowledged config: gpt-5.4 · effort high",
+        configModel: "gpt-5.4",
+        configThinking: "effort high",
+        configMismatch: true,
+        timestamp: "2024-01-01T00:00:01Z",
+      },
+      {
+        id: "cfg-3",
+        type: "system",
+        subtype: "config_ack",
+        content: "Codex acknowledged config: gpt-5.4 · effort xhigh",
+        configModel: "gpt-5.4",
+        configThinking: "effort xhigh",
+        configMismatch: false,
+        timestamp: "2024-01-01T00:00:02Z",
+      },
+    ];
+
+    const items = preprocessMessages(messages);
+    expect(items).toHaveLength(3);
+    expect(items[0]).toMatchObject({
+      type: "system",
+      subtype: "config_ack",
+      configChanged: true,
+    });
+    expect(items[1]).toMatchObject({
+      type: "system",
+      subtype: "config_ack",
+      configChanged: false,
+    });
+    expect(items[2]).toMatchObject({
+      type: "system",
+      subtype: "config_ack",
+      configChanged: false,
+    });
+  });
+
   it("renders provider error messages", () => {
     const messages: Message[] = [
       {
@@ -818,7 +949,7 @@ describe("preprocessMessages", () => {
   });
 
   describe("orphaned tool handling", () => {
-    it("marks orphaned tool_use as aborted", () => {
+    it("marks orphaned tool_use as result unavailable", () => {
       const messages: Message[] = [
         {
           id: "msg-1",
@@ -842,7 +973,7 @@ describe("preprocessMessages", () => {
       expect(items[0]).toMatchObject({
         type: "tool_call",
         id: "tool-1",
-        status: "aborted",
+        status: "incomplete",
         toolResult: undefined,
       });
     });
@@ -894,7 +1025,7 @@ describe("preprocessMessages", () => {
       );
 
       expect(tool1?.type === "tool_call" && tool1.status).toBe("complete");
-      expect(tool2?.type === "tool_call" && tool2.status).toBe("aborted");
+      expect(tool2?.type === "tool_call" && tool2.status).toBe("incomplete");
     });
 
     it("non-orphaned pending tools remain pending", () => {
@@ -923,6 +1054,184 @@ describe("preprocessMessages", () => {
         id: "tool-1",
         status: "pending",
       });
+    });
+
+    it("keeps Codex background process handles pending", () => {
+      const messages: Message[] = [
+        {
+          id: "msg-1",
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool-1",
+              name: "Bash",
+              input: { command: "sleep 20" },
+            },
+          ],
+          timestamp: "2024-01-01T00:00:00Z",
+        },
+        {
+          id: "msg-2",
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool-1",
+              content:
+                "Chunk ID: abc\nWall time: 1.0 seconds\nProcess running with session ID 123\nOutput:\n",
+            },
+          ],
+          timestamp: "2024-01-01T00:00:01Z",
+        },
+      ];
+
+      const items = preprocessMessages(messages);
+
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        type: "tool_call",
+        id: "tool-1",
+        status: "pending",
+      });
+    });
+
+    it("keeps Codex background process handles incomplete when orphaned", () => {
+      const messages: Message[] = [
+        {
+          id: "msg-1",
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool-1",
+              name: "Bash",
+              input: { command: "sleep 20" },
+            },
+          ],
+          timestamp: "2024-01-01T00:00:00Z",
+          orphanedToolUseIds: ["tool-1"],
+        },
+        {
+          id: "msg-2",
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool-1",
+              content:
+                "Chunk ID: abc\nWall time: 1.0 seconds\nProcess running with session ID 123\nOutput:\n",
+            },
+          ],
+          timestamp: "2024-01-01T00:00:01Z",
+        },
+      ];
+
+      const items = preprocessMessages(messages);
+
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        type: "tool_call",
+        id: "tool-1",
+        status: "incomplete",
+      });
+    });
+
+    it("lets a later observed result win over an orphan marker", () => {
+      const messages: Message[] = [
+        {
+          id: "msg-1",
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool-1",
+              name: "Edit",
+              input: { file_path: "a.ts" },
+            },
+          ],
+          timestamp: "2024-01-01T00:00:00Z",
+          orphanedToolUseIds: ["tool-1"],
+        },
+        {
+          id: "msg-2",
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool-1",
+              content: "Patch applied",
+            },
+          ],
+          timestamp: "2024-01-01T00:00:01Z",
+        },
+      ];
+
+      const items = preprocessMessages(messages);
+
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        type: "tool_call",
+        id: "tool-1",
+        status: "complete",
+        toolResult: expect.objectContaining({ content: "Patch applied" }),
+      });
+    });
+
+    it("keeps interrupted Bash results attachable for final output", () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const messages: Message[] = [
+        {
+          id: "msg-1",
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool-1",
+              name: "Bash",
+              input: { command: "sleep 20" },
+            },
+          ],
+          timestamp: "2024-01-01T00:00:00Z",
+          orphanedToolUseIds: ["tool-1"],
+        },
+        {
+          id: "msg-2",
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool-1",
+              content: "aborted by user after 2.3s",
+            },
+          ],
+          timestamp: "2024-01-01T00:00:01Z",
+        },
+        {
+          id: "msg-3",
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool-1",
+              content: "(no output)",
+            },
+          ],
+          timestamp: "2024-01-01T00:00:20Z",
+        },
+      ];
+
+      const items = preprocessMessages(messages);
+
+      expect(warn).not.toHaveBeenCalled();
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        type: "tool_call",
+        id: "tool-1",
+        status: "aborted",
+        toolResult: expect.objectContaining({ content: "(no output)" }),
+      });
+      warn.mockRestore();
     });
   });
 
@@ -957,7 +1266,7 @@ describe("preprocessMessages", () => {
       });
     });
 
-    it("still marks orphaned tools as aborted when activeToolApproval is false", () => {
+    it("still marks orphaned tools incomplete when activeToolApproval is false", () => {
       const messages: Message[] = [
         {
           id: "msg-1",
@@ -983,7 +1292,7 @@ describe("preprocessMessages", () => {
       expect(items[0]).toMatchObject({
         type: "tool_call",
         id: "tool-1",
-        status: "aborted",
+        status: "incomplete",
       });
     });
 
@@ -1030,6 +1339,62 @@ describe("preprocessMessages", () => {
           status: "pending",
         });
       }
+    });
+
+    it("keeps older orphaned tools incomplete during later active tool work", () => {
+      const messages: Message[] = [
+        {
+          id: "msg-1",
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "old-tool",
+              name: "Bash",
+              input: { command: "sleep 15" },
+            },
+          ],
+          timestamp: "2024-01-01T00:00:00Z",
+          orphanedToolUseIds: ["old-tool"],
+        },
+        {
+          id: "msg-2",
+          role: "user",
+          content: "next prompt",
+          timestamp: "2024-01-01T00:00:01Z",
+        },
+        {
+          id: "msg-3",
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "current-tool",
+              name: "Edit",
+              input: { file_path: "a.ts" },
+            },
+          ],
+          timestamp: "2024-01-01T00:00:02Z",
+          orphanedToolUseIds: ["current-tool"],
+        },
+      ];
+
+      const items = preprocessMessages(messages, {
+        activeToolApproval: true,
+      });
+      const oldTool = items.find(
+        (item) => item.type === "tool_call" && item.id === "old-tool",
+      );
+      const currentTool = items.find(
+        (item) => item.type === "tool_call" && item.id === "current-tool",
+      );
+
+      expect(oldTool?.type === "tool_call" && oldTool.status).toBe(
+        "incomplete",
+      );
+      expect(currentTool?.type === "tool_call" && currentTool.status).toBe(
+        "pending",
+      );
     });
 
     it("handles activeToolApproval with no orphaned tools (no-op)", () => {

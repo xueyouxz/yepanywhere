@@ -39,3 +39,7 @@ export function useSessionMetadata(): SessionMetadata {
   }
   return context;
 }
+
+export function useOptionalSessionMetadata(): SessionMetadata | null {
+  return useContext(SessionMetadataContext);
+}

@@ -69,4 +69,19 @@ describe("getToolSummary", () => {
       "sed -n '1,140p' packages/client/src/layouts/NavigationLayout.tsx → No output",
     );
   });
+
+  it("uses canonical renderer names for aliased bash rows", () => {
+    const summary = getToolSummary(
+      "exec_command",
+      { command: "npm test" },
+      {
+        content: "ok\n",
+        structured: { stdout: "ok\n", stderr: "" },
+        isError: false,
+      },
+      "complete",
+    );
+
+    expect(summary).toBe("npm test");
+  });
 });

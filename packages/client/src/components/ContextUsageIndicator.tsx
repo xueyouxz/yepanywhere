@@ -25,6 +25,7 @@ export function ContextUsageIndicator({
   const { percentage } = usage;
   // Clamp percentage to 0-100
   const clampedPercentage = Math.min(100, Math.max(0, percentage));
+  const displayPercentage = Math.round(clampedPercentage);
 
   // Calculate the stroke-dasharray for the pie chart
   // Circumference of circle with r=8 (for size=16) = 2 * PI * r
@@ -82,7 +83,7 @@ export function ContextUsageIndicator({
         />
       </svg>
       {showLabel && (
-        <span className="context-usage-label">{clampedPercentage}%</span>
+        <span className="context-usage-label">{displayPercentage}%</span>
       )}
     </span>
   );

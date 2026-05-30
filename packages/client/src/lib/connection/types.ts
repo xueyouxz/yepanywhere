@@ -175,6 +175,11 @@ export interface UploadOptions {
   signal?: AbortSignal;
   /** Chunk size in bytes (default 64KB) */
   chunkSize?: number;
+  /** Image dimensions of the actual uploaded file, if known */
+  imageDimensions?: {
+    width: number;
+    height: number;
+  };
 }
 
 /**

@@ -21,6 +21,7 @@ import type { ProjectScanner } from "../projects/scanner.js";
 import type { CodexSessionReader } from "../sessions/codex-reader.js";
 import type { GeminiSessionReader } from "../sessions/gemini-reader.js";
 import { listSessionsAcrossProviders } from "../sessions/provider-resolution.js";
+import type { GrokSessionReader } from "../sessions/grok-reader.js";
 import type { ISessionReader } from "../sessions/types.js";
 import type { Supervisor } from "../supervisor/Supervisor.js";
 import type {
@@ -30,6 +31,7 @@ import type {
   SessionSummary,
 } from "../supervisor/types.js";
 import { buildProviderProjectCatalog } from "./provider-catalog.js";
+import { getActiveSessionIndexOptions } from "./session-list-options.js";
 
 export interface InboxDeps {
   scanner: ProjectScanner;
@@ -44,6 +46,9 @@ export interface InboxDeps {
   geminiScanner?: GeminiSessionScanner;
   geminiSessionsDir?: string;
   geminiReaderFactory?: (projectPath: string) => GeminiSessionReader;
+  grokSessionsDir?: string;
+  grokReaderFactory?: (projectPath: string) => GrokSessionReader;
+  sessionAutoArchiveDays?: number;
 }
 
 export interface InboxItem {
@@ -103,6 +108,9 @@ export function createInboxRoutes(deps: InboxDeps): Hono {
       codexScanner: deps.codexScanner,
       geminiScanner: deps.geminiScanner,
     });
+    const listOptions = getActiveSessionIndexOptions(
+      deps.sessionAutoArchiveDays,
+    );
 
     // Fetch sessions from all projects in parallel
     const projectSessionResults = await Promise.all(
@@ -118,8 +126,11 @@ export function createInboxRoutes(deps: InboxDeps): Hono {
               geminiSessionsDir: deps.geminiSessionsDir,
               geminiReaderFactory: deps.geminiReaderFactory,
               geminiHashToCwd: providerCatalog.geminiHashToCwd,
+              grokSessionsDir: deps.grokSessionsDir,
+              grokReaderFactory: deps.grokReaderFactory,
             },
             providerCatalog,
+            listOptions,
           );
           return { project, sessions };
         } catch (err) {

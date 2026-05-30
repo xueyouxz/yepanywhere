@@ -1,6 +1,7 @@
 import type {
   ContextUsage,
   ProviderName,
+  SessionLivenessSnapshot,
   SessionSandboxPolicy,
 } from "@yep-anywhere/shared";
 import { useEffect, useState } from "react";
@@ -30,6 +31,7 @@ interface ProcessInfo {
   effort?: string;
   model?: string;
   executor?: string;
+  liveness?: SessionLivenessSnapshot;
 }
 
 interface ProcessInfoModalProps {

@@ -125,6 +125,27 @@ function isLoopbackHostname(hostname: string): boolean {
   );
 }
 
+function isLoopbackPeerAddress(address: string): boolean {
+  const normalized = address.toLowerCase();
+  return (
+    normalized === "::1" ||
+    normalized === "::ffff:127.0.0.1" ||
+    /^127(?:\.\d{1,3}){3}$/.test(normalized)
+  );
+}
+
+export function isLoopbackWsRequest(
+  peerAddress: string | null,
+  hostname: string | null,
+): boolean {
+  return (
+    peerAddress !== null &&
+    hostname !== null &&
+    isLoopbackPeerAddress(peerAddress) &&
+    isLoopbackHostname(hostname)
+  );
+}
+
 function getRequestHostname(c: Context): string | null {
   const hostHeader = c.req.header("host");
   if (hostHeader) {
@@ -141,6 +162,10 @@ function getRequestHostname(c: Context): string | null {
   } catch {
     return null;
   }
+}
+
+function getPeerAddress(c: Context<{ Bindings: HttpBindings }>): string | null {
+  return c.env.incoming.socket.remoteAddress ?? null;
 }
 
 /**
@@ -241,12 +266,18 @@ export function createWsRelayRoutes(
         send = createSendFn(wsAdapter, connState);
         const hasSessionCookieAuth = c.get("authenticatedViaSession") === true;
         const requestHostname = getRequestHostname(c);
+        const peerAddress = getPeerAddress(c);
         const connectionPolicy = deriveWsConnectionPolicy({
           remoteAccessEnabled: remoteAccessService?.isEnabled() ?? false,
           hasSessionCookieAuth,
           isRelayConnection: false,
-          isLoopbackConnection:
-            requestHostname !== null && isLoopbackHostname(requestHostname),
+          // Loopback trust requires the actual TCP peer to be loopback. The
+          // Host header only corroborates local intent; it is never sufficient
+          // by itself for bypassing SRP.
+          isLoopbackConnection: isLoopbackWsRequest(
+            peerAddress,
+            requestHostname,
+          ),
         });
         connState.connectionPolicy = connectionPolicy;
         // Auto-authenticate for:

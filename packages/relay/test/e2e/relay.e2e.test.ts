@@ -885,4 +885,65 @@ describe("Relay Server E2E", () => {
       expect(newHealth.pairs).toBe(initialPairs + 1);
     });
   });
+
+  describe("Unauthenticated Connection Limits", () => {
+    it("caps pending unauthenticated websocket connections per IP", async () => {
+      const limitedRelay = await createRelayServer({
+        inMemoryDb: true,
+        logLevel: "warn",
+        disablePrettyPrint: true,
+        disableTelemetry: true,
+        unauthenticatedConnectionLimitPerIp: 2,
+        unauthenticatedConnectionTimeoutMs: 5_000,
+      });
+      const limitedUrl = `ws://localhost:${limitedRelay.port}/ws`;
+      const sockets: WebSocket[] = [];
+
+      const openLimited = (): Promise<WebSocket> =>
+        new Promise((resolve, reject) => {
+          const ws = new WebSocket(limitedUrl);
+          sockets.push(ws);
+          const timeout = setTimeout(
+            () => reject(new Error("WebSocket connection timeout")),
+            5_000,
+          );
+          ws.once("open", () => {
+            clearTimeout(timeout);
+            resolve(ws);
+          });
+          ws.once("error", (err) => {
+            clearTimeout(timeout);
+            reject(err);
+          });
+        });
+
+      try {
+        const first = await openLimited();
+        await openLimited();
+
+        await expect(openLimited()).rejects.toThrow(
+          /Unexpected server response: 429/,
+        );
+
+        await registerServer(
+          first,
+          `limit-${randomUUID().slice(0, 8)}`,
+          randomUUID(),
+        );
+
+        const third = await openLimited();
+        expect(third.readyState).toBe(WebSocket.OPEN);
+      } finally {
+        for (const ws of sockets) {
+          if (
+            ws.readyState === WebSocket.OPEN ||
+            ws.readyState === WebSocket.CONNECTING
+          ) {
+            ws.close();
+          }
+        }
+        await limitedRelay.close();
+      }
+    });
+  });
 });

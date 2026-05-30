@@ -25,7 +25,7 @@ export function RemoteAccessSettings() {
             <strong>{t("developmentPersistRemoteTitle")}</strong>
             <p>
               {t("developmentPersistRemoteDescriptionPrefix")}{" "}
-              <code>remote-sessions.json</code> so relay reconnect survives
+              <code>remote-sessions.json</code>{" "}
               {t("developmentPersistRemoteDescriptionSuffix")}
             </p>
           </div>

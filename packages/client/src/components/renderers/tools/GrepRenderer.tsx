@@ -235,6 +235,7 @@ function GrepToolResult({
 
 export const grepRenderer: ToolRenderer<GrepInput, GrepResult> = {
   tool: "Grep",
+  displayName: "Search",
 
   renderToolUse(input, _context) {
     return <GrepToolUse input={input as GrepInput} />;

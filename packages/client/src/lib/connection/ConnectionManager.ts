@@ -127,6 +127,10 @@ export class ConnectionManager {
   // In-flight reconnect dedup
   private _reconnectPromise: Promise<void> | null = null;
 
+  // Health-check reconnects should not preempt high-volume operations such as
+  // uploads, where the same socket is busy but still making progress.
+  private _criticalOperationDepth = 0;
+
   // Event listeners
   private _listeners: {
     stateChange: Set<EventMap["stateChange"]>;
@@ -228,6 +232,32 @@ export class ConnectionManager {
   }
 
   /**
+   * Mark a socket-heavy operation that should suppress health-check reconnects.
+   * Returns an idempotent cleanup callback.
+   */
+  beginCriticalOperation(label?: string): () => void {
+    this._criticalOperationDepth += 1;
+    this._pendingPingId = null;
+    this._cancelPongTimeout();
+    this._log(
+      `critical operation started${label ? `: ${label}` : ""} (depth=${this._criticalOperationDepth})`,
+    );
+
+    let ended = false;
+    return () => {
+      if (ended) return;
+      ended = true;
+      this._criticalOperationDepth = Math.max(
+        0,
+        this._criticalOperationDepth - 1,
+      );
+      this._log(
+        `critical operation ended${label ? `: ${label}` : ""} (depth=${this._criticalOperationDepth})`,
+      );
+    };
+  }
+
+  /**
    * Mark the connection as connected. Resets backoff counter.
    * Called by consumers when their subscription's onOpen fires.
    */
@@ -287,6 +317,10 @@ export class ConnectionManager {
    * Useful for user-initiated reconnection.
    */
   forceReconnect(reason?: string): void {
+    if (this._shouldSuppressHealthReconnect(reason)) {
+      this._log(`suppressing health reconnect during critical operation: ${reason}`);
+      return;
+    }
     this._log(`force reconnect${reason ? `: ${reason}` : ""}`);
     this._reconnectAttempts = 0;
     this._cancelBackoff();
@@ -443,6 +477,7 @@ export class ConnectionManager {
   private _checkStale(): void {
     if (this._state !== "connected") return;
     if (!this._hasReceivedHeartbeat) return;
+    if (this._criticalOperationDepth > 0) return;
     const elapsed = this.timers.now() - this._lastEventTime;
     if (elapsed >= this.config.staleThresholdMs) {
       this._log(`stale (${elapsed}ms since last event)`);
@@ -487,6 +522,11 @@ export class ConnectionManager {
       return;
     }
 
+    if (this._criticalOperationDepth > 0) {
+      this._log("visible, skipping ping during critical operation");
+      return;
+    }
+
     // Cancel any previous pending ping (handles rapid visible/hidden toggling)
     this._cancelPongTimeout();
 
@@ -522,4 +562,19 @@ export class ConnectionManager {
       this._pongTimeoutId = null;
     }
   }
+
+  private _shouldSuppressHealthReconnect(reason?: string): boolean {
+    return (
+      this._criticalOperationDepth > 0 &&
+      (reason === "stale" ||
+        reason === "ping-failed" ||
+        reason === "pong-timeout")
+    );
+  }
 }
+
+/**
+ * Singleton ConnectionManager for the app.
+ * Both ActivityBus and useSessionStream feed events into this instance.
+ */
+export const connectionManager = new ConnectionManager();

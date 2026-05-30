@@ -5,6 +5,7 @@ interface UseServerSettingsResult {
   settings: ServerSettings | null;
   isLoading: boolean;
   error: string | null;
+  updateSettings: (updates: Partial<ServerSettings>) => Promise<void>;
   updateSetting: <K extends keyof ServerSettings>(
     key: K,
     value: ServerSettings[K],
@@ -39,19 +40,16 @@ export function useServerSettings(): UseServerSettingsResult {
     fetchSettings();
   }, [fetchSettings]);
 
-  const updateSetting = useCallback(
-    async <K extends keyof ServerSettings>(
-      key: K,
-      value: ServerSettings[K],
-    ): Promise<void> => {
+  const updateSettings = useCallback(
+    async (updates: Partial<ServerSettings>): Promise<void> => {
       try {
         setError(null);
-        const response = await api.updateServerSettings({ [key]: value });
+        const response = await api.updateServerSettings(updates);
         setSettings(response.settings);
       } catch (err) {
-        console.error("[useServerSettings] Failed to update setting:", err);
+        console.error("[useServerSettings] Failed to update settings:", err);
         setError(
-          err instanceof Error ? err.message : "Failed to update setting",
+          err instanceof Error ? err.message : "Failed to update settings",
         );
         throw err;
       }
@@ -59,10 +57,21 @@ export function useServerSettings(): UseServerSettingsResult {
     [],
   );
 
+  const updateSetting = useCallback(
+    async <K extends keyof ServerSettings>(
+      key: K,
+      value: ServerSettings[K],
+    ): Promise<void> => {
+      await updateSettings({ [key]: value });
+    },
+    [updateSettings],
+  );
+
   return {
     settings,
     isLoading,
     error,
+    updateSettings,
     updateSetting,
     refetch: fetchSettings,
   };

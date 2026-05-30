@@ -163,6 +163,27 @@ function decryptJsonEnvelopeWithTrafficKeyFallback(
   return legacyDecrypted;
 }
 
+function isPublicShareReadRequest(
+  parsed: unknown,
+): parsed is RemoteClientMessage & { type: "request" } {
+  if (!parsed || typeof parsed !== "object") {
+    return false;
+  }
+  const message = parsed as {
+    body?: unknown;
+    method?: unknown;
+    path?: unknown;
+    type?: unknown;
+  };
+  return (
+    message.type === "request" &&
+    message.method === "GET" &&
+    typeof message.path === "string" &&
+    message.path.startsWith("/public-api/shares/") &&
+    message.body === undefined
+  );
+}
+
 /**
  * Parse an application-level message after SRP control messages are ruled out.
  * Handles legacy JSON encrypted envelopes and plaintext policy checks.
@@ -204,6 +225,9 @@ export function parseApplicationClientMessage(
   }
 
   if (srpRequiredPolicy && !hasEstablishedSrpTransport(connState)) {
+    if (isPublicShareReadRequest(parsed)) {
+      return parsed;
+    }
     console.warn("[WS Relay] Received plaintext message but auth required");
     ws.close(4001, "Authentication required");
     return null;

@@ -122,6 +122,11 @@ export interface VersionInfo {
   resumeProtocolVersion: number;
   /** Feature capabilities supported by this server. Used by clients to show/hide UI. */
   capabilities: string[];
+  /**
+   * Speech backend ids this server has validated and is willing to route
+   * audio to. Browser-native remains client-side and is not listed here.
+   */
+  voiceBackends?: string[];
   /** Device bridge availability and update state. */
   deviceBridgeState?: DeviceBridgeState;
   /** Installed managed bridge binary version when known. */
@@ -161,6 +166,11 @@ export interface VersionRouteOptions {
   installId?: string;
   /** Whether voice input is enabled (default: true). */
   voiceInputEnabled?: boolean;
+  /**
+   * Returns ids of server-routed speech backends validated at startup.
+   * Browser-native is implicit and intentionally not included.
+   */
+  getEnabledVoiceBackends?: () => string[];
 }
 
 export interface ServerCompatibilityInfo {
@@ -208,6 +218,15 @@ export function getServerCapabilities(options?: VersionRouteOptions): string[] {
   return capabilities;
 }
 
+export function getEnabledVoiceBackends(
+  options?: VersionRouteOptions,
+): string[] {
+  if (options?.voiceInputEnabled === false) {
+    return [];
+  }
+  return options?.getEnabledVoiceBackends?.() ?? [];
+}
+
 export function getServerCompatibilityInfo(
   options?: VersionRouteOptions,
 ): Promise<ServerCompatibilityInfo> {
@@ -234,6 +253,7 @@ export function createVersionRoutes(options?: VersionRouteOptions): Hono {
       ...(options?.voiceInputEnabled !== false ? ["voiceInput"] : []),
       ...getCapabilitiesForDeviceBridgeState(deviceBridgeStatus.state, enabled),
     ];
+    const voiceBackends = getEnabledVoiceBackends(options);
 
     // For dev versions like "v0.1.7-3-g050bfd2", extract base version "v0.1.7"
     // to compare against the update server.
@@ -249,6 +269,7 @@ export function createVersionRoutes(options?: VersionRouteOptions): Hono {
       updateAvailable,
       resumeProtocolVersion: RESUME_PROTOCOL_VERSION,
       capabilities,
+      voiceBackends,
       deviceBridgeState: deviceBridgeStatus.state,
       deviceBridgeVersion: deviceBridgeStatus.installedVersion ?? null,
       latestDeviceBridgeVersion: deviceBridgeStatus.latestVersion ?? null,

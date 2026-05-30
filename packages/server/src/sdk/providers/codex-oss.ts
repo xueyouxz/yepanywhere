@@ -174,6 +174,7 @@ export class CodexOSSProvider implements AgentProvider {
   readonly supportsPermissionMode = false;
   readonly supportsThinkingToggle = false;
   readonly supportsSlashCommands = false;
+  readonly supportsSteering = false;
 
   private readonly codexPath?: string;
   private readonly localProvider: "ollama" | "lmstudio";
@@ -353,7 +354,7 @@ export class CodexOSSProvider implements AgentProvider {
       } as SDKMessage;
     }
 
-    const messageGen = queue.generator();
+    const messageGen = queue;
     let isFirstNewMessage = !options.resumeSessionId;
     for await (const message of messageGen) {
       if (signal.aborted) break;

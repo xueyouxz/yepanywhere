@@ -59,4 +59,24 @@ describe("loadConfig codex paths", () => {
       "/var/tmp",
     ]);
   });
+
+  it("defaults server-routed voice backends off", async () => {
+    const { loadConfig } = await import("../src/config.js");
+    const config = loadConfig();
+
+    expect(config.voiceBackends).toEqual([]);
+  });
+
+  it("parses explicitly enabled server-routed voice backends", async () => {
+    vi.stubEnv("YA_VOICE_BACKENDS", "ya-dummy, local-whisper,ya-dummy");
+
+    const { loadConfig } = await import("../src/config.js");
+    const config = loadConfig();
+
+    expect(config.voiceBackends).toEqual([
+      "ya-dummy",
+      "local-whisper",
+      "ya-dummy",
+    ]);
+  });
 });

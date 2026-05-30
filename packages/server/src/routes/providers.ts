@@ -9,6 +9,31 @@ interface ProviderRouteDeps {
   enabledProviders?: string[];
 }
 
+function getProviderImageSizing(
+  providerName: ProviderName,
+): ProviderInfo["imageSizing"] {
+  switch (providerName) {
+    case "claude":
+    case "claude-ollama":
+      return {
+        defaultLongEdgePx: 1568,
+        maxUsefulLongEdgePx: 1568,
+        note:
+          "Anthropic recommends resizing Claude images to no more than 1568 px on the long edge.",
+      };
+    case "codex":
+    case "codex-oss":
+      return {
+        defaultLongEdgePx: 2048,
+        maxUsefulLongEdgePx: 2048,
+        note:
+          "GPT-5.2/5.3-Codex high detail allows up to 2048 px max dimension.",
+      };
+    default:
+      return undefined;
+  }
+}
+
 /**
  * Creates provider-related API routes.
  *
@@ -24,31 +49,37 @@ export function createProvidersRoutes(deps: ProviderRouteDeps = {}): Hono {
       const enabled = new Set(deps.enabledProviders);
       providers = providers.filter((p) => enabled.has(p.name));
     }
-    const providerInfos: ProviderInfo[] = [];
-
-    for (const provider of providers) {
-      const [authStatus, models] = await Promise.all([
-        provider.getAuthStatus(),
-        provider.getAvailableModels(),
-      ]);
-      deps.modelInfoService?.ingestModels(
-        provider.name as ProviderName,
-        models,
-      );
-      providerInfos.push({
-        name: provider.name,
-        displayName: provider.displayName,
-        installed: authStatus.installed,
-        authenticated: authStatus.authenticated,
-        enabled: authStatus.enabled,
-        expiresAt: authStatus.expiresAt?.toISOString(),
-        user: authStatus.user,
-        models,
-        supportsPermissionMode: provider.supportsPermissionMode,
-        supportsThinkingToggle: provider.supportsThinkingToggle,
-        supportsSlashCommands: provider.supportsSlashCommands,
-      });
-    }
+    const providerInfos: ProviderInfo[] = await Promise.all(
+      providers.map(async (provider) => {
+        const [authStatus, models] = await Promise.all([
+          provider.getAuthStatus(),
+          provider.getAvailableModels(),
+        ]);
+        deps.modelInfoService?.ingestModels(
+          provider.name as ProviderName,
+          models,
+        );
+        return {
+          name: provider.name,
+          displayName: provider.displayName,
+          installed: authStatus.installed,
+          authenticated: authStatus.authenticated,
+          enabled: authStatus.enabled,
+          expiresAt: authStatus.expiresAt?.toISOString(),
+          user: authStatus.user,
+          models,
+          imageSizing: getProviderImageSizing(provider.name),
+          supportsPermissionMode: provider.supportsPermissionMode,
+          supportsThinkingToggle: provider.supportsThinkingToggle,
+          supportsSlashCommands: provider.supportsSlashCommands,
+          supportsSteering: provider.supportsSteering,
+          supportsRecaps: provider.supportsRecaps,
+          supportsNativeRecaps: provider.supportsNativeRecaps,
+          supportsNativePromptSuggestions:
+            provider.supportsNativePromptSuggestions,
+        } satisfies ProviderInfo;
+      }),
+    );
 
     return c.json({ providers: providerInfos });
   });
@@ -77,9 +108,14 @@ export function createProvidersRoutes(deps: ProviderRouteDeps = {}): Hono {
       expiresAt: authStatus.expiresAt?.toISOString(),
       user: authStatus.user,
       models,
+      imageSizing: getProviderImageSizing(provider.name),
       supportsPermissionMode: provider.supportsPermissionMode,
       supportsThinkingToggle: provider.supportsThinkingToggle,
       supportsSlashCommands: provider.supportsSlashCommands,
+      supportsSteering: provider.supportsSteering,
+      supportsRecaps: provider.supportsRecaps,
+      supportsNativeRecaps: provider.supportsNativeRecaps,
+      supportsNativePromptSuggestions: provider.supportsNativePromptSuggestions,
     };
 
     return c.json({ provider: providerInfo });

@@ -11,9 +11,9 @@ const MAX_CONTENT_LINES = 30;
  * Format bytes to human readable
  */
 function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024) return `${bytes}\u202fb`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}\u202fkb`;
+  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10}\u202fmb`;
 }
 
 /**

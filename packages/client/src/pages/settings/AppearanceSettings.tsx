@@ -1,3 +1,10 @@
+import { useEffect, useState } from "react";
+import {
+  DEFAULT_CONTENT_MAX_WIDTH_PX,
+  MAX_CONTENT_MAX_WIDTH_PX,
+  MIN_CONTENT_MAX_WIDTH_PX,
+  useContentMaxWidth,
+} from "../../hooks/useContentMaxWidth";
 import { useDeveloperMode } from "../../hooks/useDeveloperMode";
 import { FONT_SIZES, useFontSize } from "../../hooks/useFontSize";
 import { useFunPhrases } from "../../hooks/useFunPhrases";
@@ -16,11 +23,26 @@ export function AppearanceSettings() {
   const { locale, setLocale, t } = useI18n();
   const { fontSize, setFontSize } = useFontSize();
   const { tabSize, setTabSize } = useTabSize();
+  const { contentMaxWidth, setContentMaxWidth } = useContentMaxWidth();
+  const [contentMaxWidthDraft, setContentMaxWidthDraft] = useState(() =>
+    String(contentMaxWidth),
+  );
   const { theme, setTheme } = useTheme();
   const { streamingEnabled, setStreamingEnabled } = useStreamingEnabled();
   const { funPhrasesEnabled, setFunPhrasesEnabled } = useFunPhrases();
   const { showConnectionBars, setShowConnectionBars } = useDeveloperMode();
   const translate = (key: string) => t(key as never);
+
+  useEffect(() => {
+    setContentMaxWidthDraft(String(contentMaxWidth));
+  }, [contentMaxWidth]);
+
+  const commitContentMaxWidth = () => {
+    const parsed = Number.parseInt(contentMaxWidthDraft, 10);
+    setContentMaxWidth(
+      Number.isFinite(parsed) ? parsed : DEFAULT_CONTENT_MAX_WIDTH_PX,
+    );
+  };
 
   return (
     <section className="settings-section">
@@ -98,6 +120,41 @@ export function AppearanceSettings() {
                 {getTabSizeLabel(size)}
               </button>
             ))}
+          </div>
+        </div>
+        <div className="settings-item">
+          <div className="settings-item-info">
+            <strong>{t("appearanceContentWidthTitle")}</strong>
+            <p>{t("appearanceContentWidthDescription")}</p>
+          </div>
+          <div className="settings-item-actions">
+            <input
+              type="number"
+              className="settings-input-small"
+              min={MIN_CONTENT_MAX_WIDTH_PX}
+              max={MAX_CONTENT_MAX_WIDTH_PX}
+              step={10}
+              value={contentMaxWidthDraft}
+              onChange={(e) => setContentMaxWidthDraft(e.target.value)}
+              onBlur={commitContentMaxWidth}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  commitContentMaxWidth();
+                  e.currentTarget.blur();
+                }
+              }}
+              aria-label={t("appearanceContentWidthTitle")}
+            />
+            <button
+              type="button"
+              className="settings-button settings-button-secondary"
+              onClick={() => {
+                setContentMaxWidth(DEFAULT_CONTENT_MAX_WIDTH_PX);
+                setContentMaxWidthDraft(String(DEFAULT_CONTENT_MAX_WIDTH_PX));
+              }}
+            >
+              {t("appearanceContentWidthReset")}
+            </button>
           </div>
         </div>
         <div className="settings-item">

@@ -671,7 +671,16 @@ export async function handleUploadStart(
   send: SendFn,
   uploadManager: UploadManager,
 ): Promise<void> {
-  const { uploadId, projectId, sessionId, filename, size, mimeType } = msg;
+  const {
+    uploadId,
+    projectId,
+    sessionId,
+    filename,
+    size,
+    mimeType,
+    width,
+    height,
+  } = msg;
 
   if (uploads.has(uploadId)) {
     send({
@@ -689,6 +698,10 @@ export async function handleUploadStart(
       filename,
       size,
       mimeType,
+      undefined,
+      width !== undefined && height !== undefined
+        ? { width, height }
+        : undefined,
     );
 
     uploads.set(uploadId, {

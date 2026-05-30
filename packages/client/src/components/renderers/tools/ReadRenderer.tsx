@@ -1,9 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useScrollPreservingToggle } from "../../../lib/scrollAnchor";
+import {
+  FixedFontMathToggle,
+  renderFixedFontMath,
+  renderFixedFontRichContent,
+} from "../../ui/FixedFontMathToggle";
 import type { ZodError } from "zod";
+import { useOptionalSessionMetadata } from "../../../contexts/SessionMetadataContext";
 import { useSchemaValidationContext } from "../../../contexts/SchemaValidationContext";
+import { makeDisplayPath } from "../../../lib/text";
 import { validateToolResult } from "../../../lib/validateToolResult";
 import { SchemaWarning } from "../../SchemaWarning";
+import { FilePathDisplay } from "../../ui/FilePathDisplay";
 import { Modal } from "../../ui/Modal";
+import { RenderModeGlyph } from "../../ui/RenderModeGlyph";
 import type {
   ImageFile,
   PdfFile,
@@ -58,16 +68,29 @@ function getFileName(filePath: string): string {
   return filePath.split("/").pop() || filePath;
 }
 
+function renderReadMathPanel(html: string) {
+  return (
+    <div className="file-viewer-code fixed-font-rendered-panel">
+      <div
+        className="fixed-font-rendered__content"
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: KaTeX output is trusted HTML from local rendering
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    </div>
+  );
+}
+
 /**
  * Read tool use - shows file path being read
  */
 function ReadToolUse({ input }: { input: ReadInput }) {
-  const fileName = getFileName(input.file_path);
+  const meta = useOptionalSessionMetadata();
+  const displayPath = makeDisplayPath(input.file_path, meta?.projectPath);
   return (
     <div className="read-tool-use">
-      <span className="file-path">{fileName}</span>
+      <span className="file-path"><FilePathDisplay displayPath={displayPath} /></span>
       {(input.offset !== undefined || input.limit !== undefined) && (
-        <span className="read-range">
+        <span className="read-range" title={`offset ${input.offset ?? 0}, limit ${input.limit ?? "∞"}`}>
           {input.offset !== undefined && ` from line ${input.offset}`}
           {input.limit !== undefined && ` (${input.limit} lines)`}
         </span>
@@ -90,11 +113,81 @@ function FileModalContent({
   highlightedTruncated?: boolean;
   renderedMarkdownHtml?: string;
 }) {
+  const clientMarkdownPreview = useMemo(() => {
+    if (renderedMarkdownHtml) {
+      return null;
+    }
+    const rendered = renderFixedFontRichContent(file.content, {
+      baseFilePath: file.filePath,
+    });
+    return rendered.changed ? rendered.html : null;
+  }, [file.content, file.filePath, renderedMarkdownHtml]);
+  const markdownHtml = renderedMarkdownHtml ?? clientMarkdownPreview;
+  const hasMarkdownPreview = !!markdownHtml;
   const [showPreview, setShowPreview] = useState(false);
-  const lines = (file.content ?? "").split("\n");
-  const hasMarkdownPreview = !!renderedMarkdownHtml;
 
-  // Toggle button for markdown files
+  // For Shiki-highlighted code files: offer KaTeX-only math rendering (default off).
+  // Uses renderFixedFontMath (not renderFixedFontRichContent) so markdown structural
+  // transforms (headings, lists, tables) are never applied to source code.
+  const mathRendered = useMemo(
+    () => (highlightedHtml ? renderFixedFontMath(file.content) : null),
+    [highlightedHtml, file.content],
+  );
+  const hasMathToggle = !!mathRendered?.changed;
+  const [showMath, setShowMath] = useState(false);
+  const { btnRef: mathBtnRef, handleClick: handleMathToggle } =
+    useScrollPreservingToggle(showMath, () => setShowMath((v) => !v));
+
+  const lines = (file.content ?? "").split("\n");
+
+  const sourceView = highlightedHtml ? (
+    <div className="file-viewer-code file-viewer-code-highlighted">
+      <div
+        className="shiki-container"
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: server-rendered HTML
+        dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+      />
+      {highlightedTruncated && (
+        <div className="file-viewer-truncated">
+          Content truncated for highlighting (showing first 2000 lines)
+        </div>
+      )}
+    </div>
+  ) : (
+    <div className="file-content-with-lines">
+      <div className="line-numbers">
+        {lines.map((_, i) => (
+          <div key={`ln-${i + 1}`}>{file.startLine + i}</div>
+        ))}
+      </div>
+      <pre className="line-content">
+        <code>{file.content}</code>
+      </pre>
+    </div>
+  );
+
+  const content =
+    showPreview && markdownHtml ? (
+      <div className="markdown-preview">
+        <div
+          className="markdown-rendered"
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: server-rendered HTML
+          dangerouslySetInnerHTML={{ __html: markdownHtml }}
+        />
+      </div>
+    ) : highlightedHtml ? (
+      // Code file: show math-rendered plain text when toggled on, Shiki otherwise.
+      // Math mode loses syntax colouring intentionally — you asked for the formula.
+      showMath && mathRendered ? renderReadMathPanel(mathRendered.html) : sourceView
+    ) : (
+      // Plain text / log / output: full ANSI + math + markdown table detection.
+      <FixedFontMathToggle
+        sourceText={file.content}
+        sourceView={sourceView}
+        renderRenderedView={(html) => renderReadMathPanel(html)}
+      />
+    );
+
   const toggleButton = hasMarkdownPreview && (
     <div className="markdown-view-toggle">
       <button
@@ -113,82 +206,33 @@ function FileModalContent({
       </button>
     </div>
   );
+  const showSigma = !hasMarkdownPreview && hasMathToggle;
 
-  // Show rendered markdown preview
-  if (showPreview && renderedMarkdownHtml) {
-    return (
-      <div className="file-content-modal">
-        {toggleButton}
-        <div className="markdown-preview">
-          <div
-            className="markdown-rendered"
-            // biome-ignore lint/security/noDangerouslySetInnerHtml: server-rendered HTML
-            dangerouslySetInnerHTML={{ __html: renderedMarkdownHtml }}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  // Use highlighted HTML if available
-  if (highlightedHtml) {
-    return (
-      <div className="file-content-modal">
-        {toggleButton}
-        <div className="file-viewer-code file-viewer-code-highlighted">
-          <div
-            className="shiki-container"
-            // biome-ignore lint/security/noDangerouslySetInnerHtml: server-rendered HTML
-            dangerouslySetInnerHTML={{ __html: highlightedHtml }}
-          />
-          {highlightedTruncated && (
-            <div className="file-viewer-truncated">
-              Content truncated for highlighting (showing first 2000 lines)
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // Fallback: plain text with line numbers
   return (
     <div className="file-content-modal">
       {toggleButton}
-      <div className="file-content-with-lines">
-        <div className="line-numbers">
-          {lines.map((_, i) => (
-            <div key={`ln-${i + 1}`}>{file.startLine + i}</div>
-          ))}
+      {showSigma ? (
+        <div className="fixed-font-render-toggle">
+          {content}
+          <button
+            ref={mathBtnRef}
+            type="button"
+            className={`fixed-font-render-toggle__button ${showMath ? "is-rendered" : ""}`}
+            onClick={handleMathToggle}
+            aria-label={showMath ? "Show source" : "Render math (LaTeX)"}
+            title={showMath ? "Show source" : "Render math (LaTeX)"}
+            aria-pressed={showMath}
+          >
+            <RenderModeGlyph />
+          </button>
         </div>
-        <pre className="line-content">
-          <code>{file.content}</code>
-        </pre>
-      </div>
+      ) : (
+        content
+      )}
     </div>
   );
 }
 
-/**
- * Build modal title for file with optional range info
- */
-function FileModalTitle({ file }: { file: TextFile }) {
-  const fileName = getFileName(file.filePath);
-  const showRange = file.startLine > 1 || file.numLines < file.totalLines;
-
-  return (
-    <span className="file-path">
-      {fileName}
-      {showRange && (
-        <span className="file-range">
-          {" "}
-          (lines {file.startLine}-{file.startLine + file.numLines - 1} of{" "}
-          {file.totalLines})
-        </span>
-      )}
-    </span>
-  );
-}
 
 /**
  * Text file result - clickable filename that opens modal
@@ -206,51 +250,34 @@ function TextFileResult({
   renderedMarkdownHtml?: string;
   isPtyHandoff?: boolean;
 }) {
-  const [showModal, setShowModal] = useState(false);
-  const fileName = getFileName(file.filePath);
+  const meta = useOptionalSessionMetadata();
+  const displayPath = makeDisplayPath(file.filePath, meta?.projectPath);
   const showRange = file.startLine > 1 || file.numLines < file.totalLines;
 
   if (isPtyHandoff) {
     return (
       <div className="read-text-result">
-        <span className="file-path">{fileName}</span>{" "}
+        <span className="file-path"><FilePathDisplay displayPath={displayPath} /></span>{" "}
         <span className="file-line-count">continues in Shell</span>
       </div>
     );
   }
 
   return (
-    <>
-      <div className="read-text-result">
-        <button
-          type="button"
-          className="file-link-button"
-          onClick={() => setShowModal(true)}
-        >
-          {fileName}
-          {showRange && (
-            <span className="file-range">
-              {" "}
-              (lines {file.startLine}-{file.startLine + file.numLines - 1})
-            </span>
-          )}
-          <span className="file-line-count">{file.numLines} lines</span>
-        </button>
-      </div>
-      {showModal && (
-        <Modal
-          title={<FileModalTitle file={file} />}
-          onClose={() => setShowModal(false)}
-        >
-          <FileModalContent
-            file={file}
-            highlightedHtml={highlightedHtml}
-            highlightedTruncated={highlightedTruncated}
-            renderedMarkdownHtml={renderedMarkdownHtml}
-          />
-        </Modal>
+    <div className="read-text-result read-text-inline">
+      {showRange && (
+        <div className="file-range-inline">
+          lines {file.startLine}–{file.startLine + file.numLines - 1} of{" "}
+          {file.totalLines}
+        </div>
       )}
-    </>
+      <FileModalContent
+        file={file}
+        highlightedHtml={highlightedHtml}
+        highlightedTruncated={highlightedTruncated}
+        renderedMarkdownHtml={renderedMarkdownHtml}
+      />
+    </div>
   );
 }
 
@@ -273,7 +300,7 @@ function ImageFileResult({ file }: { file: ImageFile }) {
             </>
           )}
           {hasDimensions && sizeKB > 0 && " "}
-          {sizeKB > 0 && <>({sizeKB}KB)</>}
+          {sizeKB > 0 && <>({sizeKB}\u202fkb)</>}
         </div>
       )}
       <img
@@ -319,7 +346,7 @@ function PdfFileResult({
         onClick={() => openPdfInNewTab(file.base64)}
       >
         {fileName}
-        {sizeKB > 0 && <span className="file-line-count">({sizeKB}KB)</span>}
+        {sizeKB > 0 && <span className="file-line-count">({sizeKB}\u202fkb)</span>}
         <span className="file-line-count">Open PDF</span>
       </button>
     </div>
@@ -443,12 +470,14 @@ function ReadInteractiveSummary({
   const showValidationWarning =
     enabled && validationErrors && !isToolIgnored("Read");
 
+  const meta = useOptionalSessionMetadata();
+  const displayPath = makeDisplayPath(input.file_path, meta?.projectPath);
   const fileName = getFileName(input.file_path);
 
   if (isError) {
     return (
       <span>
-        {fileName}
+        <FilePathDisplay displayPath={displayPath} />
         {showValidationWarning && validationErrors && (
           <SchemaWarning toolName="Read" errors={validationErrors} />
         )}
@@ -457,7 +486,7 @@ function ReadInteractiveSummary({
   }
 
   if (!result?.file) {
-    return <span>{fileName}</span>;
+    return <span><FilePathDisplay displayPath={displayPath} /></span>;
   }
 
   if (result.type === "pdf") {
@@ -471,7 +500,7 @@ function ReadInteractiveSummary({
           openPdfInNewTab(pdfFile.base64);
         }}
       >
-        {fileName}
+        <FilePathDisplay displayPath={displayPath} />
         <span className="file-line-count-inline">(PDF)</span>
         {showValidationWarning && validationErrors && (
           <SchemaWarning toolName="Read" errors={validationErrors} />
@@ -492,7 +521,7 @@ function ReadInteractiveSummary({
             setShowModal(true);
           }}
         >
-          {fileName}
+          <FilePathDisplay displayPath={displayPath} />
           <span className="file-line-count-inline">(image)</span>
           {showValidationWarning && validationErrors && (
             <SchemaWarning toolName="Read" errors={validationErrors} />
@@ -513,7 +542,7 @@ function ReadInteractiveSummary({
   if (isPtyHandoff) {
     return (
       <span>
-        {fileName}{" "}
+        <FilePathDisplay displayPath={displayPath} />{" "}
         <span className="file-line-count-inline">continues in Shell</span>
       </span>
     );
@@ -529,18 +558,15 @@ function ReadInteractiveSummary({
           setShowModal(true);
         }}
       >
-        {fileName}
+        <FilePathDisplay displayPath={displayPath} />{" "}
         <span className="file-line-count-inline">{file.numLines} lines</span>
         {showValidationWarning && validationErrors && (
           <SchemaWarning toolName="Read" errors={validationErrors} />
         )}
       </button>
       {showModal && (
-        <Modal
-          title={<FileModalTitle file={file} />}
-          onClose={() => setShowModal(false)}
-        >
-          <FileModalContent
+        <Modal title={fileName} onClose={() => setShowModal(false)}>
+          <TextFileResult
             file={file}
             highlightedHtml={result._highlightedContentHtml}
             highlightedTruncated={result._highlightedTruncated}

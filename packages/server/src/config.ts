@@ -4,6 +4,7 @@ import * as path from "node:path";
 import type { Level as LogLevel } from "pino";
 import { getDefaultCodexSessionsDir } from "./projects/codex-scanner.js";
 import type { PermissionMode } from "./sdk/types.js";
+import { getModuleEnv, harvestYaModuleEnv } from "./yaModuleEnv.js";
 
 /**
  * Get the data directory for yep-anywhere state files.
@@ -53,6 +54,8 @@ export interface Config {
   sessionIndexWriteLockTimeoutMs: number;
   /** Session index lock staleness threshold (ms). */
   sessionIndexWriteLockStaleMs: number;
+  /** Default active session window in days. 0 disables auto-archiving. */
+  sessionAutoArchiveDays: number;
   /** Project scanner cache TTL (ms). 0 = rescan every request. */
   projectScanCacheTtlMs: number;
   /** Idle timeout in milliseconds before process cleanup */
@@ -103,6 +106,18 @@ export interface Config {
   enabledProviders: string[];
   /** Whether voice input is enabled. Default: true */
   voiceInputEnabled: boolean;
+  /** Explicitly enabled server-routed voice backend ids. Empty = none. */
+  voiceBackends: string[];
+  /** Deepgram API key for the ya-deepgram backend (from YA_stt__DEEPGRAM_API_KEY). */
+  deepgramApiKey?: string;
+  /** xAI key for the ya-grok backend (from YA_stt__XAI_API_KEY). */
+  xaiSttApiKey?: string;
+  /** Whisper model name for ya-whisper backend (default: distil-large-v3). */
+  whisperModel?: string;
+  /** Whisper device for ya-whisper backend (default: cpu). */
+  whisperDevice?: string;
+  /** Whisper compute type for ya-whisper backend (default: int8). */
+  whisperComputeType?: string;
   /** Allowed directory prefixes for serving local images (e.g., ["/tmp"]). Empty = disabled. */
   allowedImagePaths: string[];
 
@@ -128,6 +143,11 @@ export interface Config {
  * Load configuration from environment variables with defaults.
  */
 export function loadConfig(): Config {
+  // Harvest YA_<module>__* secrets into the private store and strip them from
+  // process.env before anything can spawn a child that would inherit them.
+  harvestYaModuleEnv();
+  const sttEnv = getModuleEnv("stt");
+
   // SERVE_FRONTEND defaults to true (unified server mode)
   // Set SERVE_FRONTEND=false to disable frontend serving (API-only mode)
   const serveFrontend = process.env.SERVE_FRONTEND !== "false";
@@ -174,12 +194,14 @@ export function loadConfig(): Config {
     0,
     parseIntOrDefault(process.env.PROJECT_SCAN_CACHE_TTL_MS, 5000),
   );
+  const sessionAutoArchiveDays = Math.max(
+    0,
+    parseIntOrDefault(process.env.SESSION_AUTO_ARCHIVE_DAYS, 14),
+  );
   const managedUploadsDir = path.join(dataDir, "uploads");
   const extraAllowedImagePaths =
     process.env.ALLOWED_IMAGE_PATHS !== undefined
-      ? process.env.ALLOWED_IMAGE_PATHS.split(",")
-          .map((s) => s.trim())
-          .filter(Boolean)
+      ? parseCommaSeparatedList(process.env.ALLOWED_IMAGE_PATHS)
       : ["/tmp"];
 
   return {
@@ -192,6 +214,7 @@ export function loadConfig(): Config {
     sessionIndexFullValidationMs,
     sessionIndexWriteLockTimeoutMs,
     sessionIndexWriteLockStaleMs,
+    sessionAutoArchiveDays,
     projectScanCacheTtlMs,
     idleTimeoutMs: parseIntOrDefault(process.env.IDLE_TIMEOUT, 5 * 60) * 1000,
     defaultPermissionMode: parsePermissionMode(process.env.PERMISSION_MODE),
@@ -250,6 +273,14 @@ export function loadConfig(): Config {
       : [],
     // Voice input (default: true, set VOICE_INPUT=false to disable)
     voiceInputEnabled: process.env.VOICE_INPUT !== "false",
+    // Explicit local/test voice backends (cloud backends auto-enable on key
+    // presence). Example: YA_VOICE_BACKENDS=ya-whisper
+    voiceBackends: parseCommaSeparatedList(process.env.YA_VOICE_BACKENDS),
+    deepgramApiKey: sttEnv.DEEPGRAM_API_KEY || undefined,
+    xaiSttApiKey: sttEnv.XAI_API_KEY || undefined,
+    whisperModel: process.env.WHISPER_MODEL || undefined,
+    whisperDevice: process.env.WHISPER_DEVICE || undefined,
+    whisperComputeType: process.env.WHISPER_COMPUTE_TYPE || undefined,
     // Always allow yep-managed uploads. ALLOWED_IMAGE_PATHS adds external paths
     // like /tmp; an empty value disables only those extras.
     allowedImagePaths: Array.from(
@@ -274,6 +305,15 @@ export function loadConfig(): Config {
     httpsSelfSigned: process.env.HTTPS_SELF_SIGNED === "true",
     desktopAuthToken: process.env.DESKTOP_AUTH_TOKEN || undefined,
   };
+}
+
+function parseCommaSeparatedList(value: string | undefined): string[] {
+  return value
+    ? value
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
 }
 
 /**

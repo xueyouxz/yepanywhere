@@ -18,15 +18,31 @@ export interface SessionMenuProps {
   onToggleArchive: () => void | Promise<void>;
   onToggleRead?: () => void | Promise<void>;
   onRename: () => void;
+  /** Copy the session's initial prompt, when available. */
+  onCopyPrompt?: () => void | Promise<void>;
   /** Called after successful clone with the new session ID */
   onClone?: (newSessionId: string) => void | Promise<void>;
+  /** Called to request compaction in the current session */
+  onCompact?: () => void | Promise<void>;
+  /** Called to hand off the session into a fresh agent session */
+  onHandoff?: () => void | Promise<void>;
   /** Called to terminate the session's process */
   onTerminate?: () => void | Promise<void>;
+  /** Reload the page (non-swipe alternative for mobile) */
+  onReload?: () => void;
+  /** Called to configure session heartbeat settings */
+  onConfigureHeartbeat?: () => void;
+  /** Called to configure session recap settings */
+  onConfigureRecaps?: () => void;
+  /** Whether dismissed warnings can be restored */
+  warningRestoreAvailable?: boolean;
+  /** Restore dismissed per-session warnings */
+  onRestoreWarnings?: () => void | Promise<void>;
   /** Use "..." icon instead of chevron */
   useEllipsisIcon?: boolean;
-  /** Whether session sharing is configured */
+  /** @deprecated Public share availability is checked when the modal creates the link. */
   sharingConfigured?: boolean;
-  /** Called to share the session as a snapshot */
+  /** Called to open the public share flow */
   onShare?: () => void | Promise<void>;
   /** Additional class for the wrapper */
   className?: string;
@@ -46,9 +62,16 @@ export function SessionMenu({
   onToggleArchive,
   onToggleRead,
   onRename,
+  onCopyPrompt,
   onClone,
+  onCompact,
+  onHandoff,
   onTerminate,
-  sharingConfigured,
+  onReload,
+  onConfigureHeartbeat,
+  onConfigureRecaps,
+  warningRestoreAvailable = false,
+  onRestoreWarnings,
   onShare,
   useEllipsisIcon = false,
   className = "",
@@ -113,7 +136,7 @@ export function SessionMenu({
       // Calculate position synchronously before opening to avoid flicker
       if (useFixedPositioning && triggerRef.current) {
         const rect = triggerRef.current.getBoundingClientRect();
-        const dropdownWidth = 140; // Approximate width of dropdown
+        const dropdownWidth = 180; // Approximate width of dropdown
         const dropdownHeight = 180; // Approximate height of dropdown (varies by options)
         const rightPosition = window.innerWidth - rect.right;
         const margin = 8;
@@ -257,6 +280,82 @@ export function SessionMenu({
         </svg>
         {t("sessionMenuRename")}
       </button>
+      {onCopyPrompt && (
+        <button type="button" onClick={() => handleAction(onCopyPrompt)}>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+          {t("sessionMenuCopyPrompt")}
+        </button>
+      )}
+      {onConfigureHeartbeat && (
+        <button type="button" onClick={() => handleAction(onConfigureHeartbeat)}>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
+            <path d="M12 2v4" />
+            <path d="M12 18v4" />
+            <path d="m4.93 4.93 2.83 2.83" />
+            <path d="m16.24 16.24 2.83 2.83" />
+            <path d="M2 12h4" />
+            <path d="M18 12h4" />
+            <path d="m4.93 19.07 2.83-2.83" />
+            <path d="m16.24 7.76 2.83-2.83" />
+          </svg>
+          {t("sessionMenuHeartbeat")}
+        </button>
+      )}
+      {onConfigureRecaps && (
+        <button type="button" onClick={() => handleAction(onConfigureRecaps)}>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
+            <path d="M4 19h16" />
+            <path d="M6 5h12" />
+            <path d="M6 9h12" />
+            <path d="M6 13h8" />
+          </svg>
+          {t("sessionMenuRecaps")}
+        </button>
+      )}
+      {warningRestoreAvailable && onRestoreWarnings && (
+        <button type="button" onClick={() => handleAction(onRestoreWarnings)}>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
+            <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+            <path d="M3 3v5h5" />
+          </svg>
+          {t("sessionMenuRestoreWarnings")}
+        </button>
+      )}
       {onClone && getProvider(provider).capabilities.supportsCloning && (
         <button type="button" onClick={handleClone} disabled={isCloning}>
           <svg
@@ -274,7 +373,45 @@ export function SessionMenu({
           {isCloning ? t("sessionMenuCloning") : t("sessionMenuClone")}
         </button>
       )}
-      {sharingConfigured && onShare && (
+      {onCompact && (
+        <button type="button" onClick={() => handleAction(onCompact)}>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
+            <path d="M4 14h6v6" />
+            <path d="m4 20 7-7" />
+            <path d="M20 10h-6V4" />
+            <path d="m20 4-7 7" />
+          </svg>
+          {t("sessionMenuCompact")}
+        </button>
+      )}
+      {onHandoff && (
+        <button type="button" onClick={() => handleAction(onHandoff)}>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
+            <path d="M17 1l4 4-4 4" />
+            <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+            <path d="M7 23l-4-4 4-4" />
+            <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+          </svg>
+          {t("sessionMenuHandoff")}
+        </button>
+      )}
+      {onShare && (
         <button type="button" onClick={handleShare} disabled={isSharing}>
           <svg
             width="14"
@@ -285,9 +422,11 @@ export function SessionMenu({
             strokeWidth="2"
             aria-hidden="true"
           >
-            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-            <polyline points="15 3 21 3 21 9" />
-            <line x1="10" y1="14" x2="21" y2="3" />
+            <circle cx="18" cy="5" r="3" />
+            <circle cx="6" cy="12" r="3" />
+            <circle cx="18" cy="19" r="3" />
+            <path d="m8.6 13.5 6.8 4" />
+            <path d="m15.4 6.5-6.8 4" />
           </svg>
           {isSharing ? t("sessionMenuSharing") : t("sessionMenuShare")}
         </button>
@@ -354,6 +493,23 @@ export function SessionMenu({
           {isTerminating
             ? t("sessionMenuTerminating")
             : t("sessionMenuTerminate")}
+        </button>
+      )}
+      {onReload && (
+        <button type="button" onClick={() => { setIsOpen(false); onReload(); }}>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
+            <polyline points="23 4 23 10 17 10" />
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+          </svg>
+          Reload page
         </button>
       )}
     </div>

@@ -20,6 +20,28 @@ import type { BusEvent, EventBus } from "../src/watcher/index.js";
 
 type Listener = (event: ProcessEvent) => void | Promise<void>;
 
+const MOCK_LIVENESS = {
+  checkedAt: "2026-05-06T00:00:00.000Z",
+  derivedStatus: "verified-progressing",
+  activeWorkKind: "agent-turn",
+  state: "in-turn",
+  evidence: ["test"],
+  lastProviderMessageAt: "2026-05-06T00:00:00.000Z",
+  lastRawProviderEventAt: null,
+  lastRawProviderEventSource: null,
+  lastStateChangeAt: "2026-05-06T00:00:00.000Z",
+  lastVerifiedProgressAt: "2026-05-06T00:00:00.000Z",
+  lastVerifiedIdleAt: null,
+  lastLivenessProbeAt: null,
+  lastLivenessProbeStatus: null,
+  lastLivenessProbeSource: null,
+  silenceMs: 0,
+  longSilenceThresholdMs: 300_000,
+  processAlive: true,
+  queueDepth: 0,
+  deferredQueueDepth: 0,
+};
+
 function createMockProcess(overrides?: Partial<Record<string, unknown>>): {
   process: Process;
   fireEvent: (event: ProcessEvent) => Promise<void>;
@@ -46,6 +68,7 @@ function createMockProcess(overrides?: Partial<Record<string, unknown>>): {
     accumulateStreamingText: vi.fn(),
     clearStreamingText: vi.fn(),
     getDeferredQueueSummary: vi.fn(() => []),
+    getLivenessSnapshot: vi.fn(() => MOCK_LIVENESS),
     ...overrides,
   } as unknown as Process;
 
@@ -129,6 +152,7 @@ describe("createSessionSubscription", () => {
       modeVersion: 1,
       provider: "anthropic",
       model: "claude-sonnet-4-5-20250929",
+      liveness: MOCK_LIVENESS,
       request: { prompt: "Continue?" },
     });
   });
@@ -154,6 +178,28 @@ describe("createSessionSubscription", () => {
     ).toBe(true);
   });
 
+  it("emits plain user echoes synchronously before augmentation", async () => {
+    const { process, fireEvent } = createMockProcess();
+    const { emit, events } = collectEmit();
+
+    createSessionSubscription(process, emit);
+
+    const delivered = fireEvent({
+      type: "message",
+      message: {
+        type: "user",
+        uuid: "user-1",
+        message: {
+          role: "user",
+          content: "queued input accepted",
+        },
+      },
+    } as ProcessEvent);
+
+    expect(events.some(([type]) => type === "message")).toBe(true);
+    await delivered;
+  });
+
   it("forwards state-change events", async () => {
     const { process, fireEvent } = createMockProcess();
     const { emit, events } = collectEmit();
@@ -169,7 +215,24 @@ describe("createSessionSubscription", () => {
     expect(status).toBeDefined();
     expect(status?.[1]).toMatchObject({
       state: "waiting-input",
+      liveness: MOCK_LIVENESS,
       request: { prompt: "Allow?" },
+    });
+  });
+
+  it("forwards liveness-update events as status snapshots", async () => {
+    const { process, fireEvent } = createMockProcess();
+    const { emit, events } = collectEmit();
+
+    createSessionSubscription(process, emit);
+
+    await fireEvent({ type: "liveness-update" } as ProcessEvent);
+
+    const status = events.find(([type]) => type === "status");
+    expect(status).toBeDefined();
+    expect(status?.[1]).toMatchObject({
+      state: "in-turn",
+      liveness: MOCK_LIVENESS,
     });
   });
 
@@ -361,7 +424,10 @@ describe("createSessionSubscription", () => {
 
     const complete = events.find(([type]) => type === "complete");
     expect(complete).toBeDefined();
-    expect((complete?.[1] as Record<string, unknown>).timestamp).toBeDefined();
+    if (!complete) {
+      throw new Error("expected complete event");
+    }
+    expect((complete[1] as Record<string, unknown>).timestamp).toBeDefined();
 
     // Events after complete should be ignored
     const countBefore = events.length;
@@ -388,6 +454,7 @@ describe("createSessionSubscription", () => {
     expect(
       (heartbeats[0][1] as Record<string, unknown>).timestamp,
     ).toBeDefined();
+    expect(heartbeats[0][1]).toMatchObject({ liveness: MOCK_LIVENESS });
 
     cleanup();
   });

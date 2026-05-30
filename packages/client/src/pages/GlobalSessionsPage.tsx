@@ -1,26 +1,28 @@
 import { ALL_PROVIDERS, type ProviderName } from "@yep-anywhere/shared";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { type GlobalSessionItem, api } from "../api/client";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { api } from "../api/client";
 import { BulkActionBar } from "../components/BulkActionBar";
 import {
   FilterDropdown,
+  type FilterDropdownOption,
   type FilterOption,
 } from "../components/FilterDropdown";
 import { PageHeader } from "../components/PageHeader";
 import { SessionListItem } from "../components/SessionListItem";
 import { useDrafts } from "../hooks/useDrafts";
 import { useGlobalSessions } from "../hooks/useGlobalSessions";
+import { setNewSessionPrefill } from "../lib/newSessionPrefill";
 import { useRemoteBasePath } from "../hooks/useRemoteBasePath";
 import { useI18n } from "../i18n";
 import { useNavigationLayout } from "../layouts";
-import { getSessionDisplayTitle, toUrlProjectId } from "../utils";
+import { getSessionDisplayTitle } from "../utils";
 
 // Long-press threshold for entering selection mode on mobile
 const LONG_PRESS_MS = 500;
 
-// Status filter options
-type StatusFilter = "all" | "unread" | "starred" | "archived";
+const STATUS_FILTER_VALUES = ["unread", "starred", "archived"] as const;
+type StatusFilter = (typeof STATUS_FILTER_VALUES)[number];
 
 // Age filter options (days)
 type AgeFilter = "3" | "7" | "14" | "30";
@@ -33,8 +35,73 @@ const PROVIDER_COLORS: Record<ProviderName, string> = {
   "codex-oss": "#f97316",
   gemini: "#4285f4",
   "gemini-acp": "#4285f4", // Same as gemini
+  grok: "#111827",
   opencode: "#9333ea", // Purple for OpenCode
 };
+
+function isStatusFilter(value: string): value is StatusFilter {
+  return (STATUS_FILTER_VALUES as readonly string[]).includes(value);
+}
+
+function StatusFilterIcon({ status }: { status: StatusFilter }) {
+  const className = `status-filter-icon status-filter-icon--${status}`;
+  switch (status) {
+    case "unread":
+      return (
+        <svg
+          className={className}
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+          <path d="m3 7 9 6 9-6" />
+        </svg>
+      );
+    case "starred":
+      return (
+        <svg
+          className={className}
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+        </svg>
+      );
+    case "archived":
+      return (
+        <svg
+          className={className}
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="3" y="4" width="18" height="4" rx="1" />
+          <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" />
+          <path d="M10 12h4" />
+        </svg>
+      );
+  }
+}
 
 /**
  * Global sessions page showing all sessions across all projects.
@@ -46,6 +113,7 @@ export function GlobalSessionsPage() {
   const { openSidebar, isWideScreen, toggleSidebar, isSidebarCollapsed } =
     useNavigationLayout();
   const basePath = useRemoteBasePath();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Get filter params from URL
@@ -61,9 +129,7 @@ export function GlobalSessionsPage() {
     if (!param) return [];
     return param
       .split(",")
-      .filter((s): s is StatusFilter =>
-        ["all", "unread", "starred", "archived"].includes(s),
-      );
+      .filter(isStatusFilter);
   }, [searchParams]);
 
   const providerFilters = useMemo(() => {
@@ -171,9 +237,6 @@ export function GlobalSessionsPage() {
         let matchesStatus = false;
         for (const status of statusFilters) {
           switch (status) {
-            case "all":
-              if (!session.isArchived) matchesStatus = true;
-              break;
             case "unread":
               if (session.hasUnread && !session.isArchived)
                 matchesStatus = true;
@@ -222,42 +285,55 @@ export function GlobalSessionsPage() {
 
   // Build status filter options with global counts from server
   // When filtering by project, we don't have global stats, so omit counts
-  const statusOptions = useMemo((): FilterOption<StatusFilter>[] => {
+  const statusOptions = useMemo((): FilterDropdownOption<StatusFilter>[] => {
     // Only show counts when not filtering by project (global view)
     const showCounts = !projectFilter;
 
     return [
       {
-        value: "all",
-        label: t("globalSessionsStatusAll"),
-        count: showCounts ? stats.totalCount : undefined,
-      },
-      {
         value: "unread",
         label: t("globalSessionsStatusUnread"),
+        icon: <StatusFilterIcon status="unread" />,
         count: showCounts ? stats.unreadCount : undefined,
       },
       {
         value: "starred",
         label: t("globalSessionsStatusStarred"),
+        icon: <StatusFilterIcon status="starred" />,
         count: showCounts ? stats.starredCount : undefined,
       },
       {
         value: "archived",
         label: t("globalSessionsStatusArchived"),
+        icon: <StatusFilterIcon status="archived" />,
         count: showCounts ? stats.archivedCount : undefined,
+      },
+      {
+        value: "all",
+        label: t("globalSessionsStatusAll"),
+        clearSelection: true,
+        dividerBefore: true,
+        count: showCounts ? stats.totalCount : undefined,
       },
     ];
   }, [stats, projectFilter, t]);
 
+  const statusPlaceholder = (
+    <span className="status-filter-placeholder" aria-hidden="true">
+      {STATUS_FILTER_VALUES.map((status) => (
+        <StatusFilterIcon key={status} status={status} />
+      ))}
+    </span>
+  );
+
   // Build provider filter options with global counts from server
   // When filtering by project, we don't have global stats, so omit counts
-  const providerOptions = useMemo((): FilterOption<ProviderName>[] => {
+  const providerOptions = useMemo((): FilterDropdownOption<ProviderName>[] => {
     const showCounts = !projectFilter;
     const providerCounts = stats.providerCounts;
 
     // Only show providers that have sessions
-    const options: FilterOption<ProviderName>[] = [];
+    const options: FilterDropdownOption<ProviderName>[] = [];
     for (const provider of ALL_PROVIDERS) {
       const count = providerCounts[provider];
       if (count && count > 0) {
@@ -269,8 +345,15 @@ export function GlobalSessionsPage() {
         });
       }
     }
+    options.push({
+      value: "all-providers",
+      label: t("globalSessionsProviderAll"),
+      clearSelection: true,
+      dividerBefore: true,
+      count: showCounts ? stats.totalCount : undefined,
+    });
     return options;
-  }, [stats.providerCounts, projectFilter]);
+  }, [stats.providerCounts, stats.totalCount, projectFilter, t]);
 
   // Age filter options
   const ageOptions = useMemo((): FilterOption<AgeFilter>[] => {
@@ -313,6 +396,47 @@ export function GlobalSessionsPage() {
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressSessionRef = useRef<string | null>(null);
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Dup-title hiding for the heavier (card) list in GlobalSessionsPage (all sessions + per-project views).
+  // Cheap O(n) client-side grouping on the already-fetched + filtered page. Re-uses the same
+  // "prefer higher messageCount + recent activity" rule so we don't hide the substantive version of a dup title.
+  // Hidden dups are still reachable via the expander (and fully included for bulk selection).
+  const [showHiddenDups, setShowHiddenDups] = useState(false);
+
+  const { visibleSessions, hiddenDupSessions } = useMemo(() => {
+    if (isSelectionMode) {
+      // During multi-select, show everything so user can act on dups if desired.
+      return { visibleSessions: filteredSessions, hiddenDupSessions: [] as typeof filteredSessions };
+    }
+
+    const groups = new Map<string, typeof filteredSessions>();
+    for (const s of filteredSessions) {
+      const norm = (s.title || s.fullTitle || s.initialPrompt || "").trim().toLowerCase().slice(0, 120);
+      const key = `${s.provider || "unknown"}|${s.projectId}|${norm}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(s);
+    }
+
+    const visible: typeof filteredSessions = [];
+    const hidden: typeof filteredSessions = [];
+    for (const arr of groups.values()) {
+      if (arr.length <= 1) {
+        visible.push(...arr);
+      } else {
+        // Prefer the one with most messages or most recent activity — do not hide the "real" one.
+        arr.sort((a, b) => {
+          const mc = (b.messageCount || 0) - (a.messageCount || 0);
+          if (mc !== 0) return mc;
+          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        });
+        visible.push(arr[0]!); // arr is guaranteed non-empty in this branch (length >= 2)
+        hidden.push(...arr.slice(1));
+      }
+    }
+    visible.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    hidden.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    return { visibleSessions: visible, hiddenDupSessions: hidden };
+  }, [filteredSessions, isSelectionMode]);
 
   // Selection handlers
   const handleSelect = useCallback((sessionId: string, selected: boolean) => {
@@ -566,6 +690,24 @@ export function GlobalSessionsPage() {
     }));
   }, [projects]);
 
+  const activeProject = useMemo(
+    () => projects.find((project) => project.id === projectFilter) ?? null,
+    [projectFilter, projects],
+  );
+
+  const projectScopedSearchText = searchQuery.trim();
+  const showProjectNewSessionCta = Boolean(projectFilter && activeProject);
+
+  const handleStartProjectSession = useCallback(() => {
+    if (!projectFilter) return;
+    if (projectScopedSearchText) {
+      setNewSessionPrefill(projectScopedSearchText);
+    }
+    navigate(
+      `${basePath}/new-session?projectId=${encodeURIComponent(projectFilter)}`,
+    );
+  }, [basePath, navigate, projectFilter, projectScopedSearchText]);
+
   // Clear all filters
   const clearFilters = () => {
     setSearchInput("");
@@ -646,6 +788,8 @@ export function GlobalSessionsPage() {
                   selected={statusFilters}
                   onChange={setStatusFilters}
                   placeholder={t("globalSessionsStatusAll")}
+                  placeholderContent={statusPlaceholder}
+                  className="filter-dropdown--status"
                 />
                 {providerOptions.length > 1 && (
                   <FilterDropdown
@@ -653,7 +797,8 @@ export function GlobalSessionsPage() {
                     options={providerOptions}
                     selected={providerFilters}
                     onChange={setProviderFilters}
-                    placeholder={t("globalSessionsStatusAll")}
+                    placeholder={t("globalSessionsProviderAll")}
+                    className="filter-dropdown--provider"
                   />
                 )}
                 {executorOptions.length > 1 && (
@@ -684,6 +829,56 @@ export function GlobalSessionsPage() {
                 </button>
               )}
             </div>
+
+            {showProjectNewSessionCta && activeProject && (
+              <div className="global-sessions-project-cta">
+                <div className="global-sessions-project-cta__copy">
+                  <strong>
+                    {t("sidebarNewSession")}{" "}
+                    <code className="global-sessions-project-cta__token">
+                      {activeProject.name}
+                    </code>
+                  </strong>
+                  {projectScopedSearchText && (
+                    <span>
+                      {t("globalSessionsProjectCtaPromptLabel")}{" "}
+                      <code className="global-sessions-project-cta__token">
+                        {projectScopedSearchText}
+                      </code>
+                    </span>
+                  )}
+                  {!projectScopedSearchText && (
+                    <span>
+                      {t("globalSessionsProjectCtaHint")}{" "}
+                      <code className="global-sessions-project-cta__token">
+                        {activeProject.name}
+                      </code>
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="inbox-refresh-button global-sessions-project-cta__button"
+                  onClick={handleStartProjectSession}
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                  {t("sidebarNewSession")}
+                </button>
+              </div>
+            )}
 
             {loading && sessions.length === 0 && (
               <p className="loading">{t("sidebarLoadingSessions")}</p>
@@ -752,7 +947,7 @@ export function GlobalSessionsPage() {
                 <ul
                   className={`session-list ${isSelectionMode ? "session-list--selection-mode" : ""}`}
                 >
-                  {filteredSessions.map((session) => (
+                  {visibleSessions.map((session) => (
                     <div
                       key={session.id}
                       onTouchStart={(e) => handleLongPressStart(session.id, e)}
@@ -770,13 +965,18 @@ export function GlobalSessionsPage() {
                         sessionId={session.id}
                         projectId={session.projectId}
                         title={getSessionDisplayTitle(session)}
-                        fullTitle={getSessionDisplayTitle(session)}
+                        fullTitle={
+                          session.fullTitle ?? getSessionDisplayTitle(session)
+                        }
+                        initialPrompt={session.initialPrompt}
                         updatedAt={session.updatedAt}
+                        createdAt={session.createdAt}
                         hasUnread={session.hasUnread}
                         activity={session.activity}
                         pendingInputType={session.pendingInputType}
                         status={session.ownership}
                         provider={session.provider}
+                        parentSessionId={session.parentSessionId}
                         executor={session.executor}
                         isStarred={session.isStarred}
                         isArchived={session.isArchived}
@@ -802,11 +1002,75 @@ export function GlobalSessionsPage() {
                         projectName={session.projectName}
                         basePath={basePath}
                         messageCount={session.messageCount}
+                        // userTurnCount / systemTurnCount will be populated when
+                        // the index summaries cache them (see SessionIndexService)
                         hasDraft={drafts.has(session.id)}
                       />
                     </div>
                   ))}
                 </ul>
+
+                {/* Dup hidden expander for the heavier/thicker card list (all sessions or per-project).
+                    Cheap (runs on already-fetched filtered page). Matches the sidebar "(X hidden)" pattern
+                    but with thicker card items when expanded. */}
+                {hiddenDupSessions.length > 0 && (
+                  <div className="global-sessions-hidden-dups">
+                    <button
+                      type="button"
+                      className="global-sessions-hidden-dups-toggle"
+                      onClick={() => setShowHiddenDups((v) => !v)}
+                      aria-expanded={showHiddenDups}
+                    >
+                      {showHiddenDups ? "−" : "+"} {hiddenDupSessions.length} duplicate titles hidden
+                      (same name + provider + project)
+                    </button>
+                    {showHiddenDups && (
+                      <ul className="session-list global-sessions-hidden-sublist">
+                        {hiddenDupSessions.map((session) => (
+                          <div key={session.id} className="global-sessions-hidden-item">
+                            <SessionListItem
+                              sessionId={session.id}
+                              projectId={session.projectId}
+                              title={getSessionDisplayTitle(session)}
+                              fullTitle={
+                                session.fullTitle ?? getSessionDisplayTitle(session)
+                              }
+                              initialPrompt={session.initialPrompt}
+                              updatedAt={session.updatedAt}
+                              createdAt={session.createdAt}
+                              hasUnread={session.hasUnread}
+                              activity={session.activity}
+                              pendingInputType={session.pendingInputType}
+                              status={session.ownership}
+                              provider={session.provider}
+                              parentSessionId={session.parentSessionId}
+                              executor={session.executor}
+                              isStarred={session.isStarred}
+                              isArchived={session.isArchived}
+                              mode="card"
+                              showContextUsage={false}
+                              isSelected={selectedIds.has(session.id)}
+                              isSelectionMode={isSelectionMode && !isWideScreen}
+                              onNavigate={() => {
+                                if (isSelectionMode && !isWideScreen) {
+                                  handleSelect(session.id, !selectedIds.has(session.id));
+                                }
+                              }}
+                              onSelect={
+                                isWideScreen || isSelectionMode ? handleSelect : undefined
+                              }
+                              showProjectName={!projectFilter}
+                              projectName={session.projectName}
+                              basePath={basePath}
+                              messageCount={session.messageCount}
+                              hasDraft={drafts.has(session.id)}
+                            />
+                          </div>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
 
                 {hasMore && (
                   <div className="global-sessions-load-more">

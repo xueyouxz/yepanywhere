@@ -8,6 +8,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { initializeFontSize } from "./hooks/useFontSize";
+import { initializeContentMaxWidth } from "./hooks/useContentMaxWidth";
 import { initializeTabSize } from "./hooks/useTabSize";
 import { initializeTheme } from "./hooks/useTheme";
 import { NavigationLayout } from "./layouts";
@@ -29,6 +30,7 @@ import "./styles/index.css";
 initializeTheme();
 initializeFontSize();
 initializeTabSize();
+initializeContentMaxWidth();
 
 // SSE activity stream connection is managed by useActivityBusConnection hook
 // in App.tsx, which connects only when authenticated (or auth is disabled)

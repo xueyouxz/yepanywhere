@@ -40,7 +40,6 @@ import { updateAllowedHosts } from "./middleware/allowed-hosts.js";
 import { NotificationService } from "./notifications/index.js";
 import { CodexSessionScanner } from "./projects/codex-scanner.js";
 import { GeminiSessionScanner } from "./projects/gemini-scanner.js";
-import { ProjectScanner } from "./projects/scanner.js";
 import { PushService, getOrCreateVapidKeys } from "./push/index.js";
 import { RecentsService } from "./recents/index.js";
 import {
@@ -61,10 +60,12 @@ import {
   InstallService,
   ModelInfoService,
   NetworkBindingService,
+  PublicShareService,
   RelayClientService,
   ServerSettingsService,
   SharingService,
 } from "./services/index.js";
+import { initSpeechBackendRegistry } from "./services/voice/registry.js";
 import { ClaudeSessionReader } from "./sessions/reader.js";
 import { UploadManager } from "./uploads/manager.js";
 import {
@@ -366,9 +367,36 @@ const serverSettingsService = new ServerSettingsService({
 const sharingService = new SharingService({
   dataDir: config.dataDir,
 });
+const publicShareService = new PublicShareService({
+  dataDir: config.dataDir,
+});
 const modelInfoService = new ModelInfoService();
 
 async function startServer() {
+  const startupStart = Date.now();
+  let lastStartupMark = startupStart;
+  const startupTimings: Array<{
+    phase: string;
+    deltaMs: number;
+    elapsedMs: number;
+  }> = [];
+
+  const markStartup = (phase: string): void => {
+    const now = Date.now();
+    const timing = {
+      phase,
+      deltaMs: now - lastStartupMark,
+      elapsedMs: now - startupStart,
+    };
+    startupTimings.push(timing);
+    lastStartupMark = now;
+    console.log(
+      `[Startup] ${timing.phase} (+${timing.deltaMs}ms, total ${timing.elapsedMs}ms)`,
+    );
+  };
+
+  markStartup("startup began");
+
   let tlsOptions: { key: Buffer; cert: Buffer } | undefined;
   if (config.httpsSelfSigned) {
     const certResult = ensureSelfSignedCertificate({
@@ -388,22 +416,39 @@ async function startServer() {
   // Initialize services (loads state from disk)
   // InstallService first since it generates the installation ID used by other services
   await installService.initialize();
+  markStartup("installService initialized");
   await notificationService.initialize();
+  markStartup("notificationService initialized");
   await sessionMetadataService.initialize();
+  markStartup("sessionMetadataService initialized");
   await projectMetadataService.initialize();
+  markStartup("projectMetadataService initialized");
   await sessionIndexService.initialize();
+  markStartup("sessionIndexService initialized");
   await pushService.initialize();
+  markStartup("pushService initialized");
   await browserProfileService.initialize();
+  markStartup("browserProfileService initialized");
   await recentsService.initialize();
+  markStartup("recentsService initialized");
   await authService.initialize();
+  markStartup("authService initialized");
   await remoteAccessService.initialize();
+  markStartup("remoteAccessService initialized");
   await serverSettingsService.initialize();
+  markStartup("serverSettingsService initialized");
   await sharingService.initialize();
+  markStartup("sharingService initialized");
+  await publicShareService.initialize();
+  markStartup("publicShareService initialized");
   await remoteSessionService.setDiskPersistenceEnabled(
     serverSettingsService.getSetting("persistRemoteSessionsToDisk"),
   );
+  markStartup("remoteSessionService persistence setting applied");
   await remoteSessionService.initialize();
+  markStartup("remoteSessionService initialized");
   await networkBindingService.initialize();
+  markStartup("networkBindingService initialized");
 
   // Seed allowed hosts middleware from persisted settings
   updateAllowedHosts(serverSettingsService.getSetting("allowedHosts"));
@@ -494,6 +539,22 @@ async function startServer() {
     );
   }
 
+  const speechBackendRegistry = await initSpeechBackendRegistry({
+    voiceInputEnabled: config.voiceInputEnabled,
+    voiceBackends: config.voiceBackends,
+    deepgramApiKey: config.deepgramApiKey,
+    xaiSttApiKey: config.xaiSttApiKey,
+    whisperModel: config.whisperModel,
+    whisperDevice: config.whisperDevice,
+    whisperComputeType: config.whisperComputeType,
+  });
+  const enabledSpeechBackends = speechBackendRegistry.enabledIds();
+  if (enabledSpeechBackends.length > 0) {
+    console.log(
+      `[Voice] Enabled server-routed backends: ${enabledSpeechBackends.join(", ")}`,
+    );
+  }
+
   // Create the app first (without WebSocket support initially)
   // We'll add WebSocket routes after setting up WebSocket support
   const { app, supervisor, scanner } = createApp({
@@ -508,6 +569,7 @@ async function startServer() {
     projectMetadataService,
     sessionIndexService,
     projectScanCacheTtlMs: config.projectScanCacheTtlMs,
+    sessionAutoArchiveDays: config.sessionAutoArchiveDays,
     maxWorkers: config.maxWorkers,
     idlePreemptThresholdMs: config.idlePreemptThresholdMs,
     pushService,
@@ -530,12 +592,15 @@ async function startServer() {
     browserProfileService,
     serverSettingsService,
     sharingService,
+    publicShareService,
     deviceBridgeService,
     modelInfoService,
     enabledProviders: config.enabledProviders,
     voiceInputEnabled: config.voiceInputEnabled,
+    speechBackendRegistry,
     allowedImagePaths: config.allowedImagePaths,
   });
+  markStartup("app created");
 
   const focusedSessionWatchManager = new FocusedSessionWatchManager({
     scanner,
@@ -571,15 +636,13 @@ async function startServer() {
 
   // Add upload routes with WebSocket support
   // These must be added BEFORE the frontend proxy catch-all
-  const uploadScanner = new ProjectScanner({
-    projectsDir: config.claudeProjectsDir,
-  });
   const uploadRoutes = createUploadRoutes({
-    scanner: uploadScanner,
+    scanner,
     upgradeWebSocket,
     maxUploadSizeBytes: config.maxUploadSizeBytes,
   });
   app.route("/api", uploadRoutes);
+  markStartup("upload routes mounted");
 
   // Add WebSocket relay route for Phase 2b/2c/2d
   // This allows clients to make HTTP-like requests, subscriptions, and uploads over WebSocket
@@ -618,6 +681,7 @@ async function startServer() {
     focusedSessionWatchManager,
     deviceBridgeService,
   });
+  markStartup("relay accept handler configured");
 
   // Function to start/restart relay client with current config
   async function updateRelayConnection() {
@@ -654,6 +718,7 @@ async function startServer() {
 
   // Start relay connection on boot if configured
   await updateRelayConnection();
+  markStartup("relay connection update completed");
 
   // Serve stable (emergency) UI from /_stable/ path if available
   // This bypasses HMR and serves pre-built assets directly
@@ -667,12 +732,16 @@ async function startServer() {
       `[Frontend] Stable UI available at /_stable/ from ${config.stableDistPath}`,
     );
   }
+  markStartup("frontend routes configured");
 
   // Add frontend proxy as the final catch-all (AFTER all API routes including uploads)
   if (frontendProxy) {
     const proxy = frontendProxy;
     app.all("*", (c) => {
       const { incoming, outgoing } = c.env;
+      if (!incoming || !outgoing) {
+        return c.text("Not found", 404);
+      }
       proxy.web(incoming, outgoing);
       return RESPONSE_ALREADY_SENT;
     });
@@ -919,6 +988,7 @@ async function startServer() {
     effectivePort,
     "127.0.0.1",
     (info) => {
+      markStartup("localhost server onReady");
       // Write port to file if requested (for test harnesses)
       if (config.portFile) {
         fs.writeFileSync(config.portFile, String(info.port));
@@ -986,6 +1056,7 @@ async function startServer() {
       host: networkConfig.host,
       port: networkPort,
     });
+    markStartup("network socket bound from settings");
   }
 
   // If CLI host override was specified (not localhost), also bind to that interface
@@ -996,6 +1067,7 @@ async function startServer() {
     config.host !== "localhost"
   ) {
     await onNetworkBindingChange({ host: config.host, port: effectivePort });
+    markStartup("network socket bound from CLI override");
   }
 
   // Start maintenance server on separate port (for out-of-band diagnostics)
@@ -1009,6 +1081,16 @@ async function startServer() {
       host: "127.0.0.1", // Maintenance always on localhost
       mainServerPort: effectivePort,
     });
+    markStartup("maintenance server started");
+  }
+
+  const totalStartupMs = Date.now() - startupStart;
+  console.log(`[Startup] completed in ${totalStartupMs}ms`);
+  console.log("[Startup] Timing summary:");
+  for (const timing of startupTimings) {
+    console.log(
+      `- ${timing.phase}: +${timing.deltaMs}ms (total ${timing.elapsedMs}ms)`,
+    );
   }
 
   // Export callbacks for use by API routes (via app options)

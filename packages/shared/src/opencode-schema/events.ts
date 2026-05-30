@@ -14,11 +14,18 @@
 import { z } from "zod";
 
 /**
- * Session status from OpenCode (busy or idle).
+ * Session status from OpenCode.
  */
-export const OpenCodeSessionStatusSchema = z.object({
-  type: z.enum(["busy", "idle"]),
-});
+export const OpenCodeSessionStatusSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("idle") }),
+  z.object({ type: z.literal("busy") }),
+  z.object({
+    type: z.literal("retry"),
+    attempt: z.number(),
+    message: z.string(),
+    next: z.number(),
+  }),
+]);
 
 export type OpenCodeSessionStatus = z.infer<typeof OpenCodeSessionStatusSchema>;
 

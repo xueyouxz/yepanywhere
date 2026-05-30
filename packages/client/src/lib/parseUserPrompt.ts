@@ -12,8 +12,32 @@ export interface UploadedFileInfo {
   size: string;
   mimeType: string;
   path: string;
+  width?: number;
+  height?: number;
   /** Optional direct preview URL for inline provider attachments (e.g. data: URLs) */
   previewUrl?: string;
+}
+
+function normalizeSizeLabel(size: string): string {
+  const trimmed = size.trim();
+  const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*([KMGT]?B)$/i);
+  if (!match) {
+    return trimmed;
+  }
+
+  const value = Number(match[1]);
+  if (!Number.isFinite(value)) {
+    return trimmed;
+  }
+
+  const unit = (match[2] ?? "").toUpperCase();
+  if (unit === "B") {
+    return `${Math.round(value)}\u202fb`;
+  }
+  if (unit === "KB") {
+    return `${Math.round(value)}\u202fkb`;
+  }
+  return `${Math.round(value * 10) / 10}\u202f${unit[0]?.toLowerCase() ?? ""}b`;
 }
 
 /**
@@ -35,8 +59,8 @@ export interface ParsedUserPrompt {
 export const getFilename = sharedGetFilename;
 
 /**
- * Parse the "User uploaded files:" section from message content.
- * Format: "- filename (size, mimetype): path"
+ * Parse the uploaded-files section from message content.
+ * Supports markdown link lines and the older plain path format.
  */
 function parseUploadedFiles(content: string): {
   textWithoutUploads: string;
@@ -44,27 +68,57 @@ function parseUploadedFiles(content: string): {
 } {
   const uploadedFiles: UploadedFileInfo[] = [];
 
-  // Match the "User uploaded files:" section
-  const uploadMarker = "\n\nUser uploaded files:\n";
-  const markerIndex = content.indexOf(uploadMarker);
+  // Match the uploaded-files section
+  const markers = [
+    "\n\nUser uploaded files in .attachments:\n",
+    "\n\nUser uploaded files:\n",
+  ];
+  const markerIndex = markers
+    .map((marker) => content.indexOf(marker))
+    .filter((index) => index !== -1)
+    .sort((a, b) => a - b)[0];
 
-  if (markerIndex === -1) {
+  if (markerIndex === undefined) {
+    return { textWithoutUploads: content, uploadedFiles: [] };
+  }
+
+  const uploadMarker = markers.find((marker) =>
+    content.startsWith(marker, markerIndex),
+  );
+  if (!uploadMarker) {
     return { textWithoutUploads: content, uploadedFiles: [] };
   }
 
   const textWithoutUploads = content.slice(0, markerIndex);
   const uploadSection = content.slice(markerIndex + uploadMarker.length);
 
-  // Parse each line: "- filename (size, mimetype): path"
-  const lineRegex = /^- (.+?) \(([^,]+), ([^)]+)\): (.+)$/;
+  // Parse each line:
+  // - [name](path) (size, mimetype)
+  // - [name](path) (size, mimetype, WxH)
+  // - filename (size, mimetype): path
+  const markdownRegex =
+    /^- \[(.+?)\]\((?:<(.+?)>|(.+?))\) \(([^,]+), ([^,()]+?)(?:, (\d+)x(\d+))?\)$/;
+  const legacyRegex = /^- (.+?) \(([^,]+), ([^)]+)\): (.+)$/;
   for (const line of uploadSection.split("\n")) {
-    const match = line.match(lineRegex);
-    if (match) {
+    const markdownMatch = line.match(markdownRegex);
+    if (markdownMatch) {
       uploadedFiles.push({
-        originalName: match[1] ?? "",
-        size: match[2] ?? "",
-        mimeType: match[3] ?? "",
-        path: match[4] ?? "",
+        originalName: markdownMatch[1] ?? "",
+        path: markdownMatch[2] ?? markdownMatch[3] ?? "",
+        size: normalizeSizeLabel(markdownMatch[4] ?? ""),
+        mimeType: markdownMatch[5] ?? "",
+        width: markdownMatch[6] ? Number(markdownMatch[6]) : undefined,
+        height: markdownMatch[7] ? Number(markdownMatch[7]) : undefined,
+      });
+      continue;
+    }
+    const legacyMatch = line.match(legacyRegex);
+    if (legacyMatch) {
+      uploadedFiles.push({
+        originalName: legacyMatch[1] ?? "",
+        size: normalizeSizeLabel(legacyMatch[2] ?? ""),
+        mimeType: legacyMatch[3] ?? "",
+        path: legacyMatch[4] ?? "",
       });
     }
   }

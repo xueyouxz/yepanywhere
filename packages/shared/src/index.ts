@@ -16,10 +16,16 @@ export {
   transformFilePathsToHtml,
 } from "./filePathDetection.js";
 
+// ANSI escape rendering (shared between server and client)
+export { hasAnsiEscapes, renderAnsiToHtml } from "./ansi-renderer.js";
+
 export type {
   ProviderName,
   ProviderInfo,
+  ProviderImageSizing,
   ModelInfo,
+  RecapMode,
+  PromptSuggestionMode,
   SlashCommand,
   PermissionMode,
   NewSessionDefaults,
@@ -38,6 +44,10 @@ export type {
 export {
   ALL_PROVIDERS,
   ALL_PERMISSION_MODES,
+  HELPER_SIDE_MODEL_CHEAPEST,
+  HELPER_SIDE_MODEL_SAME_AS_MAIN,
+  PROMPT_SUGGESTION_MODES,
+  RECAP_MODES,
   thinkingOptionToConfig,
   resolveModel,
   DEFAULT_MODEL,
@@ -46,11 +56,32 @@ export {
 
 export type { GitStatusInfo, GitFileChange } from "./git-status.js";
 
+export type {
+  SessionActiveWorkKind,
+  SessionLivenessDerivedStatus,
+  SessionLivenessProbeStatus,
+  SessionLivenessSnapshot,
+} from "./session-liveness.js";
+
+export type {
+  UserMessageCompositionMetadata,
+  UserMessageDeliveryIntent,
+  UserMessageMetadata,
+} from "./user-message-metadata.js";
+
 export {
   orderByParentChain,
   needsReorder,
   type DagOrderable,
 } from "./dag.js";
+
+export {
+  THUMBNAIL_HEIGHT_PX,
+  THUMBNAIL_MAX_ASPECT_RATIO,
+  THUMBNAIL_MIME_TYPE,
+  type ThumbnailPlan,
+  planThumbnail,
+} from "./attachment-thumbnail.js";
 
 export {
   type UrlProjectId,
@@ -166,6 +197,8 @@ export {
   SessionView,
   getSessionDisplayTitle,
   SESSION_TITLE_MAX_LENGTH,
+  sanitizeSessionTitle,
+  truncateSessionTitle,
 } from "./session/index.js";
 
 export type {
@@ -173,6 +206,20 @@ export type {
   ClaudeSessionFile,
   CodexSessionContent,
 } from "./session/index.js";
+
+export type {
+  CreatePublicSessionShareRequest,
+  CreatePublicSessionShareResponse,
+  FreezePublicSessionLiveSharesResponse,
+  PublicSessionShareMetadata,
+  PublicSessionShareMode,
+  PublicSessionShareSessionStatusResponse,
+  PublicSessionShareViewerActionResponse,
+  PublicSessionShareViewerHeartbeatResponse,
+  PublicSessionShareViewerSummary,
+  PublicSessionShareResponse,
+  RevokePublicSessionSharesResponse,
+} from "./public-shares.js";
 
 // Tool result schemas (for runtime validation)
 export {

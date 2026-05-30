@@ -22,6 +22,8 @@ const DB_VERSION = 1;
 const STORE_NAME = "entries";
 const MAX_ENTRIES = 2000;
 const FLUSH_BATCH_SIZE = 500;
+const FLUSH_DEBOUNCE_MS = 1000;
+const TELEMETRY_INTERVAL_MS = 15_000;
 
 const PREFIX_REGEX = /^\[([A-Za-z]+)\]/;
 const DEVICE_ID_KEY = "yep-anywhere-device-id";
@@ -53,6 +55,8 @@ export class ClientLogCollector {
   private _unsubscribeState: (() => void) | null = null;
   private _errorHandler: ((e: ErrorEvent) => void) | null = null;
   private _rejectionHandler: ((e: PromiseRejectionEvent) => void) | null = null;
+  private _flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private _telemetryTimer: ReturnType<typeof setInterval> | null = null;
 
   async start(): Promise<void> {
     if (this._started) return;
@@ -60,13 +64,19 @@ export class ClientLogCollector {
     this._deviceId = getDeviceId();
 
     try {
-      this._db = await openDatabase(DB_NAME, DB_VERSION, (db) => {
+      const db = await openDatabase(DB_NAME, DB_VERSION, (db) => {
         db.createObjectStore(STORE_NAME, {
           keyPath: "id",
           autoIncrement: true,
         });
       });
+      if (!this._started) {
+        db.close();
+        return;
+      }
+      this._db = db;
     } catch {
+      if (!this._started) return;
       this._useMemoryFallback = true;
     }
 
@@ -76,6 +86,8 @@ export class ClientLogCollector {
       "[ClientInfo]",
       `[ClientInfo] ${navigator.userAgent} | ${window.screen.width}x${window.screen.height} | dpr=${window.devicePixelRatio} | lang=${navigator.language}`,
     );
+    this._writeTelemetryEntry();
+    this._startTelemetry();
 
     this._unsubscribeState = connectionManager.on("stateChange", (state) => {
       if (state === "connected") {
@@ -99,6 +111,8 @@ export class ClientLogCollector {
       this._unsubscribeState();
       this._unsubscribeState = null;
     }
+    this._clearScheduledFlush();
+    this._stopTelemetry();
 
     if (this._db) {
       this._db.close();
@@ -107,6 +121,11 @@ export class ClientLogCollector {
 
     this._memoryBuffer = [];
     this._useMemoryFallback = false;
+  }
+
+  record(level: string, prefix: string, message: string): void {
+    if (!this._started) return;
+    this._writeEntry(level, prefix, message);
   }
 
   async flush(): Promise<void> {
@@ -173,12 +192,82 @@ export class ClientLogCollector {
       if (this._memoryBuffer.length > MAX_ENTRIES) {
         this._memoryBuffer = this._memoryBuffer.slice(-MAX_ENTRIES);
       }
+      this._scheduleFlush();
       return;
     }
 
     putEntry(this._db, STORE_NAME, entry).then(() => {
       this._trimEntries();
+      this._scheduleFlush();
     });
+  }
+
+  private _scheduleFlush(): void {
+    if (!this._started || connectionManager.state !== "connected") return;
+    if (this._flushTimer) return;
+    this._flushTimer = setTimeout(() => {
+      this._flushTimer = null;
+      void this.flush();
+    }, FLUSH_DEBOUNCE_MS);
+  }
+
+  private _clearScheduledFlush(): void {
+    if (!this._flushTimer) return;
+    clearTimeout(this._flushTimer);
+    this._flushTimer = null;
+  }
+
+  private _startTelemetry(): void {
+    this._stopTelemetry();
+    this._telemetryTimer = setInterval(() => {
+      this._writeTelemetryEntry();
+    }, TELEMETRY_INTERVAL_MS);
+  }
+
+  private _stopTelemetry(): void {
+    if (!this._telemetryTimer) return;
+    clearInterval(this._telemetryTimer);
+    this._telemetryTimer = null;
+  }
+
+  private _writeTelemetryEntry(): void {
+    if (!this._started || typeof window === "undefined") return;
+    const perf = window.performance as Performance & {
+      memory?: {
+        jsHeapSizeLimit?: number;
+        totalJSHeapSize?: number;
+        usedJSHeapSize?: number;
+      };
+    };
+    const memory = perf.memory;
+    const payload = {
+      path: window.location.pathname,
+      visibility:
+        typeof document !== "undefined" ? document.visibilityState : "unknown",
+      memory: memory
+        ? {
+            usedJSHeapSize: memory.usedJSHeapSize,
+            totalJSHeapSize: memory.totalJSHeapSize,
+            jsHeapSizeLimit: memory.jsHeapSizeLimit,
+          }
+        : null,
+      dom:
+        typeof document !== "undefined"
+          ? {
+              nodes: document.getElementsByTagName("*").length,
+              messageRows:
+                document.querySelectorAll(".message-render-row").length,
+              streamingBlocks:
+                document.querySelectorAll(".streaming-block").length,
+              toolRows: document.querySelectorAll(".tool-row").length,
+            }
+          : null,
+    };
+    this._writeEntry(
+      "info",
+      "[ClientTelemetry]",
+      `[ClientTelemetry] ${JSON.stringify(payload)}`,
+    );
   }
 
   private async _trimEntries(): Promise<void> {

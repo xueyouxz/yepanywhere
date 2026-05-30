@@ -416,7 +416,7 @@ describe("Real SDK E2E", () => {
     expect(processContent).toContain('Say "got it" and nothing else');
     expect(processContent).toContain("User uploaded files:");
     expect(processContent).toContain("data.txt");
-    expect(processContent).toContain("1.0 KB");
+    expect(processContent).toContain("1KB");
     expect(processContent).toContain("text/plain");
 
     // THE CRITICAL TEST: Verify JSONL content matches what Process produces

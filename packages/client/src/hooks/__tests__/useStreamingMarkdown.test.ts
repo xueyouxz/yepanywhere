@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStreamingMarkdown } from "../useStreamingMarkdown";
 
 describe("useStreamingMarkdown", () => {
@@ -7,6 +7,7 @@ describe("useStreamingMarkdown", () => {
   let pending: HTMLSpanElement;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     container = document.createElement("div");
     pending = document.createElement("span");
     document.body.appendChild(container);
@@ -14,6 +15,8 @@ describe("useStreamingMarkdown", () => {
   });
 
   afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
     document.body.removeChild(container);
     document.body.removeChild(pending);
   });
@@ -24,6 +27,12 @@ describe("useStreamingMarkdown", () => {
       container;
     (result.pendingRef as React.MutableRefObject<HTMLSpanElement>).current =
       pending;
+  }
+
+  function flushBufferedUpdates() {
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
   }
 
   it("starts with isStreaming false", () => {
@@ -62,6 +71,7 @@ describe("useStreamingMarkdown", () => {
         type: "paragraph",
       });
     });
+    flushBufferedUpdates();
 
     expect(container.children.length).toBe(2);
     expect(container.children[0]?.innerHTML).toBe("<p>First</p>");
@@ -90,6 +100,7 @@ describe("useStreamingMarkdown", () => {
         type: "paragraph",
       });
     });
+    flushBufferedUpdates();
 
     expect(container.children.length).toBe(3);
     // Should be in correct order based on blockIndex
@@ -114,6 +125,7 @@ describe("useStreamingMarkdown", () => {
         type: "paragraph",
       });
     });
+    flushBufferedUpdates();
 
     expect(container.children.length).toBe(1);
     expect(container.children[0]?.innerHTML).toBe("<p>Updated</p>");
@@ -162,6 +174,7 @@ describe("useStreamingMarkdown", () => {
       });
       result.current.onPending({ html: "pending..." });
     });
+    flushBufferedUpdates();
 
     expect(container.children.length).toBe(1);
     expect(pending.innerHTML).toBe("pending...");
@@ -217,11 +230,31 @@ describe("useStreamingMarkdown", () => {
         type: "paragraph",
       });
     });
+    flushBufferedUpdates();
 
     expect(container.children.length).toBe(3);
     // Should maintain order by blockIndex
     expect((container.children[0] as HTMLElement).dataset.blockIndex).toBe("0");
     expect((container.children[1] as HTMLElement).dataset.blockIndex).toBe("2");
     expect((container.children[2] as HTMLElement).dataset.blockIndex).toBe("5");
+  });
+
+  it("coalesces rapid pending updates and flushes the latest", () => {
+    const { result } = renderHook(() => useStreamingMarkdown());
+    attachRefs(result.current);
+
+    act(() => {
+      result.current.onPending({ html: "A" });
+    });
+    expect(pending.innerHTML).toBe("A");
+
+    act(() => {
+      result.current.onPending({ html: "AB" });
+      result.current.onPending({ html: "ABC" });
+    });
+
+    expect(pending.innerHTML).toBe("A");
+    flushBufferedUpdates();
+    expect(pending.innerHTML).toBe("ABC");
   });
 });

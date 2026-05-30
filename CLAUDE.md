@@ -2,6 +2,8 @@
 
 For cross-project context (how this project relates to other Kyle projects), see `~/code/dotfiles/projects/README.md`.
 
+For dev/contributor guidance (setup, commands, style, contribution ethos), see [DEVELOPMENT.md](DEVELOPMENT.md).
+
 A mobile-first supervisor for Claude Code agents. Like the VS Code Claude extension, but designed for phones and multi-session workflows.
 
 **Key ideas:**
@@ -88,7 +90,7 @@ ENABLED_PROVIDERS=claude VOICE_INPUT=false PORT=4000 YEP_ANYWHERE_PROFILE=dev pn
 ```
 
 Environment variables:
-- `ENABLED_PROVIDERS` - Comma-separated list of provider names to expose (default: all). Valid names: `claude`, `claude-ollama`, `codex`, `codex-oss`, `gemini`, `gemini-acp`, `opencode`
+- `ENABLED_PROVIDERS` - Comma-separated list of provider names to expose (default: all). Valid names: `claude`, `claude-ollama`, `codex`, `codex-oss`, `gemini`, `gemini-acp`, `opencode`, `grok`
 - `VOICE_INPUT` - Set to `false` to disable the voice input button server-side (default: `true`)
 
 ## Android Emulator Testing

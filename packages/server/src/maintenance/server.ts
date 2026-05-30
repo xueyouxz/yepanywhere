@@ -5,9 +5,9 @@
  * and independent from the main server's event loop. This allows diagnostics
  * even when the main server is unresponsive.
  *
- * Security: Rejects browser cross-origin requests (Origin header present) to
- * prevent drive-by attacks from malicious websites. Only allows requests from
- * curl, wget, or same-origin browser requests.
+ * Security: The maintenance server is an admin surface intentionally limited
+ * to loopback hosts. Host validation is load-bearing even for requests with no
+ * Origin header, because browsers can omit Origin on same-site requests.
  *
  * Endpoints:
  * - GET  /health         - Simple health check
@@ -36,6 +36,12 @@ import { handleDebugRequest } from "./debug-routes.js";
 /** Current PROXY_DEBUG state (can be toggled at runtime) */
 let proxyDebugEnabled =
   process.env.PROXY_DEBUG === "1" || process.env.PROXY_DEBUG === "true";
+
+const LOOPBACK_MAINTENANCE_HOSTS = new Set([
+  "localhost",
+  "127.0.0.1",
+  "::1",
+]);
 
 /** Export for use by proxy module */
 export function isProxyDebugEnabled(): boolean {
@@ -97,12 +103,24 @@ export function startMaintenanceServer(options: MaintenanceServerOptions): {
     const path = url.pathname;
     const method = req.method || "GET";
 
+    // Security: validate Host before the Origin/Sec-Fetch check. Origin is not
+    // present on every browser request, while Host is the authority the browser
+    // believes it is contacting.
+    if (!isAllowedMaintenanceHost(req.headers.host)) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: "Forbidden",
+          message: "Maintenance server only accepts loopback Host headers.",
+          hint: `curl http://localhost:${port}${path}`,
+        }),
+      );
+      return;
+    }
+
     // Security: Reject cross-origin browser requests to prevent drive-by attacks.
-    // Browsers send Origin header for cross-origin requests (including from malicious sites).
-    // We allow:
-    // - Requests without Origin (curl, wget, etc.)
-    // - Requests from same origin (localhost:PORT)
-    // - Requests with Sec-Fetch-Site: same-origin or none
+    // Browsers send Origin header for many cross-origin requests. This is a
+    // secondary check after Host validation for defense in depth.
     const origin = req.headers.origin;
     const secFetchSite = req.headers["sec-fetch-site"];
 
@@ -216,6 +234,24 @@ export function startMaintenanceServer(options: MaintenanceServerOptions): {
       server.close();
     },
   };
+}
+
+function parseHostHeader(host: string | undefined): string | null {
+  if (!host) return null;
+
+  if (host.startsWith("[")) {
+    const closeBracket = host.indexOf("]");
+    if (closeBracket === -1) return null;
+    return host.slice(1, closeBracket).toLowerCase();
+  }
+
+  return host.replace(/:\d+$/, "").toLowerCase();
+}
+
+function isAllowedMaintenanceHost(host: string | undefined): boolean {
+  const hostname = parseHostHeader(host);
+  if (!hostname) return false;
+  return LOOPBACK_MAINTENANCE_HOSTS.has(hostname);
 }
 
 /** Send JSON response */

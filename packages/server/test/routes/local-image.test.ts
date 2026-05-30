@@ -40,6 +40,36 @@ describe("Local image routes", () => {
     expect(await response.text()).toBe("png-bytes");
   });
 
+  it("serves media files from discovered project directories", async () => {
+    const uploadsDir = path.join(tempDir, "uploads");
+    const projectDir = path.join(tempDir, "project");
+    await mkdir(projectDir, { recursive: true });
+
+    const filePath = path.join(projectDir, "trajectory.png");
+    await writeFile(filePath, "png-bytes");
+
+    const routes = createLocalImageRoutes({
+      allowedPaths: [uploadsDir],
+      scanner: {
+        async listProjects() {
+          return [
+            {
+              path: projectDir,
+            },
+          ];
+        },
+      },
+    });
+
+    const response = await routes.request(
+      `/?path=${encodeURIComponent(filePath)}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(await response.text()).toBe("png-bytes");
+  });
+
   it("rejects files outside the allowed directories", async () => {
     const uploadsDir = path.join(tempDir, "uploads");
     const otherDir = path.join(tempDir, "other");

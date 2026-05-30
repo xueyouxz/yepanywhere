@@ -2,10 +2,14 @@ import { randomUUID } from "node:crypto";
 import {
   type EffortLevel,
   type PermissionRules,
+  type PromptSuggestionMode,
   type ProviderName,
-  SESSION_TITLE_MAX_LENGTH,
+  type RecapMode,
+  type SessionLivenessProbeStatus,
+  type SessionLivenessSnapshot,
   type ThinkingConfig,
   type UrlProjectId,
+  truncateSessionTitle,
 } from "@yep-anywhere/shared";
 import type { AgentActivity, PendingInputType } from "@yep-anywhere/shared";
 import { getLogger } from "../logging/logger.js";
@@ -29,7 +33,6 @@ import type {
 } from "../watcher/EventBus.js";
 import { Process, type ProcessConstructorOptions } from "./Process.js";
 import {
-  type QueuedRequest,
   type QueuedRequestInfo,
   type QueuedResponse,
   WorkerQueue,
@@ -57,11 +60,127 @@ const STALE_CHECK_INTERVAL_MS = 60 * 1000;
 const DEFAULT_STALE_IN_TURN_THRESHOLD_MS = 5 * 60 * 1000;
 /** Codex sessions can be silent for long periods during backend retries/reconnects. */
 const CODEX_STALE_IN_TURN_THRESHOLD_MS = 60 * 60 * 1000;
+const HEARTBEAT_TURN_CHECK_INTERVAL_MS = 30 * 1000;
+const LIVENESS_PROBE_CHECK_INTERVAL_MS = 30 * 1000;
+const LIVENESS_PROBE_REFRESH_MS = 60 * 1000;
+const DEFAULT_HEARTBEAT_TURN_TEXT = "heartbeat";
+const DEFAULT_HEARTBEAT_TURNS_AFTER_MINUTES = 5;
+const DEFAULT_INTERRUPT_TIMEOUT_MS = 2000;
+const FORCED_HEARTBEAT_INTERRUPT_PREAMBLE =
+  "interrupted for heartbeat; resume interrupted command after responding:";
+const HEARTBEAT_RESET_PROBE_STATUSES: ReadonlySet<SessionLivenessProbeStatus> =
+  new Set(["active", "idle", "waiting-input"]);
+const ACTIVE_HEARTBEAT_DOUBT_STATUSES = new Set([
+  "verified-progressing",
+  "recently-active-unverified",
+  "long-silent-unverified",
+]);
+
+interface ActiveHeartbeatMarker {
+  processId: string;
+  heartbeatResetAtMs: number;
+  heartbeatDueAtMs: number;
+  steered: boolean;
+  forced: boolean;
+}
 
 function getStaleInTurnThresholdMs(provider: ProviderName): number {
   return provider === "codex" || provider === "codex-oss"
     ? CODEX_STALE_IN_TURN_THRESHOLD_MS
     : DEFAULT_STALE_IN_TURN_THRESHOLD_MS;
+}
+
+function parseFiniteIsoMs(value: string | null | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function getHeartbeatResetAtMs(
+  liveness: SessionLivenessSnapshot,
+  fallbackMs: number,
+): number {
+  const candidateTimes = [
+    parseFiniteIsoMs(liveness.lastVerifiedIdleAt),
+    parseFiniteIsoMs(liveness.lastVerifiedProgressAt),
+    parseFiniteIsoMs(liveness.lastProviderMessageAt),
+    parseFiniteIsoMs(liveness.lastRawProviderEventAt),
+    liveness.lastLivenessProbeStatus &&
+    HEARTBEAT_RESET_PROBE_STATUSES.has(liveness.lastLivenessProbeStatus)
+      ? parseFiniteIsoMs(liveness.lastLivenessProbeAt)
+      : null,
+  ].filter((ms): ms is number => ms !== null);
+
+  return candidateTimes.length > 0
+    ? Math.max(...candidateTimes, fallbackMs)
+    : fallbackMs;
+}
+
+function parseCandidateUpdatedAtMs(value: string | Date): number | null {
+  const ms = value instanceof Date ? value.getTime() : Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function normalizeHeartbeatForceAfterMinutes(
+  value: number | null | undefined,
+): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  return Math.max(0, Math.min(value, 1440));
+}
+
+type HeartbeatAction =
+  | { type: "wait" }
+  | { type: "queue" }
+  | { type: "interrupt"; forceAfterMinutes: number; forceIdleMs: number };
+
+function getActiveHeartbeatAction(params: {
+  isVerifiedIdle: boolean;
+  isActiveDoubt: boolean;
+  process: Process;
+  settings: HeartbeatTurnSettings;
+  heartbeatResetAtMs: number;
+  idleMs: number;
+  now: number;
+}): HeartbeatAction {
+  const { isVerifiedIdle, process, settings, idleMs } = params;
+
+  if (isVerifiedIdle) {
+    return { type: "queue" };
+  }
+
+  // isActiveDoubt: in-turn session that may be hung
+  const afterMinutes = Number.isFinite(settings.afterMinutes)
+    ? Math.max(1, Math.min(settings.afterMinutes, 1440))
+    : DEFAULT_HEARTBEAT_TURNS_AFTER_MINUTES;
+  const forceAfterMinutes = normalizeHeartbeatForceAfterMinutes(
+    settings.forceAfterMinutes,
+  );
+
+  if (forceAfterMinutes !== null) {
+    const forceThresholdMs =
+      (afterMinutes + forceAfterMinutes) * 60 * 1000;
+    if (idleMs >= forceThresholdMs) {
+      return {
+        type: "interrupt",
+        forceAfterMinutes,
+        forceIdleMs: idleMs - afterMinutes * 60 * 1000,
+      };
+    }
+  }
+
+  // Only queue a steering message if the session supports steering;
+  // for non-steerable sessions we have no useful action until force threshold.
+  if (!process.canSteer) {
+    return { type: "wait" };
+  }
+  return { type: "queue" };
 }
 
 /**
@@ -74,6 +193,11 @@ export interface ModelSettings {
   thinking?: ThinkingConfig;
   /** Effort level for response quality. undefined = SDK default */
   effort?: EffortLevel;
+  /**
+   * Optional provider-visible client identity, used by providers that expose
+   * launcher identity in session metadata (currently Codex).
+   */
+  clientName?: string;
   /** Provider to use for this session. undefined = use default (Claude) */
   providerName?: ProviderName;
   /** SSH host for remote execution (undefined = local) */
@@ -84,12 +208,36 @@ export interface ModelSettings {
   globalInstructions?: string;
   /** Permission rules for tool filtering (deny/allow patterns) */
   permissions?: PermissionRules;
+  /** How this session should answer away-recap requests. */
+  recapMode?: RecapMode;
+  /** How this session should request native prompt suggestions. */
+  promptSuggestionMode?: PromptSuggestionMode;
+  /** Session-level helper side model for simulated helper features. */
+  helperSideModel?: string;
 }
 
 /** Error response when queue is full */
 export interface QueueFullResponse {
   error: "queue_full";
   maxQueueSize: number;
+}
+
+export interface HeartbeatTurnSettings {
+  enabled: boolean;
+  afterMinutes: number;
+  text: string;
+  forceAfterMinutes?: number | null;
+}
+
+export interface HeartbeatTurnCandidate {
+  sessionId: string;
+  projectId: UrlProjectId;
+  projectPath: string;
+  provider: ProviderName;
+  model?: string;
+  executor?: string;
+  updatedAt: string | Date;
+  hasPendingToolCall: boolean;
 }
 
 /** Optional callback to persist executor when session ID is received */
@@ -129,11 +277,22 @@ export interface SupervisorOptions {
   onSessionExecutor?: OnSessionExecutorCallback;
   /** Callback to fetch session summary for initial metadata reconciliation */
   onSessionSummary?: OnSessionSummaryCallback;
+  /** Callback to read the current heartbeat-turn settings for a session */
+  getHeartbeatTurnSettings?: (
+    sessionId: string,
+  ) => HeartbeatTurnSettings | undefined;
+  /** Callback to find heartbeat-enabled sessions with no owned process. */
+  getHeartbeatTurnCandidates?: () =>
+    | Promise<HeartbeatTurnCandidate[]>
+    | HeartbeatTurnCandidate[];
+  /** Maximum time to wait for a graceful provider interrupt before hard abort. */
+  interruptTimeoutMs?: number;
 }
 
 export class Supervisor {
   private processes: Map<string, Process> = new Map();
   private sessionToProcess: Map<string, string> = new Map(); // sessionId -> processId
+  private observedProcessIds: Set<string> = new Set();
   private everOwnedSessions: Set<string> = new Set(); // Sessions we've ever owned (for orphan detection)
   private terminatedProcesses: ProcessInfo[] = []; // Recently terminated processes
   private provider: AgentProvider | null;
@@ -148,6 +307,17 @@ export class Supervisor {
   private onSessionExecutor?: OnSessionExecutorCallback;
   private onSessionSummary?: OnSessionSummaryCallback;
   private staleCheckTimer: ReturnType<typeof setInterval>;
+  private getHeartbeatTurnSettings?: (
+    sessionId: string,
+  ) => HeartbeatTurnSettings | undefined;
+  private getHeartbeatTurnCandidates?: () =>
+    | Promise<HeartbeatTurnCandidate[]>
+    | HeartbeatTurnCandidate[];
+  private heartbeatActiveMarkers = new Map<string, ActiveHeartbeatMarker>();
+  private heartbeatTurnInFlight = false;
+  private heartbeatTurnTimer: ReturnType<typeof setInterval>;
+  private livenessProbeTimer: ReturnType<typeof setInterval>;
+  private interruptTimeoutMs: number;
 
   constructor(options: SupervisorOptions) {
     this.provider = options.provider ?? null;
@@ -165,15 +335,60 @@ export class Supervisor {
     });
     this.onSessionExecutor = options.onSessionExecutor;
     this.onSessionSummary = options.onSessionSummary;
+    this.getHeartbeatTurnSettings = options.getHeartbeatTurnSettings;
+    this.getHeartbeatTurnCandidates = options.getHeartbeatTurnCandidates;
+    this.interruptTimeoutMs =
+      options.interruptTimeoutMs ?? DEFAULT_INTERRUPT_TIMEOUT_MS;
     this.staleCheckTimer = setInterval(
       () => this.terminateStaleProcesses(),
       STALE_CHECK_INTERVAL_MS,
     );
     this.staleCheckTimer.unref(); // Don't keep process alive for cleanup
+    this.heartbeatTurnTimer = setInterval(
+      () => {
+        void this.queueHeartbeatTurns();
+      },
+      HEARTBEAT_TURN_CHECK_INTERVAL_MS,
+    );
+    this.heartbeatTurnTimer.unref();
+    this.livenessProbeTimer = setInterval(
+      () => this.probeLongSilentProcesses(),
+      LIVENESS_PROBE_CHECK_INTERVAL_MS,
+    );
+    this.livenessProbeTimer.unref();
 
     if (!this.provider && !this.sdk && !this.realSdk) {
       throw new Error("Either provider, sdk, or realSdk must be provided");
     }
+  }
+
+  private resolveProvider(modelSettings?: ModelSettings): AgentProvider | null {
+    const providerName = modelSettings?.providerName
+      ? modelSettings.providerName
+      : modelSettings?.executor
+        ? "claude"
+        : undefined;
+
+    if (!providerName) {
+      return this.provider;
+    }
+    if (this.provider?.name === providerName) {
+      return this.provider;
+    }
+    return getProvider(providerName);
+  }
+
+  private resolvePromptSuggestionMode(
+    requestedMode: PromptSuggestionMode | undefined,
+    provider: Pick<AgentProvider, "supportsNativePromptSuggestions">,
+  ): PromptSuggestionMode {
+    if (requestedMode === "off") {
+      return "off";
+    }
+    if (provider.supportsNativePromptSuggestions === true) {
+      return "native";
+    }
+    return "off";
   }
 
   async startSession(
@@ -212,13 +427,7 @@ export class Supervisor {
       }
     }
 
-    // Resolve provider: use specified provider name, or fall back to default provider
-    // If executor is specified, we MUST use a provider (Claude) to enable remote execution
-    const provider = modelSettings?.providerName
-      ? getProvider(modelSettings.providerName)
-      : modelSettings?.executor
-        ? getProvider("claude") // Force Claude provider when executor is specified
-        : this.provider;
+    const provider = this.resolveProvider(modelSettings);
 
     // Use provider if available (preferred)
     if (provider) {
@@ -295,13 +504,7 @@ export class Supervisor {
       }
     }
 
-    // Resolve provider: use specified provider name, or fall back to default provider
-    // If executor is specified, we MUST use a provider (Claude) to enable remote execution
-    const provider = modelSettings?.providerName
-      ? getProvider(modelSettings.providerName)
-      : modelSettings?.executor
-        ? getProvider("claude") // Force Claude provider when executor is specified
-        : this.provider;
+    const provider = this.resolveProvider(modelSettings);
 
     // Use provider if available (preferred)
     if (provider) {
@@ -339,6 +542,7 @@ export class Supervisor {
     projectId: UrlProjectId,
     permissionMode?: PermissionMode,
     modelSettings?: ModelSettings,
+    resumeSessionId?: string,
   ): Promise<Process> {
     if (!this.realSdk) {
       throw new Error("realSdk is not available");
@@ -346,16 +550,23 @@ export class Supervisor {
 
     const processHolder: { process: Process | null } = { process: null };
     const effectiveMode = permissionMode ?? this.defaultPermissionMode;
+    const promptSuggestionMode = this.resolvePromptSuggestionMode(
+      modelSettings?.promptSuggestionMode,
+      { supportsNativePromptSuggestions: true },
+    );
 
     // Start session WITHOUT an initial message - agent will wait
     const result = await this.realSdk.startSession({
       cwd: projectPath,
       // No initialMessage - queue will block until one is pushed
+      resumeSessionId,
       permissionMode: effectiveMode,
       model: modelSettings?.model,
       thinking: modelSettings?.thinking,
       effort: modelSettings?.effort,
+      clientName: modelSettings?.clientName,
       globalInstructions: modelSettings?.globalInstructions,
+      promptSuggestions: promptSuggestionMode === "native",
       onToolApproval: async (toolName, input, opts) => {
         if (!processHolder.process) {
           return { behavior: "deny", message: "Process not ready" };
@@ -369,6 +580,8 @@ export class Supervisor {
       queue,
       abort,
       isProcessAlive,
+      probeLiveness,
+      getProviderActivity,
       setMaxThinkingTokens,
       interrupt,
       supportedModels,
@@ -376,7 +589,7 @@ export class Supervisor {
       setModel,
     } = result;
 
-    const tempSessionId = randomUUID();
+    const tempSessionId = resumeSessionId ?? randomUUID();
     const options: ProcessConstructorOptions = {
       projectPath,
       projectId,
@@ -385,6 +598,8 @@ export class Supervisor {
       queue,
       abortFn: abort,
       isProcessAlive,
+      probeLivenessFn: probeLiveness,
+      getProviderActivityFn: getProviderActivity,
       pid: () => {
         const p = result.pid;
         return typeof p === "function" ? p() : p;
@@ -401,18 +616,33 @@ export class Supervisor {
       effort: modelSettings?.effort,
       executor: modelSettings?.executor,
       permissions: modelSettings?.permissions,
+      recapMode: modelSettings?.recapMode,
+      promptSuggestionMode,
+      helperSideModel: modelSettings?.helperSideModel,
     };
 
     const process = new Process(iterator, options);
     processHolder.process = process;
+    this.observeProcessEvents(process);
 
     // Wait for the real session ID from the SDK
-    await process.waitForSessionId();
+    if (!resumeSessionId) {
+      await process.waitForSessionId();
+    }
 
-    // Register as a new session
-    this.registerProcess(process, true);
+    // Recreated processes for an existing session should not emit session-created again.
+    this.registerProcess(process, !resumeSessionId);
 
     return process;
+  }
+
+  private async queueProcessMessage(
+    process: Process,
+    message: UserMessage,
+    options?: { allowSteer?: boolean },
+  ): Promise<ReturnType<Process["queueMessage"]>> {
+    await process.primeSupportedCommandsForMessage(message);
+    return process.queueMessage(message, options);
   }
 
   /**
@@ -426,7 +656,6 @@ export class Supervisor {
     permissionMode?: PermissionMode,
     modelSettings?: ModelSettings,
   ): Promise<Process> {
-    // Create a placeholder process first (needed for tool approval callback)
     const tempSessionId = resumeSessionId ?? randomUUID();
 
     // realSdk is guaranteed to exist here (checked in startSession)
@@ -440,24 +669,23 @@ export class Supervisor {
 
     // Use provided mode or fall back to default
     const effectiveMode = permissionMode ?? this.defaultPermissionMode;
-
-    // Generate UUID for the initial message so SDK and SSE use the same ID.
-    // This ensures the client can match the SSE replay to its temp message,
-    // and prevents duplicates when JSONL is later fetched.
-    const messageUuid = randomUUID();
-    const messageWithUuid: UserMessage = { ...message, uuid: messageUuid };
+    const promptSuggestionMode = this.resolvePromptSuggestionMode(
+      modelSettings?.promptSuggestionMode,
+      { supportsNativePromptSuggestions: true },
+    );
 
     const result = await this.realSdk.startSession({
       cwd: projectPath,
-      initialMessage: messageWithUuid,
       resumeSessionId,
       permissionMode: effectiveMode,
       model: modelSettings?.model,
       thinking: modelSettings?.thinking,
       effort: modelSettings?.effort,
+      clientName: modelSettings?.clientName,
       executor: modelSettings?.executor,
       remoteEnv: modelSettings?.remoteEnv,
       globalInstructions: modelSettings?.globalInstructions,
+      promptSuggestions: promptSuggestionMode === "native",
       onToolApproval: async (toolName, input, opts) => {
         // Delegate to the process's handleToolApproval
         if (!processHolder.process) {
@@ -472,6 +700,8 @@ export class Supervisor {
       queue,
       abort,
       isProcessAlive,
+      probeLiveness,
+      getProviderActivity,
       setMaxThinkingTokens,
       interrupt,
       supportedModels,
@@ -487,6 +717,8 @@ export class Supervisor {
       queue,
       abortFn: abort,
       isProcessAlive,
+      probeLivenessFn: probeLiveness,
+      getProviderActivityFn: getProviderActivity,
       pid: () => {
         const p = result.pid;
         return typeof p === "function" ? p() : p;
@@ -503,21 +735,27 @@ export class Supervisor {
       effort: modelSettings?.effort,
       executor: modelSettings?.executor,
       permissions: modelSettings?.permissions,
+      recapMode: modelSettings?.recapMode,
+      promptSuggestionMode,
+      helperSideModel: modelSettings?.helperSideModel,
     };
 
     const process = new Process(iterator, options);
     processHolder.process = process;
-
-    // Add the initial user message to history with the same UUID we passed to SDK.
-    // This ensures SSE replay includes the user message so the client can replace
-    // its temp message. The SDK also writes to JSONL with this UUID, so both SSE
-    // and JSONL will have matching IDs (no duplicates).
-    process.addInitialUserMessage(message.text, messageUuid, message.tempId);
+    this.observeProcessEvents(process);
 
     // Wait for the real session ID from the SDK before registering
     // This ensures the client gets the correct ID to use for persistence
     if (!resumeSessionId) {
       await process.waitForSessionId();
+    }
+
+    const queued = await this.queueProcessMessage(process, message, {
+      allowSteer: false,
+    });
+    if (!queued.success) {
+      await process.abort();
+      throw new Error(queued.error ?? "Failed to queue initial message");
     }
 
     this.registerProcess(process, !resumeSessionId);
@@ -535,6 +773,7 @@ export class Supervisor {
     permissionMode?: PermissionMode,
     modelSettings?: ModelSettings,
     provider?: AgentProvider,
+    resumeSessionId?: string,
   ): Promise<Process> {
     const activeProvider = provider ?? this.provider;
     if (!activeProvider) {
@@ -543,18 +782,25 @@ export class Supervisor {
 
     const processHolder: { process: Process | null } = { process: null };
     const effectiveMode = permissionMode ?? this.defaultPermissionMode;
+    const promptSuggestionMode = this.resolvePromptSuggestionMode(
+      modelSettings?.promptSuggestionMode,
+      activeProvider,
+    );
 
     // Start session WITHOUT an initial message - agent will wait
     const result = await activeProvider.startSession({
       cwd: projectPath,
       // No initialMessage - queue will block until one is pushed
+      resumeSessionId,
       permissionMode: effectiveMode,
       model: modelSettings?.model,
       thinking: modelSettings?.thinking,
       effort: modelSettings?.effort,
+      clientName: modelSettings?.clientName,
       executor: modelSettings?.executor,
       remoteEnv: modelSettings?.remoteEnv,
       globalInstructions: modelSettings?.globalInstructions,
+      promptSuggestions: promptSuggestionMode === "native",
       onToolApproval: async (toolName, input, opts) => {
         if (!processHolder.process) {
           return { behavior: "deny", message: "Process not ready" };
@@ -568,6 +814,8 @@ export class Supervisor {
       queue,
       abort,
       isProcessAlive,
+      probeLiveness,
+      getProviderActivity,
       setMaxThinkingTokens,
       interrupt,
       steer,
@@ -576,7 +824,7 @@ export class Supervisor {
       setModel,
     } = result;
 
-    const tempSessionId = randomUUID();
+    const tempSessionId = resumeSessionId ?? randomUUID();
     const options: ProcessConstructorOptions = {
       projectPath,
       projectId,
@@ -585,6 +833,8 @@ export class Supervisor {
       queue,
       abortFn: abort,
       isProcessAlive,
+      probeLivenessFn: probeLiveness,
+      getProviderActivityFn: getProviderActivity,
       pid: () => {
         const p = result.pid;
         return typeof p === "function" ? p() : p;
@@ -602,16 +852,22 @@ export class Supervisor {
       effort: modelSettings?.effort,
       executor: modelSettings?.executor,
       permissions: modelSettings?.permissions,
+      recapMode: modelSettings?.recapMode,
+      promptSuggestionMode,
+      helperSideModel: modelSettings?.helperSideModel,
     };
 
     const process = new Process(iterator, options);
     processHolder.process = process;
+    this.observeProcessEvents(process);
 
     // Wait for the real session ID from the provider
-    await process.waitForSessionId();
+    if (!resumeSessionId) {
+      await process.waitForSessionId();
+    }
 
-    // Register as a new session
-    this.registerProcess(process, true);
+    // Recreated processes for an existing session should not emit session-created again.
+    this.registerProcess(process, !resumeSessionId);
 
     return process;
   }
@@ -633,21 +889,18 @@ export class Supervisor {
       throw new Error("provider is not available");
     }
 
-    const tempSessionId = resumeSessionId ?? randomUUID();
-
     // We need to reference process in the callback before it's assigned
     const processHolder: { process: Process | null } = { process: null };
 
     // Use provided mode or fall back to default
     const effectiveMode = permissionMode ?? this.defaultPermissionMode;
-
-    // Generate UUID for the initial message so SDK and SSE use the same ID.
-    const messageUuid = randomUUID();
-    const messageWithUuid: UserMessage = { ...message, uuid: messageUuid };
+    const promptSuggestionMode = this.resolvePromptSuggestionMode(
+      modelSettings?.promptSuggestionMode,
+      activeProvider,
+    );
 
     const result = await activeProvider.startSession({
       cwd: projectPath,
-      initialMessage: messageWithUuid,
       resumeSessionId,
       permissionMode: effectiveMode,
       model: modelSettings?.model,
@@ -656,6 +909,7 @@ export class Supervisor {
       executor: modelSettings?.executor,
       remoteEnv: modelSettings?.remoteEnv,
       globalInstructions: modelSettings?.globalInstructions,
+      promptSuggestions: promptSuggestionMode === "native",
       onToolApproval: async (toolName, input, opts) => {
         if (!processHolder.process) {
           return { behavior: "deny", message: "Process not ready" };
@@ -669,6 +923,8 @@ export class Supervisor {
       queue,
       abort,
       isProcessAlive,
+      probeLiveness,
+      getProviderActivity,
       setMaxThinkingTokens,
       interrupt,
       steer,
@@ -677,6 +933,7 @@ export class Supervisor {
       setModel,
     } = result;
 
+    const tempSessionId = resumeSessionId ?? randomUUID();
     const options: ProcessConstructorOptions = {
       projectPath,
       projectId,
@@ -685,6 +942,8 @@ export class Supervisor {
       queue,
       abortFn: abort,
       isProcessAlive,
+      probeLivenessFn: probeLiveness,
+      getProviderActivityFn: getProviderActivity,
       pid: () => {
         const p = result.pid;
         return typeof p === "function" ? p() : p;
@@ -702,17 +961,26 @@ export class Supervisor {
       effort: modelSettings?.effort,
       executor: modelSettings?.executor,
       permissions: modelSettings?.permissions,
+      recapMode: modelSettings?.recapMode,
+      promptSuggestionMode,
+      helperSideModel: modelSettings?.helperSideModel,
     };
 
     const process = new Process(iterator, options);
     processHolder.process = process;
-
-    // Add the initial user message to history with the same UUID we passed to provider.
-    process.addInitialUserMessage(message.text, messageUuid, message.tempId);
+    this.observeProcessEvents(process);
 
     // Wait for the real session ID from the provider before registering
     if (!resumeSessionId) {
       await process.waitForSessionId();
+    }
+
+    const queued = await this.queueProcessMessage(process, message, {
+      allowSteer: false,
+    });
+    if (!queued.success) {
+      await process.abort();
+      throw new Error(queued.error ?? "Failed to queue initial message");
     }
 
     this.registerProcess(process, !resumeSessionId);
@@ -840,7 +1108,10 @@ export class Supervisor {
           }
           // Queue message to existing process (if we didn't fall through to restart)
           if (!existingProcess.isTerminated) {
-            const result = existingProcess.queueMessage(message);
+            const result = await this.queueProcessMessage(
+              existingProcess,
+              message,
+            );
             if (result.success) {
               return existingProcess;
             }
@@ -894,13 +1165,7 @@ export class Supervisor {
       }
     }
 
-    // Resolve provider: use specified provider name, or fall back to default provider
-    // If executor is specified, we MUST use a provider (Claude) to enable remote execution
-    const provider = modelSettings?.providerName
-      ? getProvider(modelSettings.providerName)
-      : modelSettings?.executor
-        ? getProvider("claude") // Force Claude provider when executor is specified
-        : this.provider;
+    const provider = this.resolveProvider(modelSettings);
 
     // Use provider if available (preferred)
     if (provider) {
@@ -941,6 +1206,88 @@ export class Supervisor {
     return this.processes.get(processId);
   }
 
+  async reconfigureProcess(
+    processId: string,
+    updates: ModelSettings,
+  ): Promise<Process | null> {
+    const process = this.getProcess(processId);
+    if (!process || process.isTerminated) {
+      return null;
+    }
+
+    const hasModelUpdate = Object.prototype.hasOwnProperty.call(
+      updates,
+      "model",
+    );
+    const hasThinkingUpdate = Object.prototype.hasOwnProperty.call(
+      updates,
+      "thinking",
+    );
+    const hasEffortUpdate = Object.prototype.hasOwnProperty.call(
+      updates,
+      "effort",
+    );
+
+    const nextModel = hasModelUpdate ? updates.model : process.resolvedModel;
+    const nextThinking = hasThinkingUpdate ? updates.thinking : process.thinking;
+    const nextEffort = hasEffortUpdate ? updates.effort : process.effort;
+
+    const modelChanged = nextModel !== process.resolvedModel;
+    const thinkingChanged = nextThinking?.type !== process.thinking?.type;
+    const effortChanged = nextEffort !== process.effort;
+
+    if (!modelChanged && !thinkingChanged && !effortChanged) {
+      return process;
+    }
+
+    if (!thinkingChanged && !effortChanged && process.supportsSetModel) {
+      const changed = await process.setModel(nextModel);
+      return changed ? process : null;
+    }
+
+    const effectiveProvider = this.resolveProvider({
+      providerName: process.provider,
+    });
+    if (!effectiveProvider) {
+      return null;
+    }
+
+    const mergedSettings: ModelSettings = {
+      model: nextModel,
+      thinking: nextThinking,
+      effort: nextEffort,
+      providerName: process.provider,
+      executor: process.executor,
+      recapMode: process.recapMode,
+      promptSuggestionMode: process.promptSuggestionMode,
+      helperSideModel: process.helperSideModel,
+    };
+
+    await process.abort();
+    this.unregisterProcess(process);
+
+    return await this.createProviderSession(
+      process.projectPath,
+      process.projectId,
+      process.permissionMode,
+      mergedSettings,
+      effectiveProvider,
+      process.sessionId,
+    );
+  }
+
+  configureProcessRecaps(
+    processId: string,
+    config: { recapMode?: RecapMode; helperSideModel?: string },
+  ): Process | null {
+    const process = this.getProcess(processId);
+    if (!process || process.isTerminated) {
+      return null;
+    }
+    process.setRecapConfig(config);
+    return process;
+  }
+
   getProcessForSession(sessionId: string): Process | undefined {
     const processId = this.sessionToProcess.get(sessionId);
     if (!processId) return undefined;
@@ -975,10 +1322,20 @@ export class Supervisor {
       return { success: false, error: "Process terminated" };
     }
 
+    const isActiveSteeringMessage =
+      message.metadata?.deliveryIntent === "steer" &&
+      process.state.type === "in-turn";
+    const requestedThinking = isActiveSteeringMessage
+      ? process.thinking
+      : modelSettings?.thinking;
+    const requestedEffort = isActiveSteeringMessage
+      ? process.effort
+      : modelSettings?.effort;
+
     // Check if thinking/effort settings changed
     const thinkingChanged =
-      process.thinking?.type !== (modelSettings?.thinking?.type ?? undefined);
-    const effortChanged = process.effort !== modelSettings?.effort;
+      process.thinking?.type !== (requestedThinking?.type ?? undefined);
+    const effortChanged = process.effort !== requestedEffort;
 
     if (thinkingChanged || effortChanged) {
       if (
@@ -987,14 +1344,14 @@ export class Supervisor {
         process.supportsThinkingModeChange
       ) {
         // Toggle thinking dynamically via deprecated API (works for auto↔off)
-        const tokens = modelSettings?.thinking?.type === "disabled" ? 0 : 1;
+        const tokens = requestedThinking?.type === "disabled" ? 0 : 1;
         const changed = await process.setMaxThinkingTokens(
           tokens === 0 ? undefined : tokens,
         );
         if (changed) {
           process.updateThinkingConfig(
-            modelSettings?.thinking,
-            modelSettings?.effort,
+            requestedThinking,
+            requestedEffort,
           );
         } else {
           const log = getLogger();
@@ -1017,8 +1374,8 @@ export class Supervisor {
             processId: process.id,
             oldThinking: process.thinking?.type,
             oldEffort: process.effort,
-            newThinking: modelSettings?.thinking?.type,
-            newEffort: modelSettings?.effort,
+            newThinking: requestedThinking?.type,
+            newEffort: requestedEffort,
           },
           "Thinking/effort changed on queue, restarting process",
         );
@@ -1026,12 +1383,21 @@ export class Supervisor {
         await process.abort();
         this.unregisterProcess(process);
 
+        const restartModelSettings: ModelSettings = {
+          ...modelSettings,
+          recapMode: modelSettings?.recapMode ?? process.recapMode,
+          promptSuggestionMode:
+            modelSettings?.promptSuggestionMode ?? process.promptSuggestionMode,
+          helperSideModel:
+            modelSettings?.helperSideModel ?? process.helperSideModel,
+        };
+
         const result = await this.resumeSession(
           sessionId,
           projectPath,
           message,
           permissionMode,
-          modelSettings,
+          restartModelSettings,
         );
 
         if ("id" in result) {
@@ -1046,7 +1412,7 @@ export class Supervisor {
       process.setPermissionMode(permissionMode);
     }
 
-    const result = process.queueMessage(message);
+    const result = await this.queueProcessMessage(process, message);
     if (result.success) {
       return { success: true, process, restarted: false };
     }
@@ -1056,6 +1422,382 @@ export class Supervisor {
 
   getAllProcesses(): Process[] {
     return Array.from(this.processes.values());
+  }
+
+  private async queueHeartbeatTurns(): Promise<void> {
+    if (this.heartbeatTurnInFlight) {
+      return;
+    }
+    this.heartbeatTurnInFlight = true;
+    const now = Date.now();
+    const log = getLogger();
+
+    try {
+      for (const process of this.processes.values()) {
+        await this.queueHeartbeatTurnForProcess(process, now, log);
+      }
+
+      if (!this.getHeartbeatTurnCandidates) {
+        return;
+      }
+      const candidates = await this.getHeartbeatTurnCandidates();
+      for (const candidate of candidates) {
+        await this.queueHeartbeatTurnForCandidate(candidate, now, log);
+      }
+    } finally {
+      this.heartbeatTurnInFlight = false;
+    }
+  }
+
+  private async queueHeartbeatTurnForProcess(
+    process: Process,
+    now: number,
+    log: ReturnType<typeof getLogger>,
+  ): Promise<void> {
+    const settings = this.getHeartbeatTurnSettings?.(process.sessionId);
+    if (!settings?.enabled) {
+      return;
+    }
+    if (process.isTerminated || process.isHeld) {
+      return;
+    }
+    if (process.queueDepth > 0 || process.isProcessAlive === false) {
+      return;
+    }
+
+    const liveness = process.getLivenessSnapshot(new Date(now));
+    const isVerifiedIdle =
+      process.state.type === "idle" &&
+      liveness.derivedStatus === "verified-idle";
+    const isActiveDoubt =
+      process.state.type === "in-turn" &&
+      ACTIVE_HEARTBEAT_DOUBT_STATUSES.has(liveness.derivedStatus);
+    if (!isVerifiedIdle && !isActiveDoubt) {
+      return;
+    }
+
+    const afterMinutes = Number.isFinite(settings.afterMinutes)
+      ? Math.max(1, Math.min(settings.afterMinutes, 1440))
+      : DEFAULT_HEARTBEAT_TURNS_AFTER_MINUTES;
+    const idleThresholdMs = afterMinutes * 60 * 1000;
+    const text = settings.text.trim() || DEFAULT_HEARTBEAT_TURN_TEXT;
+
+    const fallbackMs =
+      process.state.type === "idle"
+        ? process.state.since.getTime()
+        : parseFiniteIsoMs(liveness.lastStateChangeAt) ?? now;
+    const heartbeatResetAtMs = getHeartbeatResetAtMs(liveness, fallbackMs);
+    if (!Number.isFinite(heartbeatResetAtMs)) {
+      return;
+    }
+    const idleMs = Math.max(0, now - heartbeatResetAtMs);
+    if (idleMs < idleThresholdMs) {
+      return;
+    }
+    const heartbeatResetAt = new Date(heartbeatResetAtMs).toISOString();
+    const action = getActiveHeartbeatAction({
+      isVerifiedIdle,
+      isActiveDoubt,
+      process,
+      settings,
+      heartbeatResetAtMs,
+      idleMs,
+      now,
+    });
+    if (action.type === "wait") {
+      return;
+    }
+
+    if (action.type === "interrupt") {
+      void this.interruptHeartbeatTurnForProcess(process, {
+        now,
+        log,
+        text,
+        idleMs,
+        heartbeatResetAt,
+        afterMinutes,
+        forceAfterMinutes: action.forceAfterMinutes,
+        forceIdleMs: action.forceIdleMs,
+        livenessStatus: liveness.derivedStatus,
+      });
+      return;
+    }
+
+    const result = await this.queueProcessMessage(process, { text });
+    if (result.success) {
+      log.info(
+        {
+          event: "heartbeat_turn_queued",
+          sessionId: process.sessionId,
+          processId: process.id,
+          projectId: process.projectId,
+          idleMs,
+          heartbeatResetAt,
+          afterMinutes,
+          text,
+          heartbeatReason: isVerifiedIdle ? "verified-idle" : "active-doubt",
+          livenessStatus: liveness.derivedStatus,
+        },
+        `Queued heartbeat turn for session: ${process.sessionId}`,
+      );
+    } else {
+      log.warn(
+        {
+          event: "heartbeat_turn_failed",
+          sessionId: process.sessionId,
+          processId: process.id,
+          projectId: process.projectId,
+          idleMs,
+          heartbeatResetAt,
+          afterMinutes,
+          error: result.error,
+          heartbeatReason: isVerifiedIdle ? "verified-idle" : "active-doubt",
+          livenessStatus: liveness.derivedStatus,
+        },
+        `Failed to queue heartbeat turn for session: ${process.sessionId}`,
+      );
+    }
+  }
+
+  private async interruptHeartbeatTurnForProcess(
+    process: Process,
+    details: {
+      now: number;
+      log: ReturnType<typeof getLogger>;
+      text: string;
+      idleMs: number;
+      heartbeatResetAt: string;
+      afterMinutes: number;
+      forceAfterMinutes: number;
+      forceIdleMs: number;
+      livenessStatus: SessionLivenessSnapshot["derivedStatus"];
+    },
+  ): Promise<void> {
+    const { log } = details;
+    const { interrupted, timedOut } = await this.interruptProcessWithTimeout(
+      process,
+      {
+        extraMessages: [{ text: details.text }],
+        preamble: FORCED_HEARTBEAT_INTERRUPT_PREAMBLE,
+      },
+    );
+
+    if (interrupted) {
+      log.warn(
+        {
+          event: "heartbeat_turn_interrupted",
+          sessionId: process.sessionId,
+          processId: process.id,
+          projectId: process.projectId,
+          idleMs: details.idleMs,
+          heartbeatResetAt: details.heartbeatResetAt,
+          afterMinutes: details.afterMinutes,
+          forceAfterMinutes: details.forceAfterMinutes,
+          forceIdleMs: details.forceIdleMs,
+          text: details.text,
+          heartbeatReason: "force-after-active-doubt",
+          livenessStatus: details.livenessStatus,
+        },
+        `Interrupted active turn for heartbeat: ${process.sessionId}`,
+      );
+      return;
+    }
+
+    if (timedOut) {
+      log.warn(
+        {
+          event: "heartbeat_interrupt_timeout",
+          sessionId: process.sessionId,
+          processId: process.id,
+          projectId: process.projectId,
+          timeoutMs: this.interruptTimeoutMs,
+          forceAfterMinutes: details.forceAfterMinutes,
+          forceIdleMs: details.forceIdleMs,
+          livenessStatus: details.livenessStatus,
+        },
+        `Heartbeat interrupt timed out: ${process.sessionId}`,
+      );
+    }
+
+    const result = await this.queueProcessMessage(process, {
+      text: `${FORCED_HEARTBEAT_INTERRUPT_PREAMBLE}\n\n${details.text}`,
+    });
+    log.warn(
+      {
+        event: result.success
+          ? "heartbeat_interrupt_fallback_queued"
+          : "heartbeat_interrupt_fallback_failed",
+        sessionId: process.sessionId,
+        processId: process.id,
+        projectId: process.projectId,
+        idleMs: details.idleMs,
+        heartbeatResetAt: details.heartbeatResetAt,
+        afterMinutes: details.afterMinutes,
+        forceAfterMinutes: details.forceAfterMinutes,
+        forceIdleMs: details.forceIdleMs,
+        error: result.error,
+        heartbeatReason: "force-after-active-doubt",
+        livenessStatus: details.livenessStatus,
+      },
+      result.success
+        ? `Queued heartbeat after failed interrupt: ${process.sessionId}`
+        : `Failed heartbeat interrupt fallback: ${process.sessionId}`,
+    );
+  }
+
+  private async queueHeartbeatTurnForCandidate(
+    candidate: HeartbeatTurnCandidate,
+    now: number,
+    log: ReturnType<typeof getLogger>,
+  ): Promise<void> {
+    if (this.getProcessForSession(candidate.sessionId)) {
+      return;
+    }
+    if (!candidate.hasPendingToolCall) {
+      return;
+    }
+    const provider = this.resolveProvider({ providerName: candidate.provider });
+    if (!provider?.supportsSteering) {
+      return;
+    }
+    const settings = this.getHeartbeatTurnSettings?.(candidate.sessionId);
+    if (!settings?.enabled) {
+      return;
+    }
+
+    const heartbeatResetAtMs = parseCandidateUpdatedAtMs(candidate.updatedAt);
+    if (heartbeatResetAtMs === null) {
+      return;
+    }
+    const afterMinutes = Number.isFinite(settings.afterMinutes)
+      ? Math.max(1, Math.min(settings.afterMinutes, 1440))
+      : DEFAULT_HEARTBEAT_TURNS_AFTER_MINUTES;
+    const idleThresholdMs = afterMinutes * 60 * 1000;
+    const idleMs = Math.max(0, now - heartbeatResetAtMs);
+    if (idleMs < idleThresholdMs) {
+      return;
+    }
+
+    const text = settings.text.trim() || DEFAULT_HEARTBEAT_TURN_TEXT;
+    const heartbeatResetAt = new Date(heartbeatResetAtMs).toISOString();
+    const result = await this.resumeSession(
+      candidate.sessionId,
+      candidate.projectPath,
+      { text },
+      undefined,
+      {
+        providerName: candidate.provider,
+        model: candidate.model,
+        executor: candidate.executor,
+      },
+    );
+
+    if ("error" in result) {
+      log.warn(
+        {
+          event: "heartbeat_turn_failed",
+          sessionId: candidate.sessionId,
+          projectId: candidate.projectId,
+          idleMs,
+          heartbeatResetAt,
+          afterMinutes,
+          error: result.error,
+          heartbeatReason: "unowned-pending-tool",
+          livenessStatus: "pending-tool-unowned",
+        },
+        `Failed to resume heartbeat turn for session: ${candidate.sessionId}`,
+      );
+      return;
+    }
+
+    log.info(
+      {
+        event: "heartbeat_turn_queued",
+        sessionId: candidate.sessionId,
+        projectId: candidate.projectId,
+        idleMs,
+        heartbeatResetAt,
+        afterMinutes,
+        text,
+        heartbeatReason: "unowned-pending-tool",
+        livenessStatus: "pending-tool-unowned",
+        queued: "queued" in result ? result.queued : false,
+        processId: "id" in result ? result.id : undefined,
+      },
+      `Resumed heartbeat turn for session: ${candidate.sessionId}`,
+    );
+  }
+
+  private probeLongSilentProcesses(): void {
+    const now = new Date();
+    const log = getLogger();
+
+    for (const process of this.processes.values()) {
+      if (process.state.type !== "in-turn") {
+        continue;
+      }
+      if (process.isHeld || process.isTerminated || !process.canProbeLiveness) {
+        continue;
+      }
+
+      const liveness = process.getLivenessSnapshot(now);
+      if (
+        liveness.derivedStatus !== "long-silent-unverified" &&
+        liveness.derivedStatus !== "verified-waiting-provider"
+      ) {
+        continue;
+      }
+
+      const lastProbeAt = liveness.lastLivenessProbeAt
+        ? Date.parse(liveness.lastLivenessProbeAt)
+        : null;
+      if (
+        lastProbeAt !== null &&
+        Number.isFinite(lastProbeAt) &&
+        now.getTime() - lastProbeAt < LIVENESS_PROBE_REFRESH_MS
+      ) {
+        continue;
+      }
+
+      void process
+        .probeLiveness()
+        .then((probe) => {
+          if (!probe) {
+            return;
+          }
+          const event =
+            process.state.type === "in-turn" && probe.status !== "active"
+              ? "liveness_probe_attention"
+              : "liveness_probe_completed";
+          log.info(
+            {
+              event,
+              sessionId: process.sessionId,
+              processId: process.id,
+              projectId: process.projectId,
+              provider: process.provider,
+              status: probe.status,
+              source: probe.source,
+              detail: probe.detail,
+              checkedAt: probe.checkedAt.toISOString(),
+            },
+            "Completed active session liveness probe",
+          );
+        })
+        .catch((error) => {
+          log.warn(
+            {
+              event: "liveness_probe_failed",
+              sessionId: process.sessionId,
+              processId: process.id,
+              projectId: process.projectId,
+              provider: process.provider,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            "Active session liveness probe failed",
+          );
+        });
+    }
   }
 
   getProcessInfoList(): ProcessInfo[] {
@@ -1104,7 +1846,7 @@ export class Supervisor {
    */
   async interruptProcess(
     processId: string,
-  ): Promise<{ success: boolean; supported: boolean }> {
+  ): Promise<{ success: boolean; supported: boolean; hardAborted?: boolean }> {
     const process = this.processes.get(processId);
     if (!process) return { success: false, supported: false };
 
@@ -1125,8 +1867,209 @@ export class Supervisor {
       `Session interrupt requested: ${process.sessionId}`,
     );
 
-    const interrupted = await process.interrupt();
-    return { success: interrupted, supported: true };
+    const { interrupted, timedOut } =
+      await this.interruptProcessWithTimeout(process);
+    if (interrupted) {
+      return { success: true, supported: true };
+    }
+
+    if (timedOut) {
+      log.warn(
+        {
+          event: "session_interrupt_timeout",
+          sessionId: process.sessionId,
+          processId: process.id,
+          projectId: process.projectId,
+          currentState: process.state.type,
+          timeoutMs: this.interruptTimeoutMs,
+        },
+        `Session interrupt timed out; hard-aborting process: ${process.sessionId}`,
+      );
+    }
+
+    log.warn(
+      {
+        event: "session_interrupt_incomplete",
+        sessionId: process.sessionId,
+        processId: process.id,
+        projectId: process.projectId,
+        currentState: process.state.type,
+      },
+      `Session interrupt incomplete; hard-aborting process: ${process.sessionId}`,
+    );
+
+    const deferredMessages = process.drainPendingUserMessages("promoted");
+    this.emitSessionAborted(process.sessionId, process.projectId);
+    process.terminate("interrupt fallback abort");
+    this.unregisterProcess(process);
+    this.recoverDeferredMessagesAfterHardAbort(process, deferredMessages);
+    return { success: false, supported: true, hardAborted: true };
+  }
+
+  async requestRecap(
+    processId: string,
+    options?: { sinceMs?: number | null },
+  ): Promise<{ supported: boolean; emitted: boolean; reason?: string }> {
+    const process = this.processes.get(processId);
+    if (!process) {
+      return {
+        supported: false,
+        emitted: false,
+        reason: "process not found",
+      };
+    }
+
+    const provider = getProvider(process.provider);
+    if (!provider) {
+      return {
+        supported: false,
+        emitted: false,
+        reason: "provider not found",
+      };
+    }
+
+    return process.requestRecap(provider, options);
+  }
+
+  private async interruptProcessWithTimeout(
+    process: Process,
+    options?: { extraMessages?: UserMessage[]; preamble?: string },
+  ): Promise<{ interrupted: boolean; timedOut: boolean }> {
+    const log = getLogger();
+    const interruptPromise = process
+      .interrupt(options)
+      .then((interrupted) => ({ interrupted, timedOut: false }))
+      .catch((error) => {
+        log.warn(
+          {
+            event: "session_interrupt_failed",
+            sessionId: process.sessionId,
+            processId: process.id,
+            projectId: process.projectId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          `Session interrupt failed: ${process.sessionId}`,
+        );
+        return { interrupted: false, timedOut: false };
+      });
+
+    if (
+      !Number.isFinite(this.interruptTimeoutMs) ||
+      this.interruptTimeoutMs <= 0
+    ) {
+      return interruptPromise;
+    }
+
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<{
+      interrupted: boolean;
+      timedOut: boolean;
+    }>((resolve) => {
+      timeout = setTimeout(() => {
+        resolve({ interrupted: false, timedOut: true });
+      }, this.interruptTimeoutMs);
+      timeout.unref?.();
+    });
+
+    try {
+      return await Promise.race([interruptPromise, timeoutPromise]);
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    }
+  }
+
+  private recoverDeferredMessagesAfterHardAbort(
+    sourceProcess: Process,
+    deferredMessages: UserMessage[],
+  ): void {
+    if (deferredMessages.length === 0) {
+      return;
+    }
+
+    void this.resumeDeferredMessagesAfterHardAbort(
+      sourceProcess,
+      deferredMessages,
+    ).catch((error) => {
+      const log = getLogger();
+      log.warn(
+        {
+          event: "deferred_recovery_failed",
+          sessionId: sourceProcess.sessionId,
+          processId: sourceProcess.id,
+          projectId: sourceProcess.projectId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        "Failed to recover deferred messages after hard abort",
+      );
+    });
+  }
+
+  private async resumeDeferredMessagesAfterHardAbort(
+    sourceProcess: Process,
+    deferredMessages: UserMessage[],
+  ): Promise<void> {
+    const [firstMessage, ...remainingMessages] = deferredMessages;
+    if (!firstMessage) {
+      return;
+    }
+
+    const providerName =
+      sourceProcess.provider === "claude" && this.realSdk && !this.provider
+        ? undefined
+        : sourceProcess.provider;
+
+    const result = await this.resumeSession(
+      sourceProcess.sessionId,
+      sourceProcess.projectPath,
+      firstMessage,
+      firstMessage.mode ?? sourceProcess.permissionMode,
+      {
+        model: sourceProcess.resolvedModel ?? sourceProcess.model,
+        thinking: sourceProcess.thinking,
+        effort: sourceProcess.effort,
+        providerName,
+        executor: sourceProcess.executor,
+        permissions: sourceProcess.permissions,
+      },
+    );
+
+    const log = getLogger();
+    if (!("id" in result)) {
+      log.warn(
+        {
+          event: "deferred_recovery_not_started",
+          sessionId: sourceProcess.sessionId,
+          processId: sourceProcess.id,
+          projectId: sourceProcess.projectId,
+          recoveredCount: deferredMessages.length,
+        },
+        "Deferred recovery was queued or rejected after hard abort",
+      );
+      return;
+    }
+
+    for (const message of remainingMessages) {
+      if (message.mode) {
+        result.setPermissionMode(message.mode);
+      }
+      await result.primeSupportedCommandsForMessage(message);
+      const queued = result.deferMessage(message, { promoteIfReady: false });
+      if (!queued.success) {
+        log.warn(
+          {
+            event: "deferred_recovery_enqueue_failed",
+            sessionId: sourceProcess.sessionId,
+            processId: result.id,
+            projectId: sourceProcess.projectId,
+            tempId: message.tempId,
+            error: queued.error,
+          },
+          "Failed to recover deferred message on replacement process",
+        );
+      }
+    }
   }
 
   private emitSessionAborted(sessionId: string, projectId: UrlProjectId): void {
@@ -1141,69 +2084,11 @@ export class Supervisor {
     this.eventBus.emit(event);
   }
 
-  private registerProcess(process: Process, isNewSession: boolean): void {
-    const log = getLogger();
-    log.info(
-      {
-        event: "session_registered",
-        sessionId: process.sessionId,
-        processId: process.id,
-        projectId: process.projectId,
-        projectPath: process.projectPath,
-        isNewSession,
-        permissionMode: process.permissionMode,
-      },
-      `Session registered: ${process.sessionId} (process: ${process.id})`,
-    );
-
-    this.processes.set(process.id, process);
-    this.sessionToProcess.set(process.sessionId, process.id);
-    this.everOwnedSessions.add(process.sessionId);
-
-    const ownership: SessionOwnership = {
-      owner: "self",
-      processId: process.id,
-      permissionMode: process.permissionMode,
-      modeVersion: process.modeVersion,
-    };
-
-    // Emit session created event for new sessions
-    if (isNewSession) {
-      this.emitSessionCreated(process, ownership);
-      this.scheduleInitialSessionReconciliation(
-        process.sessionId,
-        process.projectId,
-      );
+  private observeProcessEvents(process: Process): void {
+    if (this.observedProcessIds.has(process.id)) {
+      return;
     }
-
-    // Emit ownership change event
-    this.emitOwnershipChange(process.sessionId, process.projectId, ownership);
-
-    // Emit initial agent activity (process starts in in-turn state)
-    const initialState = process.state;
-    if (
-      initialState.type === "in-turn" ||
-      initialState.type === "waiting-input"
-    ) {
-      // Convert InputRequest.type to PendingInputType if waiting for input at start
-      let pendingInputType: PendingInputType | undefined;
-      if (initialState.type === "waiting-input") {
-        const requestType = initialState.request.type;
-        pendingInputType =
-          requestType === "tool-approval" ? "tool-approval" : "user-question";
-      }
-      this.emitAgentActivityChange(
-        process.sessionId,
-        process.projectId,
-        initialState.type,
-        pendingInputType,
-      );
-    }
-
-    // Emit worker activity after registering (new worker added)
-    this.emitWorkerActivity();
-
-    // Listen for completion to auto-cleanup, and state changes for process state events
+    this.observedProcessIds.add(process.id);
     process.subscribe((event) => {
       if (event.type === "complete") {
         this.unregisterProcess(process);
@@ -1304,7 +2189,73 @@ export class Supervisor {
     });
   }
 
+  private registerProcess(process: Process, isNewSession: boolean): void {
+    this.observeProcessEvents(process);
+
+    const log = getLogger();
+    log.info(
+      {
+        event: "session_registered",
+        sessionId: process.sessionId,
+        processId: process.id,
+        projectId: process.projectId,
+        projectPath: process.projectPath,
+        isNewSession,
+        permissionMode: process.permissionMode,
+      },
+      `Session registered: ${process.sessionId} (process: ${process.id})`,
+    );
+
+    this.processes.set(process.id, process);
+    this.sessionToProcess.set(process.sessionId, process.id);
+    this.everOwnedSessions.add(process.sessionId);
+
+    const ownership: SessionOwnership = {
+      owner: "self",
+      processId: process.id,
+      permissionMode: process.permissionMode,
+      modeVersion: process.modeVersion,
+    };
+
+    // Emit session created event for new sessions
+    if (isNewSession) {
+      this.emitSessionCreated(process, ownership);
+      this.scheduleInitialSessionReconciliation(
+        process.sessionId,
+        process.projectId,
+      );
+    }
+
+    // Emit ownership change event
+    this.emitOwnershipChange(process.sessionId, process.projectId, ownership);
+
+    // Emit initial agent activity (process starts in in-turn state)
+    const initialState = process.state;
+    if (
+      initialState.type === "in-turn" ||
+      initialState.type === "waiting-input"
+    ) {
+      // Convert InputRequest.type to PendingInputType if waiting for input at start
+      let pendingInputType: PendingInputType | undefined;
+      if (initialState.type === "waiting-input") {
+        const requestType = initialState.request.type;
+        pendingInputType =
+          requestType === "tool-approval" ? "tool-approval" : "user-question";
+      }
+      this.emitAgentActivityChange(
+        process.sessionId,
+        process.projectId,
+        initialState.type,
+        pendingInputType,
+      );
+    }
+
+    // Emit worker activity after registering (new worker added)
+    this.emitWorkerActivity();
+  }
+
   private unregisterProcess(process: Process): void {
+    this.observedProcessIds.delete(process.id);
     if (!this.processes.has(process.id)) {
       return;
     }
@@ -1426,6 +2377,7 @@ export class Supervisor {
       messageCount: optimistic.messageCount,
       ownership,
       provider: process.provider,
+      initialPrompt: optimistic.fullTitle ?? undefined,
     };
 
     const event: SessionCreatedEvent = {
@@ -1452,10 +2404,7 @@ export class Supervisor {
       return { title: null, fullTitle: null, messageCount: 0 };
     }
 
-    const title =
-      fullTitle.length <= SESSION_TITLE_MAX_LENGTH
-        ? fullTitle
-        : `${fullTitle.slice(0, SESSION_TITLE_MAX_LENGTH - 3)}...`;
+    const title = truncateSessionTitle(fullTitle) || null;
 
     return { title, fullTitle, messageCount: 1 };
   }
@@ -1739,11 +2688,7 @@ export class Supervisor {
     permissionMode?: PermissionMode,
     modelSettings?: ModelSettings,
   ): Promise<Process> {
-    const provider = modelSettings?.providerName
-      ? getProvider(modelSettings.providerName)
-      : modelSettings?.executor
-        ? getProvider("claude")
-        : this.provider;
+    const provider = this.resolveProvider(modelSettings);
 
     // Use provider if available (preferred)
     if (provider) {

@@ -9,7 +9,7 @@
 
 import { basename } from "node:path";
 import type { UrlProjectId } from "@yep-anywhere/shared";
-import { decodeProjectId } from "../projects/paths.js";
+import { decodeProjectId, getProjectName } from "../projects/paths.js";
 import type { ConnectedBrowsersService } from "../services/ConnectedBrowsersService.js";
 import type { Supervisor } from "../supervisor/Supervisor.js";
 import type { InputRequest } from "../supervisor/types.js";
@@ -159,7 +159,7 @@ export class PushNotifier {
   private getProjectName(projectId: UrlProjectId): string {
     try {
       const projectPath = decodeProjectId(projectId);
-      return basename(projectPath);
+      return getProjectName(projectPath);
     } catch {
       return "Unknown Project";
     }

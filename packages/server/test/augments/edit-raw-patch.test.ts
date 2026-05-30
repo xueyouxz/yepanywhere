@@ -29,6 +29,36 @@ describe("parseRawEditPatch", () => {
     ]);
   });
 
+  it("parses Codex Add File patches as new-file hunks", () => {
+    const rawPatch = [
+      "*** Begin Patch",
+      "*** Add File: /repo/research/progress-2026-05-18.md",
+      "+# Recent MT Adapter Progress",
+      "+",
+      "+- **win** in `dev`",
+      "*** End Patch",
+      "",
+    ].join("\n");
+
+    const parsed = parseRawEditPatch(rawPatch);
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.filePath).toBe("/repo/research/progress-2026-05-18.md");
+    expect(parsed?.structuredPatch).toEqual([
+      {
+        oldStart: 1,
+        oldLines: 0,
+        newStart: 1,
+        newLines: 3,
+        lines: [
+          "+# Recent MT Adapter Progress",
+          "+",
+          "+- **win** in `dev`",
+        ],
+      },
+    ]);
+  });
+
   it("tolerates malformed patch text without throwing", () => {
     const rawPatch = [
       "*** Begin Patch",

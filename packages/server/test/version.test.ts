@@ -195,6 +195,35 @@ describe("GET /version", () => {
     expect(Array.isArray(json.capabilities)).toBe(true);
   });
 
+  it("advertises validated server-routed voice backends", async () => {
+    mockFetch(() => new Response(null, { status: 204 }));
+
+    const { createVersionRoutes } = await importVersion();
+    const routes = createVersionRoutes({
+      getEnabledVoiceBackends: () => ["ya-dummy"],
+    });
+    const res = await routes.request("/");
+    const json = await res.json();
+
+    expect(json.capabilities).toContain("voiceInput");
+    expect(json.voiceBackends).toEqual(["ya-dummy"]);
+  });
+
+  it("does not advertise voice backends when voice input is disabled", async () => {
+    mockFetch(() => new Response(null, { status: 204 }));
+
+    const { createVersionRoutes } = await importVersion();
+    const routes = createVersionRoutes({
+      voiceInputEnabled: false,
+      getEnabledVoiceBackends: () => ["ya-dummy"],
+    });
+    const res = await routes.request("/");
+    const json = await res.json();
+
+    expect(json.capabilities).not.toContain("voiceInput");
+    expect(json.voiceBackends).toEqual([]);
+  });
+
   it("reports update-available for stale bridge binaries", async () => {
     mockFetch(() => new Response(null, { status: 204 }));
 

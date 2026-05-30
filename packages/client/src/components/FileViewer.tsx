@@ -19,9 +19,9 @@ interface FileViewerProps {
  * Format file size for display.
  */
 function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024) return `${bytes}\u202fb`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}\u202fkb`;
+  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10}\u202fmb`;
 }
 
 /**
@@ -164,7 +164,7 @@ export const FileViewer = memo(function FileViewer({
     try {
       await navigator.clipboard.writeText(fileData.content);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setTimeout(() => setCopied(false), 3000);
     } catch (err) {
       console.error("Failed to copy:", err);
     }

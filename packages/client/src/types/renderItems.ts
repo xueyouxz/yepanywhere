@@ -47,7 +47,8 @@ export interface ToolCallItem extends RenderItemBase {
   toolName: string; // tool_use.name
   toolInput: unknown; // tool_use.input
   toolResult?: ToolResultData; // undefined while pending
-  status: "pending" | "complete" | "error" | "aborted";
+  /** "incomplete" means the turn ended without YA observing a result. */
+  status: "pending" | "complete" | "error" | "aborted" | "incomplete";
 }
 
 export interface ToolResultData {
@@ -77,4 +78,6 @@ export interface SystemItem extends RenderItemBase {
   content: string;
   /** For status subtype: the current status (e.g., "compacting") */
   status?: "compacting" | null;
+  /** For config_ack subtype: whether it differs from the previous config ack */
+  configChanged?: boolean;
 }

@@ -35,6 +35,13 @@ export interface ACPClientConfig {
   cwd: string;
   /** Additional environment variables */
   env?: Record<string, string>;
+  /**
+   * Env var names to strip from the inherited environment before spawning.
+   * Applied after the `process.env` + `env` merge, so it can remove ambiently
+   * inherited keys that an overlay alone cannot delete. Used to keep a vendor's
+   * API key from leaking into a CLI that would honor it (see grok-acp).
+   */
+  excludeEnv?: string[];
 }
 
 /**
@@ -103,10 +110,18 @@ export class ACPClient {
       "Spawning ACP agent",
     );
 
+    const childEnv: Record<string, string | undefined> = {
+      ...process.env,
+      ...config.env,
+    };
+    for (const key of config.excludeEnv ?? []) {
+      delete childEnv[key];
+    }
+
     this.process = spawn(config.command, config.args ?? [], {
       cwd: config.cwd,
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, ...config.env },
+      env: childEnv,
       shell: process.platform === "win32",
     });
 

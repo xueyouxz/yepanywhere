@@ -80,7 +80,12 @@ function getProviderLabel(
     case "codex":
       return "Codex";
     case "gemini":
+    case "gemini-acp":
       return "Gemini";
+    case "grok":
+      return "Grok";
+    case "opencode":
+      return "OpenCode";
     case "local":
       return t("agentsProviderLocal" as never);
     default:
@@ -96,7 +101,12 @@ function getProviderBadgeClass(provider: string | undefined): string {
     case "codex":
       return "agent-provider-codex";
     case "gemini":
+    case "gemini-acp":
       return "agent-provider-gemini";
+    case "grok":
+      return "agent-provider-grok";
+    case "opencode":
+      return "agent-provider-opencode";
     case "local":
       return "agent-provider-local";
     default:

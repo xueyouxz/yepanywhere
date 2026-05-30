@@ -11,6 +11,10 @@ export interface RecentSessionEntry {
   visitedAt: string;
 }
 
+interface UseRecentSessionsOptions {
+  limit?: number;
+}
+
 /**
  * Record a session visit (fire-and-forget).
  * Can be called from outside React components.
@@ -26,7 +30,9 @@ export function recordSessionVisit(sessionId: string, projectId: string): void {
  * Fetches on mount and provides methods to record visits and clear.
  * Returns enriched entries with session title and project name.
  */
-export function useRecentSessions(): {
+export function useRecentSessions(
+  options: UseRecentSessionsOptions = {},
+): {
   recentSessions: EnrichedRecentEntry[];
   isLoading: boolean;
   error: Error | null;
@@ -34,6 +40,7 @@ export function useRecentSessions(): {
   clearRecents: () => void;
   refetch: () => void;
 } {
+  const { limit } = options;
   const [recentSessions, setRecentSessions] = useState<EnrichedRecentEntry[]>(
     [],
   );
@@ -42,7 +49,7 @@ export function useRecentSessions(): {
 
   const fetchRecents = useCallback(async () => {
     try {
-      const response = await api.getRecents();
+      const response = await api.getRecents(limit);
       setRecentSessions(response.recents);
       setError(null);
     } catch (err) {
@@ -50,7 +57,7 @@ export function useRecentSessions(): {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [limit]);
 
   useEffect(() => {
     fetchRecents();

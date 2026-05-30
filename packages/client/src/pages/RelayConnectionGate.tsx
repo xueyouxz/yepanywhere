@@ -10,8 +10,8 @@
  * - Once connected, renders ConnectedAppContent + child routes via Outlet
  */
 
-import { useEffect, useState } from "react";
-import { Navigate, Outlet, useParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Navigate, Outlet, useLocation, useParams } from "react-router-dom";
 import { ConnectedAppContent } from "../RemoteApp";
 import { HostOfflineModal } from "../components/HostOfflineModal";
 import {
@@ -80,6 +80,7 @@ function createAutoResumeError(
  */
 export function RelayConnectionGate() {
   const { relayUsername } = useParams<{ relayUsername: string }>();
+  const location = useLocation();
   const {
     connection,
     connectViaRelay,
@@ -92,6 +93,22 @@ export function RelayConnectionGate() {
 
   const [state, setState] = useState<ConnectionState>("checking");
   const [error, setError] = useState<AutoResumeError | null>(null);
+  const returnTo = useMemo(
+    () => `${location.pathname}${location.search}${location.hash}`,
+    [location.hash, location.pathname, location.search],
+  );
+  const relayLoginTarget = useMemo(() => {
+    const params = new URLSearchParams();
+    if (relayUsername) {
+      params.set("u", relayUsername);
+    }
+    const host = relayUsername ? getHostByRelayUsername(relayUsername) : null;
+    if (host?.relayUrl) {
+      params.set("r", host.relayUrl);
+    }
+    params.set("returnTo", returnTo);
+    return `/login/relay?${params.toString()}`;
+  }, [relayUsername, returnTo]);
 
   // Attempt to connect when username changes
   useEffect(() => {
@@ -236,12 +253,7 @@ export function RelayConnectionGate() {
 
     case "no_host":
     case "no_session":
-      return (
-        <Navigate
-          to={`/login/relay?u=${encodeURIComponent(relayUsername ?? "")}`}
-          replace
-        />
-      );
+      return <Navigate to={relayLoginTarget} replace />;
 
     case "error": {
       const defaultError: AutoResumeError = {
@@ -250,6 +262,9 @@ export function RelayConnectionGate() {
         relayUsername: relayUsername ?? "",
         message: "Connection failed",
       };
+      if ((error ?? defaultError).reason === "auth_failed") {
+        return <Navigate to={relayLoginTarget} replace />;
+      }
       return (
         <HostOfflineModal
           error={error ?? defaultError}

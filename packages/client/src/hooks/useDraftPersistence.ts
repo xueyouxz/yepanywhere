@@ -1,14 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-const DEBOUNCE_MS = 500;
-
 export interface DraftControls {
+  /** Return the current in-memory draft value */
+  getDraft: () => string;
+  /** Replace input state and localStorage immediately */
+  setDraft: (value: string) => void;
+  /** Flush any pending draft write immediately */
+  flushDraft: () => void;
   /** Clear input state only, keeping localStorage for failure recovery */
   clearInput: () => void;
   /** Clear both input state and localStorage (call on confirmed success) */
   clearDraft: () => void;
   /** Restore from localStorage (call on failure) */
   restoreFromStorage: () => void;
+}
+
+export interface UseDraftPersistenceOptions {
+  /** Keep the current in-memory draft when switching to a new storage key that has no draft yet. */
+  preserveValueOnKeyChange?: boolean;
 }
 
 /** Save a value to localStorage immediately */
@@ -25,7 +34,7 @@ function saveToStorage(key: string, value: string): void {
 }
 
 /**
- * Hook for persisting draft text to localStorage with debouncing.
+ * Hook for persisting draft text to localStorage.
  * Supports failure recovery by keeping localStorage until explicitly cleared.
  *
  * @param key - localStorage key for this draft (e.g., "draft-message-{sessionId}")
@@ -33,6 +42,7 @@ function saveToStorage(key: string, value: string): void {
  */
 export function useDraftPersistence(
   key: string,
+  options?: UseDraftPersistenceOptions,
 ): [string, (value: string) => void, DraftControls] {
   const [value, setValueInternal] = useState(() => {
     try {
@@ -46,21 +56,42 @@ export function useDraftPersistence(
   const keyRef = useRef(key);
   // Track pending value so we can flush on unmount/beforeunload
   const pendingValueRef = useRef<string | null>(null);
+  const valueRef = useRef(value);
+
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
 
   // Update keyRef when key changes
   useEffect(() => {
-    keyRef.current = key;
-  }, [key]);
+    const previousKey = keyRef.current;
+    const previousValue = pendingValueRef.current ?? valueRef.current;
+    const keyChanged = previousKey !== key;
 
-  // Restore from localStorage when key changes
-  useEffect(() => {
+    if (keyChanged && pendingValueRef.current !== null) {
+      saveToStorage(previousKey, pendingValueRef.current);
+      pendingValueRef.current = null;
+    }
+
+    keyRef.current = key;
+
     try {
       const stored = localStorage.getItem(key);
+      if (
+        keyChanged &&
+        options?.preserveValueOnKeyChange &&
+        previousValue &&
+        !stored
+      ) {
+        saveToStorage(key, previousValue);
+        setValueInternal(previousValue);
+        return;
+      }
       setValueInternal(stored ?? "");
     } catch {
       setValueInternal("");
     }
-  }, [key]);
+  }, [key, options?.preserveValueOnKeyChange]);
 
   // Flush pending value to localStorage
   const flushPending = useCallback(() => {
@@ -74,37 +105,64 @@ export function useDraftPersistence(
     }
   }, []);
 
-  // Handle beforeunload to save draft before page unload (including HMR)
+  // Handle lifecycle boundaries to save drafts before the page can be frozen,
+  // discarded, or refreshed. `pagehide` covers mobile/browser cache paths where
+  // `beforeunload` is skipped.
   useEffect(() => {
-    const handleBeforeUnload = () => {
+    const handlePageExit = () => {
       flushPending();
     };
-    window.addEventListener("beforeunload", handleBeforeUnload);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        flushPending();
+      }
+    };
+    window.addEventListener("beforeunload", handlePageExit);
+    window.addEventListener("pagehide", handlePageExit);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("beforeunload", handlePageExit);
+      window.removeEventListener("pagehide", handlePageExit);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [flushPending]);
 
-  // Debounced save to localStorage
+  // Save each edit immediately. A debounce window can lose the newest typed
+  // text during HMR/reload paths that do not reliably fire page lifecycle
+  // events before React remounts and restores the previous storage value.
   const setValue = useCallback((newValue: string) => {
     setValueInternal(newValue);
-    pendingValueRef.current = newValue;
-
+    pendingValueRef.current = null;
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
     }
+    saveToStorage(keyRef.current, newValue);
+  }, []);
 
-    timeoutRef.current = setTimeout(() => {
-      saveToStorage(keyRef.current, newValue);
-      pendingValueRef.current = null;
-    }, DEBOUNCE_MS);
+  // Read the current in-memory value for UI actions that append to the draft.
+  const getDraft = useCallback(() => valueRef.current, []);
+
+  // Replace the draft immediately. This is used when another UI action, such
+  // as editing a queued message, needs to take over the composer.
+  const setDraft = useCallback((newValue: string) => {
+    setValueInternal(newValue);
+    pendingValueRef.current = null;
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    saveToStorage(keyRef.current, newValue);
   }, []);
 
   // Clear input state only (for optimistic UI on submit)
   const clearInput = useCallback(() => {
+    if (pendingValueRef.current !== null) {
+      saveToStorage(keyRef.current, pendingValueRef.current);
+    }
     setValueInternal("");
     pendingValueRef.current = null;
-    // Cancel pending debounce so we don't overwrite localStorage with ""
+    // Cancel pending write so we don't overwrite the recovery draft with ""
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
@@ -152,8 +210,22 @@ export function useDraftPersistence(
   }, []);
 
   const controls = useMemo(
-    () => ({ clearInput, clearDraft, restoreFromStorage }),
-    [clearInput, clearDraft, restoreFromStorage],
+    () => ({
+      getDraft,
+      setDraft,
+      flushDraft: flushPending,
+      clearInput,
+      clearDraft,
+      restoreFromStorage,
+    }),
+    [
+      getDraft,
+      setDraft,
+      flushPending,
+      clearInput,
+      clearDraft,
+      restoreFromStorage,
+    ],
   );
 
   return [value, setValue, controls];

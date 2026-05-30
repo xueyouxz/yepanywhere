@@ -7,7 +7,7 @@
  * Run with: pnpm test --filter=@yep-anywhere/client -- useStreamingMarkdown.integration
  */
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStreamingMarkdown } from "../useStreamingMarkdown";
 
 // Enable debug logging for tests
@@ -22,6 +22,7 @@ describe("useStreamingMarkdown integration", () => {
   let pending: HTMLSpanElement;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     // Enable debug logging
     window.__STREAMING_DEBUG__ = true;
 
@@ -43,6 +44,8 @@ describe("useStreamingMarkdown integration", () => {
   });
 
   afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
     document.body.removeChild(container);
     document.body.removeChild(pending);
     window.__STREAMING_DEBUG__ = false;
@@ -73,6 +76,12 @@ describe("useStreamingMarkdown integration", () => {
     }
     console.log("Pending innerHTML:", pending.innerHTML || "(empty)");
     console.log("---\n");
+  }
+
+  function flushBufferedUpdates() {
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
   }
 
   // Helper to delay for simulating realistic timing
@@ -106,6 +115,7 @@ describe("useStreamingMarkdown integration", () => {
       act(() => {
         result.current.onPending({ html: "Hello world" });
       });
+      flushBufferedUpdates();
       logDOMState("After second pending");
       expect(pending.innerHTML).toBe("Hello world");
 
@@ -118,6 +128,7 @@ describe("useStreamingMarkdown integration", () => {
           type: "paragraph",
         });
       });
+      flushBufferedUpdates();
       logDOMState("After augment");
       expect(container.children.length).toBe(1);
       expect(container.children[0]?.innerHTML).toBe("<p>Hello world</p>");
@@ -127,6 +138,7 @@ describe("useStreamingMarkdown integration", () => {
       act(() => {
         result.current.onPending({ html: "" });
       });
+      flushBufferedUpdates();
       logDOMState("After clearing pending");
       expect(pending.innerHTML).toBe("");
 
@@ -179,6 +191,7 @@ describe("useStreamingMarkdown integration", () => {
         });
         result.current.onPending({ html: "" });
       });
+      flushBufferedUpdates();
       logDOMState("After paragraph augment");
 
       expect(container.children.length).toBe(2);
@@ -224,6 +237,7 @@ describe("useStreamingMarkdown integration", () => {
           html: '<pre><code class="language-javascript">function hello() {\n  console.log("Hello");\n}',
         });
       });
+      flushBufferedUpdates();
       logDOMState("After more pending code");
 
       // Code block augment with full syntax highlighting
@@ -242,6 +256,7 @@ describe("useStreamingMarkdown integration", () => {
         });
         result.current.onPending({ html: "" });
       });
+      flushBufferedUpdates();
       logDOMState("After code augment");
 
       expect(container.children.length).toBe(1);
@@ -275,6 +290,7 @@ describe("useStreamingMarkdown integration", () => {
           result.current.onPending({ html: chunk });
         });
       }
+      flushBufferedUpdates();
 
       logDOMState("After all pending chunks");
       expect(pending.innerHTML).toBe(fullText);
@@ -422,6 +438,7 @@ describe("useStreamingMarkdown integration", () => {
           type: "paragraph",
         });
       });
+      flushBufferedUpdates();
       logDOMState("After block 1 (final)");
 
       // Verify correct order
@@ -470,6 +487,7 @@ describe("useStreamingMarkdown integration", () => {
           type: "paragraph",
         });
       });
+      flushBufferedUpdates();
       logDOMState("After update");
 
       expect(container.children.length).toBe(1);
@@ -503,6 +521,7 @@ describe("useStreamingMarkdown integration", () => {
         });
         result.current.onPending({ html: "More content coming..." });
       });
+      flushBufferedUpdates();
       logDOMState("Before reset");
 
       expect(container.children.length).toBe(2);
@@ -530,6 +549,7 @@ describe("useStreamingMarkdown integration", () => {
           type: "paragraph",
         });
       });
+      flushBufferedUpdates();
       logDOMState("After fresh start");
 
       expect(container.children.length).toBe(1);

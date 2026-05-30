@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ProjectMetadataService } from "../../src/metadata/ProjectMetadataService.js";
 import { CodexSessionScanner } from "../../src/projects/codex-scanner.js";
 import { ProjectScanner } from "../../src/projects/scanner.js";
 import { encodeProjectId } from "../../src/supervisor/types.js";
@@ -306,5 +307,82 @@ describe("ProjectScanner cache", () => {
       path: "/home/user/project-one",
       hasCodexSessions: true,
     });
+  });
+
+  it("skips hidden projects discovered from session logs", async () => {
+    const projectsDir = join(tmpdir(), `project-scanner-${randomUUID()}`);
+    const dataDir = join(tmpdir(), `project-metadata-${randomUUID()}`);
+    tempDirs.push(projectsDir, dataDir);
+
+    await createClaudeProject(
+      projectsDir,
+      "localhost",
+      "/home/user/project-one",
+      "sess-1",
+    );
+
+    const metadata = new ProjectMetadataService({ dataDir });
+    await metadata.initialize();
+    await metadata.hideProject(
+      encodeProjectId("/home/user/project-one"),
+      "/home/user/project-one",
+    );
+
+    const scanner = new ProjectScanner({
+      projectsDir,
+      enableCodex: false,
+      enableGemini: false,
+      projectMetadataService: metadata,
+      cacheTtlMs: 60000,
+    });
+
+    const projects = await scanner.listProjects();
+    expect(projects.some((p) => p.path === "/home/user/project-one")).toBe(
+      false,
+    );
+  });
+
+  it("skips hidden Codex projects", async () => {
+    const projectsDir = join(tmpdir(), `project-scanner-${randomUUID()}`);
+    const dataDir = join(tmpdir(), `project-metadata-${randomUUID()}`);
+    tempDirs.push(projectsDir, dataDir);
+
+    const metadata = new ProjectMetadataService({ dataDir });
+    await metadata.initialize();
+    await metadata.hideProject(
+      encodeProjectId("/home/user/codex-project"),
+      "/home/user/codex-project",
+    );
+
+    const codexScanner = {
+      listProjects: vi.fn(async () => [
+        {
+          id: encodeProjectId("/home/user/codex-project"),
+          path: "/home/user/codex-project",
+          name: "codex-project",
+          sessionCount: 1,
+          sessionDir: "/codex/sessions",
+          activeOwnedCount: 0,
+          activeExternalCount: 0,
+          lastActivity: "2025-01-01T00:00:00.000Z",
+          provider: "codex" as const,
+        },
+      ]),
+      invalidateCache: vi.fn(),
+    } as unknown as CodexSessionScanner;
+
+    const scanner = new ProjectScanner({
+      projectsDir,
+      codexScanner,
+      enableCodex: true,
+      enableGemini: false,
+      projectMetadataService: metadata,
+      cacheTtlMs: 60000,
+    });
+
+    const projects = await scanner.listProjects();
+    expect(projects.some((p) => p.path === "/home/user/codex-project")).toBe(
+      false,
+    );
   });
 });

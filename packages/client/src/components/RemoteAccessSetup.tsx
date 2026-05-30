@@ -311,7 +311,7 @@ export function RemoteAccessSetup({
   const handleCopyUrl = async (url: string) => {
     await navigator.clipboard.writeText(url);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setTimeout(() => setCopied(false), 3000);
   };
 
   if (loading) {

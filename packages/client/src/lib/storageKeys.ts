@@ -46,6 +46,7 @@ export const UI_KEYS = {
   theme: "yep-anywhere-theme",
   fontSize: "yep-anywhere-font-size",
   tabSize: "yep-anywhere-tab-size",
+  contentMaxWidth: "yep-anywhere-content-max-width",
   sidebarWidth: "yep-anywhere-sidebar-width",
   sidebarExpanded: "yep-anywhere-sidebar-expanded",
   funPhrases: "yep-anywhere-fun-phrases-enabled",
@@ -56,6 +57,7 @@ export const UI_KEYS = {
   emulatorMaxWidth: "yep-anywhere-emulator-max-width",
   emulatorQuality: "yep-anywhere-emulator-quality",
   emulatorAdaptiveFps: "yep-anywhere-emulator-adaptive-fps",
+  attachmentUploadQuality: "yep-anywhere-attachment-upload-quality",
 } as const;
 
 // ============================================================================
@@ -68,7 +70,9 @@ export const SERVER_SCOPED_KEYS = {
   thinkingLevel: "thinking-level",
   thinkingEnabled: "thinking-enabled",
   thinkingMode: "thinking-mode",
+  permissionMode: "permission-mode",
   voiceInputEnabled: "voice-input-enabled",
+  speechMethod: "speech-method",
   browserProfileId: "browser-profile-id",
   notifyInApp: "notify-in-app",
   recentProject: "recent-project",
@@ -200,7 +204,9 @@ export const LEGACY_KEYS = {
   thinkingLevel: "yep-anywhere-thinking-level",
   thinkingEnabled: "yep-anywhere-thinking-enabled",
   thinkingMode: "yep-anywhere-thinking-mode",
+  permissionMode: "yep-anywhere-permission-mode",
   voiceInputEnabled: "yep-anywhere-voice-input-enabled",
+  speechMethod: "yep-anywhere-speech-method",
   browserProfileId: "yep-anywhere-device-id",
   notifyInApp: "yep-anywhere-notify-in-app",
   recentProject: "yep-anywhere-recent-project",
@@ -237,6 +243,7 @@ export function migrateLegacySettings(installId: string): boolean {
     { legacy: LEGACY_KEYS.thinkingLevel, scoped: "thinkingLevel" },
     { legacy: LEGACY_KEYS.thinkingEnabled, scoped: "thinkingEnabled" },
     { legacy: LEGACY_KEYS.voiceInputEnabled, scoped: "voiceInputEnabled" },
+    { legacy: LEGACY_KEYS.speechMethod, scoped: "speechMethod" },
     { legacy: LEGACY_KEYS.browserProfileId, scoped: "browserProfileId" },
     { legacy: LEGACY_KEYS.notifyInApp, scoped: "notifyInApp" },
     { legacy: LEGACY_KEYS.recentProject, scoped: "recentProject" },

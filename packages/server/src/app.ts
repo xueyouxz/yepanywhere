@@ -1,6 +1,12 @@
 import type { HttpBindings } from "@hono/node-server";
 import { RESPONSE_ALREADY_SENT } from "@hono/node-server/utils/response";
+import type {
+  AppContentBlock,
+  AppSession,
+  UrlProjectId,
+} from "@yep-anywhere/shared";
 import { Hono } from "hono";
+import { join } from "node:path";
 import type { AuthService } from "./auth/AuthService.js";
 import { createAuthRoutes } from "./auth/routes.js";
 import type { DeviceBridgeService } from "./device/DeviceBridgeService.js";
@@ -26,6 +32,7 @@ import {
   GEMINI_TMP_DIR,
   GeminiSessionScanner,
 } from "./projects/gemini-scanner.js";
+import { GROK_SESSIONS_DIR } from "./projects/paths.js";
 import { ProjectScanner } from "./projects/scanner.js";
 import { PushNotifier, type PushService } from "./push/index.js";
 import { createPushRoutes } from "./push/routes.js";
@@ -52,6 +59,11 @@ import { createOnboardingRoutes } from "./routes/onboarding.js";
 import { createProcessesRoutes } from "./routes/processes.js";
 import { createProjectsRoutes } from "./routes/projects.js";
 import { createProvidersRoutes } from "./routes/providers.js";
+import { createCodexUpdateRoutes } from "./routes/codex-updates.js";
+import {
+  createPublicSharePublicRoutes,
+  createPublicShareRoutes,
+} from "./routes/public-shares.js";
 import { createRecentsRoutes } from "./routes/recents.js";
 import { createServerAdminRoutes } from "./routes/server-admin.js";
 import { createServerInfoRoutes } from "./routes/server-info.js";
@@ -60,30 +72,41 @@ import { createSettingsRoutes } from "./routes/settings.js";
 import { createSharingRoutes } from "./routes/sharing.js";
 import { ClaudeOllamaProvider } from "./sdk/providers/claude-ollama.js";
 
+import { createLocalFileRoutes } from "./routes/local-file.js";
 import { createLocalImageRoutes } from "./routes/local-image.js";
 import { type UploadDeps, createUploadRoutes } from "./routes/upload.js";
+import { createSpeechRoutes } from "./routes/speech.js";
 import { createVersionRoutes } from "./routes/version.js";
+import { WS_INTERNAL_AUTHENTICATED } from "./middleware/internal-auth.js";
 import type {
   ClaudeSDK,
   PermissionMode,
   RealClaudeSDKInterface,
 } from "./sdk/types.js";
+import type { PublicShareService } from "./services/PublicShareService.js";
 import type { BrowserProfileService } from "./services/BrowserProfileService.js";
+import { CodexUpdateChecker } from "./services/CodexUpdateChecker.js";
 import type { ConnectedBrowsersService } from "./services/ConnectedBrowsersService.js";
 import type { ModelInfoService } from "./services/ModelInfoService.js";
 import type { NetworkBindingService } from "./services/NetworkBindingService.js";
 import type { RelayClientService } from "./services/RelayClientService.js";
 import type { ServerSettingsService } from "./services/ServerSettingsService.js";
 import type { SharingService } from "./services/SharingService.js";
+import type { SpeechBackendRegistry } from "./services/voice/registry.js";
 import { CodexSessionReader } from "./sessions/codex-reader.js";
 import { GeminiSessionReader } from "./sessions/gemini-reader.js";
+import { GrokSessionReader } from "./sessions/grok-reader.js";
 import { OpenCodeSessionReader } from "./sessions/opencode-reader.js";
 import { findSessionSummaryAcrossProviders } from "./sessions/provider-resolution.js";
+import { normalizeSession } from "./sessions/normalization.js";
 import { ClaudeSessionReader } from "./sessions/reader.js";
 import type { ISessionReader } from "./sessions/types.js";
 import { ExternalSessionTracker } from "./supervisor/ExternalSessionTracker.js";
-import { Supervisor } from "./supervisor/Supervisor.js";
-import type { Project } from "./supervisor/types.js";
+import {
+  Supervisor,
+  type HeartbeatTurnCandidate,
+} from "./supervisor/Supervisor.js";
+import type { Message, Project } from "./supervisor/types.js";
 import type { EventBus } from "./watcher/index.js";
 import { LifecycleWebhookService } from "./webhooks/LifecycleWebhookService.js";
 
@@ -109,6 +132,8 @@ export interface AppOptions {
   sessionIndexService?: SessionIndexService;
   /** Project scanner cache TTL in ms (0 = rescan every request). */
   projectScanCacheTtlMs?: number;
+  /** Sessions older than this many days are hidden from default scans. 0 disables. */
+  sessionAutoArchiveDays?: number;
   /** Maximum concurrent workers. 0 = unlimited (default) */
   maxWorkers?: number;
   /** Idle threshold in milliseconds for preemption */
@@ -172,12 +197,16 @@ export interface AppOptions {
   modelInfoService?: ModelInfoService;
   /** SharingService for session sharing */
   sharingService?: SharingService;
+  /** PublicShareService for secret-link read-only session shares */
+  publicShareService?: PublicShareService;
   /** DeviceBridgeService for Android emulator streaming */
   deviceBridgeService?: DeviceBridgeService;
   /** If non-empty, only these provider names are exposed via the API. */
   enabledProviders?: string[];
   /** Whether voice input is enabled. Default: true */
   voiceInputEnabled?: boolean;
+  /** Validated server-routed speech backends for capability advertisement. */
+  speechBackendRegistry?: SpeechBackendRegistry;
   /** Allowed directory prefixes for serving local images. Default: ["/tmp"] */
   allowedImagePaths?: string[];
 }
@@ -190,6 +219,30 @@ export interface AppResult {
   scanner: ProjectScanner;
   /** Session reader factory for debug API access */
   readerFactory: (project: Project) => ISessionReader;
+}
+
+function getMessageContentBlocks(message: Message): AppContentBlock[] {
+  const content = message.message?.content ?? message.content;
+  return Array.isArray(content) ? content : [];
+}
+
+function hasPendingToolCall(messages: Message[]): boolean {
+  const pendingToolUseIds = new Set<string>();
+
+  for (const message of messages) {
+    for (const block of getMessageContentBlocks(message)) {
+      if (block.type === "tool_use" && typeof block.id === "string") {
+        pendingToolUseIds.add(block.id);
+      } else if (
+        block.type === "tool_result" &&
+        typeof block.tool_use_id === "string"
+      ) {
+        pendingToolUseIds.delete(block.tool_use_id);
+      }
+    }
+  }
+
+  return pendingToolUseIds.size > 0;
 }
 
 export function createApp(options: AppOptions): AppResult {
@@ -245,10 +298,14 @@ export function createApp(options: AppOptions): AppResult {
   // Create dependencies
   const codexScanner = new CodexSessionScanner();
   const geminiScanner = new GeminiSessionScanner();
+  const projectScanCachePath = options.dataDir
+    ? join(options.dataDir, "indexes", "project-scanner-cache.json")
+    : undefined;
   const scanner = new ProjectScanner({
     projectsDir: options.projectsDir,
     codexScanner,
     geminiScanner,
+    projectScanCachePath,
     projectMetadataService: options.projectMetadataService,
     eventBus: options.eventBus,
     cacheTtlMs: options.projectScanCacheTtlMs,
@@ -330,6 +387,15 @@ export function createApp(options: AppOptions): AppResult {
               projectPath: project.path,
             }),
         );
+      case "grok":
+        return getOrCreateReader(
+          `grok::${GROK_SESSIONS_DIR}::${project.path}`,
+          () =>
+            new GrokSessionReader({
+              sessionsDir: GROK_SESSIONS_DIR,
+              projectPath: project.path,
+            }),
+        );
     }
   };
   const codexReaderFactory = (projectPath: string): CodexSessionReader =>
@@ -351,6 +417,15 @@ export function createApp(options: AppOptions): AppResult {
           hashToCwd: geminiScanner.getHashToCwd(),
         }),
     );
+  const grokReaderFactory = (projectPath: string): GrokSessionReader =>
+    getOrCreateReader(
+      `grok-extra::${GROK_SESSIONS_DIR}::${projectPath}`,
+      () =>
+        new GrokSessionReader({
+          sessionsDir: GROK_SESSIONS_DIR,
+          projectPath,
+        }),
+    );
   const getSessionSummary = async (sessionId: string, projectId: string) => {
     const project = await scanner.getProject(projectId);
     if (!project) return null;
@@ -365,12 +440,89 @@ export function createApp(options: AppOptions): AppResult {
         geminiSessionsDir: GEMINI_TMP_DIR,
         geminiReaderFactory,
         geminiHashToCwd: geminiScanner.getHashToCwd(),
+        grokSessionsDir: GROK_SESSIONS_DIR,
+        grokReaderFactory,
       },
       options.sessionMetadataService?.getProvider(sessionId),
     );
     return resolved?.summary ?? null;
   };
-  const supervisor = new Supervisor({
+  let supervisor: Supervisor;
+  const getHeartbeatTurnCandidates = async (): Promise<
+    HeartbeatTurnCandidate[]
+  > => {
+    const metadataBySession = options.sessionMetadataService?.getAllMetadata();
+    if (!metadataBySession) {
+      return [];
+    }
+
+    const heartbeatSessionIds = Object.entries(metadataBySession).filter(
+      ([, metadata]) => metadata.heartbeatTurnsEnabled,
+    );
+    if (heartbeatSessionIds.length === 0) {
+      return [];
+    }
+
+    const projects = await scanner.listProjects();
+    const candidates: HeartbeatTurnCandidate[] = [];
+    const providerResolutionDeps = {
+      readerFactory,
+      codexSessionsDir: CODEX_SESSIONS_DIR,
+      codexReaderFactory,
+      geminiSessionsDir: GEMINI_TMP_DIR,
+      geminiReaderFactory,
+      geminiHashToCwd: geminiScanner.getHashToCwd(),
+      grokSessionsDir: GROK_SESSIONS_DIR,
+      grokReaderFactory,
+    };
+
+    for (const [sessionId, metadata] of heartbeatSessionIds) {
+      if (supervisor.getProcessForSession(sessionId)) {
+        continue;
+      }
+
+      for (const project of projects) {
+        const resolved = await findSessionSummaryAcrossProviders(
+          project,
+          sessionId,
+          project.id,
+          providerResolutionDeps,
+          metadata.provider,
+        );
+        if (!resolved) {
+          continue;
+        }
+
+        const loaded = await resolved.source.reader.getSession(
+          sessionId,
+          project.id,
+        );
+        if (!loaded) {
+          break;
+        }
+        const session = normalizeSession(loaded);
+        if (!hasPendingToolCall(session.messages)) {
+          break;
+        }
+
+        candidates.push({
+          sessionId,
+          projectId: project.id,
+          projectPath: project.path,
+          provider: resolved.summary.provider,
+          model: resolved.summary.model,
+          executor: metadata.executor,
+          updatedAt: resolved.summary.updatedAt,
+          hasPendingToolCall: true,
+        });
+        break;
+      }
+    }
+
+    return candidates;
+  };
+
+  supervisor = new Supervisor({
     sdk: options.sdk,
     realSdk: options.realSdk,
     idleTimeoutMs: options.idleTimeoutMs,
@@ -386,6 +538,30 @@ export function createApp(options: AppOptions): AppResult {
           Promise.resolve()
       : undefined,
     onSessionSummary: getSessionSummary,
+    getHeartbeatTurnSettings:
+      options.serverSettingsService || options.sessionMetadataService
+        ? (sessionId) => {
+            const sessionHeartbeat =
+              options.sessionMetadataService?.getMetadata(sessionId);
+            return {
+              enabled: sessionHeartbeat?.heartbeatTurnsEnabled ?? false,
+              afterMinutes:
+                sessionHeartbeat?.heartbeatTurnsAfterMinutes ??
+                options.serverSettingsService?.getSetting(
+                  "heartbeatTurnsAfterMinutes",
+                ) ??
+                5,
+              forceAfterMinutes:
+                sessionHeartbeat?.heartbeatForceAfterMinutes ?? null,
+              text:
+                sessionHeartbeat?.heartbeatTurnText ??
+                options.serverSettingsService?.getSetting("heartbeatTurnText") ??
+                "yepanywhere heartbeat",
+            };
+          }
+      : undefined,
+    getHeartbeatTurnCandidates:
+      options.sessionMetadataService ? getHeartbeatTurnCandidates : undefined,
   });
 
   // Create external session tracker if eventBus is available
@@ -445,6 +621,8 @@ export function createApp(options: AppOptions): AppResult {
         false,
       installId: options.installId,
       voiceInputEnabled: options.voiceInputEnabled,
+      getEnabledVoiceBackends: () =>
+        options.speechBackendRegistry?.enabledIds() ?? [],
     }),
   );
 
@@ -535,6 +713,9 @@ export function createApp(options: AppOptions): AppResult {
       geminiScanner,
       geminiSessionsDir: GEMINI_TMP_DIR,
       geminiReaderFactory,
+      grokSessionsDir: GROK_SESSIONS_DIR,
+      grokReaderFactory,
+      sessionAutoArchiveDays: options.sessionAutoArchiveDays,
     }),
   );
   app.route(
@@ -553,8 +734,11 @@ export function createApp(options: AppOptions): AppResult {
       geminiScanner,
       geminiSessionsDir: GEMINI_TMP_DIR,
       geminiReaderFactory,
+      grokSessionsDir: GROK_SESSIONS_DIR,
+      grokReaderFactory,
       serverSettingsService: options.serverSettingsService,
       modelInfoService: options.modelInfoService,
+      dataDir: options.dataDir,
     }),
   );
   app.route(
@@ -581,6 +765,11 @@ export function createApp(options: AppOptions): AppResult {
             return {
               reader: geminiReaderFactory(project.path),
               sessionDir: GEMINI_TMP_DIR,
+            };
+          case "grok":
+            return {
+              reader: grokReaderFactory(project.path),
+              sessionDir: GROK_SESSIONS_DIR,
             };
           default:
             return {
@@ -609,6 +798,9 @@ export function createApp(options: AppOptions): AppResult {
       geminiScanner,
       geminiSessionsDir: GEMINI_TMP_DIR,
       geminiReaderFactory,
+      grokSessionsDir: GROK_SESSIONS_DIR,
+      grokReaderFactory,
+      sessionAutoArchiveDays: options.sessionAutoArchiveDays,
     }),
   );
 
@@ -629,7 +821,10 @@ export function createApp(options: AppOptions): AppResult {
       geminiScanner,
       geminiSessionsDir: GEMINI_TMP_DIR,
       geminiReaderFactory,
+      grokSessionsDir: GROK_SESSIONS_DIR,
+      grokReaderFactory,
       eventBus: options.eventBus,
+      sessionAutoArchiveDays: options.sessionAutoArchiveDays,
     }),
   );
 
@@ -654,6 +849,8 @@ export function createApp(options: AppOptions): AppResult {
         geminiScanner,
         geminiSessionsDir: GEMINI_TMP_DIR,
         geminiReaderFactory,
+        grokSessionsDir: GROK_SESSIONS_DIR,
+        grokReaderFactory,
       }),
     );
   }
@@ -691,11 +888,140 @@ export function createApp(options: AppOptions): AppResult {
     );
   }
 
+  // Codex CLI update checker
+  const codexUpdateChecker = new CodexUpdateChecker();
+  app.route(
+    "/api/codex/updates",
+    createCodexUpdateRoutes({ codexUpdateChecker }),
+  );
+  if (
+    options.serverSettingsService?.getSetting("codexUpdatePolicy") === "auto"
+  ) {
+    void (async () => {
+      try {
+        const status = await codexUpdateChecker.getStatus();
+        if (status.updateAvailable && status.updateMethod === "npm") {
+          const result = await codexUpdateChecker.install();
+          if (result.success) {
+            console.log(
+              `[codex-update] Auto-updated to ${result.status.installed ?? "?"}`,
+            );
+          } else {
+            console.warn(
+              `[codex-update] Auto-update failed: ${result.error ?? "unknown"}`,
+            );
+          }
+        }
+      } catch (err) {
+        console.warn("[codex-update] Auto-update threw:", err);
+      }
+    })();
+  }
+
   // Sharing routes (session snapshot sharing via Worker)
   if (options.sharingService) {
     app.route(
       "/api/sharing",
       createSharingRoutes({ sharingService: options.sharingService }),
+    );
+  }
+
+  // Public read-only session shares. Creation is authenticated under /api;
+  // public reads are secret-only and stay outside /api auth/mutation routes.
+  if (options.publicShareService) {
+    const loadPublicShareSession = async (
+      projectId: UrlProjectId,
+      sessionId: string,
+      options?: { afterMessageId?: string },
+    ): Promise<AppSession | null> => {
+      const searchParams = new URLSearchParams();
+      if (options?.afterMessageId) {
+        searchParams.set("afterMessageId", options.afterMessageId);
+      }
+      searchParams.set("publicShare", "1");
+      const query = searchParams.toString();
+      const response = await app.fetch(
+        new Request(
+          `http://127.0.0.1/api/projects/${projectId}/sessions/${encodeURIComponent(sessionId)}${query ? `?${query}` : ""}`,
+          { headers: { "X-Yep-Anywhere": "true" } },
+        ),
+        { [WS_INTERNAL_AUTHENTICATED]: true },
+      );
+      if (!response.ok) {
+        return null;
+      }
+      const body = (await response.json()) as {
+        messages?: AppSession["messages"];
+        session?: AppSession;
+      };
+      if (!body.session) {
+        return null;
+      }
+      return {
+        ...body.session,
+        messages: Array.isArray(body.session.messages)
+          ? body.session.messages
+          : (body.messages ?? []),
+      };
+    };
+
+    const loadPublicShareSessionUpdatedAt = async (
+      projectId: UrlProjectId,
+      sessionId: string,
+    ): Promise<string | null> => {
+      const response = await app.fetch(
+        new Request(
+          `http://127.0.0.1/api/projects/${projectId}/sessions/${encodeURIComponent(sessionId)}/metadata`,
+          { headers: { "X-Yep-Anywhere": "true" } },
+        ),
+        { [WS_INTERNAL_AUTHENTICATED]: true },
+      );
+      if (!response.ok) {
+        return null;
+      }
+      const body = (await response.json()) as {
+        session?: { updatedAt?: string | null };
+      };
+      return body.session?.updatedAt ?? null;
+    };
+
+    const loadPublicShareSessionSummary = async (
+      projectId: UrlProjectId,
+      sessionId: string,
+    ): Promise<
+      Pick<AppSession, "customTitle" | "provider" | "title" | "updatedAt"> | null
+    > => {
+      const response = await app.fetch(
+        new Request(
+          `http://127.0.0.1/api/projects/${projectId}/sessions/${encodeURIComponent(sessionId)}/metadata`,
+          { headers: { "X-Yep-Anywhere": "true" } },
+        ),
+        { [WS_INTERNAL_AUTHENTICATED]: true },
+      );
+      if (!response.ok) {
+        return null;
+      }
+      const body = (await response.json()) as {
+        session?: Pick<
+          AppSession,
+          "customTitle" | "provider" | "title" | "updatedAt"
+        >;
+      };
+      return body.session ?? null;
+    };
+
+    const publicShareDeps = {
+      publicShareService: options.publicShareService,
+      loadSession: loadPublicShareSession,
+      loadSessionUpdatedAt: loadPublicShareSessionUpdatedAt,
+      loadSessionSummary: loadPublicShareSessionSummary,
+      getRelayConfig: () => options.remoteAccessService?.getRelayConfig() ?? null,
+    };
+
+    app.route("/api/public-shares", createPublicShareRoutes(publicShareDeps));
+    app.route(
+      "/public-api/shares",
+      createPublicSharePublicRoutes(publicShareDeps),
     );
   }
 
@@ -744,12 +1070,31 @@ export function createApp(options: AppOptions): AppResult {
     );
   }
 
+  // Speech audio WebSocket route
+  if (options.upgradeWebSocket && options.speechBackendRegistry) {
+    app.route(
+      "/api/speech",
+      createSpeechRoutes({
+        speechBackendRegistry: options.speechBackendRegistry,
+        upgradeWebSocket: options.upgradeWebSocket,
+      }),
+    );
+  }
+
   // Local image serving (opt-in, restricted to allowed paths)
   if (options.allowedImagePaths && options.allowedImagePaths.length > 0) {
     app.route(
       "/api/local-image",
       createLocalImageRoutes({
         allowedPaths: options.allowedImagePaths,
+        scanner,
+      }),
+    );
+    app.route(
+      "/api/local-file",
+      createLocalFileRoutes({
+        allowedPaths: options.allowedImagePaths,
+        scanner,
       }),
     );
   }

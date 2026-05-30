@@ -133,6 +133,34 @@ describe("ProjectMetadataService", () => {
     });
   });
 
+  describe("hideProject", () => {
+    it("hides a project and removes it from the added list", async () => {
+      const projectId = encodeProjectId("/path1");
+      await service.addProject(projectId, "/path1");
+
+      await service.hideProject(projectId, "/path1");
+
+      expect(service.getMetadata(projectId)).toBeUndefined();
+      expect(service.isHiddenProject(projectId)).toBe(true);
+      expect(service.getAllHiddenProjects()[projectId]).toEqual(
+        expect.objectContaining({
+          path: "/path1",
+          hiddenAt: expect.any(String),
+        }),
+      );
+    });
+
+    it("unhides a project when it is added again", async () => {
+      const projectId = encodeProjectId("/path1");
+      await service.hideProject(projectId, "/path1");
+
+      await service.addProject(projectId, "/path1");
+
+      expect(service.isHiddenProject(projectId)).toBe(false);
+      expect(service.getMetadata(projectId)).toBeDefined();
+    });
+  });
+
   describe("isAddedProject", () => {
     it("returns true for added projects", async () => {
       const projectId = encodeProjectId("/path1");

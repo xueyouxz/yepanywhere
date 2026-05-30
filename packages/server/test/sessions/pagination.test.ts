@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   type PaginationInfo,
+  sliceAfterMessageId,
+  sliceAfterMessageIdWithMatch,
   sliceAtCompactBoundaries,
+  sliceAtUserTurnBoundary,
 } from "../../src/sessions/pagination.js";
 import type { Message } from "../../src/supervisor/types.js";
 
@@ -16,6 +19,49 @@ function compactBoundary(uuid: string): Message {
 }
 
 describe("sliceAtCompactBoundaries", () => {
+  it("slices incremental messages after a known message id", () => {
+    const messages = [
+      msg("user", "u1"),
+      msg("assistant", "a1"),
+      msg("user", "u2"),
+      msg("assistant", "a2"),
+    ];
+
+    expect(sliceAfterMessageId(messages, "a1")).toEqual([
+      msg("user", "u2"),
+      msg("assistant", "a2"),
+    ]);
+  });
+
+  it("keeps messages unchanged when the incremental anchor is missing", () => {
+    const messages = [msg("user", "u1"), msg("assistant", "a1")];
+
+    expect(sliceAfterMessageId(messages, "missing")).toBe(messages);
+  });
+
+  it("reports whether the incremental anchor was found", () => {
+    const messages = [
+      msg("user", "u1"),
+      msg("assistant", "a1"),
+      msg("user", "u2"),
+    ];
+
+    expect(sliceAfterMessageIdWithMatch(messages, "a1")).toEqual({
+      messages: [msg("user", "u2")],
+      found: true,
+    });
+    expect(sliceAfterMessageIdWithMatch(messages, "missing")).toEqual({
+      messages,
+      found: false,
+    });
+  });
+
+  it("keeps messages unchanged when no incremental anchor is requested", () => {
+    const messages = [msg("user", "u1"), msg("assistant", "a1")];
+
+    expect(sliceAfterMessageId(messages)).toBe(messages);
+  });
+
   it("returns all messages when no compactions exist", () => {
     const messages = [
       msg("user", "u1"),
@@ -218,10 +264,10 @@ describe("sliceAtCompactBoundaries", () => {
       msg("assistant", "a1"),
     ];
 
-    // Non-existent ID → falls back to all messages
+    // Non-existent ID means there is no safe older page to prepend.
     const result = sliceAtCompactBoundaries(messages, 2, "nonexistent");
 
-    expect(result.messages).toEqual(messages);
+    expect(result.messages).toEqual([]);
     expect(result.pagination.hasOlderMessages).toBe(false);
   });
 
@@ -280,5 +326,66 @@ describe("sliceAtCompactBoundaries", () => {
     expect(result.messages[0]?.uuid).toBe("cb2");
     expect(result.pagination.totalCompactions).toBe(2);
     expect(result.pagination.hasOlderMessages).toBe(true);
+  });
+});
+
+describe("sliceAtUserTurnBoundary", () => {
+  it("returns only the requested recent user-turn tail", () => {
+    const messages = [
+      msg("user", "u1"),
+      msg("assistant", "a1"),
+      msg("user", "u2"),
+      msg("assistant", "a2"),
+      msg("user", "u3"),
+      msg("assistant", "a3"),
+    ];
+
+    const result = sliceAtUserTurnBoundary(messages, 2);
+
+    expect(result.messages).toEqual([
+      msg("user", "u2"),
+      msg("assistant", "a2"),
+      msg("user", "u3"),
+      msg("assistant", "a3"),
+    ]);
+    expect(result.pagination).toEqual({
+      hasOlderMessages: true,
+      totalMessageCount: 6,
+      returnedMessageCount: 4,
+      truncatedBeforeMessageId: "u2",
+      totalCompactions: 0,
+      totalUserTurns: 3,
+      truncatedBy: "user_turn",
+    } satisfies PaginationInfo);
+  });
+
+  it("can start at a clicked user turn id", () => {
+    const messages = [
+      msg("user", "u1"),
+      msg("assistant", "a1"),
+      msg("user", "u2"),
+      msg("assistant", "a2"),
+      msg("user", "u3"),
+    ];
+
+    const result = sliceAtUserTurnBoundary(messages, 20, "u2");
+
+    expect(result.messages).toEqual([
+      msg("user", "u2"),
+      msg("assistant", "a2"),
+      msg("user", "u3"),
+    ]);
+    expect(result.pagination.hasOlderMessages).toBe(true);
+    expect(result.pagination.truncatedBeforeMessageId).toBe("u2");
+  });
+
+  it("does not invent a tail when the clicked id is missing", () => {
+    const messages = [msg("user", "u1"), msg("assistant", "a1")];
+
+    const result = sliceAtUserTurnBoundary(messages, 20, "missing");
+
+    expect(result.messages).toEqual([]);
+    expect(result.pagination.hasOlderMessages).toBe(false);
+    expect(result.pagination.returnedMessageCount).toBe(0);
   });
 });

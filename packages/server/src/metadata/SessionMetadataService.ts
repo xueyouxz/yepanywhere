@@ -7,7 +7,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { ProviderName } from "@yep-anywhere/shared";
+import { type ProviderName, sanitizeSessionTitle } from "@yep-anywhere/shared";
 
 export interface SessionMetadata {
   /** Custom title that overrides auto-generated title */
@@ -16,12 +16,24 @@ export interface SessionMetadata {
   isArchived?: boolean;
   /** Whether the session is starred/favorited */
   isStarred?: boolean;
+  /** Parent session when this session is a YA-owned fork/aside. */
+  parentSessionId?: string;
   /** Model used for this session (resolved, not "default") */
   model?: string;
   /** Provider used for this session (for backward compatibility with sessions that don't have provider in JSONL) */
   provider?: ProviderName;
   /** SSH host alias for remote execution (undefined = local) */
   executor?: string;
+  /** Initial prompt text accepted by YA for new-session recovery/copy. */
+  initialPrompt?: string;
+  /** Whether this session is opted in to heartbeat turns */
+  heartbeatTurnsEnabled?: boolean;
+  /** Optional per-session idle threshold override in minutes */
+  heartbeatTurnsAfterMinutes?: number;
+  /** Optional per-session heartbeat text override */
+  heartbeatTurnText?: string;
+  /** Per-session grace minutes before forcing output; null = off */
+  heartbeatForceAfterMinutes?: number | null;
 }
 
 export interface SessionMetadataState {
@@ -115,7 +127,8 @@ export class SessionMetadataService {
    * Pass undefined or empty string to clear the custom title.
    */
   async setTitle(sessionId: string, title: string | undefined): Promise<void> {
-    const trimmedTitle = title?.trim();
+    const trimmedTitle =
+      title === undefined ? undefined : sanitizeSessionTitle(title);
     this.updateSessionMetadata(sessionId, (metadata) => ({
       ...metadata,
       customTitle: trimmedTitle || undefined,
@@ -193,18 +206,44 @@ export class SessionMetadataService {
   }
 
   /**
+   * Set the initial prompt accepted for a new session.
+   * Used as a durable recovery source if provider startup fails before JSONL
+   * persistence writes the user message.
+   */
+  async setInitialPrompt(
+    sessionId: string,
+    initialPrompt: string | undefined,
+  ): Promise<void> {
+    const prompt = initialPrompt?.trim() || undefined;
+    this.updateSessionMetadata(sessionId, (metadata) => ({
+      ...metadata,
+      initialPrompt: prompt,
+    }));
+    await this.save();
+  }
+
+  /**
    * Update metadata for a session (title, archived, starred).
    */
   async updateMetadata(
     sessionId: string,
-    updates: { title?: string; archived?: boolean; starred?: boolean },
+    updates: {
+      title?: string;
+      archived?: boolean;
+      starred?: boolean;
+      parentSessionId?: string | null;
+      heartbeatTurnsEnabled?: boolean;
+      heartbeatTurnsAfterMinutes?: number | null;
+      heartbeatTurnText?: string | null;
+      heartbeatForceAfterMinutes?: number | null;
+    },
   ): Promise<void> {
     this.updateSessionMetadata(sessionId, (metadata) => {
       const result = { ...metadata };
 
       // Handle title
       if (updates.title !== undefined) {
-        const trimmedTitle = updates.title.trim();
+        const trimmedTitle = sanitizeSessionTitle(updates.title);
         result.customTitle = trimmedTitle || undefined;
       }
 
@@ -216,6 +255,28 @@ export class SessionMetadataService {
       // Handle starred
       if (updates.starred !== undefined) {
         result.isStarred = updates.starred || undefined;
+      }
+
+      if (updates.parentSessionId !== undefined) {
+        result.parentSessionId =
+          updates.parentSessionId?.trim() || undefined;
+      }
+
+      if (updates.heartbeatTurnsEnabled !== undefined) {
+        result.heartbeatTurnsEnabled = updates.heartbeatTurnsEnabled || undefined;
+      }
+
+      if (updates.heartbeatTurnsAfterMinutes !== undefined) {
+        result.heartbeatTurnsAfterMinutes =
+          updates.heartbeatTurnsAfterMinutes ?? undefined;
+      }
+
+      if (updates.heartbeatTurnText !== undefined) {
+        result.heartbeatTurnText = updates.heartbeatTurnText?.trim() || undefined;
+      }
+
+      if (updates.heartbeatForceAfterMinutes !== undefined) {
+        result.heartbeatForceAfterMinutes = updates.heartbeatForceAfterMinutes;
       }
 
       return result;
@@ -238,9 +299,23 @@ export class SessionMetadataService {
     if (updated.customTitle) cleaned.customTitle = updated.customTitle;
     if (updated.isArchived) cleaned.isArchived = updated.isArchived;
     if (updated.isStarred) cleaned.isStarred = updated.isStarred;
+    if (updated.parentSessionId) cleaned.parentSessionId = updated.parentSessionId;
     if (updated.model) cleaned.model = updated.model;
     if (updated.provider) cleaned.provider = updated.provider;
     if (updated.executor) cleaned.executor = updated.executor;
+    if (updated.initialPrompt) cleaned.initialPrompt = updated.initialPrompt;
+    if (updated.heartbeatTurnsEnabled) {
+      cleaned.heartbeatTurnsEnabled = updated.heartbeatTurnsEnabled;
+    }
+    if (updated.heartbeatTurnsAfterMinutes !== undefined) {
+      cleaned.heartbeatTurnsAfterMinutes = updated.heartbeatTurnsAfterMinutes;
+    }
+    if (updated.heartbeatTurnText) {
+      cleaned.heartbeatTurnText = updated.heartbeatTurnText;
+    }
+    if (updated.heartbeatForceAfterMinutes !== undefined) {
+      cleaned.heartbeatForceAfterMinutes = updated.heartbeatForceAfterMinutes;
+    }
 
     if (Object.keys(cleaned).length === 0) {
       // Remove the entry entirely if empty

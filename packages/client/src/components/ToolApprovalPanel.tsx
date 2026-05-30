@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useToolApprovalFeedbackDraft } from "../hooks/useDrafts";
 import { useI18n } from "../i18n";
+import {
+  makeSecurityVisibleText,
+  makeSecurityVisibleValue,
+} from "../lib/securityVisibleText";
 import type { InputRequest } from "../types";
 import { toolRegistry } from "./renderers/tools";
 import type { RenderContext } from "./renderers/types";
@@ -187,16 +191,24 @@ export function ToolApprovalPanel({
     request.toolName,
   ]);
 
+  const displayToolInput = useMemo(
+    () => makeSecurityVisibleValue(request.toolInput),
+    [request.toolInput],
+  );
+  const displayToolName = request.toolName
+    ? makeSecurityVisibleText(request.toolName)
+    : undefined;
   const summary = request.toolName
-    ? getToolSummary(request.toolName, request.toolInput, undefined, "pending")
+    ? getToolSummary(request.toolName, displayToolInput, undefined, "pending")
     : request.prompt;
+  const displaySummary = summary ? makeSecurityVisibleText(summary) : summary;
 
   const [showPreviewModal, setShowPreviewModal] = useState(false);
 
   // Only show "View details" when the approval summary text itself is too
   // long to display inline. The full tool details (diffs, etc.) are already
   // visible in the session stream above.
-  const summaryText = `Allow ${request.toolName ?? ""} ${summary ?? ""}?`;
+  const summaryText = `Allow ${displayToolName ?? ""} ${displaySummary ?? ""}?`;
   const showViewDetails = summaryText.length > 120;
 
   const renderContext: RenderContext = useMemo(
@@ -253,8 +265,8 @@ export function ToolApprovalPanel({
                 <div className="tool-approval-question-row">
                   <span className="tool-approval-question">
                     {t("toolApprovalAllow", {
-                      tool: request.toolName ?? "",
-                      summary: summary ?? "",
+                      tool: displayToolName ?? "",
+                      summary: displaySummary ?? "",
                     })}
                   </span>
                   {showViewDetails && (
@@ -270,14 +282,14 @@ export function ToolApprovalPanel({
                 {showPreviewModal && request.toolName && (
                   <Modal
                     title={t("toolApprovalDetailsTitle", {
-                      tool: request.toolName,
+                      tool: displayToolName ?? request.toolName,
                     })}
                     onClose={() => setShowPreviewModal(false)}
                   >
                     <div className="tool-use-expanded">
                       {toolRegistry.renderToolUse(
                         request.toolName,
-                        request.toolInput,
+                        displayToolInput,
                         renderContext,
                       )}
                     </div>

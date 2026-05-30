@@ -38,6 +38,9 @@ const EXCLUDED_VARS = new Set([
   // leak into Claude Code child processes where it breaks project tooling
   // (e.g. React 19 + Vitest). See GitHub issue #41.
   "NODE_ENV",
+  // Model selection should come from YA's explicit SDK option, or from
+  // Claude Code settings when YA intentionally requests the default model.
+  "ANTHROPIC_MODEL",
 ]);
 
 /** Essential variables to always keep (even if they match excluded patterns) */

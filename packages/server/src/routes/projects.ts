@@ -9,11 +9,16 @@ import type {
 import type { NotificationService } from "../notifications/index.js";
 import type { CodexSessionScanner } from "../projects/codex-scanner.js";
 import type { GeminiSessionScanner } from "../projects/gemini-scanner.js";
-import { canonicalizeProjectPath, isAbsolutePath } from "../projects/paths.js";
+import {
+  canonicalizeProjectPath,
+  isAbsolutePath,
+  isDetachedProjectPath,
+} from "../projects/paths.js";
 import type { ProjectScanner } from "../projects/scanner.js";
 import type { CodexSessionReader } from "../sessions/codex-reader.js";
 import type { GeminiSessionReader } from "../sessions/gemini-reader.js";
 import { listSessionsAcrossProviders } from "../sessions/provider-resolution.js";
+import type { GrokSessionReader } from "../sessions/grok-reader.js";
 import type { ISessionReader } from "../sessions/types.js";
 import type { ExternalSessionTracker } from "../supervisor/ExternalSessionTracker.js";
 import type { Supervisor } from "../supervisor/Supervisor.js";
@@ -24,6 +29,7 @@ import type {
   SessionSummary,
 } from "../supervisor/types.js";
 import { buildProviderProjectCatalog } from "./provider-catalog.js";
+import { getActiveSessionIndexOptions } from "./session-list-options.js";
 
 export interface ProjectsDeps {
   scanner: ProjectScanner;
@@ -47,6 +53,11 @@ export interface ProjectsDeps {
   geminiSessionsDir?: string;
   /** Optional shared Gemini reader factory for cross-provider session lookups */
   geminiReaderFactory?: (projectPath: string) => GeminiSessionReader;
+  /** Grok sessions directory (defaults to ~/.grok/sessions) */
+  grokSessionsDir?: string;
+  grokReaderFactory?: (projectPath: string) => GrokSessionReader;
+  /** Sessions older than this many days are hidden from default scans. 0 disables. */
+  sessionAutoArchiveDays?: number;
 }
 
 interface ProjectActivityCounts {
@@ -207,6 +218,8 @@ export function createProjectsRoutes(deps: ProjectsDeps): Hono {
       const customTitle = metadata?.customTitle;
       const isArchived = metadata?.isArchived;
       const isStarred = metadata?.isStarred;
+      const parentSessionId =
+        metadata?.parentSessionId ?? session.parentSessionId;
 
       return {
         ...session,
@@ -218,13 +231,16 @@ export function createProjectsRoutes(deps: ProjectsDeps): Hono {
         customTitle,
         isArchived,
         isStarred,
+        parentSessionId,
       };
     });
   }
 
   // GET /api/projects - List all projects
   routes.get("/", async (c) => {
-    const rawProjects = await deps.scanner.listProjects();
+    const rawProjects = (await deps.scanner.listProjects()).filter(
+      (project) => !isDetachedProjectPath(project.path),
+    );
     const activityCounts = await getProjectActivityCounts(
       deps.supervisor,
       deps.externalTracker,
@@ -321,6 +337,34 @@ export function createProjectsRoutes(deps: ProjectsDeps): Hono {
     return c.json({ project });
   });
 
+  // DELETE /api/projects/:projectId - Hide a project from YA lists
+  routes.delete("/:projectId", async (c) => {
+    const projectId = c.req.param("projectId");
+
+    // Validate projectId format at API boundary
+    if (!isUrlProjectId(projectId)) {
+      return c.json({ error: "Invalid project ID format" }, 400);
+    }
+
+    if (!deps.projectMetadataService) {
+      return c.json({ error: "Project removal is unavailable" }, 501);
+    }
+
+    const project = await deps.scanner.getProject(projectId);
+    if (!project) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    await deps.projectMetadataService.hideProject(project.id, project.path);
+    deps.scanner.invalidateCache();
+
+    return c.json({
+      removed: true,
+      projectId: project.id,
+      path: project.path,
+    });
+  });
+
   // GET /api/projects/:projectId/sessions - List sessions
   routes.get("/:projectId/sessions", async (c) => {
     const projectId = c.req.param("projectId");
@@ -329,6 +373,8 @@ export function createProjectsRoutes(deps: ProjectsDeps): Hono {
     if (!isUrlProjectId(projectId)) {
       return c.json({ error: "Invalid project ID format" }, 400);
     }
+
+    const includeArchived = c.req.query("includeArchived") === "true";
 
     // Use getOrCreateProject to support new projects without sessions yet
     const project = await deps.scanner.getOrCreateProject(projectId);
@@ -351,8 +397,13 @@ export function createProjectsRoutes(deps: ProjectsDeps): Hono {
         geminiSessionsDir: deps.geminiSessionsDir,
         geminiReaderFactory: deps.geminiReaderFactory,
         geminiHashToCwd: providerCatalog.geminiHashToCwd,
+        grokSessionsDir: deps.grokSessionsDir,
+        grokReaderFactory: deps.grokReaderFactory,
       },
       providerCatalog,
+      includeArchived
+        ? undefined
+        : getActiveSessionIndexOptions(deps.sessionAutoArchiveDays),
     );
 
     // Add missing owned sessions (new sessions that don't have user/assistant messages yet)

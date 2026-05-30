@@ -1,18 +1,50 @@
-import type { ProviderName, UploadedFile } from "@yep-anywhere/shared";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  AppContentBlock,
+  PromptSuggestionMode,
+  ProviderName,
+  PublicSessionShareSessionStatusResponse,
+  ThinkingOption,
+  UploadedFile,
+} from "@yep-anywhere/shared";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  type MouseEvent as ReactMouseEvent,
+  useRef,
+  useState,
+} from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { api } from "../api/client";
-import { MessageInput, type UploadProgress } from "../components/MessageInput";
+import { api, type DeferredMessagePlacement } from "../api/client";
+import {
+  BtwAsidePane,
+  BtwAsideTranscript,
+  type BtwAsideTranscriptTurn,
+} from "../components/BtwAsidePane";
+import { ClientLogRecordingBadge } from "../components/ClientLogRecordingBadge";
+import {
+  MessageInput,
+  type MessageSubmissionMetadata,
+  type UploadProgress,
+} from "../components/MessageInput";
 import { MessageInputToolbar } from "../components/MessageInputToolbar";
 import { MessageList } from "../components/MessageList";
 import { ModelSwitchModal } from "../components/ModelSwitchModal";
 import { ProcessInfoModal } from "../components/ProcessInfoModal";
 import { ProviderBadge } from "../components/ProviderBadge";
+import { ThinkingIndicator } from "../components/ThinkingIndicator";
 import { QuestionAnswerPanel } from "../components/QuestionAnswerPanel";
 import { RecentSessionsDropdown } from "../components/RecentSessionsDropdown";
+import { RestartSessionModal } from "../components/RestartSessionModal";
+import { SessionHeartbeatModal } from "../components/SessionHeartbeatModal";
 import { SessionMenu } from "../components/SessionMenu";
+import { SessionRecapModal } from "../components/SessionRecapModal";
+import { SessionShareModal } from "../components/SessionShareModal";
 import { ToolApprovalPanel } from "../components/ToolApprovalPanel";
+import type { ModalAnchorRect } from "../components/ui/Modal";
+import { ViewerCountIndicator } from "../components/ViewerCountIndicator";
 import { AgentContentProvider } from "../contexts/AgentContentContext";
+import { RenderModeProvider } from "../contexts/RenderModeContext";
 import { SessionMetadataProvider } from "../contexts/SessionMetadataContext";
 import {
   StreamingMarkdownProvider,
@@ -20,6 +52,10 @@ import {
 } from "../contexts/StreamingMarkdownContext";
 import { useToastContext } from "../contexts/ToastContext";
 import { useActivityBusState } from "../hooks/useActivityBusState";
+import {
+  getAttachmentUploadLongEdgePx,
+  useAttachmentUploadQuality,
+} from "../hooks/useAttachmentUploadQuality";
 import { useConnection } from "../hooks/useConnection";
 import { useDeveloperMode } from "../hooks/useDeveloperMode";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
@@ -31,14 +67,462 @@ import { useProviders } from "../hooks/useProviders";
 import { recordSessionVisit } from "../hooks/useRecentSessions";
 import { useRemoteBasePath } from "../hooks/useRemoteBasePath";
 import {
+  type DeferredMessage,
   type StreamingMarkdownCallbacks,
   useSession,
 } from "../hooks/useSession";
 import { useI18n } from "../i18n";
 import { useNavigationLayout } from "../layouts";
+import { buildCorrectionText } from "../lib/correctionText";
+import { storeUploadedAttachmentPreview } from "../lib/attachmentPreviewCache";
+import {
+  getRecallSubmissionAfterQueuedCancel,
+  type LastComposerSubmission,
+  type SentComposerSubmission,
+} from "../lib/composerRecall";
+import { logSessionUiTrace } from "../lib/diagnostics/uiTrace";
+import { getIndicatorToneFromProcess } from "../lib/modelConfigIndicator";
+import { getModelIndicatorModelLabel } from "../lib/modelIndicatorText";
+import {
+  buildBtwAsideParentHref,
+  getBtwAsideSessionDisplayTitle,
+} from "../lib/btwAsideSessions";
+import { prepareImageUpload } from "../lib/imageAttachmentResize";
 import { preprocessMessages } from "../lib/preprocessMessages";
+import {
+  getEstimatedServerOffsetMs,
+  getServerClockTimestamp,
+  measureServerLatencyMs,
+  recordServerClockSample,
+} from "../lib/serverClock";
+import {
+  CLIENT_SLASH_COMMANDS,
+  resolveComposerSlashTurn,
+} from "../lib/slashCommands";
+import {
+  getBtwSplitRouting,
+  getBtwToolbarMode,
+} from "../lib/btwAsideRouting";
+import { getSessionActivityUiState } from "../lib/sessionActivityUi";
 import { generateUUID } from "../lib/uuid";
+import type { Message } from "../types";
 import { getSessionDisplayTitle } from "../utils";
+
+const PENDING_ELSEWHERE_DISMISS_KEY_PREFIX =
+  "yepanywhere:pending-elsewhere-dismissed:";
+const PUBLIC_SHARE_STATUS_POLL_MS = 5000;
+const PUBLIC_SHARE_INITIAL_PROMPT_MAX_LENGTH = 700;
+const BTW_ASIDE_POLL_MS = 1500;
+const BTW_ASIDE_MAX_POLLS = 160;
+const BTW_ASIDE_PREVIEW_MAX_LENGTH = 700;
+const BTW_ASIDE_PROMPT_MARKER = "[YA /btw aside]";
+const BTW_ASIDE_FORK_PROVIDERS = new Set<ProviderName>([
+  "claude",
+  "codex",
+  "codex-oss",
+]);
+
+interface QueuedEditDraft {
+  originalTempId: string;
+  placement?: DeferredMessagePlacement;
+}
+
+interface PreparedComposerSubmission {
+  outgoingText: string;
+  thinking?: ThinkingOption;
+  slashCommand?: "fast" | "run";
+}
+
+type BtwAsideStatus =
+  | "draft"
+  | "starting"
+  | "running"
+  | "complete"
+  | "failed"
+  | "stopped";
+
+interface BtwAside {
+  id: string;
+  sessionId?: string;
+  baseMessageCount: number;
+  request: string;
+  followUps: string[];
+  status: BtwAsideStatus;
+  error?: string;
+  preview?: string;
+  responses: string[];
+  turns?: BtwAsideTranscriptTurn[];
+  processId?: string;
+  createdAt: string;
+  updatedAt: string;
+  historyAt?: string;
+  expanded?: boolean;
+}
+
+function providerSupportsBtwAsideFork(
+  provider: ProviderName | undefined,
+): boolean {
+  return provider ? BTW_ASIDE_FORK_PROVIDERS.has(provider) : false;
+}
+
+function appendComposerTransferDraft(currentDraft: string, text: string): string {
+  const current = currentDraft.trimEnd();
+  const addition = text.trim();
+  if (!current) {
+    return addition;
+  }
+  if (!addition) {
+    return current;
+  }
+  return `${current}\n\n${addition}`;
+}
+
+function getDeferredEditPlacement(
+  messages: DeferredMessage[],
+  tempId: string,
+): DeferredMessagePlacement | undefined {
+  const index = messages.findIndex((message) => message.tempId === tempId);
+  if (index === -1) {
+    return undefined;
+  }
+  const afterTempId = messages[index - 1]?.tempId;
+  const beforeTempId = messages[index + 1]?.tempId;
+  if (!afterTempId && !beforeTempId) {
+    return undefined;
+  }
+  return {
+    ...(afterTempId ? { afterTempId } : {}),
+    ...(beforeTempId ? { beforeTempId } : {}),
+  };
+}
+
+function isMissingDeferredQueueEntryError(error: unknown): boolean {
+  if ((error as { status?: number } | null)?.status === 404) {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("No active process") ||
+    message.includes("Deferred message not found")
+  );
+}
+
+function messageContentToPlainText(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  return content
+    .map((block) => {
+      if (!block || typeof block !== "object") {
+        return "";
+      }
+      const value = block as AppContentBlock;
+      if (value.type === "text" && typeof value.text === "string") {
+        return value.text;
+      }
+      if (value.type === "thinking" && typeof value.thinking === "string") {
+        return value.thinking;
+      }
+      return typeof value.content === "string" ? value.content : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function messageContentToBtwLiveText(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  return content
+    .map((block) => {
+      if (!block || typeof block !== "object") {
+        return "";
+      }
+      const value = block as AppContentBlock & Record<string, unknown>;
+      if (value.type === "text" && typeof value.text === "string") {
+        return value.text;
+      }
+      if (value.type === "thinking" && typeof value.thinking === "string") {
+        return `Thinking: ${truncateBtwPreview(value.thinking)}`;
+      }
+      if (value.type === "tool_use" && typeof value.name === "string") {
+        const input = value.input as Record<string, unknown> | undefined;
+        const detail =
+          (typeof input?.command === "string" && input.command) ||
+          (typeof input?.cmd === "string" && input.cmd) ||
+          (typeof input?.file_path === "string" && input.file_path) ||
+          (typeof input?.query === "string" && input.query) ||
+          (typeof input?.url === "string" && input.url) ||
+          "";
+        return detail
+          ? `Using ${value.name}: ${truncateBtwPreview(detail)}`
+          : `Using ${value.name}`;
+      }
+      return typeof value.content === "string" ? value.content : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function truncateBtwPreview(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= BTW_ASIDE_PREVIEW_MAX_LENGTH) {
+    return normalized;
+  }
+  return `${normalized.slice(0, BTW_ASIDE_PREVIEW_MAX_LENGTH - 3).trimEnd()}...`;
+}
+
+function getMessagePlainText(message: Message | undefined): string {
+  return (
+    messageContentToPlainText(message?.content) ||
+    messageContentToPlainText(message?.message?.content)
+  );
+}
+
+function isAssistantRole(message: Message | undefined): message is Message {
+  return (
+    message?.type === "assistant" ||
+    message?.role === "assistant" ||
+    message?.message?.role === "assistant"
+  );
+}
+
+function isUserRole(message: Message | undefined): message is Message {
+  return (
+    message?.type === "user" ||
+    message?.role === "user" ||
+    message?.message?.role === "user"
+  );
+}
+
+function getLatestAssistantText(messages: Message[]): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!isAssistantRole(message)) {
+      continue;
+    }
+
+    const text = getMessagePlainText(message);
+    if (text.trim()) {
+      return truncateBtwPreview(text);
+    }
+  }
+  return null;
+}
+
+function findLatestBtwPromptIndex(messages: Message[]): number {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (
+      getMessagePlainText(messages[index] ?? {}).includes(
+        BTW_ASIDE_PROMPT_MARKER,
+      )
+    ) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function findFirstBtwPromptIndex(messages: Message[]): number {
+  for (let index = 0; index < messages.length; index += 1) {
+    if (
+      getMessagePlainText(messages[index] ?? {}).includes(
+        BTW_ASIDE_PROMPT_MARKER,
+      )
+    ) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function getBtwSideRequestFromPromptText(text: string): string | null {
+  const requestMarker = "[Side request]";
+  const requestIndex = text.indexOf(requestMarker);
+  if (requestIndex < 0) {
+    return null;
+  }
+  const request = text.slice(requestIndex + requestMarker.length).trim();
+  return request || null;
+}
+
+function getBtwTranscriptTurns(
+  messages: Message[],
+  baseMessageCount: number,
+): BtwAsideTranscriptTurn[] {
+  const firstBtwPromptIndex = findFirstBtwPromptIndex(messages);
+  const startIndex =
+    firstBtwPromptIndex >= 0
+      ? firstBtwPromptIndex
+      : Math.min(Math.max(0, baseMessageCount), messages.length);
+
+  return messages
+    .slice(startIndex)
+    .flatMap((message, relativeIndex): BtwAsideTranscriptTurn[] => {
+      const messageId =
+        typeof message.uuid === "string"
+          ? message.uuid
+          : typeof message.id === "string"
+            ? message.id
+            : `message-${startIndex + relativeIndex}`;
+
+      if (isUserRole(message)) {
+        const request = getBtwSideRequestFromPromptText(
+          getMessagePlainText(message),
+        );
+        return request
+          ? [{ id: `${messageId}-user`, role: "user", text: request }]
+          : [];
+      }
+
+      if (!isAssistantRole(message)) {
+        return [];
+      }
+
+      const assistantMessage = message as Message;
+      const text = (
+        messageContentToBtwLiveText(assistantMessage.content) ||
+        messageContentToBtwLiveText(assistantMessage.message?.content)
+      ).trim();
+      return text
+        ? [{ id: `${messageId}-assistant`, role: "assistant", text }]
+        : [];
+    });
+}
+
+function getBtwRequestFromMessages(messages: Message[]): string | null {
+  const promptIndex = findLatestBtwPromptIndex(messages);
+  if (promptIndex < 0) {
+    return null;
+  }
+  const text = getMessagePlainText(messages[promptIndex] ?? {});
+  return getBtwSideRequestFromPromptText(text);
+}
+
+function buildBtwAsideInitialPrompt(prompt: string): string {
+  return [
+    BTW_ASIDE_PROMPT_MARKER,
+    "You are a forked side session running alongside a still-active parent session.",
+    "The transcript above this turn was produced by that parent; call it 'Mother'.",
+    "Earlier assistant turns are Mother's actions, not your own; when reasoning about or referring back to them, treat them as Mother's and attribute them in writing ('Mother said X', 'Mother edited Y') rather than using first person.",
+    "Your view of Mother's work is frozen at fork time; Mother may have continued since.",
+    "Mother is responsible for the main task; do not continue, take over, or report on it unless the side request below explicitly asks you to.",
+    "You share Mother's working directory. Prefer read-only investigation; if writes are necessary, scope them tightly to avoid colliding with Mother's edits.",
+    "Answer only the side request below. End with a short report block (1-5 lines) suitable for the user to paste back to Mother verbatim.",
+    "",
+    "[Side request]",
+    prompt,
+  ].join("\n");
+}
+
+function buildBtwAsideFollowupPrompt(prompt: string): string {
+  return [
+    BTW_ASIDE_PROMPT_MARKER,
+    "(Continuing the side session. Mother remains responsible for the main task; refer to Mother's prior turns as 'Mother said ...'; share working directory with care; end with a short paste-ready report.)",
+    "",
+    "[Side request]",
+    prompt,
+  ].join("\n");
+}
+
+function normalizePublicShareInitialPrompt(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (
+    trimmed.startsWith("# AGENTS.md instructions") ||
+    trimmed.startsWith("<environment_context>")
+  ) {
+    return null;
+  }
+  const normalized = trimmed.replace(/\s+/g, " ");
+  return normalized.length > PUBLIC_SHARE_INITIAL_PROMPT_MAX_LENGTH
+    ? `${normalized.slice(0, PUBLIC_SHARE_INITIAL_PROMPT_MAX_LENGTH - 3).trimEnd()}...`
+    : normalized;
+}
+
+function parsePositiveIntegerParam(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function getPublicShareInitialPrompt(messages: unknown[]): string | null {
+  for (const message of messages) {
+    if (!message || typeof message !== "object") {
+      continue;
+    }
+    const entry = message as {
+      content?: unknown;
+      message?: { content?: unknown };
+      type?: unknown;
+    };
+    if (entry.type !== "user") {
+      continue;
+    }
+    const content =
+      messageContentToPlainText(entry.content) ||
+      messageContentToPlainText(entry.message?.content);
+    const preview = normalizePublicShareInitialPrompt(content);
+    if (preview) {
+      return preview;
+    }
+  }
+  return null;
+}
+
+function parseCodexConfigAck(
+  message: { [key: string]: unknown } | null | undefined,
+): {
+  model?: string;
+  thinking?: { type: string };
+  effort?: string;
+} | null {
+  if (
+    !message ||
+    message.type !== "system" ||
+    message.subtype !== "config_ack"
+  ) {
+    return null;
+  }
+
+  const configModel =
+    typeof message.configModel === "string" ? message.configModel.trim() : "";
+  const configThinking =
+    typeof message.configThinking === "string"
+      ? message.configThinking.trim().toLowerCase()
+      : "";
+
+  const ack: {
+    model?: string;
+    thinking?: { type: string };
+    effort?: string;
+  } = {};
+
+  if (configModel) {
+    ack.model = configModel;
+  }
+
+  if (configThinking.startsWith("effort ")) {
+    const acknowledgedEffort = configThinking.slice("effort ".length).trim();
+    if (acknowledgedEffort === "none") {
+      ack.thinking = { type: "disabled" };
+      ack.effort = "none";
+    } else if (acknowledgedEffort) {
+      ack.thinking = { type: "enabled" };
+      ack.effort = acknowledgedEffort;
+    }
+  }
+
+  return ack.model || ack.thinking || ack.effort ? ack : null;
+}
 
 export function SessionPage() {
   const { projectId, sessionId } = useParams<{
@@ -55,11 +539,13 @@ export function SessionPage() {
   // Wrap with StreamingMarkdownProvider for server-rendered markdown streaming
   return (
     <StreamingMarkdownProvider>
-      <SessionPageContent
-        key={sessionId}
-        projectId={projectId}
-        sessionId={sessionId}
-      />
+      <RenderModeProvider key={sessionId}>
+        <SessionPageContent
+          key={sessionId}
+          projectId={projectId}
+          sessionId={sessionId}
+        />
+      </RenderModeProvider>
     </StreamingMarkdownProvider>
   );
 }
@@ -96,6 +582,46 @@ function SessionPageContent({
   const initialTitle = navState?.initialTitle;
   const initialModel = navState?.initialModel;
   const initialProvider = navState?.initialProvider;
+  const clientTailParams = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return {
+      tailTurns: parsePositiveIntegerParam(params.get("tailTurns")),
+      tailFrom: params.get("tailFrom")?.trim() || undefined,
+    };
+  }, [location.search]);
+  const clientTailActive =
+    clientTailParams.tailTurns !== undefined ||
+    clientTailParams.tailFrom !== undefined;
+
+  const updateClientTailParams = useCallback(
+    (update: { tailTurns?: number; tailFrom?: string }) => {
+      const params = new URLSearchParams(location.search);
+      params.delete("tailTurns");
+      params.delete("tailFrom");
+      if (update.tailTurns !== undefined) {
+        params.set("tailTurns", String(update.tailTurns));
+      }
+      if (update.tailFrom) {
+        params.set("tailFrom", update.tailFrom);
+      }
+      const search = params.toString();
+      navigate(
+        {
+          pathname: location.pathname,
+          search: search ? `?${search}` : "",
+        },
+        { replace: false },
+      );
+    },
+    [location.pathname, location.search, navigate],
+  );
+
+  const trimClientFromUserMessage = useCallback(
+    (messageId: string) => {
+      updateClientTailParams({ tailFrom: messageId });
+    },
+    [updateClientTailParams],
+  );
 
   // Get streaming markdown context for server-rendered markdown streaming
   const streamingMarkdownContext = useStreamingMarkdownContext();
@@ -123,17 +649,19 @@ function SessionPageContent({
     markdownAugments,
     status,
     processState,
+    sessionLiveness,
     isCompacting,
+    setIsCompacting,
     pendingInputRequest,
     actualSessionId,
     permissionMode,
     loading,
     error,
-    connected,
     sessionUpdatesConnected,
     lastStreamActivityAt,
     setStatus,
     setProcessState,
+    setPendingInputRequest,
     setPermissionMode,
     setHold,
     isHeld,
@@ -142,19 +670,23 @@ function SessionPageContent({
     removePendingMessage,
     updatePendingMessage,
     deferredMessages,
+    addDeferredMessage,
+    syncDeferredMessages,
+    removeDeferredMessage,
     slashCommands,
     setSessionModel,
-    sessionTools,
-    mcpServers,
     pagination,
     loadingOlder,
     loadOlderMessages,
     reconnectStream,
+    promptSuggestion,
+    dismissPromptSuggestion,
   } = useSession(
     projectId,
     sessionId,
     initialStatus,
     streamingMarkdownCallbacks,
+    clientTailParams,
   );
 
   // Developer mode settings
@@ -164,8 +696,13 @@ function SessionPageContent({
   const { connectionState } = useActivityBusState();
   const hasSessionUpdateStream =
     status.owner === "self" || status.owner === "external";
-  const sessionConnectionStatus =
-    !showConnectionBars || !hasSessionUpdateStream
+
+  // Always compute the real connection state. We only hide the bar behind
+  // developer mode for connected/idle states; a disconnected state is
+  // always shown so users can see when the live pipe is broken (e.g. dropped
+  // SSH tunnel, relay issue, etc.).
+  const rawSessionConnectionStatus =
+    !hasSessionUpdateStream
       ? "idle"
       : sessionUpdatesConnected
         ? "connected"
@@ -173,38 +710,130 @@ function SessionPageContent({
           ? "connecting"
           : "disconnected";
 
+  const sessionConnectionStatus =
+    showConnectionBars || rawSessionConnectionStatus === "disconnected"
+      ? rawSessionConnectionStatus
+      : "idle";
+
   // Effective provider/model for immediate display before session data loads
   const effectiveProvider = session?.provider ?? initialProvider;
   const effectiveModel = session?.model ?? initialModel;
+  const supportsBtwAsides = providerSupportsBtwAsideFork(effectiveProvider);
+  const [liveModelConfig, setLiveModelConfig] = useState<{
+    model?: string;
+    thinking?: { type: string };
+    effort?: string;
+    promptSuggestionMode?: PromptSuggestionMode;
+  } | null>(null);
 
   const [scrollTrigger, setScrollTrigger] = useState(0);
   const draftControlsRef = useRef<DraftControls | null>(null);
-  const handleDraftControlsReady = useCallback((controls: DraftControls) => {
-    draftControlsRef.current = controls;
-  }, []);
+  const pendingMotherComposerTransferRef = useRef<string | null>(null);
+  const lastComposerSubmissionRef = useRef<LastComposerSubmission | null>(null);
+  const lastSentComposerSubmissionRef =
+    useRef<SentComposerSubmission | null>(null);
+  const [btwAsides, setBtwAsides] = useState<BtwAside[]>([]);
+  const [focusedBtwAsideId, setFocusedBtwAsideId] = useState<string | null>(
+    null,
+  );
+  // Wide-screen split pane (side-by-side parent + focused aside). Collapsed
+  // hides the pane while keeping the aside focused for composer routing.
+  const [btwSidePaneCollapsed, setBtwSidePaneCollapsed] = useState(false);
+  // Draft text for the in-pane aside composer (cleared on focus change; not
+  // persisted to localStorage in this initial ship).
+  const [asideDraft, setAsideDraft] = useState("");
+  const asideComposerRef = useRef<HTMLTextAreaElement | null>(null);
+  const btwAsidesRef = useRef<BtwAside[]>([]);
+  const hydratedBtwSessionIdsRef = useRef<Set<string>>(new Set());
+  const [correctionDraft, setCorrectionDraft] = useState<{
+    messageId: string;
+    originalText: string;
+  } | null>(null);
+  const [queuedEditDraft, setQueuedEditDraft] =
+    useState<QueuedEditDraft | null>(null);
   const { showToast } = useToastContext();
 
-  // Sharing: check if configured (hidden unless sharing.json exists on server)
-  const [sharingConfigured, setSharingConfigured] = useState(false);
-  useEffect(() => {
-    api
-      .getSharingStatus()
-      .then((res) => setSharingConfigured(res.configured))
-      .catch(() => {});
+  const releaseQueuedEditBarrier = useCallback(
+    (editDraft: QueuedEditDraft | null, reason: string) => {
+      if (!editDraft) {
+        return;
+      }
+      logSessionUiTrace("queued-edit-release", {
+        sessionId,
+        originalTempId: editDraft.originalTempId,
+        reason,
+      });
+      api
+        .releaseDeferredEditBarrier(sessionId, editDraft.originalTempId)
+        .then((result) => {
+          if (result.deferredMessages) {
+            syncDeferredMessages(result.deferredMessages, {
+              reason: "edited",
+              tempId: editDraft.originalTempId,
+              source: "rest",
+            });
+          }
+        })
+        .catch((err) => {
+          console.warn("Failed to release deferred edit barrier:", err);
+        });
+    },
+    [sessionId, syncDeferredMessages],
+  );
+
+  const rememberSentSubmission = useCallback((text: string, id: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return;
+    }
+    const submission: SentComposerSubmission = {
+      kind: "sent",
+      text: trimmed,
+      id,
+    };
+    lastSentComposerSubmissionRef.current = submission;
+    lastComposerSubmissionRef.current = submission;
   }, []);
 
   // Connection for uploads (uses WebSocket when enabled)
   const connection = useConnection();
 
-  // Inject custom client-side commands alongside SDK-discovered ones
+  const supportsManualCompact =
+    status.owner === "self" && slashCommands.includes("compact");
+
+  // Inject custom client-side commands alongside SDK-discovered ones.
+  // Keep /model last so it stays nearest the slash button in the upward menu.
   const allSlashCommands = useMemo(() => {
-    if (status.owner === "self") {
-      return slashCommands.includes("model")
-        ? slashCommands
-        : ["model", ...slashCommands];
+    if (status.owner !== "self") {
+      return slashCommands;
     }
-    return slashCommands;
-  }, [slashCommands, status.owner]);
+
+    const orderedCommands: string[] = CLIENT_SLASH_COMMANDS.filter(
+      (command) =>
+        command !== "model" &&
+        (command !== "btw" || supportsBtwAsides) &&
+        (command !== "done" || !!focusedBtwAsideId),
+    );
+    if (supportsManualCompact) {
+      orderedCommands.push("compact");
+    }
+
+    for (const command of slashCommands) {
+      if (command !== "model" && !orderedCommands.includes(command)) {
+        orderedCommands.push(command);
+      }
+    }
+
+    orderedCommands.push("model");
+
+    return orderedCommands;
+  }, [
+    focusedBtwAsideId,
+    slashCommands,
+    status.owner,
+    supportsBtwAsides,
+    supportsManualCompact,
+  ]);
 
   // Get provider capabilities based on session's provider
   const { providers } = useProviders();
@@ -217,8 +846,120 @@ function SessionPageContent({
     currentProviderInfo?.supportsPermissionMode ?? true;
   const supportsThinkingToggle =
     currentProviderInfo?.supportsThinkingToggle ?? true;
-  const supportsSlashCommands =
-    currentProviderInfo?.supportsSlashCommands ?? false;
+  const generallySupportsSteering =
+    currentProviderInfo?.supportsSteering === true ||
+    session?.provider === "codex";
+  const supportsSteeringNow = currentProviderInfo?.supportsSteering === true;
+  const currentOwnedProcessId =
+    status.owner === "self" ? status.processId : undefined;
+  const activityRenderItems = useMemo(() => preprocessMessages(messages), [
+    messages,
+  ]);
+  const sessionActivityUi = useMemo(
+    () =>
+      getSessionActivityUiState({
+        owner: status.owner,
+        processState,
+        items: activityRenderItems,
+        hasSessionUpdateStream,
+        sessionUpdatesConnected,
+      }),
+    [
+      activityRenderItems,
+      hasSessionUpdateStream,
+      processState,
+      sessionUpdatesConnected,
+      status.owner,
+    ],
+  );
+  const hasPendingRenderedToolCalls =
+    sessionActivityUi.hasPendingToolCalls;
+  const canStopOwnedProcess = sessionActivityUi.canStopOwnedProcess;
+  const shouldDeferMessages = sessionActivityUi.shouldDeferMessages;
+  const primaryComposerAction =
+    shouldDeferMessages && generallySupportsSteering
+      ? supportsSteeringNow
+        ? "steer"
+        : "queue"
+      : shouldDeferMessages
+        ? "queue"
+        : "send";
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!currentOwnedProcessId) {
+      setLiveModelConfig(null);
+      return;
+    }
+
+    api
+      .getProcessInfo(actualSessionId)
+      .then((res) => {
+        if (cancelled) return;
+        const process = res.process;
+        setLiveModelConfig(
+          process
+            ? {
+                model: process.model,
+                thinking: process.thinking,
+                effort: process.effort,
+                promptSuggestionMode: process.promptSuggestionMode,
+              }
+            : null,
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLiveModelConfig(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [actualSessionId, currentOwnedProcessId]);
+
+  const latestCodexConfigAck = useMemo(() => {
+    if (effectiveProvider !== "codex" && effectiveProvider !== "codex-oss") {
+      return null;
+    }
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const acknowledged = parseCodexConfigAck(
+        messages[index] as { [key: string]: unknown } | undefined,
+      );
+      if (acknowledged) {
+        return acknowledged;
+      }
+    }
+
+    return null;
+  }, [effectiveProvider, messages]);
+
+  const publicShareInitialPrompt = useMemo(
+    () => getPublicShareInitialPrompt(messages),
+    [messages],
+  );
+
+  useEffect(() => {
+    if (!latestCodexConfigAck) return;
+
+    setLiveModelConfig((prev) => {
+      if (currentOwnedProcessId && prev) {
+        return {
+          model: prev.model ?? latestCodexConfigAck.model,
+          thinking: prev.thinking ?? latestCodexConfigAck.thinking,
+          effort: prev.effort ?? latestCodexConfigAck.effort,
+        };
+      }
+      return {
+        model: latestCodexConfigAck.model ?? prev?.model,
+        thinking: latestCodexConfigAck.thinking ?? prev?.thinking,
+        effort: latestCodexConfigAck.effort ?? prev?.effort,
+      };
+    });
+  }, [currentOwnedProcessId, latestCodexConfigAck]);
 
   // Inline title editing state
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -242,6 +983,16 @@ function SessionPageContent({
   const [localIsStarred, setLocalIsStarred] = useState<boolean | undefined>(
     undefined,
   );
+  const [localHeartbeatTurnsEnabled, setLocalHeartbeatTurnsEnabled] = useState<
+    boolean | undefined
+  >(undefined);
+  const [localHeartbeatTurnsAfterMinutes, setLocalHeartbeatTurnsAfterMinutes] =
+    useState<number | undefined>(undefined);
+  const [localHeartbeatTurnText, setLocalHeartbeatTurnText] = useState<
+    string | undefined
+  >(undefined);
+  const [localHeartbeatForceAfterMinutes, setLocalHeartbeatForceAfterMinutes] =
+    useState<number | undefined>(undefined);
   const [localHasUnread, setLocalHasUnread] = useState<boolean | undefined>(
     undefined,
   );
@@ -252,6 +1003,10 @@ function SessionPageContent({
     setLocalCustomTitle(undefined);
     setLocalIsArchived(undefined);
     setLocalIsStarred(undefined);
+    setLocalHeartbeatTurnsEnabled(undefined);
+    setLocalHeartbeatTurnsAfterMinutes(undefined);
+    setLocalHeartbeatTurnText(undefined);
+    setLocalHeartbeatForceAfterMinutes(undefined);
     setLocalHasUnread(undefined);
   }, [sessionId]);
 
@@ -282,22 +1037,166 @@ function SessionPageContent({
     basePath,
   ]);
 
+  // Navigate to the session reader canonical project when the API followed
+  // a provider-native redirect from a stale project-scoped link.
+  useEffect(() => {
+    const canonicalProjectId = session?.projectId;
+    if (!canonicalProjectId || canonicalProjectId === projectId) {
+      return;
+    }
+
+    navigate(
+      `${basePath}/projects/${canonicalProjectId}/sessions/${actualSessionId}${location.search}`,
+      {
+        replace: true,
+        state: location.state,
+      },
+    );
+  }, [
+    actualSessionId,
+    basePath,
+    location.search,
+    location.state,
+    navigate,
+    projectId,
+    session?.projectId,
+  ]);
+
   // File attachment state
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress[]>([]);
+  const [attachmentQuality] = useAttachmentUploadQuality();
   // Track in-flight upload promises so handleSend can wait for them
   const pendingUploadsRef = useRef<Map<string, Promise<UploadedFile | null>>>(
     new Map(),
   );
+
+  useEffect(() => {
+    setCorrectionDraft(null);
+    setQueuedEditDraft(null);
+    setBtwAsides([]);
+    btwAsidesRef.current = [];
+    setFocusedBtwAsideId(null);
+    hydratedBtwSessionIdsRef.current.clear();
+    lastComposerSubmissionRef.current = null;
+    lastSentComposerSubmissionRef.current = null;
+  }, [sessionId]);
+
+  const handleCancelCorrection = useCallback(() => {
+    const editDraft = queuedEditDraft;
+    setCorrectionDraft(null);
+    setQueuedEditDraft(null);
+    draftControlsRef.current?.clearDraft();
+    setAttachments([]);
+    releaseQueuedEditBarrier(editDraft, "cancel-correction");
+  }, [queuedEditDraft, releaseQueuedEditBarrier]);
+
+  const handleCorrectLatestUserMessage = useCallback(
+    (messageId: string, content: string) => {
+      const draftControls = draftControlsRef.current;
+      if (!draftControls) {
+        showToast(
+          t("sessionCorrectionEditFailed", {
+            message: "Composer is not available",
+          }),
+          "error",
+        );
+        return;
+      }
+
+      draftControls.setDraft(content);
+      setAttachments([]);
+      releaseQueuedEditBarrier(queuedEditDraft, "start-sent-correction");
+      setCorrectionDraft({ messageId, originalText: content });
+      setQueuedEditDraft(null);
+    },
+    [queuedEditDraft, releaseQueuedEditBarrier, showToast, t],
+  );
+
+  const getOutgoingMessageText = useCallback(
+    (text: string): string | null => {
+      if (!correctionDraft) {
+        return text;
+      }
+
+      const correctionText = buildCorrectionText(
+        correctionDraft.originalText,
+        text,
+      );
+      if (!correctionText) {
+        draftControlsRef.current?.setDraft(text);
+        showToast(t("sessionCorrectionNoChanges"), "info");
+        return null;
+      }
+      return correctionText;
+    },
+    [correctionDraft, showToast, t],
+  );
+
+  const prepareComposerSubmission = (
+    text: string,
+  ): PreparedComposerSubmission | null => {
+    const slashTurn = resolveComposerSlashTurn(text);
+    if (slashTurn.kind === "custom") {
+      if (slashTurn.command === "btw" && !supportsBtwAsides) {
+        draftControlsRef.current?.setDraft(text);
+        showToast(
+          "/btw asides are available only for providers with a wired fork path.",
+          "error",
+        );
+        return null;
+      }
+      if (slashTurn.command === "done" && !focusedBtwAside) {
+        draftControlsRef.current?.setDraft(text);
+        showToast(
+          "/done closes a focused /btw aside; no aside is focused.",
+          "error",
+        );
+        return null;
+      }
+      if (handleCustomCommand(slashTurn.command, slashTurn.argument)) {
+        return null;
+      }
+      const outgoingText = getOutgoingMessageText(text);
+      return outgoingText ? { outgoingText } : null;
+    }
+
+    if (slashTurn.kind === "error") {
+      draftControlsRef.current?.setDraft(text);
+      showToast(slashTurn.message, "error");
+      return null;
+    }
+
+    const outgoingText = getOutgoingMessageText(slashTurn.text);
+    if (!outgoingText) {
+      return null;
+    }
+
+    return {
+      outgoingText,
+      thinking: slashTurn.thinking,
+      slashCommand: slashTurn.command,
+    };
+  };
 
   // Approval panel collapsed state (separate from message input collapse)
   const [approvalCollapsed, setApprovalCollapsed] = useState(false);
 
   // Process info modal state
   const [showProcessInfoModal, setShowProcessInfoModal] = useState(false);
+  const [showHeartbeatModal, setShowHeartbeatModal] = useState(false);
+  const [showRecapModal, setShowRecapModal] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareModalAnchor, setShareModalAnchor] =
+    useState<ModalAnchorRect | null>(null);
+  const [publicShareStatus, setPublicShareStatus] =
+    useState<PublicSessionShareSessionStatusResponse | null>(null);
+  const [pendingElsewhereDismissed, setPendingElsewhereDismissed] =
+    useState(false);
 
   // Model switch modal state
   const [showModelSwitchModal, setShowModelSwitchModal] = useState(false);
+  const [showHandoffModal, setShowHandoffModal] = useState(false);
 
   // Track user engagement to mark session as "seen"
   // Only enabled when not in external session (we own or it's idle)
@@ -329,11 +1228,45 @@ function SessionPageContent({
     enabled: status.owner !== "external",
   });
 
-  const handleSend = async (text: string) => {
+  const handleSend = async (
+    text: string,
+    metadata?: MessageSubmissionMetadata,
+  ) => {
+    const prepared = prepareComposerSubmission(text);
+    if (!prepared) {
+      return;
+    }
+    const { outgoingText, slashCommand } = prepared;
+    const thinking = prepared.thinking ?? getThinkingSetting();
+    const queuedEditDraftAtSubmit = queuedEditDraft;
+    const actionAtMs = Date.now();
+    const clientTimestamp = getServerClockTimestamp(actionAtMs);
+    const clientTimestampIso = new Date(clientTimestamp).toISOString();
+
     // Add to pending queue and get tempId to pass to server
-    const tempId = addPendingMessage(text);
+    const { tempId } = addPendingMessage(
+      outgoingText,
+      undefined,
+      clientTimestampIso,
+    );
     setProcessState("in-turn"); // Optimistic: show processing indicator immediately
     setScrollTrigger((prev) => prev + 1); // Force scroll to bottom
+    logSessionUiTrace("composer-send-start", {
+      sessionId,
+      projectId,
+      tempId,
+      owner: status.owner,
+      processId: status.owner === "self" ? status.processId : null,
+      permissionMode,
+      thinking,
+      slashCommand: slashCommand ?? null,
+      textLength: outgoingText.length,
+      attachmentCount: attachments.length,
+      hasCorrectionDraft: !!correctionDraft,
+      hasQueuedEditDraft: !!queuedEditDraft,
+      clientTimestamp,
+      serverOffsetMs: getEstimatedServerOffsetMs(),
+    });
 
     // Capture already-completed attachments
     const currentAttachments = [...attachments];
@@ -357,19 +1290,23 @@ function SessionPageContent({
       setAttachments([]);
     }
 
+    if (currentAttachments.length > 0) {
+      updatePendingMessage(tempId, { attachments: currentAttachments });
+    }
+
     try {
+      const requestSentAtMs = Date.now();
       if (status.owner === "none") {
         // Resume the session with current permission mode and model settings
         // Use session's existing model if available (important for non-Claude providers),
         // otherwise fall back to user's model preference for new Claude sessions
         const model = session?.model ?? getModelSetting();
-        const thinking = getThinkingSetting();
         // Use effectiveProvider to ensure correct provider even if session data hasn't loaded
         // effectiveProvider = session?.provider ?? initialProvider (from navigation state)
         const result = await api.resumeSession(
           projectId,
           sessionId,
-          text,
+          outgoingText,
           {
             mode: permissionMode,
             model,
@@ -379,20 +1316,65 @@ function SessionPageContent({
           },
           currentAttachments.length > 0 ? currentAttachments : undefined,
           tempId,
+          clientTimestamp,
+          metadata,
         );
+        const responseReceivedAtMs = Date.now();
+        const timing = recordServerClockSample({
+          clientRequestStartMs: requestSentAtMs,
+          clientResponseEndMs: responseReceivedAtMs,
+          serverTimestamp: result.serverTimestamp,
+        });
         // Update status to trigger SSE connection
+        logSessionUiTrace("composer-send-resume-success", {
+          sessionId,
+          tempId,
+          processId: result.processId,
+          clientTimestamp,
+          serverTimestamp: result.serverTimestamp,
+          uploadWaitMs: requestSentAtMs - actionAtMs,
+          requestRttMs: timing?.roundTripMs ?? null,
+          estimatedServerOffsetMs: timing?.serverOffsetMs ?? null,
+          clientToServerLatencyMs:
+            measureServerLatencyMs(clientTimestamp, result.serverTimestamp),
+        });
         setStatus({ owner: "self", processId: result.processId });
       } else {
         // Queue to existing process with current permission mode and thinking setting
-        const thinking = getThinkingSetting();
         const result = await api.queueMessage(
           sessionId,
-          text,
+          outgoingText,
           permissionMode,
           currentAttachments.length > 0 ? currentAttachments : undefined,
           tempId,
           thinking,
+          undefined,
+          undefined,
+          clientTimestamp,
+          metadata,
         );
+        const responseReceivedAtMs = Date.now();
+        const timing = recordServerClockSample({
+          clientRequestStartMs: requestSentAtMs,
+          clientResponseEndMs: responseReceivedAtMs,
+          serverTimestamp: result.serverTimestamp,
+        });
+        logSessionUiTrace("composer-send-queue-success", {
+          sessionId,
+          tempId,
+          restarted: !!result.restarted,
+          processId: result.processId ?? null,
+          clientTimestamp,
+          serverTimestamp: result.serverTimestamp,
+          uploadWaitMs: requestSentAtMs - actionAtMs,
+          requestRttMs: timing?.roundTripMs ?? null,
+          estimatedServerOffsetMs: timing?.serverOffsetMs ?? null,
+          clientToServerLatencyMs:
+            measureServerLatencyMs(clientTimestamp, result.serverTimestamp),
+        });
+        if (result.compactQueued) {
+          setIsCompacting(true);
+        }
         // If process was restarted due to thinking mode change, reconnect stream
         if (result.restarted && result.processId) {
           setStatus({ owner: "self", processId: result.processId });
@@ -400,9 +1382,18 @@ function SessionPageContent({
         }
       }
       // Success - clear the draft from localStorage
+      rememberSentSubmission(text, tempId);
       draftControlsRef.current?.clearDraft();
+      setCorrectionDraft(null);
+      setQueuedEditDraft(null);
+      releaseQueuedEditBarrier(queuedEditDraftAtSubmit, "send-edited-queue");
     } catch (err) {
       console.error("Failed to send:", err);
+      logSessionUiTrace("composer-send-error", {
+        sessionId,
+        tempId,
+        message: err instanceof Error ? err.message : String(err),
+      });
 
       // Check if process is dead (404) - auto-retry with resumeSession
       const is404 =
@@ -412,11 +1403,11 @@ function SessionPageContent({
       if (is404) {
         try {
           const model = session?.model ?? getModelSetting();
-          const thinking = getThinkingSetting();
+          const retryRequestSentAtMs = Date.now();
           const result = await api.resumeSession(
             projectId,
             sessionId,
-            text,
+            outgoingText,
             {
               mode: permissionMode,
               model,
@@ -426,12 +1417,45 @@ function SessionPageContent({
             },
             currentAttachments.length > 0 ? currentAttachments : undefined,
             tempId,
+            clientTimestamp,
+            metadata,
           );
+          const retryResponseReceivedAtMs = Date.now();
+          const retryTiming = recordServerClockSample({
+            clientRequestStartMs: retryRequestSentAtMs,
+            clientResponseEndMs: retryResponseReceivedAtMs,
+            serverTimestamp: result.serverTimestamp,
+          });
+          logSessionUiTrace("composer-send-retry-resume-success", {
+            sessionId,
+            tempId,
+            processId: result.processId,
+            clientTimestamp,
+            serverTimestamp: result.serverTimestamp,
+            uploadWaitMs: retryRequestSentAtMs - actionAtMs,
+            requestRttMs: retryTiming?.roundTripMs ?? null,
+            estimatedServerOffsetMs: retryTiming?.serverOffsetMs ?? null,
+            clientToServerLatencyMs:
+              measureServerLatencyMs(clientTimestamp, result.serverTimestamp),
+          });
           setStatus({ owner: "self", processId: result.processId });
+          rememberSentSubmission(text, tempId);
           draftControlsRef.current?.clearDraft();
+          setCorrectionDraft(null);
+          setQueuedEditDraft(null);
+          releaseQueuedEditBarrier(
+            queuedEditDraftAtSubmit,
+            "retry-send-edited-queue",
+          );
           return;
         } catch (retryErr) {
           console.error("Failed to resume session:", retryErr);
+          logSessionUiTrace("composer-send-retry-resume-error", {
+            sessionId,
+            tempId,
+            message:
+              retryErr instanceof Error ? retryErr.message : String(retryErr),
+          });
           // Fall through to error handling below
         }
       }
@@ -446,9 +1470,40 @@ function SessionPageContent({
     }
   };
 
-  const handleQueue = async (text: string) => {
-    const tempId = addPendingMessage(text);
+  const handleQueue = async (
+    text: string,
+    metadata?: MessageSubmissionMetadata,
+  ) => {
+    const prepared = prepareComposerSubmission(text);
+    if (!prepared) {
+      return;
+    }
+    const { outgoingText, slashCommand } = prepared;
+    const thinking = prepared.thinking ?? getThinkingSetting();
+    const actionAtMs = Date.now();
+    const clientTimestamp = getServerClockTimestamp(actionAtMs);
+    const clientTimestampIso = new Date(clientTimestamp).toISOString();
+
+    const { tempId, clientOrder } = addPendingMessage(
+      outgoingText,
+      undefined,
+      clientTimestampIso,
+    );
     setScrollTrigger((prev) => prev + 1);
+    logSessionUiTrace("composer-deferred-start", {
+      sessionId,
+      tempId,
+      owner: status.owner,
+      processId: status.owner === "self" ? status.processId : null,
+      permissionMode,
+      thinking,
+      slashCommand: slashCommand ?? null,
+      textLength: outgoingText.length,
+      attachmentCount: attachments.length,
+      queuedEditOriginalTempId: queuedEditDraft?.originalTempId ?? null,
+      clientTimestamp,
+      serverOffsetMs: getEstimatedServerOffsetMs(),
+    });
 
     // Capture already-completed attachments
     const currentAttachments = [...attachments];
@@ -469,21 +1524,180 @@ function SessionPageContent({
       setAttachments([]);
     }
 
+    if (currentAttachments.length > 0) {
+      updatePendingMessage(tempId, { attachments: currentAttachments });
+    }
+
     try {
-      const thinking = getThinkingSetting();
-      await api.queueMessage(
+      const requestSentAtMs = Date.now();
+      const queuedEditDraftAtSubmit = queuedEditDraft;
+      const queuedEditPlacement = queuedEditDraftAtSubmit
+        ? {
+            ...queuedEditDraftAtSubmit.placement,
+            replaceTempId: queuedEditDraftAtSubmit.originalTempId,
+          }
+        : undefined;
+      const result = await api.queueMessage(
         sessionId,
-        text,
+        outgoingText,
         permissionMode,
         currentAttachments.length > 0 ? currentAttachments : undefined,
         tempId,
         thinking,
         true, // deferred
+        queuedEditPlacement,
+        clientTimestamp,
+        metadata,
       );
+      const responseReceivedAtMs = Date.now();
+      const timing = recordServerClockSample({
+        clientRequestStartMs: requestSentAtMs,
+        clientResponseEndMs: responseReceivedAtMs,
+        serverTimestamp: result.serverTimestamp,
+      });
+      logSessionUiTrace("composer-deferred-result", {
+        sessionId,
+        tempId,
+        deferred: result.deferred ?? null,
+        promoted: result.promoted ?? null,
+        position: result.position ?? null,
+        deferredCount: result.deferredMessages?.length ?? null,
+        clientTimestamp,
+        serverTimestamp: result.serverTimestamp,
+        uploadWaitMs: requestSentAtMs - actionAtMs,
+        requestRttMs: timing?.roundTripMs ?? null,
+        estimatedServerOffsetMs: timing?.serverOffsetMs ?? null,
+        clientToServerLatencyMs:
+          measureServerLatencyMs(clientTimestamp, result.serverTimestamp),
+      });
       removePendingMessage(tempId);
+      const localDeferredMessage = {
+        tempId,
+        content: outgoingText,
+        timestamp: clientTimestampIso,
+        clientOrder,
+        ...(currentAttachments.length > 0
+          ? {
+              attachmentCount: currentAttachments.length,
+              attachments: currentAttachments,
+            }
+          : {}),
+        mode: permissionMode,
+        metadata,
+        deliveryState: "queued" as const,
+      };
+      if (result.deferred === false || result.promoted) {
+        addDeferredMessage({
+          ...localDeferredMessage,
+          deliveryState: "sending" as const,
+        });
+        if (result.deferredMessages) {
+          syncDeferredMessages(result.deferredMessages, {
+            reason: "promoted",
+            tempId,
+            source: "rest",
+          });
+        }
+        rememberSentSubmission(text, tempId);
+        draftControlsRef.current?.clearDraft();
+        setCorrectionDraft(null);
+        setQueuedEditDraft(null);
+        return;
+      }
+      const serverDeferredMessages = result.deferredMessages?.map((message) =>
+        message.tempId === tempId
+          ? {
+              ...message,
+              attachments: currentAttachments,
+              mode: permissionMode,
+              deliveryState: "queued" as const,
+            }
+          : message,
+      );
+      if (
+        serverDeferredMessages?.some((message) => message.tempId === tempId)
+      ) {
+        syncDeferredMessages(serverDeferredMessages, {
+          reason: "queued",
+          tempId,
+          source: "rest",
+        });
+      } else {
+        addDeferredMessage(localDeferredMessage);
+        if (serverDeferredMessages) {
+          syncDeferredMessages(serverDeferredMessages, {
+            reason: "queued",
+            tempId,
+            source: "rest",
+          });
+        }
+      }
+      if (text.trim()) {
+        lastComposerSubmissionRef.current = {
+          kind: "queued",
+          text: text.trim(),
+          tempId,
+        };
+      }
       draftControlsRef.current?.clearDraft();
+      setCorrectionDraft(null);
+      setQueuedEditDraft(null);
     } catch (err) {
       console.error("Failed to queue deferred message:", err);
+      logSessionUiTrace("composer-deferred-error", {
+        sessionId,
+        tempId,
+        message: err instanceof Error ? err.message : String(err),
+      });
+
+      const isProcessUnavailable =
+        err instanceof Error &&
+        ((err as Error & { status?: number }).status === 404 ||
+          (err as Error & { status?: number }).status === 410 ||
+          err.message.includes("No active process") ||
+          err.message.includes("Process terminated"));
+      if (isProcessUnavailable) {
+        try {
+          const model = session?.model ?? getModelSetting();
+          const result = await api.resumeSession(
+            projectId,
+            sessionId,
+            outgoingText,
+            {
+              mode: permissionMode,
+              model,
+              thinking,
+              provider: effectiveProvider,
+              executor: session?.executor,
+            },
+            currentAttachments.length > 0 ? currentAttachments : undefined,
+            tempId,
+            clientTimestamp,
+            metadata,
+          );
+          logSessionUiTrace("composer-deferred-retry-resume-success", {
+            sessionId,
+            tempId,
+            processId: result.processId,
+          });
+          setStatus({ owner: "self", processId: result.processId });
+          removePendingMessage(tempId);
+          rememberSentSubmission(text, tempId);
+          draftControlsRef.current?.clearDraft();
+          setCorrectionDraft(null);
+          setQueuedEditDraft(null);
+          return;
+        } catch (retryErr) {
+          console.error("Failed to resume session:", retryErr);
+          logSessionUiTrace("composer-deferred-retry-resume-error", {
+            sessionId,
+            tempId,
+            message:
+              retryErr instanceof Error ? retryErr.message : String(retryErr),
+          });
+        }
+      }
+
       removePendingMessage(tempId);
       draftControlsRef.current?.restoreFromStorage();
       setAttachments(currentAttachments);
@@ -492,122 +1706,1097 @@ function SessionPageContent({
     }
   };
 
-  const handleModelChanged = useCallback(
-    (model: string) => {
-      setSessionModel(model);
-      showToast(t("sessionSwitchedModel", { model }), "success");
+  const handleCancelDeferred = useCallback(
+    async (tempId: string) => {
+      const localMessage = deferredMessages.find(
+        (message) => message.tempId === tempId,
+      );
+      const previousLastSubmission = lastComposerSubmissionRef.current;
+      lastComposerSubmissionRef.current =
+        getRecallSubmissionAfterQueuedCancel(
+          lastComposerSubmissionRef.current,
+          lastSentComposerSubmissionRef.current,
+          deferredMessages,
+          tempId,
+        );
+      removeDeferredMessage(tempId);
+      if (localMessage?.deliveryState === "recovered") {
+        return;
+      }
+
+      try {
+        await api.cancelDeferredMessage(sessionId, tempId);
+      } catch (err) {
+        if (isMissingDeferredQueueEntryError(err)) {
+          return;
+        }
+        if (localMessage) {
+          addDeferredMessage(localMessage);
+        }
+        lastComposerSubmissionRef.current = previousLastSubmission;
+        console.error("Failed to cancel deferred message:", err);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        showToast(t("sessionDeferredCancelFailed", { message: errorMsg }), "error");
+      }
     },
-    [setSessionModel, showToast, t],
+    [
+      addDeferredMessage,
+      deferredMessages,
+      removeDeferredMessage,
+      sessionId,
+      showToast,
+      t,
+    ],
   );
 
-  const handleCustomCommand = useCallback((command: string) => {
-    if (command === "model") {
-      setShowModelSwitchModal(true);
+  const handleCancelLatestDeferred = useCallback(() => {
+    const latest = [...deferredMessages]
+      .reverse()
+      .find((message) => message.tempId && message.deliveryState !== "sending");
+    if (!latest?.tempId) {
+      return false;
+    }
+    void handleCancelDeferred(latest.tempId);
+    return true;
+  }, [deferredMessages, handleCancelDeferred]);
+
+  const handleEditDeferred = useCallback(
+    async (tempId: string) => {
+      const draftControls = draftControlsRef.current;
+      if (!draftControls) {
+        showToast(
+          t("sessionDeferredEditFailed", {
+            message: "Composer is not available",
+          }),
+          "error",
+        );
+        return;
+      }
+
+      const localMessage = deferredMessages.find(
+        (message) => message.tempId === tempId,
+      );
+      const localPlacement = getDeferredEditPlacement(deferredMessages, tempId);
+      if (localMessage?.deliveryState === "recovered") {
+        const restoredAttachments = localMessage.attachments ?? [];
+        draftControls.setDraft(localMessage.content);
+        setAttachments(restoredAttachments);
+        if (localMessage.mode) {
+          setPermissionMode(localMessage.mode);
+        }
+        removeDeferredMessage(tempId);
+        setQueuedEditDraft({
+          originalTempId: tempId,
+          placement: localPlacement,
+        });
+        if (
+          (localMessage.attachmentCount ?? 0) > 0 &&
+          restoredAttachments.length === 0
+        ) {
+          showToast(t("sessionDeferredEditMissingAttachments"), "error");
+        }
+        return;
+      }
+
+      try {
+        const result = await api.editDeferredMessage(sessionId, tempId);
+        const restoredAttachments =
+          result.attachments ?? localMessage?.attachments ?? [];
+        draftControls.setDraft(result.message);
+        setAttachments(restoredAttachments);
+        setQueuedEditDraft({
+          originalTempId: result.tempId ?? tempId,
+          placement: result.placement ?? localPlacement,
+        });
+        const restoredMode = result.mode ?? localMessage?.mode;
+        if (restoredMode) {
+          setPermissionMode(restoredMode);
+        }
+        removeDeferredMessage(tempId);
+        if (
+          (localMessage?.attachmentCount ?? 0) > 0 &&
+          restoredAttachments.length === 0
+        ) {
+          showToast(t("sessionDeferredEditMissingAttachments"), "error");
+        }
+      } catch (err) {
+        if (localMessage && isMissingDeferredQueueEntryError(err)) {
+          const restoredAttachments = localMessage.attachments ?? [];
+          draftControls.setDraft(localMessage.content);
+          setAttachments(restoredAttachments);
+          setQueuedEditDraft({
+            originalTempId: tempId,
+            placement: localPlacement,
+          });
+          if (localMessage.mode) {
+            setPermissionMode(localMessage.mode);
+          }
+          removeDeferredMessage(tempId);
+          showToast(t("sessionDeferredEditLocalOnly"), "info");
+          if (
+            (localMessage.attachmentCount ?? 0) > 0 &&
+            restoredAttachments.length === 0
+          ) {
+            showToast(t("sessionDeferredEditMissingAttachments"), "error");
+          }
+          return;
+        }
+
+        console.error("Failed to edit deferred message:", err);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        showToast(t("sessionDeferredEditFailed", { message: errorMsg }), "error");
+      }
+    },
+    [
+      deferredMessages,
+      removeDeferredMessage,
+      sessionId,
+      setPermissionMode,
+      showToast,
+      t,
+    ],
+  );
+
+  const handleRecallLastSubmission = useCallback((): boolean => {
+    const lastSubmission = lastComposerSubmissionRef.current;
+    if (!lastSubmission?.text.trim()) {
+      return false;
+    }
+
+    if (
+      lastSubmission.kind === "queued" &&
+      deferredMessages.some(
+        (message) => message.tempId === lastSubmission.tempId,
+      )
+    ) {
+      void handleEditDeferred(lastSubmission.tempId);
       return true;
     }
-    return false;
+
+    const draftControls = draftControlsRef.current;
+    if (!draftControls) {
+      return false;
+    }
+
+    draftControls.setDraft(lastSubmission.text);
+    setAttachments([]);
+    setCorrectionDraft({
+      messageId:
+        lastSubmission.kind === "sent"
+          ? lastSubmission.id
+          : lastSubmission.tempId,
+      originalText: lastSubmission.text,
+    });
+    return true;
+  }, [deferredMessages, handleEditDeferred]);
+
+  const handleModelChanged = useCallback(
+    (next: {
+      processId: string;
+      model?: string;
+      thinking?: { type: string };
+      effort?: string;
+    }) => {
+      if (next.model) {
+        setSessionModel(next.model);
+        showToast(t("sessionSwitchedModel", { model: next.model }), "success");
+      }
+      if (next.thinking !== undefined || next.effort !== undefined) {
+        setLiveModelConfig((prev) => ({
+          model: next.model ?? prev?.model,
+          thinking: next.thinking,
+          effort: next.effort,
+          promptSuggestionMode: prev?.promptSuggestionMode,
+        }));
+      } else if (next.model) {
+        setLiveModelConfig((prev) =>
+          prev ? { ...prev, model: next.model } : { model: next.model },
+        );
+      }
+      if (status.owner === "self") {
+        if (status.processId !== next.processId) {
+          setStatus({ owner: "self", processId: next.processId });
+          reconnectStream();
+        }
+      }
+    },
+    [reconnectStream, setSessionModel, showToast, status.owner, t],
+  );
+
+  const handleCompactSession = useCallback(async () => {
+    if (status.owner !== "self" || !supportsManualCompact) return;
+    try {
+      await api.queueMessage(actualSessionId, "/compact", permissionMode);
+      showToast(t("sessionCompactRequested"), "success");
+    } catch (err) {
+      console.error("Failed to request compaction:", err);
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      showToast(t("sessionCompactFailed", { message: errorMsg }), "error");
+    }
+  }, [
+    actualSessionId,
+    permissionMode,
+    showToast,
+    status.owner,
+    supportsManualCompact,
+    t,
+  ]);
+
+  const focusedBtwAside =
+    focusedBtwAsideId ?
+      btwAsides.find((aside) => aside.id === focusedBtwAsideId) ?? null
+    : null;
+  const requestedBtwSessionId = useMemo(() => {
+    const value = new URLSearchParams(location.search).get("btw")?.trim();
+    return value || null;
+  }, [location.search]);
+  const childSessionParentHref =
+    session?.parentSessionId ?
+      buildBtwAsideParentHref(
+        basePath,
+        projectId,
+        session.parentSessionId,
+        sessionId,
+      )
+    : null;
+
+  useEffect(() => {
+    btwAsidesRef.current = btwAsides;
+  }, [btwAsides]);
+
+  const updateBtwAside = useCallback(
+    (id: string, updater: (aside: BtwAside) => BtwAside) => {
+      setBtwAsides((current) =>
+        current.map((aside) => (aside.id === id ? updater(aside) : aside)),
+      );
+    },
+    [],
+  );
+
+  const materializeBtwAside = useCallback((asideId: string) => {
+    const historyAt = new Date().toISOString();
+    setBtwAsides((current) =>
+      current.map((aside) =>
+        aside.id === asideId && !aside.historyAt
+          ? { ...aside, historyAt, updatedAt: historyAt }
+          : aside,
+      ),
+    );
   }, []);
+
+  const pollBtwAside = useCallback(
+    (asideId: string, asideSessionId: string) => {
+      let polls = 0;
+
+      const poll = async () => {
+        polls += 1;
+        try {
+          const result = await api.getSession(projectId, asideSessionId);
+          const nextStatus: BtwAsideStatus =
+            result.ownership.owner === "none" ? "complete" : "running";
+          updateBtwAside(asideId, (aside) => {
+            const turns = getBtwTranscriptTurns(
+              result.messages,
+              aside.baseMessageCount,
+            );
+            const responses = turns
+              .filter((turn) => turn.role === "assistant")
+              .map((turn) => turn.text);
+            const preview =
+              responses.length > 0
+                ? truncateBtwPreview(responses[responses.length - 1] ?? "")
+                : getLatestAssistantText(result.messages);
+            return {
+              ...aside,
+              status: nextStatus,
+              preview: preview ?? aside.preview,
+              responses: responses.length > 0 ? responses : aside.responses,
+              turns: turns.length > 0 ? turns : aside.turns,
+              historyAt:
+                nextStatus === "complete"
+                  ? aside.historyAt ?? new Date().toISOString()
+                  : aside.historyAt,
+              updatedAt: new Date().toISOString(),
+            };
+          });
+          if (nextStatus === "complete" || polls >= BTW_ASIDE_MAX_POLLS) {
+            return;
+          }
+        } catch (err) {
+          if (polls >= BTW_ASIDE_MAX_POLLS) {
+            updateBtwAside(asideId, (aside) => ({
+              ...aside,
+              status: "failed",
+              error: err instanceof Error ? err.message : String(err),
+              historyAt: aside.historyAt ?? new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            }));
+            return;
+          }
+        }
+        window.setTimeout(poll, BTW_ASIDE_POLL_MS);
+      };
+
+      window.setTimeout(poll, BTW_ASIDE_POLL_MS);
+    },
+    [projectId, updateBtwAside],
+  );
+
+  const runBtwAsideTurn = useCallback(
+    async (sourceAside: BtwAside, prompt: string, isInitialTurn: boolean) => {
+      const trimmed = prompt.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      updateBtwAside(sourceAside.id, (aside) => ({
+        ...aside,
+        request: isInitialTurn && !aside.request ? trimmed : aside.request,
+        followUps:
+          isInitialTurn ? aside.followUps : [...aside.followUps, trimmed],
+        turns: isInitialTurn
+          ? aside.turns?.length
+            ? aside.turns
+            : [
+                {
+                  id: `${sourceAside.id}-request`,
+                  role: "user",
+                  text: trimmed,
+                },
+              ]
+          : [
+              ...(aside.turns ?? []),
+              {
+                id: `${sourceAside.id}-followup-${aside.followUps.length}`,
+                role: "user",
+                text: trimmed,
+              },
+            ],
+        status: aside.sessionId ? "running" : "starting",
+        error: undefined,
+        updatedAt: new Date().toISOString(),
+      }));
+
+      try {
+        const providerName = effectiveProvider;
+        if (!providerSupportsBtwAsideFork(providerName)) {
+          throw new Error(
+            "/btw asides are available only for providers with a wired fork path",
+          );
+        }
+        let asideSessionId = sourceAside.sessionId;
+        if (!asideSessionId) {
+          const titlePreview = truncateBtwPreview(trimmed).slice(0, 80);
+          const clone = await api.cloneSession(
+            projectId,
+            actualSessionId,
+            `/btw ${titlePreview}`,
+            providerName,
+            actualSessionId,
+          );
+          asideSessionId = clone.sessionId;
+          updateBtwAside(sourceAside.id, (aside) => ({
+            ...aside,
+            sessionId: asideSessionId,
+            baseMessageCount: clone.messageCount,
+            status: "starting",
+            updatedAt: new Date().toISOString(),
+          }));
+        }
+
+        const clientTimestamp = getServerClockTimestamp(Date.now());
+        const result = await api.resumeSession(
+          projectId,
+          asideSessionId,
+          isInitialTurn
+            ? buildBtwAsideInitialPrompt(trimmed)
+            : buildBtwAsideFollowupPrompt(trimmed),
+          {
+            mode: permissionMode,
+            model:
+              liveModelConfig?.model ?? session?.model ?? getModelSetting(),
+            thinking: getThinkingSetting(),
+            provider: providerName,
+            executor: session?.executor,
+          },
+          undefined,
+          generateUUID(),
+          clientTimestamp,
+        );
+
+        updateBtwAside(sourceAside.id, (aside) => ({
+          ...aside,
+          sessionId: asideSessionId,
+          status: "running",
+          processId: result.processId,
+          updatedAt: new Date().toISOString(),
+        }));
+        pollBtwAside(sourceAside.id, asideSessionId);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        updateBtwAside(sourceAside.id, (aside) => ({
+          ...aside,
+          status: "failed",
+          error: message,
+          historyAt: aside.historyAt ?? new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }));
+        showToast(`Failed to start /btw aside: ${message}`, "error");
+      }
+    },
+    [
+      actualSessionId,
+      effectiveProvider,
+      liveModelConfig?.model,
+      permissionMode,
+      pollBtwAside,
+      projectId,
+      session?.executor,
+      session?.model,
+      showToast,
+      updateBtwAside,
+    ],
+  );
+
+  const startBtwAside = useCallback(
+    (text: string): boolean => {
+      if (!supportsBtwAsides) {
+        showToast(
+          "/btw asides are available only for providers with a wired fork path.",
+          "error",
+        );
+        return false;
+      }
+
+      const trimmed = text.trim();
+      const now = new Date().toISOString();
+      const asideId = generateUUID();
+      const aside: BtwAside = {
+        id: asideId,
+        baseMessageCount: 0,
+        request: trimmed,
+        followUps: [],
+        status: trimmed ? "starting" : "draft",
+        responses: [],
+        turns: trimmed
+          ? [
+              {
+                id: `${asideId}-request`,
+                role: "user",
+                text: trimmed,
+              },
+            ]
+          : [],
+        createdAt: now,
+        updatedAt: now,
+        expanded: false,
+      };
+
+      setBtwAsides((current) => [...current, aside]);
+      if (!trimmed) {
+        setFocusedBtwAsideId(aside.id);
+        return true;
+      }
+
+      void runBtwAsideTurn(aside, trimmed, true);
+      return true;
+    },
+    [runBtwAsideTurn, showToast, supportsBtwAsides],
+  );
+
+  useEffect(() => {
+    if (!requestedBtwSessionId || requestedBtwSessionId === sessionId) {
+      return;
+    }
+
+    const existingAside = btwAsidesRef.current.find(
+      (aside) => aside.sessionId === requestedBtwSessionId,
+    );
+    if (existingAside) {
+      setFocusedBtwAsideId(existingAside.id);
+      return;
+    }
+
+    if (hydratedBtwSessionIdsRef.current.has(requestedBtwSessionId)) {
+      return;
+    }
+    hydratedBtwSessionIdsRef.current.add(requestedBtwSessionId);
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await api.getSession(projectId, requestedBtwSessionId);
+        if (cancelled) {
+          return;
+        }
+
+        const request =
+          getBtwRequestFromMessages(result.messages) ??
+          getBtwAsideSessionDisplayTitle(
+            result.session.customTitle ?? result.session.title ?? "Aside",
+          );
+        const turns = getBtwTranscriptTurns(result.messages, 0);
+        const responses = turns
+          .filter((turn) => turn.role === "assistant")
+          .map((turn) => turn.text);
+        const preview =
+          responses.length > 0
+            ? truncateBtwPreview(responses[responses.length - 1] ?? "")
+            : getLatestAssistantText(result.messages) ?? undefined;
+        const now = new Date().toISOString();
+        const asideId = generateUUID();
+        const hydratedAside: BtwAside = {
+          id: asideId,
+          sessionId: requestedBtwSessionId,
+          baseMessageCount: 0,
+          request,
+          followUps: [],
+          status: result.ownership.owner === "none" ? "complete" : "running",
+          preview,
+          responses,
+          turns,
+          processId:
+            result.ownership.owner === "self"
+              ? result.ownership.processId
+              : undefined,
+          createdAt: result.session.createdAt ?? now,
+          updatedAt: result.session.updatedAt ?? now,
+          expanded: true,
+        };
+
+        setBtwAsides((current) =>
+          current.some((aside) => aside.sessionId === requestedBtwSessionId)
+            ? current
+            : [...current, hydratedAside],
+        );
+        setFocusedBtwAsideId(asideId);
+      } catch (err) {
+        hydratedBtwSessionIdsRef.current.delete(requestedBtwSessionId);
+        const message = err instanceof Error ? err.message : String(err);
+        showToast(`Failed to load /btw aside: ${message}`, "error");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, requestedBtwSessionId, sessionId, showToast]);
+
+  const handleFocusedBtwSend = useCallback(
+    (text: string) => {
+      if (!focusedBtwAside) {
+        void handleSend(text);
+        return;
+      }
+      void runBtwAsideTurn(
+        focusedBtwAside,
+        text,
+        focusedBtwAside.status === "draft" && !focusedBtwAside.sessionId,
+      );
+    },
+    [focusedBtwAside, handleSend, runBtwAsideTurn],
+  );
+
+  const hideBtwAside = useCallback((asideId: string) => {
+    materializeBtwAside(asideId);
+    setFocusedBtwAsideId((current) => (current === asideId ? null : current));
+  }, [materializeBtwAside]);
+
+  const toggleBtwAsideExpanded = useCallback((asideId: string) => {
+    updateBtwAside(asideId, (aside) => ({
+      ...aside,
+      expanded: !aside.expanded,
+      updatedAt: new Date().toISOString(),
+    }));
+  }, [updateBtwAside]);
+
+  // Reset wide-screen split-pane collapse whenever the focus moves between
+  // asides or back to Mother — explicit collapse only persists for one focus.
+  // Also drop the in-pane composer draft so a stale half-typed turn does not
+  // resurface under a different aside.
+  useEffect(() => {
+    setBtwSidePaneCollapsed(false);
+    setAsideDraft("");
+  }, [focusedBtwAsideId]);
+
+  const handleStopBtwAside = useCallback(
+    async (asideId: string) => {
+      const aside = btwAsides.find((item) => item.id === asideId);
+      if (!aside) return;
+      if (!aside.processId) {
+        hideBtwAside(asideId);
+        return;
+      }
+
+      try {
+        const result = await api.interruptProcess(aside.processId);
+        if (!result.interrupted && !result.aborted) {
+          await api.abortProcess(aside.processId);
+        }
+        const stoppedAt = new Date().toISOString();
+        updateBtwAside(asideId, (current) => ({
+          ...current,
+          status: "stopped",
+          historyAt: current.historyAt ?? stoppedAt,
+          updatedAt: stoppedAt,
+        }));
+      } catch (err) {
+        try {
+          await api.abortProcess(aside.processId);
+          const stoppedAt = new Date().toISOString();
+          updateBtwAside(asideId, (current) => ({
+            ...current,
+            status: "stopped",
+            historyAt: current.historyAt ?? stoppedAt,
+            updatedAt: stoppedAt,
+          }));
+        } catch {
+          const message = err instanceof Error ? err.message : String(err);
+          updateBtwAside(asideId, (current) => ({
+            ...current,
+            status: "failed",
+            error: message,
+            historyAt: current.historyAt ?? new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }));
+        }
+      }
+      setFocusedBtwAsideId((current) => (current === asideId ? null : current));
+    },
+    [btwAsides, hideBtwAside, updateBtwAside],
+  );
+
+  const stickyBtwAsides = useMemo(
+    () => btwAsides.filter((aside) => !aside.historyAt),
+    [btwAsides],
+  );
+  // Wide-screen split-pane layout: focus and footer routing are separate. A
+  // focused aside can own the pane composer while Mother's footer remains on
+  // Mother; collapsed/narrow layouts route the footer into the aside.
+  const hasFocusedBtwAside = !!focusedBtwAside;
+  const {
+    wantSplitLayout: wantBtwSplitLayout,
+    showSidePane: showBtwSidePane,
+    footerRoutesToAside: mainComposerForAside,
+  } = getBtwSplitRouting({
+    isWideScreen,
+    hasFocusedAside: hasFocusedBtwAside,
+    sidePaneCollapsed: btwSidePaneCollapsed,
+  });
+  const composerStickyBtwAsides = useMemo(() => {
+    if (showBtwSidePane && focusedBtwAside) {
+      return stickyBtwAsides.filter((aside) => aside.id !== focusedBtwAside.id);
+    }
+    return stickyBtwAsides;
+  }, [stickyBtwAsides, showBtwSidePane, focusedBtwAside]);
+  const btwToolbarMode = getBtwToolbarMode({
+    hasChildParentHref: !!childSessionParentHref,
+    hasFocusedAside: hasFocusedBtwAside,
+    footerRoutesToAside: mainComposerForAside,
+    paneComposerVisible: showBtwSidePane,
+    hasAvailableAsides: stickyBtwAsides.length > 0,
+  });
+  const historyBtwAsides = useMemo(
+    () =>
+      btwAsides
+        .filter((aside) => aside.historyAt)
+        .map((aside) => ({
+          ...aside,
+          isFocused: focusedBtwAsideId === aside.id,
+          canStop: aside.status === "starting" || aside.status === "running",
+        })),
+    [btwAsides, focusedBtwAsideId],
+  );
+
+  const applyMotherComposerTransfer = useCallback(
+    (controls: DraftControls, text: string) => {
+      const nextDraft = appendComposerTransferDraft(controls.getDraft(), text);
+      controls.setDraft(nextDraft);
+      showToast("Inserted /btw turn into Mother composer.", "info");
+    },
+    [showToast],
+  );
+
+  const flushPendingMotherComposerTransfer = useCallback(
+    (controls = draftControlsRef.current) => {
+      if (mainComposerForAside || !controls) {
+        return;
+      }
+      const pendingText = pendingMotherComposerTransferRef.current;
+      if (!pendingText) {
+        return;
+      }
+      pendingMotherComposerTransferRef.current = null;
+      applyMotherComposerTransfer(controls, pendingText);
+    },
+    [applyMotherComposerTransfer, mainComposerForAside],
+  );
+
+  const handleDraftControlsReady = useCallback(
+    (controls: DraftControls) => {
+      draftControlsRef.current = controls;
+      flushPendingMotherComposerTransfer(controls);
+    },
+    [flushPendingMotherComposerTransfer],
+  );
+
+  useEffect(() => {
+    flushPendingMotherComposerTransfer();
+  }, [flushPendingMotherComposerTransfer]);
+
+  const transferBtwTurnToMotherComposer = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      if (mainComposerForAside) {
+        pendingMotherComposerTransferRef.current = trimmed;
+        setFocusedBtwAsideId(null);
+        return;
+      }
+
+      const controls = draftControlsRef.current;
+      if (!controls) {
+        pendingMotherComposerTransferRef.current = trimmed;
+        return;
+      }
+      applyMotherComposerTransfer(controls, trimmed);
+    },
+    [applyMotherComposerTransfer, mainComposerForAside],
+  );
+
+  const handleCustomCommand = useCallback(
+    (command: string, argument = "") => {
+      if (command === "model") {
+        setShowModelSwitchModal(true);
+        return true;
+      }
+      if (command === "compact") {
+        void handleCompactSession();
+        return true;
+      }
+      if (command === "btw") {
+        return startBtwAside(argument);
+      }
+      if (command === "done") {
+        if (!focusedBtwAside) {
+          showToast(
+            "/done closes a focused /btw aside; no aside is focused.",
+            "error",
+          );
+          return true;
+        }
+        hideBtwAside(focusedBtwAside.id);
+        if (argument.trim()) {
+          // Report-back drafting (/done <text>, /done summary, /done file ...)
+          // is described in topics/provider-agnostic-btw-asides.md but is not
+          // wired yet; close-only for now.
+          showToast(
+            "Aside closed. (Report-back drafting not yet implemented.)",
+            "info",
+          );
+        }
+        return true;
+      }
+      return false;
+    },
+    [
+      focusedBtwAside,
+      handleCompactSession,
+      hideBtwAside,
+      showToast,
+      startBtwAside,
+    ],
+  );
+
+  const handleToolbarSlashCommand = useCallback(
+    (command: string) => {
+      const bare = command.startsWith("/") ? command.slice(1) : command;
+      handleCustomCommand(bare);
+    },
+    [handleCustomCommand],
+  );
+
+  const handleBtwShortcut = useCallback(
+    (text: string): boolean => {
+      if (childSessionParentHref) {
+        navigate(childSessionParentHref);
+        return false;
+      }
+
+      if (!supportsBtwAsides) {
+        return false;
+      }
+
+      if (focusedBtwAside) {
+        if (showBtwSidePane) {
+          window.setTimeout(() => asideComposerRef.current?.focus(), 0);
+          return false;
+        }
+        setFocusedBtwAsideId(null);
+        return false;
+      }
+
+      if (!text.trim() && stickyBtwAsides.length > 0) {
+        const latestAside = stickyBtwAsides[stickyBtwAsides.length - 1];
+        setFocusedBtwAsideId(latestAside?.id ?? null);
+        return false;
+      }
+
+      return startBtwAside(text);
+    },
+    [
+      childSessionParentHref,
+      focusedBtwAside,
+      navigate,
+      showBtwSidePane,
+      startBtwAside,
+      stickyBtwAsides,
+      supportsBtwAsides,
+    ],
+  );
+
+  const slashModelIndicatorTone =
+    currentOwnedProcessId && liveModelConfig
+      ? getIndicatorToneFromProcess(
+          liveModelConfig.thinking,
+          liveModelConfig.effort,
+        )
+      : undefined;
+  const liveBadgeModel = liveModelConfig?.model ?? effectiveModel;
+  // Keep the status title compact while preserving model state for non-status
+  // states and avoid leaking verbose model suffixes.
+  const stripBadgePrefix = (model: string) => {
+    const compactCodexLabel =
+      getModelIndicatorModelLabel(effectiveProvider, model);
+    const compactModel =
+      effectiveProvider === "codex" || effectiveProvider === "codex-oss"
+        ? compactCodexLabel || model
+        : model;
+    const claudeMatch = compactModel.match(/^claude-\w+-(.+)$/);
+    return claudeMatch ? claudeMatch[1] : compactModel;
+  };
+  const slashModelIndicatorTitle = useMemo(() => {
+    if (!currentOwnedProcessId) {
+      return "Slash commands";
+    }
+
+    if (isCompacting) {
+      return "Compacting";
+    }
+
+    if (processState === "in-turn") {
+      return "Thinking";
+    }
+
+    if (processState === "waiting-input") {
+      return "Waiting for input";
+    }
+
+    if (processState === "hold") {
+      return "On hold";
+    }
+
+    return liveBadgeModel
+      ? `${stripBadgePrefix(liveBadgeModel)} · ${
+          liveModelConfig?.thinking?.type === "disabled" ||
+          !liveModelConfig?.thinking
+            ? "Thinking off"
+            : liveModelConfig?.effort
+              ? `Effort ${liveModelConfig.effort === "xhigh" ? "max" : liveModelConfig.effort}`
+              : "Thinking auto"
+        }`
+      : "Slash commands";
+  }, [
+    currentOwnedProcessId,
+    isCompacting,
+    processState,
+    liveBadgeModel,
+    effectiveProvider,
+    liveModelConfig?.effort,
+    liveModelConfig?.thinking?.type,
+  ]);
 
   const handleAbort = async () => {
     if (status.owner === "self" && status.processId) {
       // Try interrupt first (graceful stop), fall back to abort if not supported
       try {
+        logSessionUiTrace("stop-request", {
+          sessionId,
+          processId: status.processId,
+          processState,
+        });
         const result = await api.interruptProcess(status.processId);
-        if (result.interrupted) {
-          // Successfully interrupted - process is still alive
+        logSessionUiTrace("stop-interrupt-result", {
+          sessionId,
+          processId: status.processId,
+          interrupted: result.interrupted,
+          aborted: result.aborted,
+          supported: result.supported,
+        });
+        if (result.interrupted || result.aborted) {
+          if (result.aborted) {
+            setStatus({ owner: "none" });
+            setProcessState("idle");
+          }
           return;
         }
         // Interrupt not supported or failed, fall back to abort
       } catch {
+        logSessionUiTrace("stop-interrupt-error", {
+          sessionId,
+          processId: status.processId,
+        });
         // Interrupt endpoint failed (404 = old server, or other error)
       }
       // Fall back to abort (kills the process)
       await api.abortProcess(status.processId);
+      logSessionUiTrace("stop-abort-fallback", {
+        sessionId,
+        processId: status.processId,
+      });
     }
   };
+
+  const syncPendingInputFromServer = useCallback(async () => {
+    try {
+      const result = await api.getPendingInputRequest(sessionId);
+      setPendingInputRequest(result.request ?? null);
+    } catch {
+      // Best-effort stale approval cleanup; the stream will also reconcile.
+    }
+  }, [sessionId, setPendingInputRequest]);
+
+  const handleInputResponseError = useCallback(
+    async (err: unknown, fallbackMessage: string) => {
+      const status = (err as { status?: number }).status;
+      const msg = status ? `Error ${status}` : fallbackMessage;
+      showToast(msg, "error");
+      if (status === 400) {
+        await syncPendingInputFromServer();
+      }
+    },
+    [showToast, syncPendingInputFromServer],
+  );
 
   const handleApprove = useCallback(async () => {
     if (pendingInputRequest) {
       try {
-        await api.respondToInput(sessionId, pendingInputRequest.id, "approve");
+        const result = await api.respondToInput(
+          sessionId,
+          pendingInputRequest.id,
+          "approve",
+        );
+        setPendingInputRequest(result.pendingInputRequest ?? null);
       } catch (err) {
-        const status = (err as { status?: number }).status;
-        const msg = status ? `Error ${status}` : t("sessionApproveFailed");
-        showToast(msg, "error");
+        await handleInputResponseError(err, t("sessionApproveFailed"));
       }
     }
-  }, [sessionId, pendingInputRequest, showToast, t]);
+  }, [
+    sessionId,
+    pendingInputRequest,
+    setPendingInputRequest,
+    handleInputResponseError,
+    t,
+  ]);
 
   const handleApproveAcceptEdits = useCallback(async () => {
     if (pendingInputRequest) {
       try {
         // Approve and switch to acceptEdits mode
-        await api.respondToInput(
+        const result = await api.respondToInput(
           sessionId,
           pendingInputRequest.id,
           "approve_accept_edits",
         );
+        setPendingInputRequest(result.pendingInputRequest ?? null);
         // Update local permission mode
         setPermissionMode("acceptEdits");
       } catch (err) {
-        const status = (err as { status?: number }).status;
-        const msg = status ? `Error ${status}` : t("sessionApproveFailed");
-        showToast(msg, "error");
+        await handleInputResponseError(err, t("sessionApproveFailed"));
       }
     }
-  }, [sessionId, pendingInputRequest, setPermissionMode, showToast, t]);
+  }, [
+    sessionId,
+    pendingInputRequest,
+    setPendingInputRequest,
+    setPermissionMode,
+    handleInputResponseError,
+    t,
+  ]);
 
   const handleDeny = useCallback(async () => {
     if (pendingInputRequest) {
       try {
-        await api.respondToInput(sessionId, pendingInputRequest.id, "deny");
+        const result = await api.respondToInput(
+          sessionId,
+          pendingInputRequest.id,
+          "deny",
+        );
+        setPendingInputRequest(result.pendingInputRequest ?? null);
       } catch (err) {
-        const status = (err as { status?: number }).status;
-        const msg = status ? `Error ${status}` : t("sessionDenyFailed");
-        showToast(msg, "error");
+        await handleInputResponseError(err, t("sessionDenyFailed"));
       }
     }
-  }, [sessionId, pendingInputRequest, showToast, t]);
+  }, [
+    sessionId,
+    pendingInputRequest,
+    setPendingInputRequest,
+    handleInputResponseError,
+    t,
+  ]);
 
   const handleDenyWithFeedback = useCallback(
     async (feedback: string) => {
       if (pendingInputRequest) {
         try {
-          await api.respondToInput(
+          const result = await api.respondToInput(
             sessionId,
             pendingInputRequest.id,
             "deny",
             undefined,
             feedback,
           );
+          setPendingInputRequest(result.pendingInputRequest ?? null);
         } catch (err) {
-          const status = (err as { status?: number }).status;
-          const msg = status ? `Error ${status}` : t("sessionFeedbackFailed");
-          showToast(msg, "error");
+          await handleInputResponseError(err, t("sessionFeedbackFailed"));
         }
       }
     },
-    [sessionId, pendingInputRequest, showToast, t],
+    [
+      sessionId,
+      pendingInputRequest,
+      setPendingInputRequest,
+      handleInputResponseError,
+      t,
+    ],
   );
 
   const handleQuestionSubmit = useCallback(
     async (answers: Record<string, string>) => {
       if (pendingInputRequest) {
         try {
-          await api.respondToInput(
+          const result = await api.respondToInput(
             sessionId,
             pendingInputRequest.id,
             "approve",
             answers,
           );
+          setPendingInputRequest(result.pendingInputRequest ?? null);
         } catch (err) {
-          const status = (err as { status?: number }).status;
-          const msg = status ? `Error ${status}` : t("sessionAnswerFailed");
-          showToast(msg, "error");
+          await handleInputResponseError(err, t("sessionAnswerFailed"));
         }
       }
     },
-    [sessionId, pendingInputRequest, showToast, t],
+    [
+      sessionId,
+      pendingInputRequest,
+      setPendingInputRequest,
+      handleInputResponseError,
+      t,
+    ],
   );
 
   // Handle file attachment uploads
@@ -631,8 +2820,15 @@ function SessionPageContent({
         ]);
 
         // Start upload and track promise for handleSend to await
-        const uploadPromise = connection
-          .upload(projectId, sessionId, file, {
+        const uploadPromise = (async () => {
+          const preparedImage = file.type.startsWith("image/")
+            ? await prepareImageUpload(
+                file,
+                getAttachmentUploadLongEdgePx(attachmentQuality),
+              )
+            : { file };
+          const uploadFile = preparedImage.file;
+          return connection.upload(projectId, sessionId, uploadFile, {
             onProgress: (bytesUploaded) => {
               setUploadProgress((prev) =>
                 prev.map((p) =>
@@ -640,15 +2836,37 @@ function SessionPageContent({
                     ? {
                         ...p,
                         bytesUploaded,
-                        percent: Math.round((bytesUploaded / file.size) * 100),
+                        percent: Math.round(
+                          (bytesUploaded / uploadFile.size) * 100,
+                        ),
                       }
-                    : p,
+                      : p,
                 ),
               );
             },
-          })
+            ...(preparedImage.width !== undefined &&
+            preparedImage.height !== undefined
+              ? {
+                  imageDimensions: {
+                    width: preparedImage.width,
+                    height: preparedImage.height,
+                  },
+                }
+              : {}),
+          });
+        })()
           .then(
             (uploaded) => {
+              if (uploaded.mimeType.startsWith("image/")) {
+                void storeUploadedAttachmentPreview(uploaded, file).catch(
+                  (err) => {
+                    console.warn(
+                      "[SessionPage] Failed to cache attachment preview:",
+                      err,
+                    );
+                  },
+                );
+              }
               setAttachments((prev) => [...prev, uploaded]);
               return uploaded;
             },
@@ -676,7 +2894,7 @@ function SessionPageContent({
         pendingUploadsRef.current.set(tempId, uploadPromise);
       }
     },
-    [projectId, sessionId, showToast, connection, t],
+    [projectId, sessionId, showToast, connection, t, attachmentQuality],
   );
 
   const handleRemoveAttachment = useCallback((id: string) => {
@@ -686,27 +2904,21 @@ function SessionPageContent({
   // Check if pending request is an AskUserQuestion
   const isAskUserQuestion = pendingInputRequest?.toolName === "AskUserQuestion";
 
-  // If process is actively in-turn or waiting for input, don't mark tools as orphaned.
-  // "orphanedToolUseIds" from server just means "no result yet" - but if the process is
-  // in-turn (e.g., executing a Task subagent) or waiting for approval, they're not orphaned.
-  // Also suppress orphan marking when the session stream is disconnected - we can't trust
-  // processState without the stream, so show tools as pending (spinner) rather than
-  // incorrectly marking them as interrupted.
+  // Suppress current-turn orphan markers only while the latest turn still
+  // appears active. Terminal assistant text should win over stale process state
+  // or stale pending tool rows so old activity cannot orphan the bottom spinner.
   const activeToolApproval =
-    processState === "in-turn" ||
-    processState === "waiting-input" ||
-    (hasSessionUpdateStream && !sessionUpdatesConnected);
+    sessionActivityUi.shouldSuppressCurrentTurnOrphans;
 
   // Detect if session has pending tool calls without results
   // This can happen when the session is unowned but was active in another process (VS Code, CLI)
   // that is waiting for user input (tool approval, question answer)
-  const hasPendingToolCalls = useMemo(() => {
-    if (status.owner !== "none") return false;
-    const items = preprocessMessages(messages);
-    return items.some(
-      (item) => item.type === "tool_call" && item.status === "pending",
-    );
-  }, [messages, status.owner]);
+  const hasPendingToolCalls =
+    status.owner === "none" && hasPendingRenderedToolCalls;
+  const pendingElsewhereDismissKey = useMemo(
+    () => `${PENDING_ELSEWHERE_DISMISS_KEY_PREFIX}${actualSessionId}`,
+    [actualSessionId],
+  );
 
   // Compute display title - priority:
   // 1. Local custom title (user renamed in this session)
@@ -721,6 +2933,35 @@ function SessionPageContent({
     t("sessionUntitled");
   const isArchived = localIsArchived ?? session?.isArchived ?? false;
   const isStarred = localIsStarred ?? session?.isStarred ?? false;
+  const heartbeatTurnsEnabled =
+    localHeartbeatTurnsEnabled ?? session?.heartbeatTurnsEnabled ?? false;
+  const heartbeatTurnsAfterMinutes =
+    localHeartbeatTurnsAfterMinutes ?? session?.heartbeatTurnsAfterMinutes;
+  const heartbeatTurnText =
+    localHeartbeatTurnText ?? session?.heartbeatTurnText;
+  const heartbeatForceAfterMinutes =
+    localHeartbeatForceAfterMinutes ?? session?.heartbeatForceAfterMinutes;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setPendingElsewhereDismissed(
+      window.localStorage.getItem(pendingElsewhereDismissKey) === "1",
+    );
+  }, [pendingElsewhereDismissKey]);
+
+  const handleDismissPendingElsewhereWarning = useCallback(() => {
+    setPendingElsewhereDismissed(true);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(pendingElsewhereDismissKey, "1");
+    }
+  }, [pendingElsewhereDismissKey]);
+
+  const handleRestorePendingElsewhereWarning = useCallback(() => {
+    setPendingElsewhereDismissed(false);
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(pendingElsewhereDismissKey);
+    }
+  }, [pendingElsewhereDismissKey]);
 
   // Update browser tab title
   useDocumentTitle(project?.name, displayTitle);
@@ -848,27 +3089,147 @@ function SessionPageContent({
     }
   };
 
-  const handleShare = useCallback(async () => {
-    try {
-      const { snapshotSession } = await import(
-        "../lib/sharing/snapshotSession"
-      );
-      const html = snapshotSession(displayTitle);
-      const result = await api.shareSession(html, displayTitle);
-      await navigator.clipboard.writeText(result.url);
-      showToast(t("sessionLinkCopied"), "success");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : t("sessionShareFailed");
-      showToast(msg, "error");
-    }
-  }, [displayTitle, showToast, t]);
+  const handleShare = useCallback(() => {
+    setShareModalAnchor(null);
+    setShowShareModal(true);
+  }, []);
 
-  if (error)
+  const handleShareIndicatorClick = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>) => {
+      const rect = event.currentTarget.getBoundingClientRect();
+      setShareModalAnchor({
+        bottom: rect.bottom,
+        height: rect.height,
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        width: rect.width,
+      });
+      setShowShareModal(true);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    setPublicShareStatus(null);
+
+    const refreshPublicShareStatus = async () => {
+      try {
+        const nextStatus = await api.getPublicSessionShareStatus(
+          projectId,
+          actualSessionId,
+        );
+        if (!cancelled) {
+          setPublicShareStatus(nextStatus);
+        }
+      } catch {
+        if (!cancelled) {
+          setPublicShareStatus(null);
+        }
+      } finally {
+        if (!cancelled) {
+          timer = setTimeout(
+            refreshPublicShareStatus,
+            PUBLIC_SHARE_STATUS_POLL_MS,
+          );
+        }
+      }
+    };
+
+    void refreshPublicShareStatus();
+
+    return () => {
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [actualSessionId, projectId]);
+
+  const handleToggleHeartbeat = useCallback(async () => {
+    const previousEnabled = heartbeatTurnsEnabled;
+    const nextEnabled = !previousEnabled;
+    setLocalHeartbeatTurnsEnabled(nextEnabled);
+    try {
+      await api.updateSessionMetadata(actualSessionId, {
+        heartbeatTurnsEnabled: nextEnabled,
+      });
+    } catch (err) {
+      console.error("Failed to update heartbeat status:", err);
+      setLocalHeartbeatTurnsEnabled(previousEnabled);
+      const errorMsg =
+        err instanceof Error ? err.message : t("sessionHeartbeatSaveFailed");
+      showToast(errorMsg, "error");
+    }
+  }, [actualSessionId, heartbeatTurnsEnabled, showToast, t]);
+
+  if (error) {
+    const errorStatus =
+      typeof (error as { status?: unknown }).status === "number"
+        ? (error as { status?: number }).status
+        : undefined;
+    const isNotFound =
+      error.message?.includes("Session not found") ||
+      error.message?.includes("not found") ||
+      errorStatus === 404;
+
+    if (isNotFound && actualSessionId) {
+      return (
+        <div className="error" style={{ maxWidth: 520, margin: "40px auto" }}>
+          <h2 style={{ marginTop: 0 }}>Session not found</h2>
+          <p style={{ color: "#666" }}>
+            The backing data for this session on disk or in a live process is
+            gone. This commonly happens for Grok sessions after a YA server
+            restart or when native session directories were cleaned.
+          </p>
+          <div
+            style={{ display: "flex", gap: 12, marginTop: 16, flexWrap: "wrap" }}
+          >
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await api.updateSessionMetadata(actualSessionId, {
+                    archived: true,
+                  });
+                  showToast("Archived and hidden from lists.", "success");
+                  navigate(`${basePath}/sessions?project=${projectId}`, {
+                    replace: true,
+                  });
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : String(err);
+                  showToast(`Failed to archive: ${message}`, "error");
+                }
+              }}
+              style={{ padding: "8px 14px", cursor: "pointer" }}
+            >
+              Archive / Hide from all lists
+            </button>
+            <button
+              type="button"
+              onClick={() => window.history.back()}
+              style={{ padding: "8px 14px", cursor: "pointer" }}
+            >
+              Go back
+            </button>
+          </div>
+          <p style={{ fontSize: "12px", color: "#888", marginTop: 20 }}>
+            Session ID: <code>{actualSessionId}</code>
+            <br />
+            Run <code>ya-clean</code> for bulk bad-state and duplicate cleanup.
+          </p>
+        </div>
+      );
+    }
+
     return (
       <div className="error">
         {t("sessionErrorPrefix")} {error.message}
       </div>
     );
+  }
 
   // Sidebar icon component
   const SidebarIcon = () => (
@@ -895,7 +3256,7 @@ function SessionPageContent({
       <div
         className={
           isWideScreen
-            ? "main-content-constrained"
+            ? `main-content-constrained${isSidebarCollapsed ? " session-pane-collapsed-sidebar" : ""}`
             : "main-content-mobile-inner"
         }
       >
@@ -929,10 +3290,13 @@ function SessionPageContent({
                   to={`${basePath}/sessions?project=${projectId}`}
                   className="project-breadcrumb"
                   title={project.name}
+                  aria-label={project.name}
                 >
-                  {project.name.length > 12
-                    ? `${project.name.slice(0, 12)}...`
-                    : project.name}
+                  {project.name.length > 12 ? (
+                    `${project.name.slice(0, 12)}...`
+                  ) : (
+                    project.name
+                  )}
                 </Link>
               )}
               <div className="session-title-row">
@@ -1020,13 +3384,31 @@ function SessionPageContent({
                     onToggleArchive={handleToggleArchive}
                     onToggleRead={handleToggleRead}
                     onRename={handleStartEditingTitle}
+                    onConfigureHeartbeat={() => setShowHeartbeatModal(true)}
+                    onConfigureRecaps={
+                      status.owner === "self"
+                        ? () => setShowRecapModal(true)
+                        : undefined
+                    }
+                    warningRestoreAvailable={
+                      hasPendingToolCalls && pendingElsewhereDismissed
+                    }
+                    onRestoreWarnings={handleRestorePendingElsewhereWarning}
                     onClone={(newSessionId) => {
                       navigate(
                         `${basePath}/projects/${projectId}/sessions/${newSessionId}`,
                       );
                     }}
+                    onHandoff={
+                      effectiveProvider
+                        ? () => setShowHandoffModal(true)
+                        : undefined
+                    }
+                    onCompact={
+                      supportsManualCompact ? handleCompactSession : undefined
+                    }
                     onTerminate={handleTerminate}
-                    sharingConfigured={sharingConfigured}
+                    onReload={() => window.location.reload()}
                     onShare={handleShare}
                     useFixedPositioning
                     useEllipsisIcon
@@ -1035,6 +3417,29 @@ function SessionPageContent({
               </div>
             </div>
             <div className="session-header-right">
+              <ClientLogRecordingBadge inline />
+              <ViewerCountIndicator
+                className="session-header-viewer-count"
+                count={
+                  publicShareStatus && publicShareStatus.liveCount > 0
+                    ? publicShareStatus.activeViewerCount
+                    : null
+                }
+                label={
+                  publicShareStatus
+                    ? t("sessionShareViewerSummary", {
+                        active: publicShareStatus.activeViewerCount,
+                        total: publicShareStatus.viewers.length,
+                        live: publicShareStatus.liveCount,
+                        frozen: publicShareStatus.frozenCount,
+                      })
+                    : t("sessionShareOpenTitle")
+                }
+                onClick={handleShareIndicatorClick}
+              />
+              {canStopOwnedProcess && (
+                <ThinkingIndicator variant="pill" className="session-header-thinking" />
+              )}
               {!loading && effectiveProvider && (
                 <button
                   type="button"
@@ -1044,8 +3449,10 @@ function SessionPageContent({
                 >
                   <ProviderBadge
                     provider={effectiveProvider}
-                    model={effectiveModel}
-                    isThinking={processState === "in-turn"}
+                    model={liveBadgeModel}
+                    thinking={liveModelConfig?.thinking}
+                    effort={liveModelConfig?.effort}
+                    isThinking={canStopOwnedProcess}
                   />
                 </button>
               )}
@@ -1074,17 +3481,109 @@ function SessionPageContent({
           />
         )}
 
+        {showHeartbeatModal && (
+          <SessionHeartbeatModal
+            sessionId={actualSessionId}
+            enabled={heartbeatTurnsEnabled}
+            heartbeatTurnsAfterMinutes={heartbeatTurnsAfterMinutes}
+            heartbeatTurnText={heartbeatTurnText}
+            heartbeatForceAfterMinutes={heartbeatForceAfterMinutes}
+            onClose={() => setShowHeartbeatModal(false)}
+            onSaved={(next) => {
+              setLocalHeartbeatTurnsEnabled(next.enabled);
+              setLocalHeartbeatTurnsAfterMinutes(
+                next.heartbeatTurnsAfterMinutes,
+              );
+              setLocalHeartbeatTurnText(next.heartbeatTurnText);
+              setLocalHeartbeatForceAfterMinutes(
+                next.heartbeatForceAfterMinutes,
+              );
+              showToast(t("sessionHeartbeatSaved"), "success");
+            }}
+          />
+        )}
+
+        {showRecapModal && status.owner === "self" && (
+          <SessionRecapModal
+            sessionId={actualSessionId}
+            processId={status.processId}
+            provider={effectiveProvider}
+            currentModel={liveBadgeModel}
+            onClose={() => setShowRecapModal(false)}
+            onSaved={() => {
+              showToast(t("sessionRecapSaved"), "success");
+            }}
+          />
+        )}
+
+        {showShareModal && (
+          <SessionShareModal
+            anchorRect={shareModalAnchor}
+            projectId={projectId}
+            sessionId={actualSessionId}
+            initialPrompt={publicShareInitialPrompt}
+            title={displayTitle}
+            onStatusChange={setPublicShareStatus}
+            onClose={() => {
+              setShowShareModal(false);
+              setShareModalAnchor(null);
+            }}
+          />
+        )}
+
         {/* Model Switch Modal */}
         {showModelSwitchModal &&
           status.owner === "self" &&
           status.processId && (
             <ModelSwitchModal
               processId={status.processId}
+              sessionId={actualSessionId}
               currentModel={session?.model}
               onModelChanged={handleModelChanged}
               onClose={() => setShowModelSwitchModal(false)}
             />
           )}
+
+        {showHandoffModal && effectiveProvider && (
+          <RestartSessionModal
+            projectId={projectId}
+            sessionId={actualSessionId}
+            provider={effectiveProvider}
+            providerDisplayName={currentProviderInfo?.displayName}
+            providers={providers}
+            models={currentProviderInfo?.models}
+            currentModel={liveBadgeModel}
+            mode={permissionMode}
+            thinking={getThinkingSetting()}
+            promptSuggestionMode={liveModelConfig?.promptSuggestionMode}
+            executor={session?.executor}
+            onRestarted={(result, options) => {
+              setShowHandoffModal(false);
+              showToast(t("sessionHandoffStarted"), "success");
+              const handoffUrl = `${basePath}/projects/${projectId}/sessions/${result.sessionId}`;
+              if (options?.targetWindow && !options.targetWindow.closed) {
+                options.targetWindow.location.href = handoffUrl;
+                return;
+              }
+              if (options?.openInNewWindow) {
+                window.open(handoffUrl, "_blank", "noopener");
+                return;
+              }
+              navigate(handoffUrl, {
+                state: {
+                  initialStatus: {
+                    owner: "self",
+                    processId: result.processId,
+                  },
+                  initialTitle: result.title,
+                  initialModel: result.model ?? liveBadgeModel,
+                  initialProvider: result.provider ?? effectiveProvider,
+                },
+              });
+            }}
+            onClose={() => setShowHandoffModal(false)}
+          />
+        )}
 
         {status.owner === "external" && (
           <div className="external-session-warning">
@@ -1092,57 +3591,243 @@ function SessionPageContent({
           </div>
         )}
 
-        {hasPendingToolCalls && (
-          <div className="external-session-warning pending-tool-warning">
-            {t("sessionPendingElsewhereWarning")}
+        {hasPendingToolCalls && !pendingElsewhereDismissed && (
+          <div
+            className="external-session-warning pending-tool-warning"
+            role="status"
+          >
+            <div className="pending-tool-warning-copy">
+              <svg
+                className="pending-tool-warning-icon"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 8v4" />
+                <path d="M12 16h.01" />
+              </svg>
+              <span>{t("sessionPendingElsewhereWarning")}</span>
+            </div>
+            <button
+              type="button"
+              className="pending-tool-warning-close"
+              onClick={handleDismissPendingElsewhereWarning}
+              aria-label={t("sessionPendingElsewhereDismiss")}
+              title={t("sessionPendingElsewhereDismiss")}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M18 6 6 18" />
+                <path d="m6 6 12 12" />
+              </svg>
+            </button>
           </div>
         )}
 
-        <main className="session-messages">
-          {loading ? (
-            <div className="loading">{t("sessionLoading")}</div>
-          ) : (
-            <SessionMetadataProvider
-              projectId={projectId}
-              projectPath={project?.path ?? null}
-              sessionId={sessionId}
-            >
-              <AgentContentProvider
-                agentContent={agentContent}
-                setAgentContent={setAgentContent}
-                toolUseToAgent={toolUseToAgent}
+        <div
+          className={`session-split${
+            wantBtwSplitLayout ? " session-split-with-aside" : ""
+          }${
+            wantBtwSplitLayout && btwSidePaneCollapsed
+              ? " session-split-aside-collapsed"
+              : ""
+          }`}
+        >
+          <main className="session-messages">
+            {loading ? (
+              <div className="loading">{t("sessionLoading")}</div>
+            ) : (
+              <SessionMetadataProvider
                 projectId={projectId}
+                projectPath={project?.path ?? null}
                 sessionId={sessionId}
               >
-                <MessageList
-                  messages={messages}
-                  provider={session?.provider}
-                  isProcessing={
-                    status.owner === "self" && processState === "in-turn"
-                  }
-                  isCompacting={isCompacting}
-                  scrollTrigger={scrollTrigger}
-                  pendingMessages={pendingMessages}
-                  deferredMessages={deferredMessages}
-                  onCancelDeferred={(tempId) =>
-                    api.cancelDeferredMessage(sessionId, tempId)
-                  }
-                  markdownAugments={markdownAugments}
-                  activeToolApproval={activeToolApproval}
-                  hasOlderMessages={pagination?.hasOlderMessages}
-                  loadingOlder={loadingOlder}
-                  onLoadOlderMessages={loadOlderMessages}
-                />
-              </AgentContentProvider>
-            </SessionMetadataProvider>
+                <AgentContentProvider
+                  agentContent={agentContent}
+                  setAgentContent={setAgentContent}
+                  toolUseToAgent={toolUseToAgent}
+                  projectId={projectId}
+                  sessionId={sessionId}
+                >
+                  <MessageList
+                    messages={messages}
+                    provider={session?.provider}
+                    isProcessing={
+                      sessionActivityUi.showProcessingIndicator
+                    }
+                    isCompacting={isCompacting}
+                    scrollTrigger={scrollTrigger}
+                    pendingMessages={pendingMessages}
+                    deferredMessages={deferredMessages}
+                    btwAsides={historyBtwAsides}
+                    onFocusBtwAside={setFocusedBtwAsideId}
+                    onDoneBtwAside={() => setFocusedBtwAsideId(null)}
+                    onStopBtwAside={(asideId) => void handleStopBtwAside(asideId)}
+                    onToggleBtwAsideExpanded={toggleBtwAsideExpanded}
+                    onTransferBtwAsideTurn={transferBtwTurnToMotherComposer}
+                    onCancelDeferred={handleCancelDeferred}
+                    onEditDeferred={handleEditDeferred}
+                    onCorrectLatestUserMessage={handleCorrectLatestUserMessage}
+                    onTrimBeforeUserMessage={trimClientFromUserMessage}
+                    markdownAugments={markdownAugments}
+                    activeToolApproval={activeToolApproval}
+                    hasOlderMessages={pagination?.hasOlderMessages}
+                    loadingOlder={loadingOlder}
+                    onLoadOlderMessages={loadOlderMessages}
+                    clientTailActive={clientTailActive}
+                  />
+                </AgentContentProvider>
+              </SessionMetadataProvider>
+            )}
+          </main>
+          {showBtwSidePane && focusedBtwAside && (
+            <BtwAsidePane
+              aside={focusedBtwAside}
+              draft={asideDraft}
+              composerRef={asideComposerRef}
+              onDraftChange={setAsideDraft}
+              onSendFollowup={handleFocusedBtwSend}
+              onHide={() => setBtwSidePaneCollapsed(true)}
+              onDone={(argument) => handleCustomCommand("done", argument)}
+              onStop={() => void handleStopBtwAside(focusedBtwAside.id)}
+              onTransferToComposer={transferBtwTurnToMotherComposer}
+            />
           )}
-        </main>
+          {wantBtwSplitLayout && btwSidePaneCollapsed && (
+            <button
+              type="button"
+              className="session-btw-pane-handle"
+              onClick={() => setBtwSidePaneCollapsed(false)}
+              title="Maximize /btw aside pane"
+              aria-label="Maximize /btw aside pane"
+            >
+              /btw
+            </button>
+          )}
 
-        <footer className="session-input">
-          <div
-            className={`session-connection-bar session-connection-${sessionConnectionStatus}`}
-          />
-          <div className="session-input-inner">
+          <footer className="session-input">
+            <div
+              className={`session-connection-bar session-connection-${sessionConnectionStatus}`}
+            />
+            <div className="session-input-inner">
+              {composerStickyBtwAsides.length > 0 && (
+                <div className="btw-aside-stack" aria-label="/btw asides">
+                  {composerStickyBtwAsides.map((aside) => {
+                  const isFocused = focusedBtwAsideId === aside.id;
+                  const canExpand = Boolean(
+                    aside.request ||
+                      aside.followUps.length > 0 ||
+                      aside.responses.length > 0 ||
+                      (aside.turns?.length ?? 0) > 0,
+                  );
+                  return (
+                    <div
+                      key={aside.id}
+                      className={`btw-aside-card is-${aside.status} ${
+                        isFocused ? "is-focused" : ""
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        className="btw-aside-main"
+                        onClick={() => setFocusedBtwAsideId(aside.id)}
+                      >
+                        <span className="btw-aside-meta">
+                          /btw {aside.status}
+                        </span>
+                        <span className="btw-aside-request">
+                          {aside.request || "New aside"}
+                        </span>
+                        {aside.followUps.length > 0 && (
+                          <span className="btw-aside-followups">
+                            +{aside.followUps.length} follow-up
+                            {aside.followUps.length === 1 ? "" : "s"}
+                          </span>
+                        )}
+                        {aside.preview && (
+                          <span className="btw-aside-preview">
+                            {aside.preview}
+                          </span>
+                        )}
+                        {aside.error && (
+                          <span className="btw-aside-error">
+                            {aside.error}
+                          </span>
+                        )}
+                      </button>
+                      {aside.expanded && canExpand && (
+                        <BtwAsideTranscript
+                          aside={aside}
+                          autoScrollLatest
+                          onTransferToComposer={transferBtwTurnToMotherComposer}
+                        />
+                      )}
+                      <div className="btw-aside-actions">
+                        {canExpand && (
+                          <button
+                            type="button"
+                            className="btw-aside-action"
+                            onClick={() => toggleBtwAsideExpanded(aside.id)}
+                          >
+                            {aside.expanded ? "Less" : "Show"}
+                          </button>
+                        )}
+                        {isFocused && (
+                          <button
+                            type="button"
+                            className="btw-aside-action"
+                            onClick={() => hideBtwAside(aside.id)}
+                            title="Return the composer to the main session"
+                          >
+                            Done
+                          </button>
+                        )}
+                        {(aside.status === "starting" ||
+                          aside.status === "running") && (
+                          <button
+                            type="button"
+                            className="btw-aside-action btw-aside-action-stop"
+                            onClick={() => void handleStopBtwAside(aside.id)}
+                            title={
+                              isFocused
+                                ? "Stop this /btw aside and return to the main session"
+                                : "Stop this /btw aside"
+                            }
+                          >
+                            Stop
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btw-aside-action"
+                          onClick={() => hideBtwAside(aside.id)}
+                          title="Move this aside into session history"
+                        >
+                          Hide
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {/* User question panel */}
             {pendingInputRequest &&
               pendingInputRequest.sessionId === actualSessionId &&
@@ -1177,9 +3862,22 @@ function SessionPageContent({
                     onHoldChange={holdModeEnabled ? setHold : undefined}
                     supportsPermissionMode={supportsPermissionMode}
                     supportsThinkingToggle={supportsThinkingToggle}
+                    slashCommands={
+                      status.owner === "self" ? allSlashCommands : []
+                    }
+                    onSelectSlashCommand={handleToolbarSlashCommand}
+                    modelIndicatorTone={slashModelIndicatorTone}
+                    modelIndicatorProvider={effectiveProvider}
+                    modelIndicatorModel={liveBadgeModel}
+                    modelIndicatorTitle={slashModelIndicatorTitle}
+                    heartbeatEnabled={heartbeatTurnsEnabled}
+                    onToggleHeartbeat={handleToggleHeartbeat}
+                    onConfigureHeartbeat={() => setShowHeartbeatModal(true)}
                     contextUsage={session?.contextUsage}
+                    lastActivityAt={activityAt}
+                    sessionLiveness={sessionLiveness}
                     isRunning={status.owner === "self"}
-                    isThinking={processState === "in-turn"}
+                    isThinking={canStopOwnedProcess}
                     onStop={handleAbort}
                     pendingApproval={
                       approvalCollapsed
@@ -1200,17 +3898,34 @@ function SessionPageContent({
               !isAskUserQuestion
             ) && (
               <MessageInput
-                onSend={handleSend}
+                onSend={
+                  mainComposerForAside
+                    ? handleFocusedBtwSend
+                    : primaryComposerAction === "steer"
+                    ? handleSend
+                    : shouldDeferMessages
+                      ? handleQueue
+                      : handleSend
+                }
                 onQueue={
-                  status.owner !== "none" && processState !== "idle"
+                  !mainComposerForAside &&
+                  shouldDeferMessages &&
+                  generallySupportsSteering
                     ? handleQueue
                     : undefined
                 }
+                primaryActionKind={
+                  mainComposerForAside ? "send" : primaryComposerAction
+                }
                 placeholder={
-                  status.owner === "external"
+                  mainComposerForAside
+                    ? "/btw follow-up"
+                    : status.owner === "external"
                     ? t("sessionPlaceholderExternal")
                     : processState === "idle"
-                      ? t("sessionPlaceholderResume")
+                      ? shouldDeferMessages
+                        ? t("sessionPlaceholderQueue")
+                        : t("sessionPlaceholderResume")
                       : t("sessionPlaceholderQueue")
                 }
                 mode={permissionMode}
@@ -1219,11 +3934,24 @@ function SessionPageContent({
                 onHoldChange={holdModeEnabled ? setHold : undefined}
                 supportsPermissionMode={supportsPermissionMode}
                 supportsThinkingToggle={supportsThinkingToggle}
+                supportsSteering={generallySupportsSteering}
                 isRunning={status.owner === "self"}
-                isThinking={processState === "in-turn"}
+                isThinking={canStopOwnedProcess}
                 onStop={handleAbort}
-                draftKey={`draft-message-${sessionId}`}
+                draftKey={
+                  mainComposerForAside && focusedBtwAside
+                    ? `draft-btw-${focusedBtwAside.sessionId ?? focusedBtwAside.id}`
+                    : `draft-message-${sessionId}`
+                }
                 onDraftControlsReady={handleDraftControlsReady}
+                correctionActive={
+                  !mainComposerForAside && correctionDraft !== null
+                }
+                onCancelCorrection={
+                  mainComposerForAside ? undefined : handleCancelCorrection
+                }
+                onRecallLastSubmission={handleRecallLastSubmission}
+                onCancelLatestDeferred={handleCancelLatestDeferred}
                 collapsed={
                   !!(
                     pendingInputRequest &&
@@ -1231,18 +3959,42 @@ function SessionPageContent({
                   )
                 }
                 contextUsage={session?.contextUsage}
+                lastActivityAt={activityAt}
+                sessionLiveness={sessionLiveness}
                 projectId={projectId}
                 sessionId={sessionId}
-                attachments={attachments}
-                onAttach={handleAttach}
-                onRemoveAttachment={handleRemoveAttachment}
-                uploadProgress={uploadProgress}
+                attachments={mainComposerForAside ? [] : attachments}
+                onAttach={mainComposerForAside ? undefined : handleAttach}
+                onRemoveAttachment={
+                  mainComposerForAside ? undefined : handleRemoveAttachment
+                }
+                uploadProgress={mainComposerForAside ? [] : uploadProgress}
                 slashCommands={status.owner === "self" ? allSlashCommands : []}
                 onCustomCommand={handleCustomCommand}
+                onBtwShortcut={
+                  childSessionParentHref || supportsBtwAsides
+                    ? handleBtwShortcut
+                    : undefined
+                }
+                btwActive={!!mainComposerForAside || !!childSessionParentHref}
+                btwHasAsides={
+                  stickyBtwAsides.length > 0 || !!childSessionParentHref
+                }
+                btwToolbarMode={btwToolbarMode}
+                modelIndicatorTone={slashModelIndicatorTone}
+                modelIndicatorProvider={effectiveProvider}
+                modelIndicatorModel={liveBadgeModel}
+                modelIndicatorTitle={slashModelIndicatorTitle}
+                heartbeatEnabled={heartbeatTurnsEnabled}
+                onToggleHeartbeat={handleToggleHeartbeat}
+                onConfigureHeartbeat={() => setShowHeartbeatModal(true)}
+                promptSuggestion={mainComposerForAside ? undefined : promptSuggestion ?? undefined}
+                onDismissPromptSuggestion={mainComposerForAside ? undefined : dismissPromptSuggestion}
               />
-            )}
-          </div>
-        </footer>
+              )}
+            </div>
+          </footer>
+        </div>
       </div>
     </div>
   );

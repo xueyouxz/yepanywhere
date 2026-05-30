@@ -1,5 +1,6 @@
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
+import { type TrustedProxy, parseTrustedProxies } from "./client-ip.js";
 import type { LogConfig, LogLevel } from "./logger.js";
 
 export interface RelayTelemetryRuntimeConfig {
@@ -22,6 +23,18 @@ export interface RelayConfig {
   pongTimeoutMs: number;
   /** Days of inactivity before username can be reclaimed (default: 90) */
   reclaimDays: number;
+  /** Pending unauthenticated WebSocket connections allowed per source IP. */
+  unauthenticatedConnectionLimitPerIp: number;
+  /** Time allowed for a new WebSocket to send a valid relay protocol message. */
+  unauthenticatedConnectionTimeoutMs: number;
+  /**
+   * IPs/CIDRs whose `X-Forwarded-For` header is trusted when resolving the
+   * client IP for the per-IP unauthenticated-connection cap. Empty by default
+   * (use only the direct socket peer). Set this to the reverse proxy's IP
+   * when running behind nginx/Caddy/Cloudflare; otherwise the per-IP cap
+   * collapses into a single global counter.
+   */
+  trustedProxies: TrustedProxy[];
   /** Logging configuration */
   logging: LogConfig;
   /** Structured relay telemetry configuration */
@@ -53,6 +66,15 @@ export function loadConfig(): RelayConfig {
     pingIntervalMs: getEnvNumber("RELAY_PING_INTERVAL_MS", 60_000),
     pongTimeoutMs: getEnvNumber("RELAY_PONG_TIMEOUT_MS", 30_000),
     reclaimDays: getEnvNumber("RELAY_RECLAIM_DAYS", 90),
+    unauthenticatedConnectionLimitPerIp: getEnvNumber(
+      "RELAY_UNAUTHENTICATED_CONNECTION_LIMIT_PER_IP",
+      10,
+    ),
+    unauthenticatedConnectionTimeoutMs: getEnvNumber(
+      "RELAY_UNAUTHENTICATED_CONNECTION_TIMEOUT_MS",
+      30_000,
+    ),
+    trustedProxies: parseTrustedProxies(process.env.RELAY_TRUSTED_PROXIES),
     logging: {
       logDir: process.env.RELAY_LOG_DIR ?? join(dataDir, "logs"),
       logFile: process.env.RELAY_LOG_FILE ?? "relay.log",

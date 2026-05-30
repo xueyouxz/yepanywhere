@@ -4,8 +4,18 @@ import { getMessageId } from "../lib/mergeMessages";
 import type { ContentBlock, Message } from "../types";
 import { getStreamingEnabled } from "./useStreamingEnabled";
 
-/** Throttle interval for batching streaming UI updates */
-const STREAMING_THROTTLE_MS = 50;
+/** Adaptive bounds for batching streaming UI updates */
+const STREAMING_UPDATE_BASE_MS = 100;
+const STREAMING_UPDATE_MAX_MS = 750;
+const STREAMING_FLUSH_BUDGET_MS = 16;
+const STREAMING_BURST_EVENT_THRESHOLD = 40;
+
+function nowMs(): number {
+  return typeof performance !== "undefined" &&
+    typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
+}
 
 /** Callbacks for streaming markdown events (augment/pending from SSE) */
 export interface StreamingMarkdownCallbacks {
@@ -96,7 +106,14 @@ export function useStreamingContent(
   const streamingThrottleRef = useRef<{
     timer: ReturnType<typeof setTimeout> | null;
     pendingIds: Set<string>;
-  }>({ timer: null, pendingIds: new Set() });
+    pendingEventCount: number;
+    intervalMs: number;
+  }>({
+    timer: null,
+    pendingIds: new Set(),
+    pendingEventCount: 0,
+    intervalMs: STREAMING_UPDATE_BASE_MS,
+  });
 
   // Update messages with streaming content
   // Creates or updates a streaming placeholder message with accumulated content
@@ -123,26 +140,71 @@ export function useStreamingContent(
     [onUpdateMessage],
   );
 
+  const tuneStreamingInterval = useCallback(
+    (durationMs: number, eventCount: number) => {
+      const throttle = streamingThrottleRef.current;
+      if (
+        durationMs > STREAMING_FLUSH_BUDGET_MS ||
+        eventCount > STREAMING_BURST_EVENT_THRESHOLD
+      ) {
+        throttle.intervalMs = Math.min(
+          STREAMING_UPDATE_MAX_MS,
+          Math.max(200, Math.ceil(throttle.intervalMs * 1.5)),
+        );
+        return;
+      }
+
+      if (durationMs < STREAMING_FLUSH_BUDGET_MS / 2 && eventCount <= 8) {
+        throttle.intervalMs = Math.max(
+          STREAMING_UPDATE_BASE_MS,
+          Math.floor(throttle.intervalMs * 0.8),
+        );
+      }
+    },
+    [],
+  );
+
+  const flushStreamingUpdates = useCallback(() => {
+    const throttle = streamingThrottleRef.current;
+    if (throttle.timer) {
+      clearTimeout(throttle.timer);
+      throttle.timer = null;
+    }
+    if (throttle.pendingIds.size === 0) {
+      throttle.pendingEventCount = 0;
+      return;
+    }
+
+    const pendingIds = [...throttle.pendingIds];
+    const eventCount = throttle.pendingEventCount;
+    throttle.pendingIds.clear();
+    throttle.pendingEventCount = 0;
+
+    const startMs = nowMs();
+    for (const id of pendingIds) {
+      updateStreamingMessage(id);
+    }
+    tuneStreamingInterval(nowMs() - startMs, eventCount);
+  }, [tuneStreamingInterval, updateStreamingMessage]);
+
   // Throttled version of updateStreamingMessage for delta events
-  // Batches rapid updates to reduce React re-renders during streaming
+  // Batches rapid updates to reduce React re-renders during streaming. Slow
+  // devices naturally move toward larger chunks instead of one-token UI work.
   const throttledUpdateStreamingMessage = useCallback(
     (messageId: string) => {
       const throttle = streamingThrottleRef.current;
       throttle.pendingIds.add(messageId);
+      throttle.pendingEventCount += 1;
 
       // If no timer running, start one
       if (!throttle.timer) {
-        throttle.timer = setTimeout(() => {
-          // Flush all pending updates
-          for (const id of throttle.pendingIds) {
-            updateStreamingMessage(id);
-          }
-          throttle.pendingIds.clear();
-          throttle.timer = null;
-        }, STREAMING_THROTTLE_MS);
+        throttle.timer = setTimeout(
+          flushStreamingUpdates,
+          throttle.intervalMs,
+        );
       }
     },
-    [updateStreamingMessage],
+    [flushStreamingUpdates],
   );
 
   // Process a stream_event SSE message
@@ -275,6 +337,7 @@ export function useStreamingContent(
       } else if (eventType === "content_block_stop") {
         // Block complete - nothing special needed, final message will replace
       } else if (eventType === "message_stop") {
+        flushStreamingUpdates();
         // Message complete - clean up streaming ref state
         // DON'T clear currentStreamingIdRef here - we need it to remove the
         // streaming placeholder when the final assistant message arrives
@@ -288,6 +351,7 @@ export function useStreamingContent(
     [
       updateStreamingMessage,
       throttledUpdateStreamingMessage,
+      flushStreamingUpdates,
       streamingMarkdownCallbacks,
       onToolUseMapping,
       onAgentContextUsage,
@@ -297,6 +361,14 @@ export function useStreamingContent(
 
   // Clear all streaming state (called when assistant message arrives)
   const clearStreaming = useCallback(() => {
+    const throttle = streamingThrottleRef.current;
+    if (throttle.timer) {
+      clearTimeout(throttle.timer);
+      throttle.timer = null;
+    }
+    throttle.pendingIds.clear();
+    throttle.pendingEventCount = 0;
+    throttle.intervalMs = STREAMING_UPDATE_BASE_MS;
     streamingContentRef.current.clear();
     currentStreamingIdRef.current = null;
     currentStreamingAgentIdRef.current = null;
@@ -313,6 +385,8 @@ export function useStreamingContent(
       clearTimeout(streamingThrottleRef.current.timer);
       streamingThrottleRef.current.timer = null;
     }
+    streamingThrottleRef.current.pendingIds.clear();
+    streamingThrottleRef.current.pendingEventCount = 0;
   }, []);
 
   return {

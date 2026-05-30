@@ -58,7 +58,7 @@
  */
 
 import { open } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, isAbsolute, join, sep } from "node:path";
 import type { UrlProjectId } from "@yep-anywhere/shared";
 import { stripBom } from "../utils/jsonl.js";
@@ -78,6 +78,15 @@ export const CLAUDE_DIR =
   join(homedir(), ".claude");
 export const CLAUDE_PROJECTS_DIR =
   process.env.CLAUDE_SESSIONS_DIR ?? join(CLAUDE_DIR, "projects");
+export const DETACHED_PROJECT_PATH = join(tmpdir(), "yep-anywhere-no-project");
+export const DETACHED_PROJECT_NAME = "No project";
+
+/** Root for Grok Build sessions (persistent across restarts, similar to Gemini/Codex) */
+export const GROK_DIR =
+  process.env.GROK_SESSIONS_DIR?.replace(new RegExp(`\\${sep}sessions$`), "") ??
+  join(homedir(), ".grok");
+export const GROK_SESSIONS_DIR =
+  process.env.GROK_SESSIONS_DIR ?? join(GROK_DIR, "sessions");
 
 /**
  * Encode an absolute project path to a projectId (base64url).
@@ -109,8 +118,14 @@ export function decodeProjectId(id: UrlProjectId): string {
  * getProjectName("/home/user/my-project")
  * // => "my-project"
  */
+export function isDetachedProjectPath(projectPath: string): boolean {
+  return canonicalizeProjectPath(projectPath) === DETACHED_PROJECT_PATH;
+}
+
 export function getProjectName(projectPath: string): string {
-  return basename(projectPath);
+  return isDetachedProjectPath(projectPath)
+    ? DETACHED_PROJECT_NAME
+    : basename(projectPath);
 }
 
 /**

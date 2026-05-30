@@ -42,6 +42,15 @@ export {
   type GeminiACPProviderConfig,
 } from "./gemini-acp.js";
 
+// Grok Build ACP provider (uses `grok agent stdio`)
+// Phase 1 isolated addition per topics/grok.md. Gated by ENABLED_PROVIDERS=grok.
+import { grokACPProvider } from "./grok-acp.js";
+export {
+  GrokACPProvider,
+  grokACPProvider,
+  type GrokACPProviderConfig,
+} from "./grok-acp.js";
+
 // CodexOSS provider (uses codex CLI with --oss for local models)
 import { codexOSSProvider } from "./codex-oss.js";
 export {
@@ -77,6 +86,7 @@ export function getAllProviders(): AgentProvider[] {
     codexOSSProvider,
     geminiProvider,
     geminiACPProvider,
+    grokACPProvider, // Phase 1: additive only (see grok-acp.ts header + topics/grok.md)
     opencodeProvider,
   ];
 }
@@ -87,6 +97,9 @@ export function getAllProviders(): AgentProvider[] {
  * Note: "gemini" maps to geminiACPProvider (ACP mode) since it's the better
  * implementation with proper permission handling. The non-ACP stream-json
  * provider is deprecated and will be removed.
+ *
+ * "grok" added (additive, isolated). When ENABLED_PROVIDERS does not include "grok",
+ * getProvider("grok") is never reached from normal flows.
  */
 export function getProvider(name: ProviderName): AgentProvider | null {
   switch (name) {
@@ -102,6 +115,8 @@ export function getProvider(name: ProviderName): AgentProvider | null {
     case "gemini-acp":
       // Both map to ACP provider - "gemini" is legacy name for backward compatibility
       return geminiACPProvider;
+    case "grok":
+      return grokACPProvider; // Phase 1 Grok Build (ACP)
     case "opencode":
       return opencodeProvider;
     default:

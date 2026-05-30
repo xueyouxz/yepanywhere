@@ -74,6 +74,9 @@ type ConnectionState =
 const RESUME_PHASE_TIMEOUT_MS = 5000;
 const RESUME_INCOMPATIBLE_ERROR =
   "resume_incompatible: session resume unsupported by server";
+const UPLOAD_BUFFER_HIGH_WATER_BYTES = 512 * 1024;
+const UPLOAD_BUFFER_LOW_WATER_BYTES = 256 * 1024;
+const UPLOAD_BUFFER_POLL_MS = 16;
 
 /** Stored session for resumption (persisted to localStorage) */
 export interface StoredSession {
@@ -90,6 +93,10 @@ function uint8ToBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(byte);
   }
   return btoa(binary);
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -155,7 +162,7 @@ export class SecureConnection implements Connection {
     this.protocol = new RelayProtocol(
       {
         sendMessage: (msg) => this.send(msg),
-        sendUploadChunk: (id, offset, chunk) => {
+        sendUploadChunk: async (id, offset, chunk) => {
           if (this.useLegacyProtocolMode) {
             this.send({
               type: "upload_chunk",
@@ -163,6 +170,7 @@ export class SecureConnection implements Connection {
               offset,
               data: uint8ToBase64(chunk),
             });
+            await this.waitForUploadBackpressure();
             return;
           }
 
@@ -179,6 +187,7 @@ export class SecureConnection implements Connection {
             this.sessionKey,
           );
           this.ws.send(envelope);
+          await this.waitForUploadBackpressure();
         },
         ensureConnected: () => this.ensureConnected(),
         isConnected: () =>
@@ -1202,6 +1211,23 @@ export class SecureConnection implements Connection {
 
   onDeviceMessage(handler: (msg: DeviceServerMessage) => void): () => void {
     return this.protocol.onDeviceMessage(handler);
+  }
+
+  private async waitForUploadBackpressure(): Promise<void> {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (ws.bufferedAmount <= UPLOAD_BUFFER_HIGH_WATER_BYTES) return;
+
+    while (
+      ws.readyState === WebSocket.OPEN &&
+      ws.bufferedAmount > UPLOAD_BUFFER_LOW_WATER_BYTES
+    ) {
+      await wait(UPLOAD_BUFFER_POLL_MS);
+    }
+
+    if (ws.readyState !== WebSocket.OPEN) {
+      throw new Error("WebSocket not connected");
+    }
   }
 
   /**

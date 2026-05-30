@@ -19,6 +19,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build-tauri:
     strategy:
@@ -59,16 +62,16 @@ jobs:
       APPIMAGE_EXTRACT_AND_RUN: '1'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # --- Node.js + pnpm ---
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: lts/*
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       # --- Rust ---
       - name: Install Rust stable
@@ -267,7 +270,7 @@ jobs:
     needs: build-tauri
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Remove .sig files from release
         env:

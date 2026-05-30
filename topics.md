@@ -1,0 +1,7 @@
+- grok - Grok Build ACP provider integration.
+- predictive-scroll - Tool row on-demand hydration and placeholder sizing.
+- recaps - Away-summary recap UX and simulated-helper configuration.
+- emulated-slash-commands - Provider command aliases and skill-backed fallbacks.
+- side-session-config - Shared helper side-session defaults and lifecycle.
+- prompt-suggestions - Next-user-turn suggestion surface and native/simulated split.
+- session-liveness - Provider/session cache state, stale entries, and recovery.

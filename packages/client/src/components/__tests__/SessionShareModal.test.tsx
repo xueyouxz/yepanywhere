@@ -1,0 +1,344 @@
+// @vitest-environment jsdom
+
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { api } from "../../api/client";
+import { I18nProvider } from "../../i18n";
+import { SessionShareModal } from "../SessionShareModal";
+
+describe("SessionShareModal", () => {
+  const writeText = vi.fn();
+
+  beforeEach(() => {
+    vi.spyOn(api, "getPublicSessionShareStatus").mockResolvedValue({
+      activeCount: 0,
+      frozenCount: 0,
+      liveCount: 0,
+      activeViewerCount: 0,
+      viewers: [],
+    });
+    vi.spyOn(api, "createPublicSessionShare").mockResolvedValue({
+      url: "https://ya.graehl.org/share/secret?h=test-host",
+      mode: "frozen",
+      createdAt: "2026-05-01T00:00:00.000Z",
+      secretBits: 512,
+    });
+    vi.spyOn(api, "revokePublicSessionShares").mockResolvedValue({
+      activeCount: 0,
+      frozenCount: 0,
+      liveCount: 0,
+      activeViewerCount: 0,
+      viewers: [],
+      revokedCount: 2,
+    });
+    vi.spyOn(api, "freezePublicSessionLiveShares").mockResolvedValue({
+      activeCount: 1,
+      frozenCount: 1,
+      liveCount: 0,
+      activeViewerCount: 0,
+      viewers: [],
+      convertedCount: 1,
+    });
+    vi.spyOn(api, "freezePublicSessionViewerToken").mockResolvedValue({
+      activeCount: 1,
+      frozenCount: 0,
+      liveCount: 1,
+      activeViewerCount: 0,
+      viewers: [
+        {
+          viewerId: "viewer-token-1",
+          shortId: "viewer-t",
+          firstSeenAt: "2026-05-01T00:00:00.000Z",
+          lastSeenAt: "2026-05-01T00:01:00.000Z",
+          accessCount: 2,
+          active: false,
+          disconnected: false,
+          frozen: true,
+        },
+      ],
+      viewerId: "viewer-token-1",
+      convertedCount: 1,
+    });
+    vi.spyOn(api, "disconnectPublicSessionViewerToken").mockResolvedValue({
+      activeCount: 1,
+      frozenCount: 0,
+      liveCount: 1,
+      activeViewerCount: 0,
+      viewers: [],
+      viewerId: "viewer-token-1",
+    });
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    writeText.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("creates and copies a frozen read-only public share in one click", async () => {
+    render(
+      <I18nProvider>
+        <SessionShareModal
+          projectId="cHJvamVjdA"
+          sessionId="session-1"
+          initialPrompt="first prompt"
+          title="Build logs"
+          onClose={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Copy Read-Only Snapshot Link/ }),
+    );
+
+    await waitFor(() => {
+      expect(api.createPublicSessionShare).toHaveBeenCalledWith({
+        projectId: "cHJvamVjdA",
+        sessionId: "session-1",
+        mode: "frozen",
+        initialPrompt: "first prompt",
+        title: "Build logs",
+      });
+    });
+    expect(writeText).toHaveBeenCalledWith(
+      "https://ya.graehl.org/share/secret?h=test-host",
+    );
+    expect(
+      screen.getByDisplayValue("https://ya.graehl.org/share/secret?h=test-host"),
+    ).toBeTruthy();
+    expect(screen.getByText("Read-only link copied to clipboard.")).toBeTruthy();
+  });
+
+  it("creates and copies a live read-only public share in one click", async () => {
+    const onStatusChange = vi.fn();
+    render(
+      <I18nProvider>
+        <SessionShareModal
+          projectId="cHJvamVjdA"
+          sessionId="session-1"
+          title="Build logs"
+          onStatusChange={onStatusChange}
+          onClose={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Copy Read-Only Live Link/ }),
+    );
+
+    await waitFor(() => {
+      expect(api.createPublicSessionShare).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "live" }),
+      );
+    });
+    expect(onStatusChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activeCount: 1,
+        liveCount: 1,
+      }),
+    );
+  });
+
+  it("falls back without surfacing raw focus errors", async () => {
+    writeText.mockRejectedValueOnce(new Error("Document is not focused"));
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn(() => false),
+    });
+
+    render(
+      <I18nProvider>
+        <SessionShareModal
+          projectId="cHJvamVjdA"
+          sessionId="session-1"
+          title="Build logs"
+          onClose={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Copy Read-Only Snapshot Link/ }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Read-only link copied to clipboard.")).toBeTruthy();
+    });
+    expect(screen.queryByText("Document is not focused")).toBeNull();
+    expect(
+      screen.getByDisplayValue("https://ya.graehl.org/share/secret?h=test-host"),
+    ).toBeTruthy();
+  });
+
+  it("tries async clipboard even when document focus is unreliable", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn(() => true),
+    });
+
+    render(
+      <I18nProvider>
+        <SessionShareModal
+          projectId="cHJvamVjdA"
+          sessionId="session-1"
+          title="Build logs"
+          onClose={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Copy Read-Only Snapshot Link/ }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Read-only link copied to clipboard.")).toBeTruthy();
+    });
+    expect(writeText).toHaveBeenCalledWith(
+      "https://ya.graehl.org/share/secret?h=test-host",
+    );
+  });
+
+  it("shows revoke all only when the session already has active shares", async () => {
+    vi.mocked(api.getPublicSessionShareStatus).mockResolvedValue({
+      activeCount: 2,
+      frozenCount: 1,
+      liveCount: 1,
+      activeViewerCount: 3,
+      viewers: [],
+    });
+
+    render(
+      <I18nProvider>
+        <SessionShareModal
+          projectId="cHJvamVjdA"
+          sessionId="session-1"
+          title="Build logs"
+          onClose={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    const revoke = await screen.findByRole("button", {
+      name: "Revoke All Shared Links",
+    });
+    expect(
+      screen.getByLabelText(
+        "3 active viewer(s), 0 token(s), 1 live link(s), 1 snapshot link(s)",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(revoke);
+
+    await waitFor(() => {
+      expect(api.revokePublicSessionShares).toHaveBeenCalledWith(
+        "cHJvamVjdA",
+        "session-1",
+      );
+    });
+    expect(screen.getByText("Revoked 2 shared link(s).")).toBeTruthy();
+  });
+
+  it("freezes all live public links", async () => {
+    vi.mocked(api.getPublicSessionShareStatus).mockResolvedValue({
+      activeCount: 1,
+      frozenCount: 0,
+      liveCount: 1,
+      activeViewerCount: 0,
+      viewers: [],
+    });
+
+    render(
+      <I18nProvider>
+        <SessionShareModal
+          projectId="cHJvamVjdA"
+          sessionId="session-1"
+          title="Build logs"
+          onClose={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", {
+      name: "Stop live updates",
+    }));
+
+    await waitFor(() => {
+      expect(api.freezePublicSessionLiveShares).toHaveBeenCalledWith(
+        "cHJvamVjdA",
+        "session-1",
+      );
+    });
+    expect(
+      screen.getByText(
+        "Live updates stopped for 1 link(s); they now open as read-only snapshots.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("shows viewer tokens with freeze and disconnect controls", async () => {
+    vi.mocked(api.getPublicSessionShareStatus).mockResolvedValue({
+      activeCount: 1,
+      frozenCount: 0,
+      liveCount: 1,
+      activeViewerCount: 1,
+      viewers: [
+        {
+          viewerId: "viewer-token-1",
+          shortId: "viewer-t",
+          firstSeenAt: "2026-05-01T00:00:00.000Z",
+          lastSeenAt: "2026-05-01T00:01:00.000Z",
+          accessCount: 2,
+          active: true,
+          disconnected: false,
+          frozen: false,
+        },
+      ],
+    });
+
+    render(
+      <I18nProvider>
+        <SessionShareModal
+          projectId="cHJvamVjdA"
+          sessionId="session-1"
+          title="Build logs"
+          onClose={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("viewer-t")).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Snapshot this token viewer-t",
+      }),
+    );
+    await waitFor(() => {
+      expect(api.freezePublicSessionViewerToken).toHaveBeenCalledWith(
+        "cHJvamVjdA",
+        "session-1",
+        "viewer-token-1",
+      );
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Disconnect this token viewer-t",
+      }),
+    );
+    await waitFor(() => {
+      expect(api.disconnectPublicSessionViewerToken).toHaveBeenCalledWith(
+        "cHJvamVjdA",
+        "session-1",
+        "viewer-token-1",
+      );
+    });
+  });
+});

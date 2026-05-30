@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { type WriteStream, createWriteStream } from "node:fs";
 import { mkdir, rm, stat } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import type { UploadedFile } from "@yep-anywhere/shared";
 import { getDataDir } from "../config.js";
 
-/** Root directory for uploads (uses dataDir from config for profile support) */
+/** Legacy root directory for uploads (kept for old files during transition). */
 export const UPLOADS_DIR = join(getDataDir(), "uploads");
+const ATTACHMENTS_DIR_NAME = ".attachments";
 
 /**
  * State machine for a single upload operation.
@@ -20,6 +21,8 @@ export interface UploadState {
   expectedSize: number;
   bytesReceived: number;
   mimeType: string;
+  imageWidth?: number;
+  imageHeight?: number;
   writeStream: WriteStream | null;
   status: "pending" | "streaming" | "complete" | "error" | "cancelled";
 }
@@ -74,6 +77,54 @@ export function sanitizeFilename(original: string): {
   };
 }
 
+export function isSafeUploadPathSegment(segment: string): boolean {
+  return (
+    segment.length > 0 &&
+    segment !== "." &&
+    segment !== ".." &&
+    !/[<>:"/\\|?*\0]/.test(segment)
+  );
+}
+
+export function resolveUploadStoragePath(
+  uploadsDir: string,
+  encodedProjectPath: string,
+  sessionId: string,
+  filename?: string,
+): string | null {
+  if (
+    !isSafeUploadPathSegment(encodedProjectPath) ||
+    !isSafeUploadPathSegment(sessionId) ||
+    (filename !== undefined && !isSafeUploadPathSegment(filename))
+  ) {
+    return null;
+  }
+
+  const root = resolve(uploadsDir);
+  const resolved = resolve(
+    root,
+    encodedProjectPath,
+    sessionId,
+    ...(filename === undefined ? [] : [filename]),
+  );
+  const relativePath = relative(root, resolved);
+  if (
+    relativePath === "" ||
+    relativePath.startsWith("..") ||
+    isAbsolute(relativePath)
+  ) {
+    return null;
+  }
+  return resolved;
+}
+
+export function getProjectAttachmentDir(
+  projectPath: string,
+  sessionId: string,
+): string {
+  return join(projectPath, ATTACHMENTS_DIR_NAME, sessionId);
+}
+
 /**
  * Get the upload directory for a project+session.
  * Creates the directory if it doesn't exist.
@@ -87,7 +138,23 @@ export async function getUploadDir(
   sessionId: string,
   uploadsDir: string = UPLOADS_DIR,
 ): Promise<string> {
-  const dir = join(uploadsDir, encodedProjectPath, sessionId);
+  const dir = resolveUploadStoragePath(
+    uploadsDir,
+    encodedProjectPath,
+    sessionId,
+  );
+  if (!dir) {
+    throw new Error("Invalid upload path segment");
+  }
+  await mkdir(dir, { recursive: true });
+  return dir;
+}
+
+export async function getProjectAttachmentUploadDir(
+  projectPath: string,
+  sessionId: string,
+): Promise<string> {
+  const dir = getProjectAttachmentDir(projectPath, sessionId);
   await mkdir(dir, { recursive: true });
   return dir;
 }
@@ -96,6 +163,21 @@ export interface UploadManagerOptions {
   uploadsDir?: string;
   /** Maximum upload file size in bytes. 0 = unlimited */
   maxUploadSizeBytes?: number;
+}
+
+function normalizeImageDimensions(input?: {
+  width?: number;
+  height?: number;
+}): { width: number; height: number } | undefined {
+  if (!input) return undefined;
+  const width = Number.isFinite(input.width) ? Math.floor(input.width ?? 0) : 0;
+  const height = Number.isFinite(input.height)
+    ? Math.floor(input.height ?? 0)
+    : 0;
+  if (width <= 0 || height <= 0) {
+    return undefined;
+  }
+  return { width, height };
 }
 
 /**
@@ -123,6 +205,11 @@ export class UploadManager {
     originalName: string,
     expectedSize: number,
     mimeType: string,
+    projectPath?: string,
+    imageDimensions?: {
+      width?: number;
+      height?: number;
+    },
   ): Promise<{ uploadId: string; state: UploadState }> {
     // Check file size limit
     if (this.maxUploadSizeBytes > 0 && expectedSize > this.maxUploadSizeBytes) {
@@ -130,13 +217,12 @@ export class UploadManager {
       throw new Error(`File size exceeds maximum allowed size of ${maxMB}MB`);
     }
 
-    const uploadDir = await getUploadDir(
-      encodedProjectPath,
-      sessionId,
-      this.uploadsDir,
-    );
+    const uploadDir = projectPath
+      ? await getProjectAttachmentUploadDir(projectPath, sessionId)
+      : await getUploadDir(encodedProjectPath, sessionId, this.uploadsDir);
     const { id, sanitized } = sanitizeFilename(originalName);
     const filePath = join(uploadDir, sanitized);
+    const normalizedDimensions = normalizeImageDimensions(imageDimensions);
 
     const state: UploadState = {
       id,
@@ -146,6 +232,12 @@ export class UploadManager {
       expectedSize,
       bytesReceived: 0,
       mimeType,
+      ...(normalizedDimensions
+        ? {
+            imageWidth: normalizedDimensions.width,
+            imageHeight: normalizedDimensions.height,
+          }
+        : {}),
       writeStream: null,
       status: "pending",
     };
@@ -247,6 +339,9 @@ export class UploadManager {
       path: state.filePath,
       size: stats.size,
       mimeType: state.mimeType,
+      ...(state.imageWidth !== undefined && state.imageHeight !== undefined
+        ? { width: state.imageWidth, height: state.imageHeight }
+        : {}),
     };
   }
 

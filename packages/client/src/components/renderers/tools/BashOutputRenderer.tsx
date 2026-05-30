@@ -3,6 +3,8 @@ import type { ZodError } from "zod";
 import { useSchemaValidationContext } from "../../../contexts/SchemaValidationContext";
 import { validateToolResult } from "../../../lib/validateToolResult";
 import { SchemaWarning } from "../../SchemaWarning";
+import { AnsiText } from "../../ui/AnsiText";
+import { FixedFontMathToggle } from "../../ui/FixedFontMathToggle";
 import type { BashOutputInput, BashOutputResult, ToolRenderer } from "./types";
 
 const MAX_LINES_COLLAPSED = 20;
@@ -44,6 +46,18 @@ function StatusIndicator({ status }: { status: string }) {
     <span className={`bashoutput-status ${config.className}`}>
       {config.icon} {status}
     </span>
+  );
+}
+
+function renderFixedFontMathPanel(html: string, className = "code-block") {
+  return (
+    <div className={`${className} fixed-font-rendered-panel`}>
+      <div
+        className="fixed-font-rendered__content"
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: KaTeX output is trusted HTML from local rendering
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    </div>
   );
 }
 
@@ -150,14 +164,30 @@ function BashOutputToolResult({
       {(result.stdout || result.stderr) && (
         <>
           {result.stdout && (
-            <pre className="bash-stdout code-block">
-              <code>{displayStdout.join("\n")}</code>
-            </pre>
+            <FixedFontMathToggle
+              sourceText={displayStdout.join("\n")}
+              sourceView={
+                <pre className="bash-stdout code-block">
+                  <AnsiText text={displayStdout.join("\n")} />
+                </pre>
+              }
+              renderRenderedView={(html) =>
+                renderFixedFontMathPanel(html, "bash-stdout code-block")
+              }
+            />
           )}
           {result.stderr && (
-            <pre className="bash-stderr code-block">
-              <code>{result.stderr}</code>
-            </pre>
+            <FixedFontMathToggle
+              sourceText={result.stderr}
+              sourceView={
+                <pre className="bash-stderr code-block">
+                  <AnsiText text={result.stderr} />
+                </pre>
+              }
+              renderRenderedView={(html) =>
+                renderFixedFontMathPanel(html, "bash-stderr code-block")
+              }
+            />
           )}
           {needsCollapse && (
             <button

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   UploadManager,
   getUploadDir,
+  resolveUploadStoragePath,
   sanitizeFilename,
 } from "../../src/uploads/manager.js";
 
@@ -99,6 +100,43 @@ describe("getUploadDir", () => {
     );
     expect(dir).toContain("abc-def_ghi");
     expect(dir).toContain("session-with-dashes");
+  });
+
+  it("rejects traversal-shaped upload path segments", async () => {
+    await expect(getUploadDir("encoded-project", "..", tempDir)).rejects.toThrow(
+      "Invalid upload path segment",
+    );
+    await expect(
+      getUploadDir("encoded-project", "session/child", tempDir),
+    ).rejects.toThrow("Invalid upload path segment");
+  });
+});
+
+describe("resolveUploadStoragePath", () => {
+  it("keeps uploads under the configured upload root", () => {
+    const root = join(tmpdir(), `upload-root-${randomUUID()}`);
+
+    expect(
+      resolveUploadStoragePath(
+        root,
+        "encoded-project",
+        "session-123",
+        "00000000-0000-4000-8000-000000000000_file.txt",
+      ),
+    ).toBe(
+      join(
+        root,
+        "encoded-project",
+        "session-123",
+        "00000000-0000-4000-8000-000000000000_file.txt",
+      ),
+    );
+    expect(
+      resolveUploadStoragePath(root, "encoded-project", "session-123", ".."),
+    ).toBeNull();
+    expect(
+      resolveUploadStoragePath(root, "encoded-project", "session-123/child"),
+    ).toBeNull();
   });
 });
 

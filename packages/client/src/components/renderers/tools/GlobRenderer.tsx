@@ -127,6 +127,7 @@ function GlobToolResult({
 
 export const globRenderer: ToolRenderer<GlobInput, GlobResult> = {
   tool: "Glob",
+  displayName: "List",
 
   renderToolUse(input, _context) {
     return <GlobToolUse input={input as GlobInput} />;

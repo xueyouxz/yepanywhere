@@ -5,10 +5,20 @@ import type {
   SlashCommand,
 } from "@yep-anywhere/shared";
 import type { MessageQueue } from "../messageQueue.js";
-import type { CanUseTool, SDKMessage, UserMessage } from "../types.js";
+import type {
+  CanUseTool,
+  ProviderActivitySnapshot,
+  ProviderLivenessProbeResult,
+  SDKMessage,
+  UserMessage,
+} from "../types.js";
 
 /**
  * Provider names - extensible for future providers.
+ *
+ * "grok" added (additive only, Phase 1) for Grok Build ACP provider.
+ * See topics/grok.md for full isolation contract + ENABLED_PROVIDERS gating.
+ * This local copy must stay in sync with @yep-anywhere/shared ProviderName.
  */
 export type ProviderName =
   | "claude"
@@ -17,6 +27,7 @@ export type ProviderName =
   | "codex-oss"
   | "gemini"
   | "gemini-acp"
+  | "grok"
   | "opencode";
 
 /**
@@ -45,6 +56,11 @@ export interface StartSessionOptions {
   initialMessage?: UserMessage;
   /** Session ID to resume (optional) */
   resumeSessionId?: string;
+  /**
+   * Optional provider-visible client identity, used by providers that expose
+   * launcher identity in session metadata (currently Codex).
+   */
+  clientName?: string;
   /** Permission mode for tool approvals */
   permissionMode?: PermissionMode;
   /** Model to use (e.g., "sonnet", "opus", "haiku") */
@@ -61,6 +77,8 @@ export interface StartSessionOptions {
   remoteEnv?: Record<string, string>;
   /** Global instructions to append to system prompt (from server settings) */
   globalInstructions?: string;
+  /** Native prompt-suggestion protocol opt-in for providers that support it. */
+  promptSuggestions?: boolean;
 }
 
 /**
@@ -78,6 +96,10 @@ export interface AgentSession {
   isProcessAlive?: () => boolean;
   /** OS PID of the spawned agent child process (undefined if not available) */
   pid?: number | (() => number | undefined);
+  /** Actively query provider/session status when passive progress evidence is stale. */
+  probeLiveness?: () => Promise<ProviderLivenessProbeResult>;
+  /** Passive raw provider/app-server event cadence, when available. */
+  getProviderActivity?: () => ProviderActivitySnapshot;
   /** Session ID if available immediately (some providers provide later via messages) */
   sessionId?: string;
   /**
@@ -96,7 +118,7 @@ export interface AgentSession {
    * The query will stop processing the current turn and return control.
    * Only supported by Claude SDK 0.2.7+.
    */
-  interrupt?: () => Promise<void>;
+  interrupt?: () => Promise<void | boolean>;
   /**
    * Get the list of available models from the SDK.
    * Only supported by Claude SDK 0.2.7+.
@@ -129,6 +151,25 @@ export interface AgentProvider {
   readonly supportsThinkingToggle: boolean;
   /** Whether this provider supports slash commands (default: false) */
   readonly supportsSlashCommands: boolean;
+  /** Whether this provider supports active turn steering (default: false) */
+  readonly supportsSteering: boolean;
+  /**
+   * Whether this provider can synthesize an on-return recap of recent
+   * activity. See topics/recaps.md. Optional; absent means false.
+   */
+  readonly supportsRecaps?: boolean;
+  /**
+   * Whether this provider emits recaps natively without YA spawning a side
+   * query. Native support still must be user-disableable because it consumes
+   * provider tokens/compute.
+   */
+  readonly supportsNativeRecaps?: boolean;
+  /**
+   * Whether this provider emits prompt suggestions natively in the ordinary
+   * session protocol. YA-simulated suggestions are a separate side-session
+   * feature and must not be implied by this flag.
+   */
+  readonly supportsNativePromptSuggestions?: boolean;
 
   /**
    * Check if this provider is installed and available.
@@ -160,4 +201,21 @@ export interface AgentProvider {
    * For cloud providers (Claude, Gemini), this returns a static list.
    */
   getAvailableModels(): Promise<ModelInfo[]>;
+
+  /**
+   * Synthesize a short recap of recent agent activity from already-emitted
+   * assistant text. The provider runs an ephemeral, non-persisted query —
+   * the output must not appear in the underlying session transcript.
+   * See topics/recaps.md.
+   *
+   * Implementations may apply timeouts and length limits. Returns the recap
+   * text on success; throws on unrecoverable failure. Implementations should
+   * NOT include trailing CLI-side hints (e.g., the Claude TUI's
+   * `(disable recaps in /config)` suffix) — those are TUI affordances that
+   * do not apply to a YA-generated recap.
+   */
+  generateRecap?: (
+    recentAssistantText: string[],
+    options?: { model?: string },
+  ) => Promise<string>;
 }

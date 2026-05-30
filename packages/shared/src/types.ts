@@ -4,7 +4,12 @@
  * - "codex": OpenAI Codex via SDK (cloud models)
  * - "codex-oss": Codex via CLI with --oss (local models via Ollama)
  * - "gemini": Google Gemini via CLI
+ * - "gemini-acp": Gemini via CLI with --experimental-acp (preferred)
+ * - "grok": Grok Build via ACP (`grok agent stdio`) - Phase 1 isolated prototype
  * - "opencode": OpenCode via HTTP server (multi-provider agent)
+ *
+ * "grok" added (additive only) for Phase 1 Grok Build provider per topics/grok.md.
+ * Gated behind ENABLED_PROVIDERS=grok; no impact on other providers or core paths.
  */
 export type ProviderName =
   | "claude"
@@ -13,12 +18,15 @@ export type ProviderName =
   | "codex-oss"
   | "gemini"
   | "gemini-acp"
+  | "grok"
   | "opencode";
 
 /**
  * All provider names in display order.
  * Used for filter dropdowns, iteration, etc.
  * Keep in sync with ProviderName type above.
+ *
+ * "grok" added (additive) - see ProviderName comment for isolation/ENABLED_PROVIDERS notes.
  */
 export const ALL_PROVIDERS: readonly ProviderName[] = [
   "claude",
@@ -27,6 +35,7 @@ export const ALL_PROVIDERS: readonly ProviderName[] = [
   "codex-oss",
   "gemini",
   "gemini-acp",
+  "grok",
   "opencode",
 ] as const;
 
@@ -56,11 +65,67 @@ export interface ModelInfo {
   parentModel?: string;
   /** Quantization level, e.g. "Q4_K_M" */
   quantizationLevel?: string;
+  /** Provider-reported default marker, when available. */
+  isDefault?: boolean;
+  /** Provider-reported default reasoning effort, when available. */
+  defaultReasoningEffort?: string;
+  /** Provider-reported supported reasoning efforts, when available. */
+  supportedReasoningEfforts?: Array<{
+    reasoningEffort: string;
+    description?: string;
+  }>;
+  /** Provider-reported input modalities, e.g. text/image. */
+  inputModalities?: string[];
+  /** Provider-reported personality support. */
+  supportsPersonality?: boolean;
 }
+
+/**
+ * Provider-level image sizing guidance for client-side rescaling before upload.
+ * These are model-input recommendations, not archival display sizes; keep an
+ * original/full-resolution path if the session should preserve readable history.
+ */
+export interface ProviderImageSizing {
+  /** Default long-edge target to use for ordinary attachments. */
+  defaultLongEdgePx: number;
+  /** Upper bound that still tends to be useful before provider-side downscale. */
+  maxUsefulLongEdgePx: number;
+  /** Optional note about model-family caveats or detail behavior. */
+  note?: string;
+}
+
+export const RECAP_MODES = ["off", "native", "side-session"] as const;
+export type RecapMode = (typeof RECAP_MODES)[number];
+
+export const PROMPT_SUGGESTION_MODES = ["off", "native"] as const;
+export type PromptSuggestionMode =
+  (typeof PROMPT_SUGGESTION_MODES)[number];
+
+export const HELPER_SIDE_MODEL_SAME_AS_MAIN = "same-as-main" as const;
+export const HELPER_SIDE_MODEL_CHEAPEST = "cheapest" as const;
 
 /**
  * Slash command (skill) available in a session.
  */
+export interface GrokSlashCommandDetails {
+  /** Whether Grok reported this as a built-in command or a skill-backed command. */
+  source: "builtin" | "skill";
+  /** Grok skill scope, when reported. */
+  scope?: string;
+  /** Grok skill definition path, when reported. */
+  path?: string;
+}
+
+export interface SlashCommandProviderDetails {
+  grok?: GrokSlashCommandDetails;
+  [provider: string]: unknown;
+}
+
+export interface SlashCommandEmulation {
+  /** Provider-visible command template YA sends for this advertised command. */
+  providerText: string;
+}
+
 export interface SlashCommand {
   /** Command name without leading slash (e.g., "commit", "review-pr") */
   name: string;
@@ -68,6 +133,10 @@ export interface SlashCommand {
   description: string;
   /** Hint for command arguments (e.g., "<file>") */
   argumentHint?: string;
+  /** YA-owned fallback behavior for a command the provider does not expose. */
+  emulation?: SlashCommandEmulation;
+  /** Optional provider-specific provenance or capability detail. */
+  providerDetails?: SlashCommandProviderDetails;
 }
 
 /**
@@ -83,12 +152,22 @@ export interface ProviderInfo {
   user?: { email?: string; name?: string };
   /** Available models for this provider */
   models?: ModelInfo[];
+  /** Long-edge image sizing guidance for client-side attachment rescaling. */
+  imageSizing?: ProviderImageSizing;
   /** Whether this provider supports permission modes (default: true for backward compat) */
   supportsPermissionMode?: boolean;
   /** Whether this provider supports extended thinking toggle (default: true for backward compat) */
   supportsThinkingToggle?: boolean;
   /** Whether this provider supports slash commands (default: false) */
   supportsSlashCommands?: boolean;
+  /** Whether this provider supports active turn steering (default: false) */
+  supportsSteering?: boolean;
+  /** Whether this provider can generate YA-triggered recap messages. */
+  supportsRecaps?: boolean;
+  /** Whether this provider emits recaps natively without a YA side query. */
+  supportsNativeRecaps?: boolean;
+  /** Whether this provider emits prompt suggestions in its ordinary protocol. */
+  supportsNativePromptSuggestions?: boolean;
 }
 
 /**
@@ -123,6 +202,10 @@ export interface NewSessionDefaults {
   provider?: ProviderName;
   model?: string;
   permissionMode?: PermissionMode;
+  recapMode?: RecapMode;
+  promptSuggestionMode?: PromptSuggestionMode;
+  /** Provider-mapped helper side model, e.g. "cheapest" or a provider model id. */
+  helperSideModel?: string;
 }
 
 /**
@@ -131,10 +214,10 @@ export interface NewSessionDefaults {
  * - "best": Use Claude Code's best available model alias
  * - "sonnet": Claude Sonnet
  * - "sonnet[1m]": Claude Sonnet with 1M context when available
- * - "opus": Claude Opus
- * - "opus[1m]": Claude Opus with 1M context when available
+ * - "opus": Claude Opus 4.8 alias
+ * - "opus[1m]": Claude Opus 4.8 with 1M context when available
  * - "haiku": Claude Haiku
- * - "opusplan": Plan with Opus, execute with Sonnet
+ * - "opusplan": Plan with Opus 4.8, execute with Sonnet
  */
 export type ModelOption =
   | "default"
@@ -153,7 +236,7 @@ export const DEFAULT_MODEL: ModelOption = "default";
 
 /**
  * Resolve a saved model option to the explicit value sent to Claude Code.
- * Returning undefined means "use Claude Code's tier-dependent default".
+ * Returning undefined means "use Claude Code's saved default for new sessions".
  */
 export function resolveModel(
   model: ModelOption | undefined,

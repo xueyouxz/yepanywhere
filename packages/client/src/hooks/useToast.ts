@@ -13,6 +13,9 @@ export interface Toast {
   action?: ToastAction;
 }
 
+const TOAST_TIMEOUT_MS = 3000;
+const ACTION_TOAST_TIMEOUT_MS = 7000;
+
 export function useToast() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -21,8 +24,8 @@ export function useToast() {
       const id = generateUUID();
       setToasts((prev) => [...prev, { id, message, type, action }]);
 
-      // Auto-dismiss after 5 seconds (7 seconds if there's an action to give user time)
-      const timeout = action ? 7000 : 5000;
+      // Action toasts stay readable long enough to use the action.
+      const timeout = action ? ACTION_TOAST_TIMEOUT_MS : TOAST_TIMEOUT_MS;
       setTimeout(() => {
         setToasts((prev) => prev.filter((t) => t.id !== id));
       }, timeout);

@@ -5,35 +5,51 @@
  * server-initiated permission requests (command/file approval).
  */
 
-import { type ChildProcess, exec, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import type { ModelInfo } from "@yep-anywhere/shared";
+import type { ModelInfo, SlashCommand } from "@yep-anywhere/shared";
 import {
   isCodexCorrelationDebugEnabled,
   logCodexCorrelationDebug,
   summarizeCodexNormalizedMessage,
 } from "../../codex/correlationDebugLogger.js";
 import {
+  canonicalizeCodexToolName,
+  isCodexBackgroundProcessOutput,
+  isCodexInterruptedToolOutput,
   type CodexToolCallContext,
   normalizeCodexCommandExecutionOutput,
   normalizeCodexToolInvocation,
+  normalizeCodexToolOutputWithContext,
+  parseCodexToolArguments,
 } from "../../codex/normalization.js";
 import { getLogger } from "../../logging/logger.js";
-import { findCodexCliPath, whichCommand } from "../cli-detection.js";
+import { findCodexCliPath } from "../cli-detection.js";
 import { logSDKMessage } from "../messageLogger.js";
 import { MessageQueue } from "../messageQueue.js";
 import type {
+  ProviderActivitySnapshot,
+  ProviderLivenessProbeResult,
   SDKMessage,
   TimestampedSDKMessage,
   UserMessage,
 } from "../types.js";
 import type { ToolApprovalResult } from "../types.js";
 import type {
+  AgentMessageDeltaNotification,
   AskForApproval as CodexAskForApproval,
+  CommandExecutionOutputDeltaNotification,
   ErrorNotification as CodexErrorNotification,
+  FileChangeOutputDeltaNotification,
   ItemCompletedNotification as CodexItemCompletedNotification,
   ItemStartedNotification as CodexItemStartedNotification,
+  PlanDeltaNotification,
+  PermissionsRequestApprovalParams,
+  PermissionsRequestApprovalResponse,
+  RawResponseItemCompletedNotification,
+  ReasoningSummaryTextDeltaNotification,
   SandboxMode as CodexSandboxMode,
+  ThreadReadParams,
   ThreadItem as CodexThreadItem,
   CommandExecutionApprovalDecision,
   CommandExecutionRequestApprovalParams,
@@ -47,8 +63,12 @@ import type {
   ToolRequestUserInputParams,
   ToolRequestUserInputResponse,
   TurnCompletedNotification,
+  TurnInterruptParams,
+  TurnInterruptResponse,
   TurnStartParams,
   TurnStartResponse,
+  TurnSteerParams,
+  TurnSteerResponse,
 } from "./codex-protocol/index.js";
 import type {
   AgentProvider,
@@ -58,7 +78,7 @@ import type {
 } from "./types.js";
 
 const log = getLogger().child({ component: "codex-provider" });
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 function logSdkCorrelationDebug(
   sessionId: string,
@@ -99,11 +119,34 @@ function withCodexTimestamp<T extends SDKMessage>(
   } as TimestampedSDKMessage<T>;
 }
 
+function stringifyTraceValue(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 const MODEL_CACHE_TTL_MS = 60 * 60 * 1000;
 const MODEL_LIST_TIMEOUT_MS = 8000;
 const APP_SERVER_INIT_REQUEST_ID = 1;
 const APP_SERVER_MODEL_LIST_REQUEST_ID = 2;
 const APP_SERVER_SHUTDOWN_GRACE_MS = 1500;
+const CODEX_CLI_GPT55_MIN_VERSION = "0.124.0";
+const CODEX_FAILURE_TRACE_LIMIT = 12;
+const CODEX_FAILURE_PREVIEW_CHARS = 240;
+const CODEX_BUILTIN_COMMANDS: SlashCommand[] = [
+  {
+    name: "goal",
+    description: "Keep working toward a verifiable end state until it is met",
+    argumentHint: "<verifiable end state>",
+  },
+];
+const CODEX_THINKING_OFF_MIN_REASONING_EFFORT_PREFIXES = [
+  "gpt-5.3-codex-spark",
+] as const;
 
 /**
  * Local debug knobs for Codex app-server policy behavior.
@@ -120,15 +163,37 @@ const CODEX_POLICY_OVERRIDES: {
   sandbox: null,
 };
 
+interface CodexThreadPolicy {
+  approvalPolicy: CodexAskForApproval;
+  sandbox: CodexSandboxMode;
+}
+
+interface CodexThreadReadResponse {
+  thread?: {
+    id?: string;
+    status?: {
+      type?: string;
+      activeFlags?: unknown;
+    };
+  };
+}
+
+type CodexThreadResumeParamsForRequest = ThreadResumeParams;
+
 /**
  * When enabled, declare Codex session originator as "Codex Desktop"
  * when initializing app-server sessions.
  */
 const DECLARE_CODEX_ORIGINATOR = true;
 const DECLARED_CODEX_ORIGINATOR = "Codex Desktop";
+const YEP_ANYWHERE_ORIGINATOR = "yep-anywhere";
 
 const PREFERRED_MODEL_ORDER = [
+  "gpt-5.5",
+  "gpt-5.4",
+  "gpt-5.4-mini",
   "gpt-5.3-codex",
+  "gpt-5.3-codex-spark",
   "gpt-5.2-codex",
   "gpt-5.1-codex-max",
   "gpt-5.2",
@@ -136,6 +201,93 @@ const PREFERRED_MODEL_ORDER = [
 ] as const;
 
 const FALLBACK_CODEX_MODELS: ModelInfo[] = [
+  {
+    id: "gpt-5.5",
+    name: "GPT-5.5",
+    description:
+      "Frontier model for complex coding, research, and real-world work.",
+    defaultReasoningEffort: "medium",
+    supportedReasoningEfforts: [
+      {
+        reasoningEffort: "low",
+        description: "Fast responses with lighter reasoning",
+      },
+      {
+        reasoningEffort: "medium",
+        description: "Balances speed and reasoning depth for everyday tasks",
+      },
+      {
+        reasoningEffort: "high",
+        description: "Greater reasoning depth for complex problems",
+      },
+      {
+        reasoningEffort: "xhigh",
+        description: "Extra high reasoning depth for complex problems",
+      },
+    ],
+    inputModalities: ["text", "image"],
+    supportsPersonality: true,
+  },
+  {
+    id: "gpt-5.4",
+    name: "GPT-5.4",
+    description: "Strong model for everyday coding.",
+    isDefault: true,
+    defaultReasoningEffort: "medium",
+    supportedReasoningEfforts: [
+      {
+        reasoningEffort: "low",
+        description: "Fast responses with lighter reasoning",
+      },
+      {
+        reasoningEffort: "medium",
+        description: "Balances speed and reasoning depth for everyday tasks",
+      },
+      {
+        reasoningEffort: "high",
+        description: "Greater reasoning depth for complex problems",
+      },
+      {
+        reasoningEffort: "xhigh",
+        description: "Extra high reasoning depth for complex problems",
+      },
+    ],
+    inputModalities: ["text", "image"],
+    supportsPersonality: true,
+  },
+  {
+    id: "gpt-5.4-mini",
+    name: "GPT-5.4-Mini",
+    description:
+      "Small, fast, and cost-efficient model for simpler coding tasks.",
+    defaultReasoningEffort: "medium",
+    supportedReasoningEfforts: [
+      {
+        reasoningEffort: "low",
+        description: "Fast responses with lighter reasoning",
+      },
+      {
+        reasoningEffort: "medium",
+        description: "Balances speed and reasoning depth for everyday tasks",
+      },
+      {
+        reasoningEffort: "high",
+        description: "Greater reasoning depth for complex problems",
+      },
+      {
+        reasoningEffort: "xhigh",
+        description: "Extra high reasoning depth for complex problems",
+      },
+    ],
+    inputModalities: ["text", "image"],
+    supportsPersonality: true,
+  },
+  { id: "gpt-5.3-codex", name: "GPT-5.3-Codex" },
+  { id: "gpt-5.3-codex-spark", name: "GPT-5.3-Codex-Spark" },
+  { id: "gpt-5.2", name: "GPT-5.2" },
+];
+
+const LEGACY_FALLBACK_CODEX_MODELS: ModelInfo[] = [
   { id: "gpt-5.3-codex", name: "GPT-5.3-Codex" },
   { id: "gpt-5.2-codex", name: "GPT-5.2-Codex" },
   { id: "gpt-5.1-codex-max", name: "GPT-5.1-Codex-Max" },
@@ -172,17 +324,65 @@ interface AppServerModel {
   displayName?: string;
   description?: string;
   upgrade?: string | null;
+  upgradeInfo?: { model?: string | null } | null;
+  hidden?: boolean | null;
+  isDefault?: boolean | null;
+  defaultReasoningEffort?: string | null;
+  supportedReasoningEfforts?: Array<{
+    reasoningEffort?: string | null;
+    description?: string | null;
+  }> | null;
+  inputModalities?: string[] | null;
+  supportsPersonality?: boolean | null;
 }
 
 interface TokenUsageSnapshot {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
+  contextWindow?: number;
 }
 
 interface CodexTurnRuntimeState {
   threadId: string;
   activeTurnId: string | null;
+  activeToolCallIds: Set<string>;
+  backgroundToolCallIds: Set<string>;
+}
+
+function normalizeSemver(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const match = raw.match(/(\d+)\.(\d+)\.(\d+)(?:-([\w.]+))?/);
+  if (!match) return null;
+  const [, major, minor, patch, pre] = match;
+  return pre ? `${major}.${minor}.${patch}-${pre}` : `${major}.${minor}.${patch}`;
+}
+
+function compareSemver(a: string, b: string): number {
+  const parsedA = splitSemver(a);
+  const parsedB = splitSemver(b);
+  for (let i = 0; i < 3; i++) {
+    const partA = parsedA.parts[i] ?? 0;
+    const partB = parsedB.parts[i] ?? 0;
+    if (partA !== partB) return partA < partB ? -1 : 1;
+  }
+  if (parsedA.pre === null && parsedB.pre === null) return 0;
+  if (parsedA.pre === null) return 1;
+  if (parsedB.pre === null) return -1;
+  return parsedA.pre < parsedB.pre ? -1 : parsedA.pre > parsedB.pre ? 1 : 0;
+}
+
+function splitSemver(version: string): { parts: number[]; pre: string | null } {
+  const dashIndex = version.indexOf("-");
+  const core = dashIndex === -1 ? version : version.slice(0, dashIndex);
+  const pre = dashIndex === -1 ? null : version.slice(dashIndex + 1);
+  return {
+    parts: core.split(".").map((part) => {
+      const parsed = Number.parseInt(part, 10);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }),
+    pre,
+  };
 }
 
 async function terminateChildProcess(
@@ -230,6 +430,44 @@ interface NormalizedFileChange {
   diff?: string;
 }
 
+interface CodexLiveEventState {
+  streamingTextByItemKey: Map<string, string>;
+  streamingReasoningSummaryByItemKey: Map<string, string[]>;
+  streamingToolOutputByItemKey: Map<string, string>;
+  toolCallContexts: Map<string, CodexToolCallContext>;
+  resultBackedToolItemsByTurnId: Map<string, Set<string>>;
+}
+
+interface CodexFailureTraceEvent {
+  at: string;
+  sourceEvent: string;
+  turnId?: string;
+  itemId?: string;
+  itemType?: string;
+  status?: string;
+  phase?: string;
+  toolName?: string;
+  command?: string;
+  deltaChars?: number;
+  outputChars?: number;
+  errorMessage?: string;
+  codexErrorInfo?: unknown;
+  additionalDetails?: string | null;
+  openaiRequestId?: string;
+}
+
+interface CodexFailureTrace {
+  sessionId?: string;
+  activeTurnId?: string | null;
+  lastUserMessage?: {
+    uuid?: string;
+    chars: number;
+  };
+  lastNotification?: CodexFailureTraceEvent;
+  lastEmittedMessage?: CodexFailureTraceEvent;
+  recentNotifications: CodexFailureTraceEvent[];
+}
+
 type NormalizedThreadItem =
   | { id: string; type: "reasoning"; text: string }
   | { id: string; type: "agent_message"; text: string }
@@ -253,9 +491,20 @@ type NormalizedThreadItem =
       server: string;
       tool: string;
       arguments: unknown;
+      mcpAppResourceUri?: string;
       result?: unknown;
       error?: { message: string };
       status: string;
+    }
+  | {
+      id: string;
+      type: "dynamic_tool_call";
+      namespace?: string | null;
+      tool: string;
+      arguments: unknown;
+      status: string;
+      content_items?: unknown[] | null;
+      success?: boolean | null;
     }
   | { id: string; type: "web_search"; query: string }
   | {
@@ -263,6 +512,7 @@ type NormalizedThreadItem =
       type: "todo_list";
       items: Array<{ text: string; completed: boolean }>;
     }
+  | { id: string; type: "context_compaction" }
   | { id: string; type: "error"; message: string }
   | { id: string; type: "image_view"; path: string };
 
@@ -377,6 +627,8 @@ class CodexAppServerClient {
   private readonly notifications = new AsyncQueue<JsonRpcNotification>();
   private onServerRequest: AppServerRequestHandler | null = null;
   private closed = false;
+  private lastRawProviderEventAt: Date | null = null;
+  private lastRawProviderEventSource: string | null = null;
 
   constructor(
     private readonly command: string,
@@ -386,6 +638,13 @@ class CodexAppServerClient {
 
   setServerRequestHandler(handler: AppServerRequestHandler): void {
     this.onServerRequest = handler;
+  }
+
+  getProviderActivity(): ProviderActivitySnapshot {
+    return {
+      lastRawProviderEventAt: this.lastRawProviderEventAt,
+      lastRawProviderEventSource: this.lastRawProviderEventSource,
+    };
   }
 
   async connect(): Promise<void> {
@@ -464,6 +723,7 @@ class CodexAppServerClient {
     // Server request/notification
     if (method) {
       if (hasId) {
+        this.recordRawProviderEvent(`codex:request:${method}`);
         const request: JsonRpcServerRequest = {
           id: message.id as JsonRpcId,
           method,
@@ -473,6 +733,7 @@ class CodexAppServerClient {
         return;
       }
 
+      this.recordRawProviderEvent(`codex:notification:${method}`);
       this.notifications.push({ method, params: message.params });
       return;
     }
@@ -488,7 +749,13 @@ class CodexAppServerClient {
 
       if (message.error && typeof message.error === "object") {
         const error = message.error as JsonRpcError;
-        pending.reject(new Error(error.message ?? "JSON-RPC request failed"));
+        const rpcError = new Error(error.message ?? "JSON-RPC request failed");
+        Object.assign(rpcError, {
+          jsonRpcCode: error.code,
+          jsonRpcData: error.data,
+          jsonRpcRequestId: id,
+        });
+        pending.reject(rpcError);
         return;
       }
 
@@ -562,6 +829,15 @@ class CodexAppServerClient {
     });
   }
 
+  private recordRawProviderEvent(source: string): void {
+    this.lastRawProviderEventAt = new Date();
+    this.lastRawProviderEventSource = source;
+  }
+
+  injectNotification(notification: JsonRpcNotification): void {
+    this.notifications.push(notification);
+  }
+
   async nextNotification(signal?: AbortSignal): Promise<JsonRpcNotification> {
     return await this.notifications.shift(signal);
   }
@@ -628,7 +904,8 @@ export class CodexProvider implements AgentProvider {
   readonly displayName = "Codex";
   readonly supportsPermissionMode = true;
   readonly supportsThinkingToggle = true;
-  readonly supportsSlashCommands = false;
+  readonly supportsSlashCommands = true;
+  readonly supportsSteering = true;
 
   private readonly config: CodexProviderConfig;
   private modelCache: { models: ModelInfo[]; expiresAt: number } | null = null;
@@ -662,10 +939,17 @@ export class CodexProvider implements AgentProvider {
     return (await findCodexCliPath()) ?? "codex";
   }
 
-  private getCodexClientName(): string {
+  private getCodexClientName(overrideClientName?: string): string {
+    const normalizedClientName =
+      typeof overrideClientName === "string"
+        ? overrideClientName.trim()
+        : "";
+    if (normalizedClientName.length > 0) {
+      return normalizedClientName;
+    }
     return DECLARE_CODEX_ORIGINATOR
       ? DECLARED_CODEX_ORIGINATOR
-      : "yep-anywhere";
+      : YEP_ANYWHERE_ORIGINATOR;
   }
 
   /**
@@ -719,7 +1003,7 @@ export class CodexProvider implements AgentProvider {
     }
 
     if (models.length === 0) {
-      models = FALLBACK_CODEX_MODELS;
+      models = await this.getFallbackCodexModels();
     }
 
     this.modelCache = {
@@ -890,35 +1174,140 @@ export class CodexProvider implements AgentProvider {
     const orderLookup = new Map<string, number>(
       PREFERRED_MODEL_ORDER.map((id, idx) => [id, idx]),
     );
-    const deduped = new Map<string, ModelInfo>();
+    const deduped = new Map<
+      string,
+      { model: ModelInfo; serverIndex: number }
+    >();
 
-    for (const model of models) {
+    for (const [serverIndex, model] of models.entries()) {
+      if (model.hidden === true) continue;
+
       const modelId = (model.model || model.id || "").trim();
       if (!modelId) continue;
 
       deduped.set(modelId, {
-        id: modelId,
-        name: this.formatModelName(model.displayName || modelId),
-        description: model.description,
+        model: {
+          id: modelId,
+          name: this.formatModelName(model.displayName || modelId),
+          description: model.description,
+          ...(model.isDefault === true ? { isDefault: true } : {}),
+          ...this.normalizeModelReasoningMetadata(model),
+          ...(Array.isArray(model.inputModalities)
+            ? { inputModalities: model.inputModalities }
+            : {}),
+          ...(typeof model.supportsPersonality === "boolean"
+            ? { supportsPersonality: model.supportsPersonality }
+            : {}),
+        },
+        serverIndex,
       });
 
-      const upgradeId = model.upgrade?.trim();
+      const upgradeId =
+        model.upgrade?.trim() ||
+        (typeof model.upgradeInfo?.model === "string"
+          ? model.upgradeInfo.model.trim()
+          : "");
       if (upgradeId && !deduped.has(upgradeId)) {
         deduped.set(upgradeId, {
-          id: upgradeId,
-          name: this.formatModelName(upgradeId),
+          model: {
+            id: upgradeId,
+            name: this.formatModelName(upgradeId),
+          },
+          serverIndex,
         });
       }
     }
 
     return [...deduped.values()]
-      .map((model, index) => ({
-        model,
+      .map((entry, index) => ({
+        model: entry.model,
         index,
-        rank: orderLookup.get(model.id) ?? PREFERRED_MODEL_ORDER.length + index,
+        rank: this.getModelSortRank(
+          entry.model,
+          entry.serverIndex,
+          orderLookup,
+        ),
       }))
-      .sort((a, b) => a.rank - b.rank)
+      .sort((a, b) => a.rank - b.rank || a.index - b.index)
       .map((entry) => entry.model);
+  }
+
+  private normalizeModelReasoningMetadata(
+    model: AppServerModel,
+  ): Pick<ModelInfo, "defaultReasoningEffort" | "supportedReasoningEfforts"> {
+    const metadata: Pick<
+      ModelInfo,
+      "defaultReasoningEffort" | "supportedReasoningEfforts"
+    > = {};
+    if (typeof model.defaultReasoningEffort === "string") {
+      metadata.defaultReasoningEffort = model.defaultReasoningEffort;
+    }
+    if (Array.isArray(model.supportedReasoningEfforts)) {
+      const efforts = model.supportedReasoningEfforts
+        .map((effort) => {
+          if (typeof effort.reasoningEffort !== "string") return null;
+          return {
+            reasoningEffort: effort.reasoningEffort,
+            ...(typeof effort.description === "string"
+              ? { description: effort.description }
+              : {}),
+          };
+        })
+        .filter(
+          (
+            effort,
+          ): effort is {
+            reasoningEffort: string;
+            description?: string;
+          } => effort !== null,
+        );
+      if (efforts.length > 0) {
+        metadata.supportedReasoningEfforts = efforts;
+      }
+    }
+    return metadata;
+  }
+
+  private getModelSortRank(
+    model: ModelInfo,
+    serverIndex: number,
+    orderLookup: Map<string, number>,
+  ): number {
+    if (model.id === "gpt-5.5") {
+      return 0;
+    }
+    if (model.isDefault) {
+      return 1;
+    }
+    const preferredRank = orderLookup.get(model.id);
+    if (preferredRank !== undefined) {
+      return 2 + preferredRank;
+    }
+    return 2 + PREFERRED_MODEL_ORDER.length + serverIndex;
+  }
+
+  private async getFallbackCodexModels(): Promise<ModelInfo[]> {
+    const version = await this.getInstalledCodexCliVersion();
+    if (
+      version &&
+      compareSemver(version, CODEX_CLI_GPT55_MIN_VERSION) < 0
+    ) {
+      return LEGACY_FALLBACK_CODEX_MODELS;
+    }
+    return FALLBACK_CODEX_MODELS;
+  }
+
+  private async getInstalledCodexCliVersion(): Promise<string | null> {
+    try {
+      const codexCommand = await this.resolveCodexCommand();
+      const { stdout } = await execFileAsync(codexCommand, ["--version"], {
+        encoding: "utf-8",
+        timeout: 3000,
+      });
+      return normalizeSemver(stdout);
+    } catch {
+      return null;
+    }
   }
 
   private formatModelName(value: string): string {
@@ -940,9 +1329,17 @@ export class CodexProvider implements AgentProvider {
   private mapEffortToReasoningEffort(
     effort?: import("@yep-anywhere/shared").EffortLevel,
     thinking?: import("@yep-anywhere/shared").ThinkingConfig,
+    model?: StartSessionOptions["model"],
   ): "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined {
     if (thinking?.type === "disabled") {
-      return "low";
+      const normalizedModel = model?.trim().toLowerCase();
+      const hasSparkModelPrefix = CODEX_THINKING_OFF_MIN_REASONING_EFFORT_PREFIXES.some(
+        (prefix) => normalizedModel?.startsWith(prefix),
+      );
+      if (hasSparkModelPrefix) {
+        return "low";
+      }
+      return "none";
     }
     if (!effort) {
       return undefined;
@@ -961,14 +1358,8 @@ export class CodexProvider implements AgentProvider {
 
   private mapPermissionModeToThreadPolicy(
     permissionMode?: StartSessionOptions["permissionMode"],
-  ): {
-    approvalPolicy: CodexAskForApproval;
-    sandbox: CodexSandboxMode;
-  } {
-    const applyOverrides = (policy: {
-      approvalPolicy: CodexAskForApproval;
-      sandbox: CodexSandboxMode;
-    }) => ({
+  ): CodexThreadPolicy {
+    const applyOverrides = (policy: CodexThreadPolicy): CodexThreadPolicy => ({
       approvalPolicy:
         CODEX_POLICY_OVERRIDES.approvalPolicy ?? policy.approvalPolicy,
       sandbox: CODEX_POLICY_OVERRIDES.sandbox ?? policy.sandbox,
@@ -1003,6 +1394,8 @@ export class CodexProvider implements AgentProvider {
     const runtimeState: CodexTurnRuntimeState = {
       threadId: options.resumeSessionId ?? "",
       activeTurnId: null,
+      activeToolCallIds: new Set(),
+      backgroundToolCallIds: new Set(),
     };
 
     // Push initial message if provided
@@ -1029,9 +1422,17 @@ export class CodexProvider implements AgentProvider {
         activeClient?.close();
       },
       isProcessAlive: () => activeClient?.isAlive() ?? false,
+      getProviderActivity: () =>
+        activeClient?.getProviderActivity() ?? {
+          lastRawProviderEventAt: null,
+          lastRawProviderEventSource: null,
+        },
       get pid() {
         return activeClient?.pid;
       },
+      probeLiveness: async () =>
+        this.probeCodexLiveness(activeClient, runtimeState),
+      supportedCommands: async () => [...CODEX_BUILTIN_COMMANDS],
       steer: async (message) => {
         if (!activeClient) return false;
         if (!runtimeState.threadId || !runtimeState.activeTurnId) return false;
@@ -1040,11 +1441,17 @@ export class CodexProvider implements AgentProvider {
         if (!userPrompt) return true;
 
         try {
-          await activeClient.request<{ turnId: string }>("turn/steer", {
-            threadId: runtimeState.threadId,
-            input: [{ type: "text", text: userPrompt, text_elements: [] }],
-            expectedTurnId: runtimeState.activeTurnId,
-          });
+          const steerResult = await activeClient.request<TurnSteerResponse>(
+            "turn/steer",
+            {
+              threadId: runtimeState.threadId,
+              input: [{ type: "text", text: userPrompt, text_elements: [] }],
+              expectedTurnId: runtimeState.activeTurnId,
+            } satisfies TurnSteerParams,
+          );
+          if (steerResult.turnId) {
+            runtimeState.activeTurnId = steerResult.turnId;
+          }
           return true;
         } catch (error) {
           log.warn(
@@ -1058,7 +1465,130 @@ export class CodexProvider implements AgentProvider {
           return false;
         }
       },
+      interrupt: async () => {
+        if (!activeClient) return false;
+        if (!runtimeState.threadId || !runtimeState.activeTurnId) return false;
+        await activeClient.request<TurnInterruptResponse>("turn/interrupt", {
+          threadId: runtimeState.threadId,
+          turnId: runtimeState.activeTurnId,
+        } satisfies TurnInterruptParams);
+        return true;
+      },
     };
+  }
+
+  private async probeCodexLiveness(
+    activeClient: CodexAppServerClient | null,
+    runtimeState: CodexTurnRuntimeState,
+  ): Promise<ProviderLivenessProbeResult> {
+    const checkedAt = new Date();
+    const source = "codex:thread/read";
+
+    if (!activeClient?.isAlive()) {
+      return {
+        status: "unavailable",
+        source,
+        checkedAt,
+        detail: "Codex app-server is not alive",
+      };
+    }
+    if (!runtimeState.threadId) {
+      return {
+        status: "unavailable",
+        source,
+        checkedAt,
+        detail: "No Codex thread id is available",
+      };
+    }
+
+    try {
+      const response = await activeClient.request<CodexThreadReadResponse>(
+        "thread/read",
+        {
+          threadId: runtimeState.threadId,
+          includeTurns: false,
+        } satisfies ThreadReadParams,
+      );
+      const status = response.thread?.status;
+      const statusType = status?.type;
+      const activeFlags = Array.isArray(status?.activeFlags)
+        ? status.activeFlags.filter(
+            (flag): flag is string => typeof flag === "string",
+          )
+        : [];
+      const mappedStatus = this.mapCodexThreadStatusToLiveness(
+        statusType,
+        activeFlags,
+      );
+
+      if (mappedStatus === "idle" && runtimeState.activeTurnId) {
+        activeClient.injectNotification({
+          method: "turn/completed",
+          params: {
+            threadId: runtimeState.threadId,
+            turn: {
+              id: runtimeState.activeTurnId,
+              items: [],
+              status: "completed",
+              error: null,
+              startedAt: null,
+              completedAt: null,
+              durationMs: null,
+            },
+          },
+        });
+      }
+
+      return {
+        status: mappedStatus,
+        source,
+        checkedAt,
+        detail: this.formatCodexThreadStatusProbeDetail(
+          statusType,
+          activeFlags,
+        ),
+      };
+    } catch (error) {
+      return {
+        status: "error",
+        source,
+        checkedAt,
+        detail: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  private mapCodexThreadStatusToLiveness(
+    statusType: string | undefined,
+    activeFlags: string[],
+  ): ProviderLivenessProbeResult["status"] {
+    switch (statusType) {
+      case "active":
+        return activeFlags.includes("waitingOnApproval") ||
+          activeFlags.includes("waitingOnUserInput")
+          ? "waiting-input"
+          : "active";
+      case "idle":
+        return "idle";
+      case "notLoaded":
+        return "not-loaded";
+      case "systemError":
+        return "system-error";
+      default:
+        return "error";
+    }
+  }
+
+  private formatCodexThreadStatusProbeDetail(
+    statusType: string | undefined,
+    activeFlags: string[],
+  ): string {
+    if (!statusType) {
+      return "thread.status:missing";
+    }
+    return activeFlags.length > 0
+      ? `thread.status:${statusType} flags:${activeFlags.join(",")}`
+      : `thread.status:${statusType}`;
   }
 
   /**
@@ -1081,6 +1611,11 @@ export class CodexProvider implements AgentProvider {
 
     let sessionId = options.resumeSessionId ?? "";
     const usageByTurnId = new Map<string, TokenUsageSnapshot>();
+    const failureTrace: CodexFailureTrace = {
+      sessionId: sessionId || undefined,
+      activeTurnId: null,
+      recentNotifications: [],
+    };
     const logMessage = (message: SDKMessage): SDKMessage => {
       const messageSessionId =
         typeof (message as { session_id?: unknown }).session_id === "string"
@@ -1097,46 +1632,33 @@ export class CodexProvider implements AgentProvider {
     try {
       await appServer.connect();
 
-      await appServer.request<{ userAgent: string }>("initialize", {
-        clientInfo: {
-          name: this.getCodexClientName(),
-          version: "dev",
-        },
-        capabilities: null,
-      });
+      const experimentalApiEnabled = await this.initializeAppServer(
+        appServer,
+        options.clientName,
+      );
       appServer.notify("initialized");
 
       const policy = this.mapPermissionModeToThreadPolicy(
         options.permissionMode,
       );
 
-      const threadResumeParams: ThreadResumeParams = {
-        threadId: options.resumeSessionId ?? sessionId,
-        model: options.model ?? null,
-        cwd: options.cwd,
-        approvalPolicy: policy.approvalPolicy,
-        sandbox: policy.sandbox,
-      };
-      const threadStartParams: ThreadStartParams = {
-        model: options.model ?? null,
-        cwd: options.cwd,
-        approvalPolicy: policy.approvalPolicy,
-        sandbox: policy.sandbox,
-        experimentalRawEvents: false,
-      };
-      const threadResult: ThreadResumeResponse | ThreadStartResponse =
-        options.resumeSessionId
-          ? await appServer.request<ThreadResumeResponse>(
-              "thread/resume",
-              threadResumeParams,
-            )
-          : await appServer.request<ThreadStartResponse>(
-              "thread/start",
-              threadStartParams,
-            );
+      const threadResumeParams = this.createThreadResumeParams(
+        options,
+        sessionId,
+        policy,
+        experimentalApiEnabled,
+      );
+      const threadStartParams = this.createThreadStartParams(options, policy);
+      const threadResult = await this.startOrResumeThread(
+        appServer,
+        options,
+        threadStartParams,
+        threadResumeParams,
+      );
 
       sessionId = threadResult.thread.id;
       runtimeState.threadId = sessionId;
+      failureTrace.sessionId = sessionId;
       log.info(
         {
           sessionId,
@@ -1162,7 +1684,23 @@ export class CodexProvider implements AgentProvider {
         } as SDKMessage),
       );
 
-      const messageGen = queue.generator();
+      const requestedReasoningEffort = this.mapEffortToReasoningEffort(
+        options.effort,
+        options.thinking,
+      );
+      const sessionConfigAck = this.createSessionConfigAckMessage(
+        sessionId,
+        threadResult.model,
+        options.model,
+        threadResult.reasoningEffort,
+        requestedReasoningEffort,
+      );
+      if (sessionConfigAck) {
+        yield logMessage(withCodexTimestamp(sessionConfigAck));
+      }
+
+      const messageGen = queue;
+      const liveEventState = this.createLiveEventState();
       let isFirstMessage = !options.resumeSessionId;
 
       for await (const message of messageGen) {
@@ -1198,16 +1736,23 @@ export class CodexProvider implements AgentProvider {
           phase: "submitted",
           sourceEvent: "queued_input",
         });
+        failureTrace.lastUserMessage = {
+          uuid: message.uuid,
+          chars: userPrompt.length,
+        };
         yield logMessage(userMessage);
 
-        const turnStartParams: TurnStartParams = {
-          threadId: sessionId,
-          input: [{ type: "text", text: userPrompt, text_elements: [] }],
-          effort: this.mapEffortToReasoningEffort(
-            options.effort,
-            options.thinking,
-          ),
-        };
+        const messagePermissionMode =
+          this.getPermissionModeFromMessage(message);
+        const turnPolicy = messagePermissionMode
+          ? this.mapPermissionModeToThreadPolicy(messagePermissionMode)
+          : null;
+        const turnStartParams = this.createTurnStartParams(
+          sessionId,
+          userPrompt,
+          options,
+          turnPolicy,
+        );
         const turnResult = await appServer.request<TurnStartResponse>(
           "turn/start",
           turnStartParams,
@@ -1215,6 +1760,9 @@ export class CodexProvider implements AgentProvider {
 
         const activeTurnId = turnResult.turn.id;
         runtimeState.activeTurnId = activeTurnId;
+        runtimeState.activeToolCallIds.clear();
+        runtimeState.backgroundToolCallIds.clear();
+        failureTrace.activeTurnId = activeTurnId;
         log.info(
           {
             sessionId,
@@ -1228,6 +1776,8 @@ export class CodexProvider implements AgentProvider {
 
         while (!turnComplete && !signal.aborted) {
           const notification = await appServer.nextNotification(signal);
+          const currentActiveTurnId = runtimeState.activeTurnId ?? activeTurnId;
+          failureTrace.activeTurnId = currentActiveTurnId;
 
           if (notification.method === "thread/tokenUsage/updated") {
             const usage = this.extractTurnUsage(notification.params);
@@ -1235,17 +1785,39 @@ export class CodexProvider implements AgentProvider {
               usageByTurnId.set(usage.turnId, usage.snapshot);
             }
           }
+          this.updateBackgroundProcessTracking(notification, runtimeState);
+
+          this.recordCodexFailureTraceEvent(
+            failureTrace,
+            this.describeNotificationForFailureTrace(notification),
+          );
 
           const messages = this.convertNotificationToSDKMessages(
             notification,
             sessionId,
             usageByTurnId,
+            liveEventState,
           );
-          for (const msg of messages) {
+          for (const rawMsg of messages) {
+            const msg =
+              rawMsg.type === "error"
+                ? ({
+                    ...rawMsg,
+                    codexFailureTrace:
+                      this.snapshotCodexFailureTrace(failureTrace),
+                    codexFailureSummary: this.formatCodexFailureTrace(
+                      failureTrace,
+                    ),
+                  } as SDKMessage)
+                : rawMsg;
+            failureTrace.lastEmittedMessage =
+              this.describeSDKMessageForFailureTrace(msg);
             yield logMessage(msg);
           }
 
-          if (this.isTurnTerminalNotification(notification, activeTurnId)) {
+          if (
+            this.isTurnTerminalNotification(notification, currentActiveTurnId)
+          ) {
             if (notification.method === "error") {
               emittedTurnError = true;
             }
@@ -1253,6 +1825,7 @@ export class CodexProvider implements AgentProvider {
           }
         }
         runtimeState.activeTurnId = null;
+        failureTrace.activeTurnId = null;
 
         // If turn failed without an emitted error notification, surface start response error.
         if (
@@ -1264,6 +1837,16 @@ export class CodexProvider implements AgentProvider {
             type: "error",
             session_id: sessionId,
             error: turnResult.turn.error.message,
+            codexErrorInfo: turnResult.turn.error.codexErrorInfo ?? null,
+            codexAdditionalDetails:
+              turnResult.turn.error.additionalDetails ?? null,
+            codexFailureTrace: this.snapshotCodexFailureTrace(failureTrace),
+            codexFailureSummary: this.formatCodexFailureTrace(failureTrace),
+            codexRequestId: this.extractOpenAIRequestId(
+              turnResult.turn.error,
+              turnResult.turn.error.additionalDetails,
+              turnResult.turn.error.message,
+            ),
           } as SDKMessage);
         }
 
@@ -1273,12 +1856,19 @@ export class CodexProvider implements AgentProvider {
         } as SDKMessage);
       }
     } catch (error) {
-      log.error({ error }, "Error in codex app-server session");
+      const codexFailureTrace = this.snapshotCodexFailureTrace(failureTrace);
+      log.error(
+        { error, codexFailureTrace },
+        "Error in codex app-server session",
+      );
       if (!signal.aborted) {
         yield logMessage({
           type: "error",
           session_id: sessionId,
           error: error instanceof Error ? error.message : String(error),
+          codexFailureTrace,
+          codexFailureSummary:
+            this.formatCodexFailureTrace(codexFailureTrace),
         } as SDKMessage);
       }
     } finally {
@@ -1309,6 +1899,640 @@ export class CodexProvider implements AgentProvider {
     return false;
   }
 
+  private updateBackgroundProcessTracking(
+    notification: JsonRpcNotification,
+    runtimeState: CodexTurnRuntimeState,
+  ): void {
+    if (notification.method === "rawResponseItem/completed") {
+      const params = this.asRawResponseItemCompletedNotification(
+        notification.params,
+      );
+      const item =
+        params?.item && typeof params.item === "object"
+          ? (params.item as Record<string, unknown>)
+          : null;
+      const itemType = this.getOptionalString(item?.type);
+      if (
+        itemType === "function_call" ||
+        itemType === "custom_tool_call"
+      ) {
+        const callId = this.getOptionalString(item?.call_id);
+        if (callId) {
+          runtimeState.activeToolCallIds.add(callId);
+        }
+        return;
+      }
+      if (
+        itemType === "function_call_output" ||
+        itemType === "custom_tool_call_output"
+      ) {
+        const callId = this.getOptionalString(item?.call_id);
+        if (!callId) return;
+        if (isCodexBackgroundProcessOutput(item?.output)) {
+          runtimeState.backgroundToolCallIds.add(callId);
+        } else {
+          runtimeState.activeToolCallIds.delete(callId);
+          runtimeState.backgroundToolCallIds.delete(callId);
+        }
+      }
+      return;
+    }
+
+    if (notification.method === "item/completed") {
+      const params = this.asItemCompletedNotification(notification.params);
+      if (!params) return;
+      const normalized = this.normalizeThreadItem(params.item);
+      if (normalized?.type === "command_execution") {
+        runtimeState.activeToolCallIds.delete(normalized.id);
+        runtimeState.backgroundToolCallIds.delete(normalized.id);
+      }
+      return;
+    }
+
+    if (notification.method === "item/started") {
+      const params = this.asItemStartedNotification(notification.params);
+      if (!params) return;
+      const normalized = this.normalizeThreadItem(params.item);
+      if (normalized && this.isResultBackedThreadItem(normalized)) {
+        runtimeState.activeToolCallIds.add(normalized.id);
+      }
+    }
+  }
+
+  private createInitializeParams(
+    experimentalApiEnabled: boolean,
+    clientName?: string,
+  ): {
+    clientInfo: { name: string; title: null; version: string };
+    capabilities: { experimentalApi: boolean } | null;
+  } {
+    return {
+      clientInfo: {
+        name: this.getCodexClientName(clientName),
+        title: null,
+        version: "dev",
+      },
+      capabilities: experimentalApiEnabled
+        ? { experimentalApi: true }
+        : null,
+    };
+  }
+
+  private async initializeAppServer(
+    appServer: CodexAppServerClient,
+    clientName?: string,
+  ): Promise<boolean> {
+    try {
+      await appServer.request<{ userAgent: string }>(
+        "initialize",
+        this.createInitializeParams(true, clientName),
+      );
+      return true;
+    } catch (error) {
+      log.warn(
+        { error },
+        "Codex initialize with experimentalApi failed; retrying without capabilities",
+      );
+      await appServer.request<{ userAgent: string }>(
+        "initialize",
+        this.createInitializeParams(false, clientName),
+      );
+      return false;
+    }
+  }
+
+  private async startOrResumeThread(
+    appServer: CodexAppServerClient,
+    options: StartSessionOptions,
+    threadStartParams: ThreadStartParams,
+    threadResumeParams: CodexThreadResumeParamsForRequest,
+  ): Promise<ThreadStartResponse | ThreadResumeResponse> {
+    return options.resumeSessionId
+      ? await appServer.request<ThreadResumeResponse>(
+          "thread/resume",
+          threadResumeParams,
+        )
+      : await appServer.request<ThreadStartResponse>(
+          "thread/start",
+          threadStartParams,
+        );
+  }
+
+  private createThreadStartParams(
+    options: StartSessionOptions,
+    policy: CodexThreadPolicy,
+  ): ThreadStartParams {
+    return {
+      model: options.model ?? null,
+      cwd: options.cwd,
+      ...this.buildThreadPermissionParams(policy),
+      config: this.buildThreadConfigOverrides(options),
+      experimentalRawEvents: false,
+      persistExtendedHistory: false,
+    };
+  }
+
+  private createThreadResumeParams(
+    options: StartSessionOptions,
+    sessionId: string,
+    policy: CodexThreadPolicy,
+    experimentalApiEnabled = false,
+  ): CodexThreadResumeParamsForRequest {
+    const params: CodexThreadResumeParamsForRequest = {
+      threadId: options.resumeSessionId ?? sessionId,
+      model: options.model ?? null,
+      cwd: options.cwd,
+      ...this.buildThreadPermissionParams(policy),
+      config: this.buildThreadConfigOverrides(options),
+      persistExtendedHistory: false,
+    };
+    if (experimentalApiEnabled) {
+      params.excludeTurns = true;
+    }
+    return params;
+  }
+
+  private buildThreadPermissionParams(
+    policy: CodexThreadPolicy,
+  ): Pick<ThreadStartParams, "approvalPolicy" | "sandbox"> {
+    return {
+      approvalPolicy: policy.approvalPolicy,
+      sandbox: policy.sandbox,
+    };
+  }
+
+  private buildThreadConfigOverrides(
+    options: StartSessionOptions,
+  ): Record<string, string> | null {
+    const reasoningEffort = this.mapEffortToReasoningEffort(
+      options.effort,
+      options.thinking,
+      options.model,
+    );
+    if (!reasoningEffort) {
+      return null;
+    }
+    return { model_reasoning_effort: reasoningEffort };
+  }
+
+  private createTurnStartParams(
+    threadId: string,
+    userPrompt: string,
+    options: StartSessionOptions,
+    turnPolicy: CodexThreadPolicy | null = null,
+  ): TurnStartParams {
+    return {
+      threadId,
+      model: options.model ?? null,
+      input: [{ type: "text", text: userPrompt, text_elements: [] }],
+      effort: this.mapEffortToReasoningEffort(
+        options.effort,
+        options.thinking,
+        options.model,
+      ),
+      summary: "auto",
+      ...this.buildTurnPermissionParams(turnPolicy),
+    };
+  }
+
+  private buildTurnPermissionParams(
+    policy: CodexThreadPolicy | null,
+  ): Partial<Pick<TurnStartParams, "approvalPolicy">> {
+    if (!policy) return {};
+    return { approvalPolicy: policy.approvalPolicy };
+  }
+
+  private createSessionConfigAckMessage(
+    sessionId: string,
+    model?: string | null,
+    requestedModel?: string | null,
+    reasoningEffort?:
+      | "none"
+      | "minimal"
+      | "low"
+      | "medium"
+      | "high"
+      | "xhigh"
+      | null,
+    requestedReasoningEffort?:
+      | "none"
+      | "minimal"
+      | "low"
+      | "medium"
+      | "high"
+      | "xhigh"
+      | undefined,
+  ): SDKMessage | null {
+    const parts: string[] = [];
+    const normalizedModel = typeof model === "string" ? model.trim() : "";
+    const normalizedRequestedModel =
+      typeof requestedModel === "string" ? requestedModel.trim() : "";
+    if (normalizedModel) {
+      parts.push(normalizedModel);
+    }
+    const effortLabel =
+      this.describeAcknowledgedSessionReasoningEffort(reasoningEffort);
+    const configMismatch =
+      (normalizedRequestedModel.length > 0 &&
+        normalizedRequestedModel !== normalizedModel) ||
+      (requestedReasoningEffort !== undefined &&
+        requestedReasoningEffort !== reasoningEffort);
+    if (effortLabel) {
+      parts.push(effortLabel);
+    }
+    if (parts.length === 0) {
+      return null;
+    }
+    return {
+      type: "system",
+      subtype: "config_ack",
+      session_id: sessionId,
+      content: `Codex acknowledged config: ${parts.join(" · ")}`,
+      isSynthetic: true,
+      configScope: "session",
+      configMismatch,
+      ...(normalizedModel ? { configModel: normalizedModel } : {}),
+      ...(effortLabel ? { configThinking: effortLabel } : {}),
+    } as SDKMessage;
+  }
+
+  private describeAcknowledgedSessionReasoningEffort(
+    effort:
+      | "none"
+      | "minimal"
+      | "low"
+      | "medium"
+      | "high"
+      | "xhigh"
+      | null
+      | undefined,
+  ): string | null {
+    return effort ? `effort ${effort}` : null;
+  }
+
+  private createLiveEventState(): CodexLiveEventState {
+    return {
+      streamingTextByItemKey: new Map(),
+      streamingReasoningSummaryByItemKey: new Map(),
+      streamingToolOutputByItemKey: new Map(),
+      toolCallContexts: new Map(),
+      resultBackedToolItemsByTurnId: new Map(),
+    };
+  }
+
+  private recordCodexFailureTraceEvent(
+    trace: CodexFailureTrace,
+    event: CodexFailureTraceEvent,
+  ): void {
+    trace.lastNotification = event;
+    trace.recentNotifications.push(event);
+    if (trace.recentNotifications.length > CODEX_FAILURE_TRACE_LIMIT) {
+      trace.recentNotifications.splice(
+        0,
+        trace.recentNotifications.length - CODEX_FAILURE_TRACE_LIMIT,
+      );
+    }
+  }
+
+  private snapshotCodexFailureTrace(
+    trace: CodexFailureTrace,
+  ): CodexFailureTrace {
+    return {
+      sessionId: trace.sessionId,
+      activeTurnId: trace.activeTurnId,
+      lastUserMessage: trace.lastUserMessage
+        ? { ...trace.lastUserMessage }
+        : undefined,
+      lastNotification: trace.lastNotification
+        ? { ...trace.lastNotification }
+        : undefined,
+      lastEmittedMessage: trace.lastEmittedMessage
+        ? { ...trace.lastEmittedMessage }
+        : undefined,
+      recentNotifications: trace.recentNotifications.map((event) => ({
+        ...event,
+      })),
+    };
+  }
+
+  private formatCodexFailureTrace(trace: CodexFailureTrace): string {
+    const lastNotification = trace.lastNotification
+      ? this.formatCodexTraceEvent(trace.lastNotification)
+      : "none";
+    const lastEmitted = trace.lastEmittedMessage
+      ? this.formatCodexTraceEvent(trace.lastEmittedMessage)
+      : "none";
+    return `last notification: ${lastNotification}; last emitted SDK message: ${lastEmitted}`;
+  }
+
+  private formatCodexTraceEvent(event: CodexFailureTraceEvent): string {
+    const details = [
+      event.sourceEvent,
+      event.itemType,
+      event.toolName,
+      event.status,
+      event.phase,
+      event.command ? `command=${event.command}` : undefined,
+      event.errorMessage ? `error=${event.errorMessage}` : undefined,
+      event.openaiRequestId ? `requestId=${event.openaiRequestId}` : undefined,
+    ].filter(Boolean);
+    return details.join(" ");
+  }
+
+  private describeNotificationForFailureTrace(
+    notification: JsonRpcNotification,
+  ): CodexFailureTraceEvent {
+    const base = (event: Omit<CodexFailureTraceEvent, "at">) => ({
+      at: new Date().toISOString(),
+      ...event,
+    });
+
+    switch (notification.method) {
+      case "item/started":
+      case "item/completed": {
+        const params =
+          notification.method === "item/started"
+            ? this.asItemStartedNotification(notification.params)
+            : this.asItemCompletedNotification(notification.params);
+        const item =
+          params?.item && typeof params.item === "object"
+            ? (params.item as Record<string, unknown>)
+            : null;
+        return base({
+          sourceEvent: notification.method,
+          turnId: params?.turnId,
+          itemId:
+            this.getOptionalString(item?.id) ??
+            this.getOptionalString((item as { call_id?: unknown })?.call_id) ??
+            undefined,
+          itemType: this.normalizeCodexItemType(
+            this.getOptionalString(item?.type),
+          ),
+          status: this.normalizeStatus(item?.status),
+          phase: notification.method === "item/completed" ? "completed" : "started",
+          toolName: this.getTraceToolName(item) ?? undefined,
+          command: this.previewTraceString(
+            this.getOptionalString(item?.command) ??
+              this.getOptionalString(item?.aggregated_output) ??
+              this.getOptionalString(item?.aggregatedOutput),
+          ),
+        });
+      }
+
+      case "item/agentMessage/delta":
+      case "item/plan/delta":
+      case "item/reasoning/summaryTextDelta":
+      case "item/commandExecution/outputDelta":
+      case "item/fileChange/outputDelta": {
+        const params =
+          notification.params && typeof notification.params === "object"
+            ? (notification.params as Record<string, unknown>)
+            : null;
+        const delta = this.getOptionalString(params?.delta);
+        return base({
+          sourceEvent: notification.method,
+          turnId: this.getOptionalString(params?.turnId) ?? undefined,
+          itemId: this.getOptionalString(params?.itemId) ?? undefined,
+          itemType: this.inferTraceItemTypeFromDeltaEvent(notification.method),
+          phase: "delta",
+          deltaChars: delta?.length,
+          outputChars: delta?.length,
+        });
+      }
+
+      case "rawResponseItem/completed": {
+        const params = this.asRawResponseItemCompletedNotification(
+          notification.params,
+        );
+        const item =
+          params?.item && typeof params.item === "object"
+            ? (params.item as Record<string, unknown>)
+            : null;
+        return base({
+          sourceEvent: notification.method,
+          turnId: params?.turnId,
+          itemId:
+            this.getOptionalString(item?.id) ??
+            this.getOptionalString(item?.call_id) ??
+            undefined,
+          itemType: this.normalizeCodexItemType(
+            this.getOptionalString(item?.type),
+          ),
+          phase: "completed",
+          toolName: this.getTraceToolName(item) ?? undefined,
+        });
+      }
+
+      case "thread/tokenUsage/updated": {
+        const params =
+          notification.params && typeof notification.params === "object"
+            ? (notification.params as Record<string, unknown>)
+            : null;
+        return base({
+          sourceEvent: notification.method,
+          turnId: this.getOptionalString(params?.turnId) ?? undefined,
+          phase: "usage",
+        });
+      }
+
+      case "turn/completed": {
+        const params = this.asTurnCompletedNotification(notification.params);
+        return base({
+          sourceEvent: notification.method,
+          turnId: params?.turn.id,
+          status: params?.turn.status,
+          phase: "completed",
+          errorMessage: params?.turn.error?.message,
+          codexErrorInfo: params?.turn.error?.codexErrorInfo ?? undefined,
+          additionalDetails: params?.turn.error?.additionalDetails ?? undefined,
+          openaiRequestId: this.extractOpenAIRequestId(
+            params?.turn.error,
+            params?.turn.error?.additionalDetails,
+            params?.turn.error?.message,
+          ),
+        });
+      }
+
+      case "error": {
+        const params = this.asErrorNotification(notification.params);
+        const fallbackError = this.extractErrorRecord(notification.params);
+        const errorMessage =
+          params?.error.message ??
+          this.getOptionalString(fallbackError?.message) ??
+          "Codex turn failed";
+        return base({
+          sourceEvent: notification.method,
+          turnId: params?.turnId,
+          phase: params?.willRetry ? "retrying" : "terminal",
+          errorMessage,
+          codexErrorInfo:
+            params?.error.codexErrorInfo ??
+            fallbackError?.codexErrorInfo ??
+            undefined,
+          additionalDetails:
+            params?.error.additionalDetails ??
+            (this.getOptionalString(fallbackError?.additionalDetails) ??
+              undefined),
+          openaiRequestId: this.extractOpenAIRequestId(
+            notification.params,
+            fallbackError,
+            errorMessage,
+          ),
+        });
+      }
+
+      default:
+        return base({ sourceEvent: notification.method });
+    }
+  }
+
+  private describeSDKMessageForFailureTrace(
+    message: SDKMessage,
+  ): CodexFailureTraceEvent {
+    const event: CodexFailureTraceEvent = {
+      at: new Date().toISOString(),
+      sourceEvent: `sdk:${message.type}`,
+      phase:
+        typeof message.subtype === "string" ? message.subtype : undefined,
+    };
+
+    if (message.error !== undefined) {
+      event.errorMessage = this.previewTraceString(
+        typeof message.error === "string"
+          ? message.error
+          : stringifyTraceValue(message.error),
+      );
+      event.openaiRequestId = this.extractOpenAIRequestId(message.error);
+    }
+
+    const content = message.message?.content;
+    if (typeof content === "string") {
+      event.outputChars = content.length;
+      return event;
+    }
+    if (!Array.isArray(content)) {
+      return event;
+    }
+
+    const interestingBlock = content.find(
+      (block) =>
+        block.type === "tool_use" ||
+        block.type === "tool_result" ||
+        block.type === "thinking",
+    );
+    if (!interestingBlock) {
+      return event;
+    }
+
+    event.itemType = interestingBlock.type;
+    if (interestingBlock.type === "tool_use") {
+      event.itemId = interestingBlock.id;
+      event.toolName = interestingBlock.name;
+      event.command = this.previewTraceString(
+        this.getTraceCommandFromInput(interestingBlock.input),
+      );
+    } else if (interestingBlock.type === "tool_result") {
+      event.itemId = interestingBlock.tool_use_id;
+      event.outputChars = interestingBlock.content?.length;
+    } else if (interestingBlock.type === "thinking") {
+      event.outputChars = interestingBlock.thinking?.length;
+    }
+
+    return event;
+  }
+
+  private inferTraceItemTypeFromDeltaEvent(method: string): string | undefined {
+    if (method.includes("commandExecution")) return "command_execution";
+    if (method.includes("fileChange")) return "file_change";
+    if (method.includes("reasoning")) return "reasoning";
+    if (method.includes("plan")) return "plan";
+    if (method.includes("agentMessage")) return "agent_message";
+    return undefined;
+  }
+
+  private normalizeCodexItemType(type: string | null): string | undefined {
+    return type?.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`);
+  }
+
+  private getTraceToolName(item: Record<string, unknown> | null): string | null {
+    if (!item) return null;
+    const type = this.normalizeCodexItemType(this.getOptionalString(item.type));
+    if (type === "command_execution") return "Bash";
+    if (type === "file_change") return "Edit";
+    if (type === "web_search") return "WebSearch";
+    if (type === "mcp_tool_call") {
+      const server = this.getOptionalString(item.server);
+      const tool = this.getOptionalString(item.tool);
+      return server && tool ? `${server}:${tool}` : (tool ?? null);
+    }
+    if (type === "dynamic_tool_call") {
+      const namespace = this.getOptionalString(item.namespace);
+      const tool = this.getOptionalString(item.tool);
+      return namespace && tool ? `${namespace}:${tool}` : (tool ?? null);
+    }
+    return this.getOptionalString(item.name);
+  }
+
+  private getTraceCommandFromInput(input: unknown): string | null {
+    if (!input || typeof input !== "object") return null;
+    const record = input as Record<string, unknown>;
+    return (
+      this.getOptionalString(record.command) ??
+      this.getOptionalString(record.cmd) ??
+      null
+    );
+  }
+
+  private extractErrorRecord(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== "object") return null;
+    const record = value as Record<string, unknown>;
+    if (record.error && typeof record.error === "object") {
+      return record.error as Record<string, unknown>;
+    }
+    return record;
+  }
+
+  private extractOpenAIRequestId(...values: unknown[]): string | undefined {
+    for (const value of values) {
+      const direct = this.findRequestIdInValue(value, 0);
+      if (direct) return direct;
+      const text = typeof value === "string" ? value : stringifyTraceValue(value);
+      const match =
+        /request\s*id[:\s]+([0-9a-f]{8}-[0-9a-f-]{20,})/i.exec(text) ??
+        /request[_-]?id["'\s:=]+([0-9a-f]{8}-[0-9a-f-]{20,})/i.exec(text);
+      if (match?.[1]) {
+        return match[1];
+      }
+    }
+    return undefined;
+  }
+
+  private findRequestIdInValue(value: unknown, depth: number): string | null {
+    if (!value || typeof value !== "object" || depth > 3) return null;
+    const record = value as Record<string, unknown>;
+    for (const [key, entry] of Object.entries(record)) {
+      if (
+        /^(request[_-]?id|x-request-id)$/i.test(key) &&
+        typeof entry === "string" &&
+        entry.trim()
+      ) {
+        return entry.trim();
+      }
+      const nested = this.findRequestIdInValue(entry, depth + 1);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
+  private previewTraceString(value: string | null | undefined): string | undefined {
+    if (!value) return undefined;
+    const trimmed = value.replace(/\s+/g, " ").trim();
+    if (trimmed.length <= CODEX_FAILURE_PREVIEW_CHARS) {
+      return trimmed;
+    }
+    return `${trimmed.slice(0, CODEX_FAILURE_PREVIEW_CHARS)}...`;
+  }
+
   private extractTurnUsage(params: unknown): {
     turnId: string;
     snapshot: TokenUsageSnapshot;
@@ -1322,6 +2546,10 @@ export class CodexProvider implements AgentProvider {
         inputTokens: notification.tokenUsage.last.inputTokens,
         outputTokens: notification.tokenUsage.last.outputTokens,
         cachedInputTokens: notification.tokenUsage.last.cachedInputTokens,
+        contextWindow:
+          typeof notification.tokenUsage.modelContextWindow === "number"
+            ? notification.tokenUsage.modelContextWindow
+            : undefined,
       },
     };
   }
@@ -1531,6 +2759,28 @@ export class CodexProvider implements AgentProvider {
         return { decision };
       }
 
+      case "item/permissions/requestApproval": {
+        const permissionParams = this.asPermissionsRequestApprovalParams(
+          request.params,
+        );
+        if (!permissionParams) {
+          log.warn(
+            {
+              method: request.method,
+              requestId: request.id,
+            },
+            "Codex permission approval params invalid; declining",
+          );
+          return this.createDeclinedPermissionResponse();
+        }
+
+        return await this.resolvePermissionRequestApproval(
+          options,
+          permissionParams,
+          signal,
+        );
+      }
+
       case "item/tool/requestUserInput": {
         const requestInput = this.asToolRequestUserInputParams(request.params);
         const questions = requestInput?.questions ?? [];
@@ -1600,16 +2850,118 @@ export class CodexProvider implements AgentProvider {
     return result.behavior === "allow" ? allowDecision : denyDecision;
   }
 
+  private async resolvePermissionRequestApproval(
+    options: StartSessionOptions,
+    params: PermissionsRequestApprovalParams,
+    signal: AbortSignal,
+  ): Promise<PermissionsRequestApprovalResponse> {
+    if (options.permissionMode === "bypassPermissions") {
+      return this.createGrantedPermissionResponse(params, "session");
+    }
+
+    const toolInput = {
+      cwd: params.cwd,
+      reason: params.reason,
+      permissions: params.permissions,
+      threadId: params.threadId,
+      turnId: params.turnId,
+      itemId: params.itemId,
+    };
+    const decision = await this.resolveApprovalDecision(
+      options,
+      "Permissions",
+      toolInput,
+      signal,
+      "accept",
+      "decline",
+    );
+    return decision === "accept"
+      ? this.createGrantedPermissionResponse(params, "session")
+      : this.createDeclinedPermissionResponse();
+  }
+
+  private createGrantedPermissionResponse(
+    params: PermissionsRequestApprovalParams,
+    scope: PermissionsRequestApprovalResponse["scope"],
+  ): PermissionsRequestApprovalResponse {
+    const permissions: PermissionsRequestApprovalResponse["permissions"] = {};
+    if (params.permissions.network) {
+      permissions.network = params.permissions.network;
+    }
+    if (params.permissions.fileSystem) {
+      permissions.fileSystem = params.permissions.fileSystem;
+    }
+    return { permissions, scope };
+  }
+
+  private createDeclinedPermissionResponse(): PermissionsRequestApprovalResponse {
+    return { permissions: {}, scope: "turn" };
+  }
+
   private convertNotificationToSDKMessages(
     notification: JsonRpcNotification,
     sessionId: string,
     usageByTurnId: Map<string, TokenUsageSnapshot>,
+    liveEventState: CodexLiveEventState,
   ): SDKMessage[] {
     switch (notification.method) {
+      case "thread/tokenUsage/updated": {
+        const usage = this.extractTurnUsage(notification.params);
+        if (!usage) {
+          return [];
+        }
+
+        const message = withCodexTimestamp({
+          type: "system",
+          subtype: "token_usage",
+          session_id: sessionId,
+          turnId: usage.turnId,
+          isSynthetic: true,
+          usage: {
+            input_tokens: usage.snapshot.inputTokens,
+            output_tokens: usage.snapshot.outputTokens,
+            cached_input_tokens: usage.snapshot.cachedInputTokens,
+          },
+          ...(usage.snapshot.contextWindow &&
+          usage.snapshot.contextWindow > 0
+            ? { model_context_window: usage.snapshot.contextWindow }
+            : {}),
+        } as SDKMessage);
+        logSdkCorrelationDebug(sessionId, message, {
+          eventKind: "token_usage",
+          turnId: usage.turnId,
+          phase: "usage_updated",
+          sourceEvent: notification.method,
+        });
+        return [message];
+      }
+
       case "turn/completed": {
         const params = this.asTurnCompletedNotification(notification.params);
         const turnId = params?.turn.id ?? null;
         const usage = turnId ? usageByTurnId.get(turnId) : undefined;
+        const messages: SDKMessage[] = [];
+        const orphanedToolUseIds = turnId
+          ? this.consumeLiveResultBackedToolItems(liveEventState, turnId)
+          : [];
+        if (turnId && orphanedToolUseIds.length > 0) {
+          const orphanMarker = withCodexTimestamp({
+            type: "system",
+            subtype: "codex_tool_orphans",
+            session_id: sessionId,
+            uuid: `codex-tool-orphans-${turnId}`,
+            isSynthetic: true,
+            orphanedToolUseIds,
+          } as SDKMessage);
+          logSdkCorrelationDebug(sessionId, orphanMarker, {
+            eventKind: "tool_orphans",
+            turnId,
+            phase: "completed",
+            sourceEvent: notification.method,
+          });
+          messages.push(orphanMarker);
+        }
+
         const message = withCodexTimestamp({
           type: "system",
           subtype: "turn_complete",
@@ -1628,7 +2980,8 @@ export class CodexProvider implements AgentProvider {
           phase: "completed",
           sourceEvent: notification.method,
         });
-        return [message];
+        messages.push(message);
+        return messages;
       }
 
       case "error": {
@@ -1645,6 +2998,16 @@ export class CodexProvider implements AgentProvider {
           type: "error",
           session_id: sessionId,
           error: message,
+          codexErrorInfo: params?.error.codexErrorInfo ?? null,
+          codexAdditionalDetails: params?.error.additionalDetails ?? null,
+          codexWillRetry: params?.willRetry ?? false,
+          codexThreadId: params?.threadId,
+          codexTurnId: params?.turnId,
+          codexRequestId: this.extractOpenAIRequestId(
+            notification.params,
+            params?.error,
+            message,
+          ),
         } as SDKMessage;
         logSdkCorrelationDebug(sessionId, errorEvent, {
           eventKind: "error",
@@ -1668,12 +3031,127 @@ export class CodexProvider implements AgentProvider {
         }
 
         const turnId = params.turnId;
-
-        return this.convertItemToSDKMessages(
+        if (
+          notification.method === "item/started" &&
+          this.isResultBackedThreadItem(normalized)
+        ) {
+          this.recordLiveResultBackedToolItem(
+            liveEventState,
+            turnId,
+            normalized.id,
+          );
+        }
+        const messages = this.convertItemToSDKMessages(
           normalized,
           sessionId,
           turnId,
           notification.method,
+        );
+        if (notification.method === "item/completed") {
+          this.clearLiveResultBackedToolItem(
+            liveEventState,
+            turnId,
+            normalized.id,
+          );
+          this.clearLiveEventStateForItem(
+            liveEventState,
+            turnId,
+            normalized.id,
+          );
+        }
+        return messages;
+      }
+
+      case "item/agentMessage/delta": {
+        const params = this.asAgentMessageDeltaNotification(notification.params);
+        if (!params || !params.delta) return [];
+        return [
+          this.buildStreamingAssistantMessage(
+            sessionId,
+            params.turnId,
+            params.itemId,
+            params.delta,
+            "agent_message_delta",
+            liveEventState,
+          ),
+        ];
+      }
+
+      case "item/plan/delta": {
+        const params = this.asPlanDeltaNotification(notification.params);
+        if (!params || !params.delta) return [];
+        return [
+          this.buildStreamingAssistantMessage(
+            sessionId,
+            params.turnId,
+            params.itemId,
+            params.delta,
+            "plan_delta",
+            liveEventState,
+          ),
+        ];
+      }
+
+      case "item/reasoning/summaryTextDelta": {
+        const params = this.asReasoningSummaryTextDeltaNotification(
+          notification.params,
+        );
+        if (!params || !params.delta) return [];
+        return [
+          this.buildStreamingReasoningSummaryMessage(
+            sessionId,
+            params.turnId,
+            params.itemId,
+            params.summaryIndex,
+            params.delta,
+            liveEventState,
+          ),
+        ];
+      }
+
+      case "item/commandExecution/outputDelta": {
+        const params = this.asCommandExecutionOutputDeltaNotification(
+          notification.params,
+        );
+        if (!params || !params.delta) return [];
+        return [
+          this.buildStreamingToolResultMessage(
+            sessionId,
+            params.turnId,
+            params.itemId,
+            params.delta,
+            "command_output_delta",
+            liveEventState,
+          ),
+        ];
+      }
+
+      case "item/fileChange/outputDelta": {
+        const params = this.asFileChangeOutputDeltaNotification(
+          notification.params,
+        );
+        if (!params || !params.delta) return [];
+        return [
+          this.buildStreamingToolResultMessage(
+            sessionId,
+            params.turnId,
+            params.itemId,
+            params.delta,
+            "file_change_output_delta",
+            liveEventState,
+          ),
+        ];
+      }
+
+      case "rawResponseItem/completed": {
+        const params = this.asRawResponseItemCompletedNotification(
+          notification.params,
+        );
+        if (!params) return [];
+        return this.convertRawResponseItemToSDKMessages(
+          params,
+          sessionId,
+          liveEventState,
         );
       }
 
@@ -1792,12 +3270,32 @@ export class CodexProvider implements AgentProvider {
           server: this.getOptionalString(itemRecord.server) ?? "unknown",
           tool: this.getOptionalString(itemRecord.tool) ?? "unknown",
           arguments: itemRecord.arguments,
+          mcpAppResourceUri:
+            this.getOptionalString(itemRecord.mcpAppResourceUri) ?? undefined,
           result: itemRecord.result,
           error:
             this.getOptionalString(errorObj?.message) !== null
               ? { message: this.getOptionalString(errorObj?.message) ?? "" }
               : undefined,
           status: this.normalizeStatus(itemRecord.status),
+        };
+      }
+
+      case "dynamic_tool_call": {
+        return {
+          id,
+          type: "dynamic_tool_call",
+          namespace: this.getOptionalString(itemRecord.namespace),
+          tool: this.getOptionalString(itemRecord.tool) ?? "unknown",
+          arguments: itemRecord.arguments,
+          status: this.normalizeStatus(itemRecord.status),
+          content_items: Array.isArray(itemRecord.contentItems)
+            ? itemRecord.contentItems
+            : null,
+          success:
+            typeof itemRecord.success === "boolean"
+              ? itemRecord.success
+              : null,
         };
       }
 
@@ -1836,6 +3334,9 @@ export class CodexProvider implements AgentProvider {
         };
       }
 
+      case "context_compaction":
+        return { id, type: "context_compaction" };
+
       case "image_view": {
         const imagePath = this.getOptionalString(itemRecord.path) ?? "";
         if (!imagePath) return null;
@@ -1861,18 +3362,18 @@ export class CodexProvider implements AgentProvider {
     const text = this.getOptionalString(item.text);
     if (text) return text;
 
-    const content = Array.isArray(item.content)
-      ? item.content.filter((part): part is string => typeof part === "string")
-      : [];
-    if (content.length > 0) {
-      return content.join("\n");
-    }
-
     const summary = Array.isArray(item.summary)
       ? item.summary.filter((part): part is string => typeof part === "string")
       : [];
     if (summary.length > 0) {
       return summary.join("\n");
+    }
+
+    const content = Array.isArray(item.content)
+      ? item.content.filter((part): part is string => typeof part === "string")
+      : [];
+    if (content.length > 0) {
+      return content.join("\n");
     }
 
     return "";
@@ -1971,6 +3472,24 @@ export class CodexProvider implements AgentProvider {
     return params as FileChangeRequestApprovalParams;
   }
 
+  private asPermissionsRequestApprovalParams(
+    params: unknown,
+  ): PermissionsRequestApprovalParams | null {
+    if (!params || typeof params !== "object") return null;
+    const record = params as Record<string, unknown>;
+    if (
+      typeof record.threadId !== "string" ||
+      typeof record.turnId !== "string" ||
+      typeof record.itemId !== "string" ||
+      typeof record.cwd !== "string" ||
+      !record.permissions ||
+      typeof record.permissions !== "object"
+    ) {
+      return null;
+    }
+    return params as PermissionsRequestApprovalParams;
+  }
+
   private asToolRequestUserInputParams(
     params: unknown,
   ): ToolRequestUserInputParams | null {
@@ -2017,6 +3536,535 @@ export class CodexProvider implements AgentProvider {
       return null;
     }
     return params as CodexItemCompletedNotification;
+  }
+
+  private asAgentMessageDeltaNotification(
+    params: unknown,
+  ): AgentMessageDeltaNotification | null {
+    if (!params || typeof params !== "object") return null;
+    const record = params as Record<string, unknown>;
+    if (
+      typeof record.threadId !== "string" ||
+      typeof record.turnId !== "string" ||
+      typeof record.itemId !== "string" ||
+      typeof record.delta !== "string"
+    ) {
+      return null;
+    }
+    return params as AgentMessageDeltaNotification;
+  }
+
+  private asPlanDeltaNotification(params: unknown): PlanDeltaNotification | null {
+    if (!params || typeof params !== "object") return null;
+    const record = params as Record<string, unknown>;
+    if (
+      typeof record.threadId !== "string" ||
+      typeof record.turnId !== "string" ||
+      typeof record.itemId !== "string" ||
+      typeof record.delta !== "string"
+    ) {
+      return null;
+    }
+    return params as PlanDeltaNotification;
+  }
+
+  private asReasoningSummaryTextDeltaNotification(
+    params: unknown,
+  ): ReasoningSummaryTextDeltaNotification | null {
+    if (!params || typeof params !== "object") return null;
+    const record = params as Record<string, unknown>;
+    if (
+      typeof record.threadId !== "string" ||
+      typeof record.turnId !== "string" ||
+      typeof record.itemId !== "string" ||
+      typeof record.delta !== "string" ||
+      typeof record.summaryIndex !== "number"
+    ) {
+      return null;
+    }
+    return params as ReasoningSummaryTextDeltaNotification;
+  }
+
+  private asCommandExecutionOutputDeltaNotification(
+    params: unknown,
+  ): CommandExecutionOutputDeltaNotification | null {
+    if (!params || typeof params !== "object") return null;
+    const record = params as Record<string, unknown>;
+    if (
+      typeof record.threadId !== "string" ||
+      typeof record.turnId !== "string" ||
+      typeof record.itemId !== "string" ||
+      typeof record.delta !== "string"
+    ) {
+      return null;
+    }
+    return params as CommandExecutionOutputDeltaNotification;
+  }
+
+  private asFileChangeOutputDeltaNotification(
+    params: unknown,
+  ): FileChangeOutputDeltaNotification | null {
+    if (!params || typeof params !== "object") return null;
+    const record = params as Record<string, unknown>;
+    if (
+      typeof record.threadId !== "string" ||
+      typeof record.turnId !== "string" ||
+      typeof record.itemId !== "string" ||
+      typeof record.delta !== "string"
+    ) {
+      return null;
+    }
+    return params as FileChangeOutputDeltaNotification;
+  }
+
+  private asRawResponseItemCompletedNotification(
+    params: unknown,
+  ): RawResponseItemCompletedNotification | null {
+    if (!params || typeof params !== "object") return null;
+    const record = params as Record<string, unknown>;
+    if (
+      typeof record.threadId !== "string" ||
+      typeof record.turnId !== "string" ||
+      !record.item ||
+      typeof record.item !== "object" ||
+      typeof (record.item as { type?: unknown }).type !== "string"
+    ) {
+      return null;
+    }
+    return params as RawResponseItemCompletedNotification;
+  }
+
+  private buildItemEventKey(turnId: string, itemId: string): string {
+    return `${turnId}:${itemId}`;
+  }
+
+  private buildItemMessageUuid(turnId: string, itemId: string): string {
+    return `${itemId}-${turnId}`;
+  }
+
+  private buildItemResultUuid(turnId: string, itemId: string): string {
+    return `${this.buildItemMessageUuid(turnId, itemId)}-result`;
+  }
+
+  private isResultBackedThreadItem(item: NormalizedThreadItem): boolean {
+    return (
+      item.type === "command_execution" ||
+      item.type === "file_change" ||
+      item.type === "mcp_tool_call" ||
+      item.type === "dynamic_tool_call" ||
+      item.type === "image_view"
+    );
+  }
+
+  private recordLiveResultBackedToolItem(
+    liveEventState: CodexLiveEventState,
+    turnId: string,
+    itemId: string,
+  ): void {
+    const items =
+      liveEventState.resultBackedToolItemsByTurnId.get(turnId) ?? new Set();
+    items.add(itemId);
+    liveEventState.resultBackedToolItemsByTurnId.set(turnId, items);
+  }
+
+  private clearLiveResultBackedToolItem(
+    liveEventState: CodexLiveEventState,
+    turnId: string,
+    itemId: string,
+  ): void {
+    const items = liveEventState.resultBackedToolItemsByTurnId.get(turnId);
+    if (!items) return;
+    items.delete(itemId);
+    if (items.size === 0) {
+      liveEventState.resultBackedToolItemsByTurnId.delete(turnId);
+    }
+  }
+
+  private consumeLiveResultBackedToolItems(
+    liveEventState: CodexLiveEventState,
+    turnId: string,
+  ): string[] {
+    const items = liveEventState.resultBackedToolItemsByTurnId.get(turnId);
+    if (!items) return [];
+    liveEventState.resultBackedToolItemsByTurnId.delete(turnId);
+    return [...items];
+  }
+
+  private buildStreamingAssistantMessage(
+    sessionId: string,
+    turnId: string,
+    itemId: string,
+    delta: string,
+    sourceEvent: string,
+    liveEventState: CodexLiveEventState,
+  ): SDKMessage {
+    const key = this.buildItemEventKey(turnId, itemId);
+    const text = `${liveEventState.streamingTextByItemKey.get(key) ?? ""}${delta}`;
+    liveEventState.streamingTextByItemKey.set(key, text);
+
+    const message = withCodexTimestamp({
+      type: "assistant",
+      session_id: sessionId,
+      uuid: this.buildItemMessageUuid(turnId, itemId),
+      _isStreaming: true,
+      message: {
+        role: "assistant",
+        content: text,
+      },
+    } as SDKMessage);
+    logSdkCorrelationDebug(sessionId, message, {
+      eventKind: sourceEvent,
+      turnId,
+      itemId,
+      phase: "delta",
+      sourceEvent,
+    });
+    return message;
+  }
+
+  private buildStreamingReasoningSummaryMessage(
+    sessionId: string,
+    turnId: string,
+    itemId: string,
+    summaryIndex: number,
+    delta: string,
+    liveEventState: CodexLiveEventState,
+  ): SDKMessage {
+    const key = this.buildItemEventKey(turnId, itemId);
+    const parts =
+      liveEventState.streamingReasoningSummaryByItemKey.get(key) ?? [];
+    parts[summaryIndex] = `${parts[summaryIndex] ?? ""}${delta}`;
+    liveEventState.streamingReasoningSummaryByItemKey.set(key, parts);
+
+    const thinking = parts.filter(Boolean).join("\n");
+    const message = withCodexTimestamp({
+      type: "assistant",
+      session_id: sessionId,
+      uuid: this.buildItemMessageUuid(turnId, itemId),
+      _isStreaming: true,
+      message: {
+        role: "assistant",
+        content: [{ type: "thinking", thinking }],
+      },
+    } as SDKMessage);
+    logSdkCorrelationDebug(sessionId, message, {
+      eventKind: "reasoning_summary_delta",
+      turnId,
+      itemId,
+      phase: "delta",
+      sourceEvent: "item/reasoning/summaryTextDelta",
+    });
+    return message;
+  }
+
+  private buildStreamingToolResultMessage(
+    sessionId: string,
+    turnId: string,
+    itemId: string,
+    delta: string,
+    sourceEvent: string,
+    liveEventState: CodexLiveEventState,
+  ): SDKMessage {
+    const key = this.buildItemEventKey(turnId, itemId);
+    const content = `${liveEventState.streamingToolOutputByItemKey.get(key) ?? ""}${delta}`;
+    liveEventState.streamingToolOutputByItemKey.set(key, content);
+
+    const message = withCodexTimestamp({
+      type: "user",
+      session_id: sessionId,
+      uuid: this.buildItemResultUuid(turnId, itemId),
+      _isStreaming: true,
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: itemId,
+            content,
+          },
+        ],
+      },
+    } as SDKMessage);
+    logSdkCorrelationDebug(sessionId, message, {
+      eventKind: "tool_result",
+      turnId,
+      itemId,
+      callId: itemId,
+      phase: "delta",
+      sourceEvent,
+    });
+    return message;
+  }
+
+  private clearLiveEventStateForItem(
+    liveEventState: CodexLiveEventState,
+    turnId: string,
+    itemId: string,
+  ): void {
+    const key = this.buildItemEventKey(turnId, itemId);
+    liveEventState.streamingTextByItemKey.delete(key);
+    liveEventState.streamingReasoningSummaryByItemKey.delete(key);
+    liveEventState.streamingToolOutputByItemKey.delete(key);
+  }
+
+  private convertRawResponseItemToSDKMessages(
+    params: RawResponseItemCompletedNotification,
+    sessionId: string,
+    liveEventState: CodexLiveEventState,
+  ): SDKMessage[] {
+    const item = params.item as Record<string, unknown>;
+    const itemType = this.getOptionalString(item.type);
+    if (!itemType) return [];
+
+    const observedAt = new Date().toISOString();
+
+    switch (itemType) {
+      case "function_call": {
+        const callId = this.getOptionalString(item.call_id);
+        const rawToolName = this.getOptionalString(item.name);
+        const argumentsText = this.getOptionalString(item.arguments);
+        if (!callId || !rawToolName) return [];
+
+        const normalizedInvocation = normalizeCodexToolInvocation(
+          canonicalizeCodexToolName(rawToolName),
+          parseCodexToolArguments(argumentsText ?? undefined),
+        );
+        liveEventState.toolCallContexts.set(callId, {
+          toolName: normalizedInvocation.toolName,
+          input: normalizedInvocation.input,
+          readShellInfo: normalizedInvocation.readShellInfo,
+          writeShellInfo: normalizedInvocation.writeShellInfo,
+        });
+        this.recordLiveResultBackedToolItem(
+          liveEventState,
+          params.turnId,
+          callId,
+        );
+
+        const message = withCodexTimestamp(
+          {
+            type: "assistant",
+            session_id: sessionId,
+            uuid: this.buildItemMessageUuid(params.turnId, callId),
+            message: {
+              role: "assistant",
+              content: [
+                {
+                  type: "tool_use",
+                  id: callId,
+                  name: normalizedInvocation.toolName,
+                  input: normalizedInvocation.input,
+                },
+              ],
+            },
+          } as SDKMessage,
+          observedAt,
+        );
+        logSdkCorrelationDebug(sessionId, message, {
+          eventKind: "function_call",
+          turnId: params.turnId,
+          itemId: callId,
+          callId,
+          phase: "completed",
+          sourceEvent: "rawResponseItem/completed",
+        });
+        return [message];
+      }
+
+      case "function_call_output": {
+        const callId = this.getOptionalString(item.call_id);
+        if (!callId) return [];
+        const normalized = normalizeCodexToolOutputWithContext(
+          item.output,
+          liveEventState.toolCallContexts.get(callId),
+        );
+        if (
+          !isCodexBackgroundProcessOutput(item.output) &&
+          !isCodexInterruptedToolOutput(item.output)
+        ) {
+          liveEventState.toolCallContexts.delete(callId);
+          this.clearLiveResultBackedToolItem(
+            liveEventState,
+            params.turnId,
+            callId,
+          );
+        }
+
+        const toolResult: {
+          type: "tool_result";
+          tool_use_id: string;
+          content: string;
+          is_error?: boolean;
+        } = {
+          type: "tool_result",
+          tool_use_id: callId,
+          content: normalized.content,
+        };
+        if (normalized.isError) {
+          toolResult.is_error = true;
+        }
+
+        const message = withCodexTimestamp(
+          {
+            type: "user",
+            session_id: sessionId,
+            uuid: this.buildItemResultUuid(params.turnId, callId),
+            message: {
+              role: "user",
+              content: [toolResult],
+            },
+            ...(normalized.structured !== undefined
+              ? { toolUseResult: normalized.structured }
+              : {}),
+          } as SDKMessage,
+          observedAt,
+        );
+        logSdkCorrelationDebug(sessionId, message, {
+          eventKind: "tool_result",
+          turnId: params.turnId,
+          itemId: callId,
+          callId,
+          phase: "completed",
+          sourceEvent: "rawResponseItem/completed",
+        });
+        return [message];
+      }
+
+      case "custom_tool_call": {
+        const callId = this.getOptionalString(item.call_id);
+        const rawToolName = this.getOptionalString(item.name);
+        const input = this.getOptionalString(item.input);
+        if (!callId || !rawToolName) return [];
+
+        const normalizedInvocation = normalizeCodexToolInvocation(
+          canonicalizeCodexToolName(rawToolName),
+          parseCodexToolArguments(input ?? undefined),
+        );
+        liveEventState.toolCallContexts.set(callId, {
+          toolName: normalizedInvocation.toolName,
+          input: normalizedInvocation.input,
+          readShellInfo: normalizedInvocation.readShellInfo,
+          writeShellInfo: normalizedInvocation.writeShellInfo,
+        });
+        this.recordLiveResultBackedToolItem(
+          liveEventState,
+          params.turnId,
+          callId,
+        );
+
+        const message = withCodexTimestamp(
+          {
+            type: "assistant",
+            session_id: sessionId,
+            uuid: this.buildItemMessageUuid(params.turnId, callId),
+            message: {
+              role: "assistant",
+              content: [
+                {
+                  type: "tool_use",
+                  id: callId,
+                  name: normalizedInvocation.toolName,
+                  input: normalizedInvocation.input,
+                },
+              ],
+            },
+          } as SDKMessage,
+          observedAt,
+        );
+        logSdkCorrelationDebug(sessionId, message, {
+          eventKind: "custom_tool_call",
+          turnId: params.turnId,
+          itemId: callId,
+          callId,
+          phase: "completed",
+          sourceEvent: "rawResponseItem/completed",
+        });
+        return [message];
+      }
+
+      case "custom_tool_call_output": {
+        const callId = this.getOptionalString(item.call_id);
+        if (!callId) return [];
+        const normalized = normalizeCodexToolOutputWithContext(
+          item.output,
+          liveEventState.toolCallContexts.get(callId),
+        );
+        if (
+          !isCodexBackgroundProcessOutput(item.output) &&
+          !isCodexInterruptedToolOutput(item.output)
+        ) {
+          liveEventState.toolCallContexts.delete(callId);
+          this.clearLiveResultBackedToolItem(
+            liveEventState,
+            params.turnId,
+            callId,
+          );
+        }
+
+        const toolResult: {
+          type: "tool_result";
+          tool_use_id: string;
+          content: string;
+          is_error?: boolean;
+        } = {
+          type: "tool_result",
+          tool_use_id: callId,
+          content: normalized.content,
+        };
+        if (normalized.isError) {
+          toolResult.is_error = true;
+        }
+
+        const message = withCodexTimestamp(
+          {
+            type: "user",
+            session_id: sessionId,
+            uuid: this.buildItemResultUuid(params.turnId, callId),
+            message: {
+              role: "user",
+              content: [toolResult],
+            },
+            ...(normalized.structured !== undefined
+              ? { toolUseResult: normalized.structured }
+              : {}),
+          } as SDKMessage,
+          observedAt,
+        );
+        logSdkCorrelationDebug(sessionId, message, {
+          eventKind: "tool_result",
+          turnId: params.turnId,
+          itemId: callId,
+          callId,
+          phase: "completed",
+          sourceEvent: "rawResponseItem/completed",
+        });
+        return [message];
+      }
+
+      case "compaction": {
+        const message = withCodexTimestamp(
+          {
+            type: "system",
+            subtype: "compact_boundary",
+            session_id: sessionId,
+            uuid: `codex-compaction-${params.turnId}`,
+            content: "Context compacted",
+          } as SDKMessage,
+          observedAt,
+        );
+        logSdkCorrelationDebug(sessionId, message, {
+          eventKind: "context_compaction",
+          turnId: params.turnId,
+          itemId: `codex-compaction-${params.turnId}`,
+          phase: "completed",
+          sourceEvent: "rawResponseItem/completed",
+        });
+        return [message];
+      }
+
+      default:
+        return [];
+    }
   }
 
   /**
@@ -2266,6 +4314,12 @@ export class CodexProvider implements AgentProvider {
 
       case "mcp_tool_call": {
         const messages: SDKMessage[] = [];
+        const input = item.mcpAppResourceUri
+          ? {
+              arguments: item.arguments,
+              mcpAppResourceUri: item.mcpAppResourceUri,
+            }
+          : item.arguments;
 
         const toolUseMessage = withCodexTimestamp(
           {
@@ -2279,7 +4333,7 @@ export class CodexProvider implements AgentProvider {
                   type: "tool_use",
                   id: item.id,
                   name: `${item.server}:${item.tool}`,
-                  input: item.arguments,
+                  input,
                 },
               ],
             },
@@ -2315,6 +4369,85 @@ export class CodexProvider implements AgentProvider {
                         : item.error?.message || "MCP tool call failed",
                   },
                 ],
+              },
+            } as SDKMessage,
+            observedAt,
+          );
+          logSdkCorrelationDebug(sessionId, toolResultMessage, {
+            eventKind: "tool_result",
+            turnId,
+            itemId: item.id,
+            callId: item.id,
+            phase: "completed",
+            sourceEvent,
+            status: item.status,
+          });
+          messages.push(toolResultMessage);
+        }
+
+        return messages;
+      }
+
+      case "dynamic_tool_call": {
+        const messages: SDKMessage[] = [];
+        const toolName = item.namespace
+          ? `${item.namespace}:${item.tool}`
+          : canonicalizeCodexToolName(item.tool);
+
+        const toolUseMessage = withCodexTimestamp(
+          {
+            type: "assistant",
+            session_id: sessionId,
+            uuid,
+            message: {
+              role: "assistant",
+              content: [
+                {
+                  type: "tool_use",
+                  id: item.id,
+                  name: toolName,
+                  input: item.arguments,
+                },
+              ],
+            },
+          } as SDKMessage,
+          observedAt,
+        );
+        logSdkCorrelationDebug(sessionId, toolUseMessage, {
+          eventKind: "dynamic_tool_call",
+          turnId,
+          itemId: item.id,
+          callId: item.id,
+          phase: isComplete ? "completed" : "started",
+          sourceEvent,
+          status: item.status,
+        });
+        messages.push(toolUseMessage);
+
+        if (isComplete && item.status !== "in_progress") {
+          const isError = item.success === false || item.status === "failed";
+          const toolResultBlock: {
+            type: "tool_result";
+            tool_use_id: string;
+            content: string;
+            is_error?: boolean;
+          } = {
+            type: "tool_result",
+            tool_use_id: item.id,
+            content: this.formatDynamicToolContent(item.content_items),
+          };
+          if (isError) {
+            toolResultBlock.is_error = true;
+          }
+
+          const toolResultMessage = withCodexTimestamp(
+            {
+              type: "user",
+              session_id: sessionId,
+              uuid: `${uuid}-result`,
+              message: {
+                role: "user",
+                content: [toolResultBlock],
               },
             } as SDKMessage,
             observedAt,
@@ -2378,6 +4511,29 @@ export class CodexProvider implements AgentProvider {
         );
         logSdkCorrelationDebug(sessionId, message, {
           eventKind: "todo_list",
+          turnId,
+          itemId: item.id,
+          phase: isComplete ? "completed" : "started",
+          sourceEvent,
+        });
+        return [message];
+      }
+
+      case "context_compaction": {
+        const message = withCodexTimestamp(
+          {
+            type: "system",
+            subtype: isComplete ? "compact_boundary" : "status",
+            session_id: sessionId,
+            uuid,
+            ...(isComplete
+              ? { content: "Context compacted" }
+              : { status: "compacting", content: "Compacting context..." }),
+          } as SDKMessage,
+          observedAt,
+        );
+        logSdkCorrelationDebug(sessionId, message, {
+          eventKind: "context_compaction",
           turnId,
           itemId: item.id,
           phase: isComplete ? "completed" : "started",
@@ -2471,6 +4627,46 @@ export class CodexProvider implements AgentProvider {
 
       default:
         return [];
+    }
+  }
+
+  private formatDynamicToolContent(contentItems: unknown[] | null | undefined) {
+    if (!Array.isArray(contentItems) || contentItems.length === 0) {
+      return "(no output)";
+    }
+
+    const parts = contentItems
+      .map((item) => {
+        if (!item || typeof item !== "object") return "";
+        const record = item as Record<string, unknown>;
+        const type = this.getOptionalString(record.type);
+        if (type === "inputText") {
+          return this.getOptionalString(record.text) ?? "";
+        }
+        if (type === "inputImage") {
+          const imageUrl = this.getOptionalString(record.imageUrl);
+          return imageUrl ? `[image: ${imageUrl}]` : "[image]";
+        }
+        return "";
+      })
+      .filter(Boolean);
+
+    return parts.length > 0 ? parts.join("\n") : JSON.stringify(contentItems);
+  }
+
+  private getPermissionModeFromMessage(
+    message: unknown,
+  ): StartSessionOptions["permissionMode"] | undefined {
+    if (!message || typeof message !== "object") return undefined;
+    const mode = (message as { mode?: unknown }).mode;
+    switch (mode) {
+      case "default":
+      case "acceptEdits":
+      case "plan":
+      case "bypassPermissions":
+        return mode;
+      default:
+        return undefined;
     }
   }
 

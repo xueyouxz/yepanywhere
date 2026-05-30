@@ -22,7 +22,9 @@ class MockWebSocket implements WebSocketLike {
   static CLOSED = 3;
 
   readyState = MockWebSocket.CONNECTING;
+  bufferedAmount = 0;
   sentMessages: (string | ArrayBuffer | Uint8Array)[] = [];
+  onSend?: (data: string | ArrayBuffer | Uint8Array) => void;
 
   // biome-ignore lint/suspicious/noExplicitAny: Test helper needs flexibility
   private listeners = new Map<string, Set<(ev: any) => void>>();
@@ -37,6 +39,7 @@ class MockWebSocket implements WebSocketLike {
 
   send(data: string | ArrayBuffer | Uint8Array): void {
     this.sentMessages.push(data);
+    this.onSend?.(data);
   }
 
   close(_code?: number, _reason?: string): void {
@@ -158,6 +161,47 @@ describe("uploadChunks", () => {
     // Verify end message
     const endMsg = JSON.parse(mockWs.sentMessages[3] as string);
     expect(endMsg).toEqual({ type: "end" });
+
+    mockWs.simulateMessage({
+      type: "complete",
+      file: testFile,
+    });
+
+    await uploadPromise;
+  });
+
+  it("waits for websocket backpressure before sending later chunks", async () => {
+    let binarySends = 0;
+
+    const uploadPromise = uploadChunks(
+      "ws://test/upload",
+      testMetadata,
+      testChunks(),
+      { maxBytesPerSecond: 0 },
+      createMockWebSocket,
+    );
+
+    mockWs.onSend = (data) => {
+      if (!(data instanceof Uint8Array)) return;
+      binarySends += 1;
+      if (binarySends === 1) {
+        mockWs.bufferedAmount = 1024 * 1024;
+        setTimeout(() => {
+          mockWs.bufferedAmount = 0;
+        }, 35);
+      }
+    };
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    expect(
+      mockWs.sentMessages.filter((msg) => msg instanceof Uint8Array),
+    ).toHaveLength(1);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(
+      mockWs.sentMessages.filter((msg) => msg instanceof Uint8Array),
+    ).toHaveLength(2);
 
     mockWs.simulateMessage({
       type: "complete",

@@ -164,8 +164,9 @@ describe("Global Sessions Routes", () => {
 
   async function makeRequest(
     queryString = "",
+    overrides: Partial<GlobalSessionsDeps> = {},
   ): Promise<GlobalSessionsResponse> {
-    const routes = createGlobalSessionsRoutes(getDeps());
+    const routes = createGlobalSessionsRoutes(getDeps(overrides));
     const response = await routes.request(`/${queryString}`);
     expect(response.status).toBe(200);
     return response.json();
@@ -235,6 +236,29 @@ describe("Global Sessions Routes", () => {
       expect(withStats.stats.unreadCount).toBe(1);
       expect(withStats.stats.starredCount).toBe(1);
       expect(withStats.stats.providerCounts.claude).toBe(1);
+    });
+
+
+    it("hides auto-archived sessions from default lists and shows them in archive browsing", async () => {
+      const project = createProject("proj1", "project-one", "/sessions/proj1");
+      const recent = createSession("recent", "proj1", hoursAgo(1));
+      const old = createSession("old", "proj1", hoursAgo(24 * 20));
+
+      vi.mocked(mockScanner.listProjects).mockResolvedValue([project]);
+      sessionsByDir.set("/sessions/proj1", [recent, old]);
+
+      const active = await makeRequest("", { sessionAutoArchiveDays: 14 });
+      expect(active.sessions.map((session) => session.id)).toEqual(["recent"]);
+
+      const archived = await makeRequest("?includeArchived=true", {
+        sessionAutoArchiveDays: 14,
+      });
+      expect(archived.sessions.map((session) => session.id)).toEqual([
+        "recent",
+        "old",
+      ]);
+      expect(archived.sessions.find((session) => session.id === "old"))
+        .toMatchObject({ isArchived: true });
     });
 
     it("includes project context on each session", async () => {
@@ -642,7 +666,12 @@ describe("Global Sessions Routes", () => {
 
       expect(
         vi.mocked(sessionIndexService.getSessionsWithCache),
-      ).toHaveBeenCalledWith("/codex/sessions", project.id, codexReader);
+      ).toHaveBeenCalledWith(
+        "/codex/sessions",
+        project.id,
+        codexReader,
+        expect.objectContaining({ activeAfterMs: expect.any(Number) }),
+      );
       expect(codexReader.listSessions).not.toHaveBeenCalled();
       expect(result.sessions.some((s) => s.id === "codex-sess-1")).toBe(true);
     });
@@ -699,7 +728,12 @@ describe("Global Sessions Routes", () => {
 
       expect(
         vi.mocked(sessionIndexService.getSessionsWithCache),
-      ).toHaveBeenCalledWith("/gemini/tmp", project.id, geminiReader);
+      ).toHaveBeenCalledWith(
+        "/gemini/tmp",
+        project.id,
+        geminiReader,
+        expect.objectContaining({ activeAfterMs: expect.any(Number) }),
+      );
       expect(geminiReader.listSessions).not.toHaveBeenCalled();
       expect(result.sessions.some((s) => s.id === "gemini-sess-1")).toBe(true);
     });

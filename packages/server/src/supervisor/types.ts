@@ -5,9 +5,12 @@ import type {
   InputRequest,
   PendingInputType,
   PermissionRules,
+  PromptSuggestionMode,
   ProviderName,
+  RecapMode,
   ThinkingConfig,
   UrlProjectId,
+  SessionLivenessSnapshot,
 } from "@yep-anywhere/shared";
 import type { PermissionMode, SDKMessage } from "../sdk/types.js";
 
@@ -88,6 +91,16 @@ export interface SessionSummary {
   isArchived?: boolean;
   /** Whether the session is starred/favorited */
   isStarred?: boolean;
+  /** Parent session when this session is a YA-owned fork/aside. */
+  parentSessionId?: string;
+  /** Initial prompt text accepted by YA for new-session recovery/copy. */
+  initialPrompt?: string;
+  /** Whether this session is opted in to heartbeat turns */
+  heartbeatTurnsEnabled?: boolean;
+  /** Optional per-session idle threshold override in minutes */
+  heartbeatTurnsAfterMinutes?: number;
+  /** Optional per-session heartbeat text override */
+  heartbeatTurnText?: string;
   /** Context usage from the last assistant message */
   contextUsage?: ContextUsage;
   /** AI provider used for this session */
@@ -204,12 +217,21 @@ export interface ProcessInfo {
   executor?: string;
   /** OS PID of the spawned agent child process */
   pid?: number;
+  /** Provider/session progress evidence, separate from transport liveness. */
+  liveness?: SessionLivenessSnapshot;
+  /** Current recap behavior for this live process. */
+  recapMode?: RecapMode;
+  /** Current prompt-suggestion behavior for this live process. */
+  promptSuggestionMode?: PromptSuggestionMode;
+  /** Session-level helper side model for simulated helper features. */
+  helperSideModel?: string;
 }
 
 // Process events for subscribers
 export type ProcessEvent =
   | { type: "message"; message: SDKMessage }
   | { type: "state-change"; state: ProcessState }
+  | { type: "liveness-update" }
   | { type: "mode-change"; mode: PermissionMode; version: number }
   | { type: "session-id-changed"; oldSessionId: string; newSessionId: string }
   | { type: "error"; error: Error }
@@ -217,7 +239,15 @@ export type ProcessEvent =
   | { type: "terminated"; reason: string; error?: Error }
   | {
       type: "deferred-queue";
-      messages: { tempId?: string; content: string; timestamp: string }[];
+      messages: {
+        tempId?: string;
+        content: string;
+        timestamp: string;
+        attachmentCount?: number;
+        blockedByEdit?: boolean;
+      }[];
+      reason?: "queued" | "cancelled" | "edited" | "promoted";
+      tempId?: string;
     };
 
 // Process options
@@ -236,6 +266,12 @@ export interface ProcessOptions {
   model?: string;
   /** SSH host for remote execution (undefined = local) */
   executor?: string;
+  /** How this process should answer away-recap requests. */
+  recapMode?: RecapMode;
+  /** How this process should request native prompt suggestions. */
+  promptSuggestionMode?: PromptSuggestionMode;
+  /** Session-level helper side model for simulated helper features. */
+  helperSideModel?: string;
   /** Permission rules for tool filtering (deny/allow patterns) */
   permissions?: PermissionRules;
   /** OS PID of the spawned agent child process, or getter for deferred resolution */

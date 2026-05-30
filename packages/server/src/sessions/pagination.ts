@@ -20,6 +20,10 @@ export interface PaginationInfo {
   truncatedBeforeMessageId?: string;
   /** Total number of compact_boundary entries in the session */
   totalCompactions: number;
+  /** Total number of user turns in the full session, when turn slicing was used */
+  totalUserTurns?: number;
+  /** Whether this response came from the aggressive user-turn truncation path */
+  truncatedBy?: "compact_boundary" | "user_turn";
 }
 
 /** Result of slicing messages at compact boundaries */
@@ -28,12 +32,64 @@ export interface SliceResult {
   pagination: PaginationInfo;
 }
 
+export interface SliceAfterResult {
+  messages: Message[];
+  found: boolean;
+}
+
 function getMessageId(m: Message): string | undefined {
   return m.uuid ?? (typeof m.id === "string" ? m.id : undefined);
 }
 
+/**
+ * Return only messages after the requested message id.
+ *
+ * Some provider readers can apply afterMessageId while reading, but others only
+ * expose a full normalized message list. Applying this after normalization keeps
+ * incremental refresh responses small when the anchor is present, while leaving
+ * already-filtered reader results unchanged when the anchor is absent.
+ */
+export function sliceAfterMessageId(
+  messages: Message[],
+  afterMessageId?: string,
+): Message[] {
+  return sliceAfterMessageIdWithMatch(messages, afterMessageId).messages;
+}
+
+export function sliceAfterMessageIdWithMatch(
+  messages: Message[],
+  afterMessageId?: string,
+): SliceAfterResult {
+  if (!afterMessageId) {
+    return { messages, found: false };
+  }
+
+  const index = messages.findIndex((message) => {
+    return getMessageId(message) === afterMessageId;
+  });
+  if (index === -1) {
+    return { messages, found: false };
+  }
+
+  return { messages: messages.slice(index + 1), found: true };
+}
+
 function isCompactBoundary(m: Message): boolean {
   return m.type === "system" && m.subtype === "compact_boundary";
+}
+
+function isUserTurn(m: Message): boolean {
+  const record = m as Message & {
+    role?: unknown;
+    message?: { role?: unknown };
+  };
+  const role =
+    typeof record.role === "string"
+      ? record.role
+      : typeof record.message?.role === "string"
+        ? record.message.role
+        : undefined;
+  return m.type === "user" || role === "user";
 }
 
 /**
@@ -57,10 +113,11 @@ export function sliceAtCompactBoundaries(
   let workingMessages = messages;
   if (beforeMessageId) {
     const idx = messages.findIndex((m) => getMessageId(m) === beforeMessageId);
-    if (idx > 0) {
-      workingMessages = messages.slice(0, idx);
-    }
-    // If not found or idx === 0, use all messages (graceful fallback)
+    // A stale or missing older-page cursor must not fall back to the current
+    // tail/full history: the client prepends this response, so overlap can
+    // duplicate large chunks in memory. Missing and first-message cursors both
+    // mean "there is no known older page to return."
+    workingMessages = idx > 0 ? messages.slice(0, idx) : [];
   }
 
   // Find all compact_boundary indices in the working set
@@ -104,6 +161,73 @@ export function sliceAtCompactBoundaries(
       returnedMessageCount: slicedMessages.length,
       truncatedBeforeMessageId: firstId,
       totalCompactions,
+    },
+  };
+}
+
+/**
+ * Slice messages to a recent user-turn window, or to a caller-chosen user turn.
+ *
+ * This is intentionally more aggressive than compact-boundary pagination: it is
+ * an opt-in browser memory workaround for very long transcripts where the user
+ * wants the client to avoid receiving older history at all.
+ */
+export function sliceAtUserTurnBoundary(
+  messages: Message[],
+  tailTurns: number,
+  fromMessageId?: string,
+): SliceResult {
+  const totalMessageCount = messages.length;
+  const userTurnIndices: number[] = [];
+  let totalCompactions = 0;
+
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (!message) continue;
+    if (isUserTurn(message)) {
+      userTurnIndices.push(index);
+    }
+    if (isCompactBoundary(message)) {
+      totalCompactions += 1;
+    }
+  }
+
+  const totalUserTurns = userTurnIndices.length;
+  let sliceFromIdx = 0;
+
+  if (fromMessageId) {
+    sliceFromIdx = messages.findIndex((m) => getMessageId(m) === fromMessageId);
+    if (sliceFromIdx < 0) {
+      return {
+        messages: [],
+        pagination: {
+          hasOlderMessages: false,
+          totalMessageCount,
+          returnedMessageCount: 0,
+          truncatedBeforeMessageId: undefined,
+          totalCompactions,
+          totalUserTurns,
+          truncatedBy: "user_turn",
+        },
+      };
+    }
+  } else if (totalUserTurns > tailTurns) {
+    sliceFromIdx = userTurnIndices[totalUserTurns - tailTurns] ?? 0;
+  }
+
+  const slicedMessages = messages.slice(sliceFromIdx);
+  const firstId = slicedMessages[0] ? getMessageId(slicedMessages[0]) : undefined;
+
+  return {
+    messages: slicedMessages,
+    pagination: {
+      hasOlderMessages: sliceFromIdx > 0,
+      totalMessageCount,
+      returnedMessageCount: slicedMessages.length,
+      truncatedBeforeMessageId: sliceFromIdx > 0 ? firstId : undefined,
+      totalCompactions,
+      totalUserTurns,
+      truncatedBy: "user_turn",
     },
   };
 }

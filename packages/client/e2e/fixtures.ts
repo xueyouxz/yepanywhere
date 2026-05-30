@@ -48,6 +48,15 @@ function getRemoteClientPort(): number {
 }
 
 function getRelayPort(): number {
+  if (
+    ["0", "false", "no"].includes(
+      (process.env.YEP_E2E_START_RELAY ?? "").toLowerCase(),
+    )
+  ) {
+    throw new Error(
+      "Relay fixtures requested, but relay startup is disabled via YEP_E2E_START_RELAY.",
+    );
+  }
   return getPort("relay-port", "Relay");
 }
 

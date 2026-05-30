@@ -43,4 +43,12 @@ export {
   type SharingServiceOptions,
 } from "./SharingService.js";
 
+export {
+  PUBLIC_SHARE_SECRET_BITS,
+  PUBLIC_SHARE_SECRET_BYTES,
+  PublicShareService,
+  type CreatePublicShareOptions,
+  type PublicShareServiceOptions,
+} from "./PublicShareService.js";
+
 export { ModelInfoService } from "./ModelInfoService.js";

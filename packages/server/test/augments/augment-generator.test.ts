@@ -45,6 +45,24 @@ describe("AugmentGenerator", () => {
       expect(augment.html).toContain("<span");
     });
 
+    it("renders streaming code without syntax highlighting", async () => {
+      const augment = await generator.renderStreamingCodeBlock(
+        {
+          content: "```javascript\nconst x = 1;",
+          lang: "javascript",
+          startOffset: 0,
+        },
+        0,
+      );
+
+      expect(augment.type).toBe("code");
+      expect(augment.blockIndex).toBe(0);
+      expect(augment.html).toContain('<pre class="shiki">');
+      expect(augment.html).toContain('class="language-javascript"');
+      expect(augment.html).toContain("const x = 1;");
+      expect(augment.html).not.toContain("<span");
+    });
+
     it("highlights typescript code", async () => {
       const block: CompletedBlock = {
         type: "code",

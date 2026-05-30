@@ -9,6 +9,8 @@ import {
   SESSION_TITLE_MAX_LENGTH,
   SessionView,
   getSessionDisplayTitle,
+  sanitizeSessionTitle,
+  truncateSessionTitle,
 } from "../../src/session/SessionView.js";
 
 // Helper to create a minimal valid SessionView for testing
@@ -376,5 +378,19 @@ describe("getSessionDisplayTitle", () => {
 describe("SESSION_TITLE_MAX_LENGTH", () => {
   it("is 120 characters", () => {
     expect(SESSION_TITLE_MAX_LENGTH).toBe(120);
+  });
+});
+
+describe("session title sanitization", () => {
+  it("strips invisible controls and bidi formatting", () => {
+    expect(sanitizeSessionTitle("  safe\u202Ename\u200B\nnext  ")).toBe(
+      "safe name next",
+    );
+  });
+
+  it("normalizes and truncates sanitized titles", () => {
+    const title = `${"x".repeat(130)}\u202E`;
+    expect(truncateSessionTitle(title)).toHaveLength(SESSION_TITLE_MAX_LENGTH);
+    expect(truncateSessionTitle(title)).toBe(`${"x".repeat(117)}...`);
   });
 });

@@ -1,18 +1,21 @@
-import { memo, useState } from "react";
-import { useRemoteImage } from "../../hooks/useRemoteImage";
+import { memo, type ReactNode, useState } from "react";
 import {
   type UploadedFileInfo,
   getFilename,
   parseUserPrompt,
 } from "../../lib/parseUserPrompt";
 import type { ContentBlock } from "../../types";
-import { Modal } from "../ui/Modal";
+import { AttachmentChip } from "../AttachmentChip";
+import { CopyTextButton } from "../ui/CopyTextButton";
 
 const MAX_LINES = 12;
 const MAX_CHARS = MAX_LINES * 100;
 
 interface Props {
   content: string | ContentBlock[];
+  onCorrect?: () => void;
+  onTrimBefore?: () => void;
+  extraActions?: ReactNode;
 }
 
 interface InputImageBlock extends ContentBlock {
@@ -20,6 +23,49 @@ interface InputImageBlock extends ContentBlock {
   file_path?: string;
   image_url?: string;
   mime_type?: string;
+}
+
+interface CorrectionDisplay {
+  correctedText: string;
+  change?: string;
+}
+
+const CORRECTION_PREFIX = "Correction to previous message:\n";
+const CORRECTION_CHANGE_SEPARATOR = "\n\nChange: ";
+
+function parseCorrectionDisplay(text: string): CorrectionDisplay | null {
+  if (!text.startsWith(CORRECTION_PREFIX)) {
+    return null;
+  }
+
+  const body = text.slice(CORRECTION_PREFIX.length);
+  const changeIndex = body.indexOf(CORRECTION_CHANGE_SEPARATOR);
+  const correctedText =
+    changeIndex === -1 ? body : body.slice(0, changeIndex);
+  const change =
+    changeIndex === -1
+      ? undefined
+      : body.slice(changeIndex + CORRECTION_CHANGE_SEPARATOR.length).trim();
+
+  if (!correctedText.trim()) {
+    return null;
+  }
+
+  return {
+    correctedText,
+    ...(change ? { change } : {}),
+  };
+}
+
+function getUserPromptCopyText(text: string): string {
+  const correction = parseCorrectionDisplay(text);
+  if (!correction) {
+    return text;
+  }
+
+  return correction.change
+    ? `${correction.correctedText}\n\nChange: ${correction.change}`
+    : correction.correctedText;
 }
 
 /**
@@ -41,34 +87,6 @@ function OpenedFilesMetadata({ files }: { files: string[] }) {
       ))}
     </div>
   );
-}
-
-/**
- * Check if a MIME type is an image type
- */
-function isImageMimeType(mimeType: string): boolean {
-  return mimeType.startsWith("image/");
-}
-
-/**
- * Extract URL components from an uploaded file path.
- * Path format: /.../.yep-anywhere/uploads/{projectId}/{sessionId}/{filename}
- */
-function getUploadUrl(filePath: string): string | null {
-  // Split path and get last 3 components: projectId, sessionId, filename
-  const parts = filePath.split("/");
-  if (parts.length < 3) return null;
-
-  const filename = parts[parts.length - 1];
-  const sessionId = parts[parts.length - 2];
-  const projectId = parts[parts.length - 3];
-
-  if (!filename || !sessionId || !projectId) return null;
-
-  // Validate filename has UUID prefix
-  if (!/^[0-9a-f-]{36}_/.test(filename)) return null;
-
-  return `/api/projects/${projectId}/sessions/${sessionId}/upload/${encodeURIComponent(filename)}`;
 }
 
 function isInputImageBlock(block: ContentBlock): block is InputImageBlock {
@@ -114,9 +132,9 @@ function parseInlineImageData(imageUrl: string): {
 
 function formatFileSize(bytes?: number): string {
   if (!bytes || bytes < 0) return "unknown size";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024) return `${bytes}\u202fb`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}\u202fkb`;
+  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10}\u202fmb`;
 }
 
 function getMimeTypeFromPath(path: string): string | undefined {
@@ -214,54 +232,6 @@ function mergeUploadedFiles(
 }
 
 /**
- * Single uploaded file attachment - clickable for images
- */
-function UploadedFileItem({ file }: { file: UploadedFileInfo }) {
-  const [showModal, setShowModal] = useState(false);
-  const isImage = isImageMimeType(file.mimeType);
-  const apiPath = isImage ? getUploadUrl(file.path) : null;
-  const directPreviewUrl = isImage ? (file.previewUrl ?? null) : null;
-
-  // Use the remote image hook to handle fetching via relay when needed
-  const { url: remoteImageUrl, loading, error } = useRemoteImage(apiPath);
-  const imageUrl = directPreviewUrl ?? remoteImageUrl;
-
-  if (isImage && (apiPath || directPreviewUrl)) {
-    return (
-      <>
-        <button
-          type="button"
-          className="uploaded-file uploaded-file-clickable"
-          title={`${file.mimeType}, ${file.size}`}
-          onClick={() => setShowModal(true)}
-        >
-          📎 {file.originalName}
-        </button>
-        {showModal && (
-          <Modal title={file.originalName} onClose={() => setShowModal(false)}>
-            <div className="uploaded-image-modal">
-              {apiPath && loading && (
-                <div className="image-loading">Loading...</div>
-              )}
-              {apiPath && error && (
-                <div className="image-error">Failed to load image</div>
-              )}
-              {imageUrl && <img src={imageUrl} alt={file.originalName} />}
-            </div>
-          </Modal>
-        )}
-      </>
-    );
-  }
-
-  return (
-    <span className="uploaded-file" title={`${file.mimeType}, ${file.size}`}>
-      📎 {file.originalName}
-    </span>
-  );
-}
-
-/**
  * Renders uploaded file attachments below the user prompt
  */
 function UploadedFilesMetadata({ files }: { files: UploadedFileInfo[] }) {
@@ -270,7 +240,16 @@ function UploadedFilesMetadata({ files }: { files: UploadedFileInfo[] }) {
   return (
     <div className="user-prompt-metadata">
       {files.map((file) => (
-        <UploadedFileItem key={file.path} file={file} />
+        <AttachmentChip
+          key={file.path}
+          originalName={file.originalName}
+          path={file.path}
+          mimeType={file.mimeType}
+          sizeLabel={file.size}
+          imageWidth={file.width}
+          imageHeight={file.height}
+          previewUrl={file.previewUrl}
+        />
       ))}
     </div>
   );
@@ -328,8 +307,109 @@ function CollapsibleText({ text }: { text: string }) {
   );
 }
 
+function UserPromptActionButtons({
+  onCorrect,
+  onTrimBefore,
+  copyText,
+  extraActions,
+}: {
+  onCorrect?: () => void;
+  onTrimBefore?: () => void;
+  copyText?: string;
+  extraActions?: ReactNode;
+}) {
+  if (!onCorrect && !onTrimBefore && !copyText && !extraActions) return null;
+
+  return (
+    <div className="user-prompt-actions">
+      {copyText && (
+        <CopyTextButton
+          text={copyText}
+          label="Copy message text"
+          className="user-prompt-action user-prompt-action-copy"
+        />
+      )}
+      {onTrimBefore && (
+        <button
+          type="button"
+          className="user-prompt-action"
+          onClick={onTrimBefore}
+          aria-label="Load client transcript from this turn"
+          title="Load client transcript from this turn"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M4 7h16" />
+            <path d="M4 12h10" />
+            <path d="M4 17h6" />
+            <path d="m15 16 3 3 3-3" />
+            <path d="M18 5v14" />
+          </svg>
+        </button>
+      )}
+      {onCorrect && (
+        <button
+          type="button"
+          className="user-prompt-action"
+          onClick={onCorrect}
+          aria-label="Edit latest message"
+          title="Edit latest message"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+          </svg>
+          <span className="user-prompt-correct-label">Edit</span>
+        </button>
+      )}
+      {extraActions}
+    </div>
+  );
+}
+
+function UserPromptText({ text }: { text: string }) {
+  const correction = parseCorrectionDisplay(text);
+  if (!correction) {
+    return <CollapsibleText text={text} />;
+  }
+
+  return (
+    <div className="user-prompt-correction">
+      <div className="user-prompt-correction-label">Correction</div>
+      <CollapsibleText text={correction.correctedText} />
+      {correction.change && (
+        <div className="user-prompt-correction-change">
+          Change: {correction.change}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export const UserPromptBlock = memo(function UserPromptBlock({
   content,
+  onCorrect,
+  onTrimBefore,
+  extraActions,
 }: Props) {
   if (typeof content === "string") {
     const { text, openedFiles, uploadedFiles } = parseUserPrompt(content);
@@ -347,12 +427,20 @@ export const UserPromptBlock = memo(function UserPromptBlock({
 
     return (
       <div className="user-prompt-container">
-        <div className="message message-user-prompt">
+        <div
+          className={`message message-user-prompt ${onCorrect ? "user-prompt-correctable" : ""}`}
+        >
           <div className="message-content">
-            <CollapsibleText text={text} />
+            <UserPromptText text={text} />
             <UploadedFilesMetadata files={uploadedFiles} />
           </div>
         </div>
+        <UserPromptActionButtons
+          onCorrect={onCorrect}
+          onTrimBefore={onTrimBefore}
+          copyText={getUserPromptCopyText(text)}
+          extraActions={extraActions}
+        />
         <OpenedFilesMetadata files={openedFiles} />
       </div>
     );
@@ -391,12 +479,20 @@ export const UserPromptBlock = memo(function UserPromptBlock({
 
   return (
     <div className="user-prompt-container">
-      <div className="message message-user-prompt">
+      <div
+        className={`message message-user-prompt ${onCorrect ? "user-prompt-correctable" : ""}`}
+      >
         <div className="message-content">
-          <CollapsibleText text={text} />
+          <UserPromptText text={text} />
           <UploadedFilesMetadata files={allUploadedFiles} />
         </div>
       </div>
+      <UserPromptActionButtons
+        onCorrect={onCorrect}
+        onTrimBefore={onTrimBefore}
+        copyText={getUserPromptCopyText(text)}
+        extraActions={extraActions}
+      />
       <OpenedFilesMetadata files={openedFiles} />
     </div>
   );

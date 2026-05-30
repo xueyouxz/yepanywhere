@@ -13,6 +13,7 @@ export {
 } from "./types";
 export {
   ConnectionManager,
+  connectionManager,
   type ConnectionState,
   type ConnectionManagerConfig,
   type ReconnectFn,
@@ -76,8 +77,6 @@ export function isRemoteMode(): boolean {
 }
 
 /**
- * Singleton ConnectionManager for the app.
- * Both ActivityBus and useSessionStream feed events into this instance.
+ * The singleton ConnectionManager lives in ConnectionManager.ts so lower-level
+ * connection modules can import it without creating a circular dependency.
  */
-import { ConnectionManager } from "./ConnectionManager";
-export const connectionManager = new ConnectionManager();

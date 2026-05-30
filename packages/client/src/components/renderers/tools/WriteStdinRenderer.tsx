@@ -1,4 +1,7 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
+import { parseShellToolOutput } from "../../../lib/shellToolOutput";
+import { AnsiText } from "../../ui/AnsiText";
+import { FixedFontMathToggle } from "../../ui/FixedFontMathToggle";
 import { Modal } from "../../ui/Modal";
 import type { ToolRenderer, WriteStdinInput, WriteStdinResult } from "./types";
 
@@ -134,43 +137,26 @@ function getResultText(result: unknown): string {
   return JSON.stringify(result, null, 2);
 }
 
-function extractExitCode(text: string): number | undefined {
-  const match = text.match(
-    /(?:^|\n)\s*(?:Process exited with code|Exit code:)\s*(-?\d+)\b/i,
-  );
-  if (!match?.[1]) {
-    return undefined;
-  }
-  return Number.parseInt(match[1], 10);
-}
-
-function extractWallTime(text: string): string | undefined {
-  const match = text.match(/(?:^|\n)\s*Wall time:\s*([^\n]+)\s*(?:\n|$)/i);
-  if (!match?.[1]) {
-    return undefined;
-  }
-  return match[1].trim();
-}
-
-function parseResultEnvelope(text: string): {
-  output: string;
-  exitCode?: number;
-  wallTime?: string;
-} {
-  const outputMatch = text.match(/(?:^|\n)\s*Output:\s*\n([\s\S]*)$/i);
-  const output = outputMatch?.[1] ?? text;
-  return {
-    output: output.trimEnd(),
-    exitCode: extractExitCode(text),
-    wallTime: extractWallTime(text),
-  };
-}
-
 function countContentLines(content: string): number {
   if (content.length === 0) {
     return 0;
   }
   return content.split("\n").filter(Boolean).length;
+}
+
+function renderFixedFontMathPanel(
+  html: string,
+  className = "code-block",
+): ReactNode {
+  return (
+    <div className={`${className} fixed-font-rendered-panel`}>
+      <div
+        className="fixed-font-rendered__content"
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: KaTeX output is trusted HTML from local rendering
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    </div>
+  );
 }
 
 function ReadViaPtyFile({
@@ -258,7 +244,7 @@ export const writeStdinRenderer: ToolRenderer<
 
   renderToolResult(result, isError, _context, input) {
     const text = getResultText(result);
-    const parsed = parseResultEnvelope(text);
+    const parsed = parseShellToolOutput(text);
     const linkedToolName = getLinkedToolName(input);
     const linkedFilePath = getLinkedFilePath(input);
 
@@ -279,9 +265,20 @@ export const writeStdinRenderer: ToolRenderer<
 
     return (
       <div className={`bash-result ${isError ? "bash-result-error" : ""}`}>
-        <pre className={`code-block ${isError ? "code-block-error" : ""}`}>
-          <code>{parsed.output}</code>
-        </pre>
+        <FixedFontMathToggle
+          sourceText={parsed.output}
+          sourceView={
+            <pre className={`code-block ${isError ? "code-block-error" : ""}`}>
+              <AnsiText text={parsed.output} />
+            </pre>
+          }
+          renderRenderedView={(html) =>
+            renderFixedFontMathPanel(
+              html,
+              `code-block ${isError ? "code-block-error" : ""}`.trim(),
+            )
+          }
+        />
       </div>
     );
   },
@@ -309,7 +306,7 @@ export const writeStdinRenderer: ToolRenderer<
     }
 
     const text = getResultText(result);
-    const parsed = parseResultEnvelope(text);
+    const parsed = parseShellToolOutput(text);
     if (parsed.exitCode !== undefined && parsed.wallTime) {
       return `exit ${parsed.exitCode} in ${parsed.wallTime}`;
     }
@@ -338,7 +335,7 @@ export const writeStdinRenderer: ToolRenderer<
     }
 
     const text = getResultText(result);
-    const parsed = parseResultEnvelope(text);
+    const parsed = parseShellToolOutput(text);
     if (!parsed.output.trim()) {
       return null;
     }

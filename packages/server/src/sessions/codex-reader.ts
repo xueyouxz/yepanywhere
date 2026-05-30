@@ -11,8 +11,8 @@
  * Unlike Claude's DAG structure, Codex sessions are linear.
  */
 
-import { readdir, stat } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { open, readdir, stat } from "node:fs/promises";
+import { join } from "node:path";
 import {
   type CodexEventMsgEntry,
   type CodexFunctionCallOutputPayload,
@@ -23,18 +23,16 @@ import {
   type CodexSessionEntry,
   type CodexSessionMetaEntry,
   type CodexTurnContextEntry,
-  SESSION_TITLE_MAX_LENGTH,
-  type UnifiedSession,
   type UrlProjectId,
   getModelContextWindow,
   parseCodexSessionEntry,
+  truncateSessionTitle,
 } from "@yep-anywhere/shared";
 import { canonicalizeProjectPath } from "../projects/paths.js";
 import type {
   ContentBlock,
   ContextUsage,
   Message,
-  Session,
   SessionSummary,
 } from "../supervisor/types.js";
 import { readFirstLine, readJsonlLines } from "../utils/jsonl.js";
@@ -68,6 +66,49 @@ interface CodexSessionFile {
 }
 
 const CODEX_META_READ_MAX_BYTES = 1024 * 1024;
+const CODEX_SCAN_CACHE_TTL_MS = 5000;
+
+interface CodexScanOptions {
+  activeAfterMs?: number;
+}
+
+interface CodexSharedScanCacheEntry {
+  timestamp: number;
+  sessions: CodexSessionFile[];
+  inFlight?: Promise<CodexSessionFile[]>;
+}
+
+const codexSharedScanCache = new Map<string, CodexSharedScanCacheEntry>();
+
+interface CodexEntryCache {
+  filePath: string;
+  mtimeMs: number;
+  size: number;
+  entries: CodexSessionEntry[];
+  partialLine: string;
+}
+
+function parseCodexJsonlChunk(
+  chunk: string,
+  mayEndWithPartialLine: boolean,
+): { entries: CodexSessionEntry[]; partialLine: string } {
+  const lines = chunk.split("\n");
+  const partialLine = mayEndWithPartialLine ? (lines.pop() ?? "") : "";
+  const entries: CodexSessionEntry[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const entry = parseCodexSessionEntry(trimmed);
+    if (entry) {
+      entries.push(entry);
+    }
+  }
+
+  return { entries, partialLine };
+}
 
 /**
  * Codex-specific session reader for Codex CLI JSONL files.
@@ -81,8 +122,7 @@ export class CodexSessionReader implements ISessionReader {
 
   // Cache of session ID -> file path for quick lookups
   private sessionFileCache: Map<string, CodexSessionFile> = new Map();
-  private cacheTimestamp = 0;
-  private readonly CACHE_TTL_MS = 5000; // 5 second cache
+  private entryCache: Map<string, CodexEntryCache> = new Map();
 
   constructor(options: CodexSessionReaderOptions) {
     this.sessionsDir = options.sessionsDir;
@@ -93,7 +133,12 @@ export class CodexSessionReader implements ISessionReader {
 
   invalidateCache(): void {
     this.sessionFileCache.clear();
-    this.cacheTimestamp = 0;
+    this.entryCache.clear();
+    for (const cacheKey of codexSharedScanCache.keys()) {
+      if (cacheKey.startsWith(`${this.sessionsDir}::`)) {
+        codexSharedScanCache.delete(cacheKey);
+      }
+    }
   }
 
   async listSessions(projectId: UrlProjectId): Promise<SessionSummary[]> {
@@ -132,16 +177,7 @@ export class CodexSessionReader implements ISessionReader {
     if (!sessionFile) return null;
 
     try {
-      const lines = await readJsonlLines(sessionFile.filePath);
-      if (lines.length === 0 || (lines.length === 1 && !lines[0])) return null;
-      const entries: CodexSessionEntry[] = [];
-
-      for (const line of lines) {
-        const entry = parseCodexSessionEntry(line);
-        if (entry) {
-          entries.push(entry);
-        }
-      }
+      const entries = await this.readEntries(sessionId, sessionFile.filePath);
 
       if (entries.length === 0) return null;
 
@@ -158,6 +194,10 @@ export class CodexSessionReader implements ISessionReader {
       const provider = this.determineProvider(metaEntry, model);
       const turnContext = this.extractTurnContext(entries);
       const contextUsage = this.extractContextUsage(entries, model, provider);
+      const parentSessionId =
+        typeof metaEntry.payload.forked_from_id === "string"
+          ? metaEntry.payload.forked_from_id
+          : undefined;
 
       // Skip sessions with no actual conversation messages
       if (messageCount === 0) return null;
@@ -174,6 +214,7 @@ export class CodexSessionReader implements ISessionReader {
         contextUsage,
         provider,
         model,
+        parentSessionId,
         originator: metaEntry.payload.originator,
         cliVersion: metaEntry.payload.cli_version,
         source: metaEntry.payload.source,
@@ -206,15 +247,7 @@ export class CodexSessionReader implements ISessionReader {
     const sessionFile = await this.findSessionFile(sessionId);
     if (!sessionFile) return null;
 
-    const lines = await readJsonlLines(sessionFile.filePath);
-
-    const entries: CodexSessionEntry[] = [];
-    for (const line of lines) {
-      const entry = parseCodexSessionEntry(line);
-      if (entry) {
-        entries.push(entry);
-      }
-    }
+    const entries = await this.readEntries(sessionId, sessionFile.filePath);
 
     // Filter entries if needed (for incremental fetching)
     // Note: Codex entries are not 1:1 with messages, so standard ID filtering is tricky
@@ -285,25 +318,71 @@ export class CodexSessionReader implements ISessionReader {
   /**
    * Scan the sessions directory and find all session files.
    */
-  private async scanSessions(): Promise<CodexSessionFile[]> {
-    // Check cache
-    if (Date.now() - this.cacheTimestamp < this.CACHE_TTL_MS) {
-      return Array.from(this.sessionFileCache.values());
+  private async scanSessions(
+    options?: CodexScanOptions,
+  ): Promise<CodexSessionFile[]> {
+    const cacheKey = this.getSharedScanCacheKey(options);
+    const cached = codexSharedScanCache.get(cacheKey);
+    const now = Date.now();
+
+    if (cached && now - cached.timestamp < CODEX_SCAN_CACHE_TTL_MS) {
+      if (cached.inFlight) {
+        const sessions = await cached.inFlight;
+        this.hydrateSessionFileCache(sessions);
+        return sessions.filter((session) => !session.isSubagent);
+      }
+      this.hydrateSessionFileCache(cached.sessions);
+      return cached.sessions.filter((session) => !session.isSubagent);
     }
 
+    const inFlight = this.scanSessionsUncached(options);
+    codexSharedScanCache.set(cacheKey, {
+      timestamp: now,
+      sessions: [],
+      inFlight,
+    });
+
+    try {
+      const sessions = await inFlight;
+      codexSharedScanCache.set(cacheKey, {
+        timestamp: Date.now(),
+        sessions,
+      });
+      this.hydrateSessionFileCache(sessions);
+      return sessions.filter((session) => !session.isSubagent);
+    } catch (error) {
+      const entry = codexSharedScanCache.get(cacheKey);
+      if (entry?.inFlight === inFlight) {
+        codexSharedScanCache.delete(cacheKey);
+      }
+      throw error;
+    }
+  }
+
+  private getSharedScanCacheKey(options?: CodexScanOptions): string {
+    return `${this.sessionsDir}::activeAfter=${options?.activeAfterMs ?? "all"}`;
+  }
+
+  private hydrateSessionFileCache(sessions: CodexSessionFile[]): void {
+    for (const session of sessions) {
+      this.sessionFileCache.set(session.id, session);
+    }
+  }
+
+  private async scanSessionsUncached(
+    options?: CodexScanOptions,
+  ): Promise<CodexSessionFile[]> {
     const sessions: CodexSessionFile[] = [];
     const files = await this.findJsonlFiles(this.sessionsDir);
 
     for (const filePath of files) {
-      const session = await this.readSessionMeta(filePath);
+      const session = await this.readSessionMeta(filePath, options);
       if (session) {
         sessions.push(session);
-        this.sessionFileCache.set(session.id, session);
       }
     }
 
-    this.cacheTimestamp = Date.now();
-    return sessions.filter((session) => !session.isSubagent);
+    return sessions;
   }
 
   async getSessionFilePath(sessionId: string): Promise<string | null> {
@@ -317,14 +396,16 @@ export class CodexSessionReader implements ISessionReader {
 
   async listSessionFiles(
     _sessionDir: string,
+    options?: CodexScanOptions,
   ): Promise<{ sessionId: string; filePath: string }[]> {
-    const sessions = await this.scanSessions();
+    const sessions = await this.scanSessions(options);
 
     return sessions
-      .filter((session) =>
-        this.projectPath
-          ? canonicalizeProjectPath(session.cwd) === this.projectPath
-          : true,
+      .filter(
+        (session) =>
+          (!this.projectPath ||
+            canonicalizeProjectPath(session.cwd) === this.projectPath) &&
+          (!options?.activeAfterMs || session.mtime >= options.activeAfterMs),
       )
       .map((session) => ({
         sessionId: session.id,
@@ -345,6 +426,80 @@ export class CodexSessionReader implements ISessionReader {
     // Scan if cache miss
     await this.scanSessions();
     return this.sessionFileCache.get(sessionId) ?? null;
+  }
+
+  private async readEntries(
+    sessionId: string,
+    filePath: string,
+  ): Promise<CodexSessionEntry[]> {
+    const stats = await stat(filePath);
+    const cached = this.entryCache.get(sessionId);
+
+    if (
+      cached &&
+      cached.filePath === filePath &&
+      cached.size === stats.size &&
+      cached.mtimeMs === stats.mtimeMs
+    ) {
+      return cached.entries;
+    }
+
+    if (
+      cached &&
+      cached.filePath === filePath &&
+      cached.size < stats.size
+    ) {
+      const appended = await this.readFileRange(
+        filePath,
+        cached.size,
+        stats.size - cached.size,
+      );
+      const { entries, partialLine } = parseCodexJsonlChunk(
+        cached.partialLine + appended,
+        stats.size > cached.size,
+      );
+      cached.entries.push(...entries);
+      cached.partialLine = partialLine;
+      cached.size = stats.size;
+      cached.mtimeMs = stats.mtimeMs;
+      return cached.entries;
+    }
+
+    const lines = await readJsonlLines(filePath);
+    const entries: CodexSessionEntry[] = [];
+    for (const line of lines) {
+      const entry = parseCodexSessionEntry(line);
+      if (entry) {
+        entries.push(entry);
+      }
+    }
+    this.entryCache.set(sessionId, {
+      filePath,
+      mtimeMs: stats.mtimeMs,
+      size: stats.size,
+      entries,
+      partialLine: "",
+    });
+    return entries;
+  }
+
+  private async readFileRange(
+    filePath: string,
+    start: number,
+    length: number,
+  ): Promise<string> {
+    if (length <= 0) {
+      return "";
+    }
+
+    const handle = await open(filePath, "r");
+    try {
+      const buffer = Buffer.alloc(length);
+      const { bytesRead } = await handle.read(buffer, 0, length, start);
+      return buffer.toString("utf-8", 0, bytesRead);
+    } finally {
+      await handle.close();
+    }
   }
 
   /**
@@ -377,12 +532,15 @@ export class CodexSessionReader implements ISessionReader {
    */
   private async readSessionMeta(
     filePath: string,
+    options?: CodexScanOptions,
   ): Promise<CodexSessionFile | null> {
     try {
-      const [stats, firstLine] = await Promise.all([
-        stat(filePath),
-        readFirstLine(filePath, CODEX_META_READ_MAX_BYTES),
-      ]);
+      const stats = await stat(filePath);
+      if (options?.activeAfterMs && stats.mtimeMs < options.activeAfterMs) {
+        return null;
+      }
+
+      const firstLine = await readFirstLine(filePath, CODEX_META_READ_MAX_BYTES);
 
       if (!firstLine) return null;
 
@@ -452,10 +610,7 @@ export class CodexSessionReader implements ISessionReader {
         ) {
           continue;
         }
-        const title =
-          fullTitle.length <= SESSION_TITLE_MAX_LENGTH
-            ? fullTitle
-            : `${fullTitle.slice(0, SESSION_TITLE_MAX_LENGTH - 3)}...`;
+        const title = truncateSessionTitle(fullTitle) || null;
         return { title, fullTitle };
       }
 
@@ -470,10 +625,7 @@ export class CodexSessionReader implements ISessionReader {
             text &&
             !(skipLeadingSystemPrompts && this.isSystemPromptUserMessage(text))
           ) {
-            const title =
-              text.length <= SESSION_TITLE_MAX_LENGTH
-                ? text
-                : `${text.slice(0, SESSION_TITLE_MAX_LENGTH - 3)}...`;
+            const title = truncateSessionTitle(text) || null;
             return { title, fullTitle: text };
           }
         }

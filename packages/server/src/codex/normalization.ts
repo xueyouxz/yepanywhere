@@ -46,6 +46,9 @@ interface NormalizedCodexToolOutputWithExitCode
 }
 
 const SHELL_EXECUTABLES = new Set(["bash", "sh", "zsh", "dash"]);
+const INLINE_IMAGE_DATA_URL_PREFIX_RE = /^data:(image\/[a-z0-9.+-]+)(?:;[^,]*)?,/i;
+const INLINE_IMAGE_DATA_URL_GLOBAL_RE =
+  /data:image\/[a-z0-9.+-]+(?:;[a-z0-9=.+-]+)*,[A-Za-z0-9+/=_-]+/gi;
 
 export function parseCodexToolArguments(argumentsText?: string): unknown {
   if (!argumentsText) {
@@ -133,6 +136,8 @@ export function normalizeCodexToolOutputWithContext(
   let isError = normalized.isError;
   const exitCode = normalized.exitCode ?? extractExitCodeFromText(content);
   const sessionId = extractSessionIdFromText(content);
+  const backgroundTaskId = extractCodexBackgroundTaskId(content);
+  const interrupted = isCodexInterruptedToolOutput(content);
 
   if (context?.toolName === "Grep") {
     const grepContent = extractCodexShellOutputContent(content);
@@ -164,6 +169,16 @@ export function normalizeCodexToolOutputWithContext(
       structured = sessionId
         ? { ...writeResult, session_id: sessionId }
         : writeResult;
+    }
+  } else if (context?.toolName === "Bash") {
+    const bashContent = extractCodexShellOutputContent(content);
+    if (bashContent !== content || backgroundTaskId || interrupted) {
+      structured = createBashToolResult(
+        interrupted ? "" : bashContent,
+        isError,
+        backgroundTaskId,
+        interrupted,
+      );
     }
   }
 
@@ -229,6 +244,8 @@ export function normalizeCodexCommandExecutionOutput(
     execution.status !== "declined"
   ) {
     structured = normalizeWriteOutput(context.writeShellInfo);
+  } else if (context?.toolName === "Bash" && execution.status !== "declined") {
+    structured = createBashToolResult(baseOutput, isError);
   }
 
   return { content, structured, isError };
@@ -655,14 +672,44 @@ function extractExitCodeFromText(output: string): number | undefined {
   return Number.parseInt(match[1], 10);
 }
 
-function extractSessionIdFromText(output: string): number | undefined {
+export function extractCodexBackgroundTaskId(
+  output: unknown,
+): string | undefined {
+  if (typeof output !== "string") {
+    return undefined;
+  }
   const match = output.match(
     /(?:^|\n)\s*(?:Process\s+running\s+with\s+session\s+ID|session(?:\s+id)?)\s*:?\s*(\d+)\b/i,
   );
   if (!match?.[1]) {
     return undefined;
   }
-  return Number.parseInt(match[1], 10);
+  return match[1];
+}
+
+export function isCodexBackgroundProcessOutput(output: unknown): boolean {
+  if (typeof output !== "string") {
+    return false;
+  }
+  return (
+    extractCodexBackgroundTaskId(output) !== undefined &&
+    extractExitCodeFromText(output) === undefined
+  );
+}
+
+export function isCodexInterruptedToolOutput(output: unknown): boolean {
+  return (
+    typeof output === "string" &&
+    /(?:^|\n)\s*(?:aborted by user|interrupted by user)(?:\s|$)/i.test(output)
+  );
+}
+
+function extractSessionIdFromText(output: string): number | undefined {
+  const taskId = extractCodexBackgroundTaskId(output);
+  if (!taskId) {
+    return undefined;
+  }
+  return Number.parseInt(taskId, 10);
 }
 
 function normalizeCodexToolOutput(
@@ -677,25 +724,44 @@ function normalizeCodexToolOutput(
     try {
       structured = JSON.parse(output);
       if (typeof structured === "string") {
-        content = structured;
-        exitCode = extractExitCodeFromText(structured);
+        const sanitized = sanitizeInlineImageData(structured);
+        content =
+          typeof sanitized.value === "string" ? sanitized.value : structured;
+        structured = sanitized.value;
+        exitCode = extractExitCodeFromText(content);
         if (exitCode !== undefined) {
           isError = exitCode !== 0;
         }
       } else if (isRecord(structured)) {
-        exitCode = extractExitCodeFromRecord(structured);
+        const sanitized = sanitizeInlineImageData(structured);
+        const record = isRecord(sanitized.value)
+          ? sanitized.value
+          : structured;
+        if (sanitized.changed) {
+          structured = record;
+          content = JSON.stringify(record, null, 2);
+        }
+        exitCode = extractExitCodeFromRecord(record);
         isError =
-          structured.is_error === true ||
+          record.is_error === true ||
           (exitCode !== undefined && exitCode !== 0) ||
-          hasFailedStatus(structured);
+          hasFailedStatus(record);
+      } else if (Array.isArray(structured)) {
+        const sanitized = sanitizeInlineImageData(structured);
+        if (sanitized.changed) {
+          structured = sanitized.value;
+          content = JSON.stringify(structured, null, 2);
+        }
       }
     } catch {
       structured = undefined;
-      exitCode = extractExitCodeFromText(output);
+      const sanitized = sanitizeInlineImageText(output);
+      content = sanitized.value;
+      exitCode = extractExitCodeFromText(content);
       if (exitCode !== undefined) {
         isError = exitCode !== 0;
       } else {
-        isError = /(?:^|\n)\s*(error|fatal|failed):/i.test(output);
+        isError = /(?:^|\n)\s*(error|fatal|failed):/i.test(content);
       }
     }
 
@@ -715,23 +781,117 @@ function normalizeCodexToolOutput(
   }
 
   if (Array.isArray(output) || isRecord(output)) {
-    const exitCode = isRecord(output)
-      ? extractExitCodeFromRecord(output)
+    const sanitized = sanitizeInlineImageData(output);
+    const structured = sanitized.value;
+    const exitCode = isRecord(structured)
+      ? extractExitCodeFromRecord(structured)
       : undefined;
     const isError =
-      isRecord(output) &&
-      (output.is_error === true ||
+      isRecord(structured) &&
+      (structured.is_error === true ||
         (exitCode ?? 0) !== 0 ||
-        hasFailedStatus(output));
+        hasFailedStatus(structured));
     return {
-      content: JSON.stringify(output, null, 2),
-      structured: output,
+      content: JSON.stringify(structured, null, 2),
+      structured,
       isError,
       exitCode,
     };
   }
 
   return { content: String(output), isError: false };
+}
+
+function sanitizeInlineImageData(value: unknown): {
+  value: unknown;
+  changed: boolean;
+} {
+  if (typeof value === "string") {
+    return sanitizeInlineImageText(value);
+  }
+
+  if (Array.isArray(value)) {
+    let changed = false;
+    const sanitized = value.map((item) => {
+      const result = sanitizeInlineImageData(item);
+      changed ||= result.changed;
+      return result.value;
+    });
+    return changed ? { value: sanitized, changed } : { value, changed };
+  }
+
+  if (!isRecord(value)) {
+    return { value, changed: false };
+  }
+
+  let changed = false;
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    const result = sanitizeInlineImageData(item);
+    changed ||= result.changed;
+    sanitized[key] = result.value;
+  }
+
+  return changed ? { value: sanitized, changed } : { value, changed };
+}
+
+function sanitizeInlineImageText(value: string): {
+  value: string;
+  changed: boolean;
+} {
+  if (!value.includes("data:image/")) {
+    return { value, changed: false };
+  }
+
+  if (value.startsWith("data:image/")) {
+    return { value: summarizeInlineImageDataUrl(value), changed: true };
+  }
+
+  const replaced = value.replace(INLINE_IMAGE_DATA_URL_GLOBAL_RE, (match) =>
+    summarizeInlineImageDataUrl(match),
+  );
+  return { value: replaced, changed: replaced !== value };
+}
+
+function summarizeInlineImageDataUrl(value: string): string {
+  const match = INLINE_IMAGE_DATA_URL_PREFIX_RE.exec(value);
+  const mimeType = match?.[1]?.toLowerCase() ?? "image/*";
+  const commaIndex = value.indexOf(",");
+  const payload = commaIndex >= 0 ? value.slice(commaIndex + 1) : "";
+  const bytes = estimateDataUrlPayloadBytes(value, payload);
+  return `[inline ${mimeType} data omitted${
+    bytes !== undefined ? `, ${formatByteSize(bytes)}` : ""
+  }]`;
+}
+
+function estimateDataUrlPayloadBytes(
+  dataUrl: string,
+  payload: string,
+): number | undefined {
+  if (!payload) return undefined;
+
+  const header = dataUrl.slice(0, Math.max(0, dataUrl.indexOf(",")));
+  if (!/;base64(?:;|$)/i.test(header)) {
+    try {
+      return decodeURIComponent(payload).length;
+    } catch {
+      return payload.length;
+    }
+  }
+
+  const sanitized = payload.replace(/\s+/g, "");
+  const padding = sanitized.endsWith("==")
+    ? 2
+    : sanitized.endsWith("=")
+      ? 1
+      : 0;
+  return Math.max(0, Math.floor((sanitized.length * 3) / 4) - padding);
+}
+
+function formatByteSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}\u202fb`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}\u202fkb`;
+  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10}\u202fmb`;
 }
 
 function extractCodexShellOutputContent(content: string): string {
@@ -749,6 +909,27 @@ function extractCodexShellOutputContent(content: string): string {
 
   const rawOutput = normalized.slice(markerIndex + marker.length);
   return rawOutput.startsWith("\n") ? rawOutput.slice(1) : rawOutput;
+}
+
+function createBashToolResult(
+  output: string,
+  isError: boolean,
+  backgroundTaskId?: string,
+  interrupted = false,
+): {
+  stdout: string;
+  stderr: string;
+  interrupted: boolean;
+  isImage: false;
+  backgroundTaskId?: string;
+} {
+  return {
+    stdout: interrupted || isError ? "" : output,
+    stderr: interrupted ? "" : isError ? output : "",
+    interrupted,
+    isImage: false,
+    ...(backgroundTaskId ? { backgroundTaskId } : {}),
+  };
 }
 
 function normalizeRipgrepOutput(output: string): {

@@ -1,5 +1,5 @@
 import { getDisplayBashCommandFromInput } from "../../lib/bashCommand";
-import type { ToolResultData } from "../../types/renderItems";
+import type { ToolCallItem, ToolResultData } from "../../types/renderItems";
 import { toolRegistry } from "../renderers/tools";
 
 /**
@@ -25,17 +25,18 @@ export function getToolSummary(
   toolName: string,
   input: unknown,
   result: ToolResultData | undefined,
-  status: "pending" | "complete" | "error" | "aborted",
+  status: ToolCallItem["status"],
 ): string {
   const renderer = toolRegistry.get(toolName);
+  const canonicalToolName = renderer.tool;
 
-  if (status === "pending" || status === "aborted") {
-    // Show input summary while pending or aborted (no result available)
+  if (status === "pending" || status === "aborted" || status === "incomplete") {
+    // Show input summary while no ordinary result is available.
     if (renderer.getUseSummary) {
       const summary = safeCall(() => renderer.getUseSummary?.(input));
       if (summary !== undefined) return summary;
     }
-    return getDefaultInputSummary(toolName, input);
+    return getDefaultInputSummary(canonicalToolName, input);
   }
 
   // Show result summary when complete or error
@@ -43,9 +44,9 @@ export function getToolSummary(
   let inputSummary: string;
   if (renderer.getUseSummary) {
     const summary = safeCall(() => renderer.getUseSummary?.(input));
-    inputSummary = summary ?? getDefaultInputSummary(toolName, input);
+    inputSummary = summary ?? getDefaultInputSummary(canonicalToolName, input);
   } else {
-    inputSummary = getDefaultInputSummary(toolName, input);
+    inputSummary = getDefaultInputSummary(canonicalToolName, input);
   }
 
   let resultSummary: string;
@@ -58,22 +59,22 @@ export function getToolSummary(
       ),
     );
     resultSummary =
-      summary ?? getDefaultResultSummary(toolName, result, status);
+      summary ?? getDefaultResultSummary(canonicalToolName, result, status);
   } else {
-    resultSummary = getDefaultResultSummary(toolName, result, status);
+    resultSummary = getDefaultResultSummary(canonicalToolName, result, status);
   }
 
   // Combine input and result for tools where the input context is valuable
-  if (toolName === "Glob" || toolName === "Grep") {
+  if (canonicalToolName === "Glob" || canonicalToolName === "Grep") {
     return `${inputSummary} → ${resultSummary}`;
   }
 
   // For Bash, always show description (input summary) since output is in collapsed preview
-  if (toolName === "Bash") {
+  if (canonicalToolName === "Bash") {
     return inputSummary;
   }
 
-  if (toolName === "WriteStdin") {
+  if (canonicalToolName === "WriteStdin") {
     if (inputSummary && inputSummary !== "waiting for output") {
       return `${inputSummary} → ${resultSummary}`;
     }

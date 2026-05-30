@@ -17,12 +17,12 @@ import {
   type GeminiSessionFile,
   type GeminiSessionMessage,
   type GeminiUserMessage,
-  SESSION_TITLE_MAX_LENGTH,
   type UnifiedSession,
   type UrlProjectId,
   getGeminiUserMessageText,
   getModelContextWindow,
   parseGeminiSessionFile,
+  truncateSessionTitle,
 } from "@yep-anywhere/shared";
 import type {
   ContentBlock,
@@ -441,10 +441,7 @@ export class GeminiSessionReader implements ISessionReader {
       if (msg.type === "user") {
         const userMsg = msg as GeminiUserMessage;
         const fullTitle = getGeminiUserMessageText(userMsg.content).trim();
-        const title =
-          fullTitle.length <= SESSION_TITLE_MAX_LENGTH
-            ? fullTitle
-            : `${fullTitle.slice(0, SESSION_TITLE_MAX_LENGTH - 3)}...`;
+        const title = truncateSessionTitle(fullTitle) || null;
         return { title, fullTitle };
       }
     }

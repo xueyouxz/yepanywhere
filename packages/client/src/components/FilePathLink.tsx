@@ -100,7 +100,7 @@ export const FilePathLink = memo(function FilePathLink({
 /**
  * Modal wrapper for FileViewer.
  */
-function FileViewerModal({
+export function FileViewerModal({
   projectId,
   filePath,
   lineNumber,

@@ -17,6 +17,10 @@ export interface UploadedFile {
   size: number;
   /** MIME type */
   mimeType: string;
+  /** Image width in pixels, if known */
+  width?: number;
+  /** Image height in pixels, if known */
+  height?: number;
 }
 
 /** Client -> Server: Start upload */
@@ -28,6 +32,10 @@ export interface UploadStartMessage {
   size: number;
   /** MIME type (e.g., "image/png", "application/pdf") */
   mimeType: string;
+  /** Image width in pixels, if known */
+  width?: number;
+  /** Image height in pixels, if known */
+  height?: number;
 }
 
 /** Client -> Server: End upload */

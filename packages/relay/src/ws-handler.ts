@@ -31,6 +31,10 @@ interface ConnectionState {
 /** Track connection state by WebSocket */
 const connectionStates = new WeakMap<WebSocket, ConnectionState>();
 
+interface WsHandlerHooks {
+  onProtocolAccepted?: (ws: WebSocket) => void;
+}
+
 function getState(ws: WebSocket): ConnectionState {
   let state = connectionStates.get(ws);
   if (!state) {
@@ -48,6 +52,7 @@ export function createWsHandler(
   config: RelayConfig,
   logger: Logger,
   telemetry: RelayTelemetryRecorder,
+  hooks: WsHandlerHooks = {},
 ) {
   function sendJson(ws: WebSocket, data: object): void {
     try {
@@ -183,6 +188,7 @@ export function createWsHandler(
         if (result === "registered") {
           state.username = msg.username;
           state.isServer = true;
+          hooks.onProtocolAccepted?.(ws);
           const response: RelayServerRegistered = { type: "server_registered" };
           sendJson(ws, response);
 
@@ -233,6 +239,7 @@ export function createWsHandler(
           state.username = msg.username;
           state.isServer = false;
           state.paired = true;
+          hooks.onProtocolAccepted?.(ws);
 
           // Also mark the server as paired
           const serverState = getState(result.serverWs);

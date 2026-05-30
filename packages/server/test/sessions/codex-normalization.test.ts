@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CodexSessionEntry } from "@yep-anywhere/shared";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { preprocessMessages } from "../../../client/src/lib/preprocessMessages.ts";
 import { normalizeSession } from "../../src/sessions/normalization.js";
 import type { LoadedSession } from "../../src/sessions/types.js";
@@ -166,6 +166,285 @@ describe("Codex Normalization", () => {
     });
   });
 
+  it("marks unpaired Codex function calls orphaned at a later turn boundary", () => {
+    const entries: CodexSessionEntry[] = [
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:01Z",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          call_id: "call-orphaned",
+          arguments: '{"cmd":"sleep 15"}',
+        },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2024-01-01T00:00:02Z",
+        payload: {
+          type: "user_message",
+          message: "next turn",
+        },
+      },
+    ];
+
+    const result = normalizeSession(buildLoadedSession(entries));
+    expect(result.messages[0]?.orphanedToolUseIds).toEqual(["call-orphaned"]);
+
+    const renderItems = preprocessMessages(result.messages);
+    expect(renderItems[0]).toMatchObject({
+      type: "tool_call",
+      id: "call-orphaned",
+      status: "incomplete",
+    });
+  });
+
+  it("keeps Codex background process handles open until interrupted", () => {
+    const entries: CodexSessionEntry[] = [
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:01Z",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          call_id: "call-bg",
+          arguments: '{"cmd":"sleep 20","tty":true}',
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:02Z",
+        payload: {
+          type: "function_call_output",
+          call_id: "call-bg",
+          output:
+            "Chunk ID: abc\nWall time: 1.0 seconds\nProcess running with session ID 123\nOutput:\n",
+        },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2024-01-01T00:00:03Z",
+        payload: {
+          type: "turn_aborted",
+          reason: "interrupted",
+        },
+      },
+    ];
+
+    const result = normalizeSession(buildLoadedSession(entries));
+    expect(result.messages[0]?.orphanedToolUseIds).toEqual(["call-bg"]);
+
+    const renderItems = preprocessMessages(result.messages);
+    expect(renderItems[0]).toMatchObject({
+      type: "tool_call",
+      id: "call-bg",
+      status: "pending",
+    });
+  });
+
+  it("closes persisted Codex background processes on exec_command_end", () => {
+    const entries: CodexSessionEntry[] = [
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:01Z",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          call_id: "call-bg",
+          arguments: '{"cmd":"sleep 1","tty":true}',
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:02Z",
+        payload: {
+          type: "function_call_output",
+          call_id: "call-bg",
+          output:
+            "Chunk ID: abc\nWall time: 1.0 seconds\nProcess running with session ID 123\nOutput:\n",
+        },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2024-01-01T00:00:03Z",
+        payload: {
+          type: "exec_command_end",
+          call_id: "call-bg",
+          process_id: "123",
+          aggregated_output: "done\n",
+          exit_code: 0,
+          status: "completed",
+        },
+      } as CodexSessionEntry,
+    ];
+
+    const result = normalizeSession(buildLoadedSession(entries));
+    expect(result.messages[0]?.orphanedToolUseIds).toBeUndefined();
+
+    const renderItems = preprocessMessages(result.messages);
+    expect(renderItems[0]).toMatchObject({
+      type: "tool_call",
+      id: "call-bg",
+      status: "complete",
+      toolResult: expect.objectContaining({ content: "done\n" }),
+    });
+  });
+
+  it("ignores duplicate Codex command output after exec_command_end", () => {
+    const entries: CodexSessionEntry[] = [
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:01Z",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          call_id: "call-fast",
+          arguments: '{"cmd":"false"}',
+        },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2024-01-01T00:00:02Z",
+        payload: {
+          type: "exec_command_end",
+          call_id: "call-fast",
+          process_id: "123",
+          aggregated_output: "",
+          exit_code: 1,
+          status: "failed",
+        },
+      } as CodexSessionEntry,
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:03Z",
+        payload: {
+          type: "function_call_output",
+          call_id: "call-fast",
+          output:
+            "Chunk ID: abc\nWall time: 0.0 seconds\nProcess exited with code 1\nOutput:\n",
+        },
+      },
+    ];
+
+    const result = normalizeSession(buildLoadedSession(entries));
+    expect(result.messages).toHaveLength(2);
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const renderItems = preprocessMessages(result.messages);
+      expect(renderItems[0]).toMatchObject({
+        type: "tool_call",
+        id: "call-fast",
+        status: "error",
+        toolResult: expect.objectContaining({ content: "(no output)" }),
+      });
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("keeps interrupted Codex commands orphaned until final exec end", () => {
+    const entries: CodexSessionEntry[] = [
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:01Z",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          call_id: "call-sleep",
+          arguments: '{"cmd":"sleep 20"}',
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:02Z",
+        payload: {
+          type: "function_call_output",
+          call_id: "call-sleep",
+          output: "aborted by user after 2.3s",
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:02.100Z",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: "<turn_aborted>\ninterrupted\n</turn_aborted>",
+            },
+          ],
+        },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2024-01-01T00:00:03Z",
+        payload: {
+          type: "turn_aborted",
+          reason: "interrupted",
+        },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2024-01-01T00:00:20Z",
+        payload: {
+          type: "exec_command_end",
+          call_id: "call-sleep",
+          process_id: "123",
+          aggregated_output: "",
+          exit_code: 0,
+          status: "completed",
+        },
+      } as CodexSessionEntry,
+    ];
+
+    const result = normalizeSession(buildLoadedSession(entries));
+    expect(
+      result.messages.some((message) =>
+        JSON.stringify(message.message?.content ?? "").includes(
+          "<turn_aborted>",
+        ),
+      ),
+    ).toBe(false);
+    expect(result.messages[0]?.orphanedToolUseIds).toEqual(["call-sleep"]);
+
+    const renderItems = preprocessMessages(result.messages);
+    expect(renderItems[0]).toMatchObject({
+      type: "tool_call",
+      id: "call-sleep",
+      status: "aborted",
+      toolResult: expect.objectContaining({ content: "(no output)" }),
+    });
+  });
+
+  it("keeps trailing unpaired Codex function calls pending", () => {
+    const entries: CodexSessionEntry[] = [
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:01Z",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          call_id: "call-pending",
+          arguments: '{"cmd":"sleep 15"}',
+        },
+      },
+    ];
+
+    const result = normalizeSession(buildLoadedSession(entries));
+    expect(result.messages[0]?.orphanedToolUseIds).toBeUndefined();
+
+    const renderItems = preprocessMessages(result.messages);
+    expect(renderItems[0]).toMatchObject({
+      type: "tool_call",
+      id: "call-pending",
+      status: "pending",
+    });
+  });
+
   it("normalizes exec_command input.cmd into Bash input.command", () => {
     const entries: CodexSessionEntry[] = [
       {
@@ -205,6 +484,41 @@ describe("Codex Normalization", () => {
         cmd: "pnpm lint",
         command: "pnpm lint",
       },
+    });
+  });
+
+  it("extracts exec_command envelope output into structured Bash stdout", () => {
+    const entries: CodexSessionEntry[] = [
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:01Z",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          call_id: "call-exec-ansi",
+          arguments: '{"cmd":"printf demo"}',
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:02Z",
+        payload: {
+          type: "function_call_output",
+          call_id: "call-exec-ansi",
+          output:
+            "Chunk ID: ff710e\nWall time: 0.0518 seconds\nProcess exited with code 0\nOutput:\nplain\n\u001b[32mgreen bold\u001b[0m\n",
+        },
+      },
+    ];
+
+    const result = normalizeSession(buildLoadedSession(entries));
+    const toolResultMessage = result.messages[1];
+
+    expect(toolResultMessage?.toolUseResult).toMatchObject({
+      stdout: "plain\n\u001b[32mgreen bold\u001b[0m\n",
+      stderr: "",
+      interrupted: false,
+      isImage: false,
     });
   });
 
@@ -850,7 +1164,7 @@ describe("Codex Normalization", () => {
     });
   });
 
-  it("adds internal reasoning placeholder thinking block when no summary is present", () => {
+  it("skips encrypted reasoning blocks when no summary is present", () => {
     const entries: CodexSessionEntry[] = [
       {
         type: "response_item",
@@ -863,16 +1177,7 @@ describe("Codex Normalization", () => {
     ];
 
     const result = normalizeSession(buildLoadedSession(entries));
-    expect(result.messages).toHaveLength(1);
-
-    const content = result.messages[0]?.message?.content;
-    const blocks = Array.isArray(content) ? content : [];
-
-    expect(blocks).toHaveLength(1);
-    expect(blocks[0]).toMatchObject({
-      type: "thinking",
-      thinking: "Reasoning [internal]",
-    });
+    expect(result.messages).toHaveLength(0);
   });
 
   it("skips developer messages from the normalized transcript", () => {
@@ -900,6 +1205,51 @@ describe("Codex Normalization", () => {
     const result = normalizeSession(buildLoadedSession(entries));
     expect(result.messages).toHaveLength(1);
     expect(result.messages[0]?.message?.role).toBe("assistant");
+  });
+
+  it("skips injected Codex startup instruction messages", () => {
+    const entries: CodexSessionEntry[] = [
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:01Z",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: [
+                "# AGENTS.md instructions for /tmp/yep-anywhere-no-project",
+                "",
+                "<INSTRUCTIONS>",
+                "# Banner",
+                "",
+                'Immediately say "Global AGENTS understood" after reading all of this.',
+                "</INSTRUCTIONS>",
+              ].join("\n"),
+            },
+          ],
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:02Z",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "sleep 30" }],
+        },
+      },
+    ];
+
+    const result = normalizeSession(buildLoadedSession(entries));
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]?.message?.role).toBe("user");
+    const content = result.messages[0]?.message?.content;
+    expect(Array.isArray(content) ? content[0] : content).toMatchObject({
+      type: "text",
+      text: "sleep 30",
+    });
   });
 
   it("emits turn_aborted as a visible system entry", () => {
@@ -940,6 +1290,65 @@ describe("Codex Normalization", () => {
       type: "system",
       subtype: "compact_boundary",
       content: "Compacted 12 messages",
+    });
+  });
+
+  it("dedupes paired Codex compacted events while preserving later ids", () => {
+    const entries: CodexSessionEntry[] = [
+      {
+        type: "compacted",
+        timestamp: "2024-01-01T00:00:03.000Z",
+        payload: {
+          message: "",
+        },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2024-01-01T00:00:03.100Z",
+        payload: {
+          type: "context_compacted",
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:04.000Z",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "After compact" }],
+        },
+      },
+    ];
+
+    const result = normalizeSession(buildLoadedSession(entries));
+    expect(result.messages).toHaveLength(2);
+    expect(result.messages[0]).toMatchObject({
+      type: "system",
+      subtype: "compact_boundary",
+    });
+    expect(result.messages[1]).toMatchObject({
+      uuid: "codex-2-2024-01-01T00:00:04.000Z",
+      type: "assistant",
+    });
+  });
+
+  it("keeps standalone Codex context_compacted events", () => {
+    const entries: CodexSessionEntry[] = [
+      {
+        type: "event_msg",
+        timestamp: "2024-01-01T00:00:03.000Z",
+        payload: {
+          type: "context_compacted",
+        },
+      },
+    ];
+
+    const result = normalizeSession(buildLoadedSession(entries));
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]).toMatchObject({
+      type: "system",
+      subtype: "compact_boundary",
+      content: "Context compacted",
     });
   });
 });

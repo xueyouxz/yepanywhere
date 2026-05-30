@@ -207,9 +207,9 @@ describe("useStreamingContent", () => {
       // Before throttle fires, no update
       expect(onUpdateMessage).not.toHaveBeenCalled();
 
-      // Advance past throttle interval (50ms)
+      // Advance past the base throttle interval.
       act(() => {
-        vi.advanceTimersByTime(50);
+        vi.advanceTimersByTime(100);
       });
 
       // Now update should have fired with accumulated text
@@ -263,7 +263,7 @@ describe("useStreamingContent", () => {
       });
 
       act(() => {
-        vi.advanceTimersByTime(50);
+        vi.advanceTimersByTime(100);
       });
 
       expect(onUpdateMessage).toHaveBeenCalledWith(
@@ -299,6 +299,61 @@ describe("useStreamingContent", () => {
         });
       });
 
+      expect(streamingMarkdownCallbacks.onStreamEnd).toHaveBeenCalled();
+    });
+
+    it("flushes pending throttled text when the stream stops", () => {
+      const { result } = renderHook(() =>
+        useStreamingContent(defaultOptions()),
+      );
+
+      act(() => {
+        result.current.handleStreamEvent({
+          type: "stream_event",
+          event: {
+            type: "message_start",
+            message: { id: "msg-123" },
+          },
+        });
+        result.current.handleStreamEvent({
+          type: "stream_event",
+          event: {
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "text", text: "" },
+          },
+        });
+      });
+
+      onUpdateMessage.mockClear();
+
+      act(() => {
+        result.current.handleStreamEvent({
+          type: "stream_event",
+          event: {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "text_delta", text: "final chunk" },
+          },
+        });
+        result.current.handleStreamEvent({
+          type: "stream_event",
+          event: {
+            type: "message_stop",
+          },
+        });
+      });
+
+      expect(onUpdateMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.objectContaining({
+            content: expect.arrayContaining([
+              expect.objectContaining({ text: "final chunk" }),
+            ]),
+          }),
+        }),
+        undefined,
+      );
       expect(streamingMarkdownCallbacks.onStreamEnd).toHaveBeenCalled();
     });
 

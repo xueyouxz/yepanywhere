@@ -9,6 +9,8 @@ import type {
 export type {
   PermissionMode,
   ProviderName,
+  RecapMode,
+  PromptSuggestionMode,
   UrlProjectId,
   // SDK schema types (for strict typing when needed)
   AssistantEntry,
@@ -126,17 +128,26 @@ export interface Message {
 // Type aliases for session types
 import type {
   AppSessionSummary,
+  SessionLivenessSnapshot,
   SessionOwnership as SessionOwnershipType,
 } from "@yep-anywhere/shared";
 
+export type { SessionLivenessSnapshot };
 export type SessionStatus = SessionOwnershipType;
 export type SessionSummary = AppSessionSummary;
+
+export interface SessionMetadata extends SessionSummary {
+  heartbeatTurnsEnabled?: boolean;
+  heartbeatTurnsAfterMinutes?: number;
+  heartbeatTurnText?: string;
+  heartbeatForceAfterMinutes?: number;
+}
 
 /**
  * Full session with messages.
  * Uses Message type (AppMessage with required id).
  */
-export interface Session extends SessionSummary {
+export interface Session extends SessionMetadata {
   messages: Message[];
 }
 

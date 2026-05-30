@@ -33,6 +33,7 @@ export abstract class BaseMockProvider implements MockAgentProvider {
   readonly supportsPermissionMode = true;
   readonly supportsThinkingToggle = true;
   readonly supportsSlashCommands = true;
+  readonly supportsSteering = true;
 
   protected scenarios: MockScenario[] = [];
   protected _scenarioIndex = 0;

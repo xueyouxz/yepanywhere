@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import { toUrlProjectId } from "@yep-anywhere/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SessionIndexService } from "../../src/indexes/SessionIndexService.js";
+import { GrokSessionReader } from "../../src/sessions/grok-reader.js";
 import { SessionReader } from "../../src/sessions/reader.js";
 import type { ISessionReader } from "../../src/sessions/types.js";
 import type { SessionSummary } from "../../src/supervisor/types.js";
@@ -472,6 +473,182 @@ describe("SessionIndexService", () => {
         codexReader,
       );
       expect(refreshed[0]?.title).toBe("Updated title");
+    });
+  });
+
+  describe("logical provider scopes", () => {
+    it("keeps Grok session indexes scoped by project path", async () => {
+      const grokSessionsDir = join(testDir, "grok-sessions");
+      const projectAPath = "/tmp/grok-project-a";
+      const projectBPath = "/tmp/grok-project-b";
+
+      const writeGrokSummary = async (
+        projectPath: string,
+        sessionId: string,
+        title: string,
+      ) => {
+        const sessionPath = join(
+          grokSessionsDir,
+          encodeURIComponent(projectPath),
+          sessionId,
+        );
+        await mkdir(sessionPath, { recursive: true });
+        await writeFile(
+          join(sessionPath, "summary.json"),
+          JSON.stringify({
+            info: { id: sessionId, cwd: projectPath },
+            created_at: "2026-05-28T17:00:00.000Z",
+            updated_at: "2026-05-28T17:01:00.000Z",
+            generated_title: title,
+            session_summary: title,
+            num_messages: 1,
+            current_model_id: "grok-build",
+          }),
+        );
+      };
+
+      await writeGrokSummary(projectAPath, "grok-a", "Project A Grok");
+      await writeGrokSummary(projectBPath, "grok-b", "Project B Grok");
+
+      const grokService = new SessionIndexService({
+        dataDir: join(testDir, "grok-indexes"),
+        projectsDir,
+        fullValidationIntervalMs: 60000,
+      });
+      await grokService.initialize();
+
+      const projectAId = toUrlProjectId(projectAPath);
+      const projectBId = toUrlProjectId(projectBPath);
+      const projectAReader = new GrokSessionReader({
+        sessionsDir: grokSessionsDir,
+        projectPath: projectAPath,
+      });
+      const projectBReader = new GrokSessionReader({
+        sessionsDir: grokSessionsDir,
+        projectPath: projectBPath,
+      });
+
+      const projectASessions = await grokService.getSessionsWithCache(
+        grokSessionsDir,
+        projectAId,
+        projectAReader,
+      );
+      expect(projectASessions.map((session) => session.id)).toEqual([
+        "grok-a",
+      ]);
+
+      const projectBSessions = await grokService.getSessionsWithCache(
+        grokSessionsDir,
+        projectBId,
+        projectBReader,
+      );
+      expect(projectBSessions.map((session) => session.id)).toEqual([
+        "grok-b",
+      ]);
+      expect(projectBSessions[0]?.projectId).toBe(projectBId);
+    });
+  });
+
+  describe("active window", () => {
+    it("filters cached summaries by activeAfter without deleting archive entries", async () => {
+      await createSession("session-old", "Old session");
+      await createSession("session-new", "New session");
+
+      const oldTime = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      await utimes(join(sessionDir, "session-old.jsonl"), oldTime, oldTime);
+
+      const activeAfterMs = Date.now() - 14 * 24 * 60 * 60 * 1000;
+      const active = await service.getSessionsWithCache(
+        sessionDir,
+        projectId,
+        reader,
+        { activeAfterMs },
+      );
+
+      expect(active.map((session) => session.id)).toEqual(["session-new"]);
+
+      const archive = await service.getSessionsWithCache(
+        sessionDir,
+        projectId,
+        reader,
+      );
+      expect(archive.map((session) => session.id).sort()).toEqual([
+        "session-new",
+        "session-old",
+      ]);
+    });
+
+    it("does not prune archive rows when provider enumeration is active-window filtered", async () => {
+      await createSession("session-old", "Old session");
+      await createSession("session-new", "New session");
+
+      const oldTime = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      await utimes(join(sessionDir, "session-old.jsonl"), oldTime, oldTime);
+
+      await service.getSessionsWithCache(sessionDir, projectId, reader);
+
+      const filteringReader: ISessionReader = {
+        listSessions: (projectId) => reader.listSessions(projectId),
+        getSessionSummary: (sessionId, projectId) =>
+          reader.getSessionSummary(sessionId, projectId),
+        getSession: (sessionId, projectId, afterMessageId, options) =>
+          reader.getSession(sessionId, projectId, afterMessageId, options),
+        getSessionSummaryIfChanged: (
+          sessionId,
+          projectId,
+          cachedMtime,
+          cachedSize,
+        ) =>
+          reader.getSessionSummaryIfChanged(
+            sessionId,
+            projectId,
+            cachedMtime,
+            cachedSize,
+          ),
+        getAgentMappings: () => reader.getAgentMappings(),
+        getAgentSession: (agentId) => reader.getAgentSession(agentId),
+        listSessionFiles: async (_sessionDir, options) => {
+          const files = await readdir(sessionDir);
+          const entries: { sessionId: string; filePath: string }[] = [];
+          for (const file of files) {
+            if (!file.endsWith(".jsonl") || file.startsWith("agent-")) {
+              continue;
+            }
+            const filePath = join(sessionDir, file);
+            const stats = await stat(filePath);
+            if (
+              options?.activeAfterMs !== undefined &&
+              stats.mtimeMs < options.activeAfterMs
+            ) {
+              continue;
+            }
+            entries.push({
+              sessionId: file.replace(".jsonl", ""),
+              filePath,
+            });
+          }
+          return entries;
+        },
+      };
+
+      const activeAfterMs = Date.now() - 14 * 24 * 60 * 60 * 1000;
+      const active = await service.getSessionsWithCache(
+        sessionDir,
+        projectId,
+        filteringReader,
+        { activeAfterMs },
+      );
+      expect(active.map((session) => session.id)).toEqual(["session-new"]);
+
+      const archive = await service.getSessionsWithCache(
+        sessionDir,
+        projectId,
+        reader,
+      );
+      expect(archive.map((session) => session.id).sort()).toEqual([
+        "session-new",
+        "session-old",
+      ]);
     });
   });
 

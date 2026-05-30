@@ -9,6 +9,26 @@ export function getMessageId(m: Message): string {
   return m.uuid ?? m.id ?? "";
 }
 
+export function findMessageIndexById(
+  messages: readonly Message[],
+  messageId: string,
+): number {
+  const lastIndex = messages.length - 1;
+  const lastMessage = messages[lastIndex];
+  if (lastMessage && getMessageId(lastMessage) === messageId) {
+    return lastIndex;
+  }
+
+  for (let index = lastIndex - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message && getMessageId(message) === messageId) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
 /**
  * Helper to get content from a message, handling both top-level and SDK nested structure.
  * SDK messages have content nested in message.content.
@@ -238,7 +258,7 @@ export function mergeStreamMessage(
 
   const incomingId = getMessageId(incoming);
   // Check for existing message with same ID
-  const existingIdx = existing.findIndex((m) => getMessageId(m) === incomingId);
+  const existingIdx = findMessageIndexById(existing, incomingId);
 
   if (existingIdx >= 0) {
     // Merge with existing message

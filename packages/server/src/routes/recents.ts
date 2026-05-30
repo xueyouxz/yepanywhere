@@ -13,6 +13,7 @@ import type { RecentsService } from "../recents/index.js";
 import type { CodexSessionReader } from "../sessions/codex-reader.js";
 import type { GeminiSessionReader } from "../sessions/gemini-reader.js";
 import { findSessionSummaryAcrossProviders } from "../sessions/provider-resolution.js";
+import type { GrokSessionReader } from "../sessions/grok-reader.js";
 import type { ISessionReader } from "../sessions/types.js";
 import type { Project } from "../supervisor/types.js";
 
@@ -27,6 +28,8 @@ export interface RecentsDeps {
   geminiScanner?: GeminiSessionScanner;
   geminiSessionsDir?: string;
   geminiReaderFactory?: (projectPath: string) => GeminiSessionReader;
+  grokSessionsDir?: string;
+  grokReaderFactory?: (projectPath: string) => GrokSessionReader;
 }
 
 export function createRecentsRoutes(deps: RecentsDeps): Hono {
@@ -73,6 +76,8 @@ export function createRecentsRoutes(deps: RecentsDeps): Hono {
           geminiSessionsDir: deps.geminiSessionsDir,
           geminiReaderFactory: deps.geminiReaderFactory,
           geminiHashToCwd: deps.geminiScanner?.getHashToCwd(),
+          grokSessionsDir: deps.grokSessionsDir,
+          grokReaderFactory: deps.grokReaderFactory,
         },
       );
       if (!resolved) {

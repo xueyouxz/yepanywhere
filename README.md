@@ -105,6 +105,8 @@ There are a lot of projects in this space. We track them all: **[docs/competitiv
 ## Development
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for build instructions, configuration options, and more.
+For client render/update architecture and performance invariants, see
+[packages/client/RENDERING_PERFORMANCE.md](packages/client/RENDERING_PERFORMANCE.md).
 
 ## TOS Compliance
 

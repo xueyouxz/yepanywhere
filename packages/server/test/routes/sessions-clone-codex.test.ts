@@ -117,6 +117,43 @@ describe("Codex clone route", () => {
     expect(codexScanner.invalidateCache).toHaveBeenCalledTimes(1);
   });
 
+  it("stores parent metadata for /btw clones", async () => {
+    const updateMetadata = vi.fn(async () => {});
+
+    const routes = createSessionsRoutes({
+      supervisor: {} as SessionsDeps["supervisor"],
+      scanner: {
+        getOrCreateProject: vi.fn(async () => project),
+      } as SessionsDeps["scanner"],
+      readerFactory: vi.fn(() => reader),
+      codexReaderFactory: vi.fn(() => reader),
+      sessionMetadataService: {
+        updateMetadata,
+      } as unknown as SessionsDeps["sessionMetadataService"],
+    });
+
+    const response = await routes.request(
+      `/projects/${projectId}/sessions/source-session/clone`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title: "/btw inspect this side path",
+          parentSessionId: "  parent-session  ",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { sessionId: string };
+    expect(updateMetadata).toHaveBeenCalledWith(body.sessionId, {
+      title: "/btw inspect this side path",
+      parentSessionId: "parent-session",
+    });
+  });
+
   it("clones Codex sessions for mixed-provider projects when the request specifies codex", async () => {
     const claudeProject: Project = {
       ...project,
