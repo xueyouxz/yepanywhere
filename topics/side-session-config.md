@@ -27,10 +27,17 @@ that capability without choosing a side model or owning another process.
   features start disabled unless the user opts in at session creation or via a
   saved provider default.
 - The side model is a session-level helper setting, not a per-feature setting.
-  The default token is `Cheapest`, which each provider maps to its cheap helper
-  model (for example Claude maps it to Haiku). The default comes from provider
-  configuration, can be changed globally in provider settings, and can be
-  overridden when creating a new session.
+  It may target the parent provider or a different configured helper provider,
+  including a YA-operator inference server such as vLLM. The default token is
+  `Cheapest`, which resolves through the helper-target registry to an
+  appropriate cheap model (for example Claude may map it to Haiku, while an
+  operator-run target may map it to a small Qwen-family model). The default
+  comes from provider configuration, can be changed globally in provider
+  settings, and can be overridden when creating a new session.
+- Once helper targets can cross provider boundaries, stored helper model ids
+  must be provider-qualified or otherwise globally unambiguous. A bare model
+  id such as `haiku` or `qwen` is not enough if more than one helper provider
+  can expose it.
 - The helper model chooser includes `Same as main session`. When a feature's
   execution mode is a provider fork and the helper model equals the parent
   session model, YA should use that fork path. If a provider later supports an
@@ -102,8 +109,8 @@ The same controls should back all simulated helper features:
 - Provider settings: per-provider default side model, plus feature defaults
   such as "simulate recaps for new sessions" or "simulate prompt suggestions
   for new sessions". The side model chooser must include `Cheapest` and
-  `Same as main session`, and the feature default must include `Off`, even for
-  native provider features.
+  `Same as main session`, may include helper targets from other providers, and
+  the feature default must include `Off`, even for native provider features.
 - New-session form: one session-level side model override, plus per-feature
   toggles for native/simulated/off or feature-specific fork-main-session mode.
   Defaults come from provider settings; native helper support can appear
@@ -115,6 +122,26 @@ The same controls should back all simulated helper features:
 - Implementation config: one shared side-query envelope for context window,
   timeout, cancellation, failure reporting, and close-on-session-end cleanup.
 
+## Helper Target Registry
+
+YA settings include a helper target registry for operator-run or external
+side-session backends. The first supported target kind is
+`openai-compatible`: a named HTTP base URL such as
+`http://localhost:8001/v1`, plus an optional served model id. A blank model
+means "use the endpoint default" for servers that accept omitted model values;
+when the UI discovers models via `/v1/models`, the user may still leave the
+model blank or choose one of the returned ids.
+
+Stored helper-side selections use `helper-target:<id>` rather than a bare
+model name. That keeps a local vLLM model such as `Qwen/Qwen3.6-27B` distinct
+from a provider-owned model with the same id and lets the parent session keep
+its own provider/model unchanged.
+
+The registry is configuration only until the helper execution layer knows how
+to route a given feature to that target. The UI may expose configured helper
+targets in the shared side-model chooser, but runtime support must still be
+implemented and tested per helper feature.
+
 ## Relationship to Features
 
 - Recaps summarize assistant work while the user was away. Native recap support
@@ -123,7 +150,10 @@ The same controls should back all simulated helper features:
 - Prompt suggestions predict the next user turn. Claude currently exposes this
   natively as `prompt_suggestion` via `promptSuggestions: true`; providers
   without native support should use the same simulated-helper controls as
-  recaps rather than a separate hidden model setting.
+  recaps rather than a separate hidden model setting. Because suggestions are
+  disposable and user-confirmed, an operator-run weak/open model can be an
+  acceptable helper target for this one feature even when it would be too low
+  quality for recaps or independent re-checks.
 - User-authored `doubt` from `github.com/graehl/agents` is the preferred
   fallback vocabulary for an independent re-check helper when no
   provider-native command exists. Native provider commands still win when
@@ -147,6 +177,9 @@ The same controls should back all simulated helper features:
 - Enabling simulated recaps and simulated prompt suggestions for the same
   parent session creates at most one helper side session and one catch-up
   cursor.
+- A parent session can choose a helper model from another provider or
+  operator-run backend without changing the parent provider/model and without
+  creating a per-feature helper model override.
 - Changing the in-session simulated-helper toggle does not restart the parent
   provider process.
 - A side query canceled by session end, tab disconnect, or timeout does not

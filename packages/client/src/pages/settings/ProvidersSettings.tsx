@@ -2,18 +2,362 @@ import { useCallback, useEffect, useState } from "react";
 import {
   HELPER_SIDE_MODEL_CHEAPEST,
   HELPER_SIDE_MODEL_SAME_AS_MAIN,
+  type HelperTargetConfig,
+  type ModelInfo,
   type PromptSuggestionMode,
   type RecapMode,
 } from "@yep-anywhere/shared";
+import { api, type ServerSettings } from "../../api/client";
 import { useToastContext } from "../../contexts/ToastContext";
 import { useCodexUpdateStatus } from "../../hooks/useCodexUpdateStatus";
 import { useProviders } from "../../hooks/useProviders";
 import { useServerSettings } from "../../hooks/useServerSettings";
 import { useI18n } from "../../i18n";
+import {
+  helperTargetDescription,
+  helperTargetsToModelOptions,
+  helperTargetValue,
+} from "../../lib/helperTargets";
 import { getAllProviders } from "../../providers/registry";
 
 const DEFAULT_OLLAMA_SYSTEM_PROMPT =
   "You are a helpful coding assistant. You help users with software engineering tasks. You have access to tools for reading files, editing files, running shell commands, and searching code. Use tools when needed to answer questions or make changes. Be concise and direct.";
+
+interface HelperTargetDraft {
+  id?: string;
+  name: string;
+  baseUrl: string;
+  model: string;
+}
+
+type UpdateServerSetting = <K extends keyof ServerSettings>(
+  key: K,
+  value: ServerSettings[K],
+) => Promise<void>;
+
+interface HelperTargetsSettingsProps {
+  settings: ServerSettings | null;
+  updateSetting: UpdateServerSetting;
+}
+
+const DEFAULT_HELPER_TARGET_DRAFT: HelperTargetDraft = {
+  name: "Local vLLM",
+  baseUrl: "http://localhost:8001/v1",
+  model: "",
+};
+
+function createHelperTargetId(
+  name: string,
+  targets: readonly HelperTargetConfig[],
+): string {
+  const base =
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "helper-target";
+  const existingIds = new Set(targets.map((target) => target.id));
+  if (!existingIds.has(base)) return base;
+
+  for (let suffix = 2; suffix < 1000; suffix += 1) {
+    const candidate = `${base}-${suffix}`;
+    if (!existingIds.has(candidate)) return candidate;
+  }
+
+  return `${base}-${Date.now().toString(36)}`;
+}
+
+function draftFromTarget(target: HelperTargetConfig): HelperTargetDraft {
+  return {
+    id: target.id,
+    name: target.name,
+    baseUrl: target.baseUrl,
+    model: target.model ?? "",
+  };
+}
+
+function targetFromDraft(
+  draft: HelperTargetDraft,
+  targets: readonly HelperTargetConfig[],
+): HelperTargetConfig {
+  const name = draft.name.trim();
+  const model = draft.model.trim();
+  return {
+    id: draft.id ?? createHelperTargetId(name, targets),
+    name,
+    kind: "openai-compatible",
+    baseUrl: draft.baseUrl.trim(),
+    ...(model ? { model } : {}),
+  };
+}
+
+function mergeModelOptions(
+  selectedModel: string,
+  discoveredModels: readonly ModelInfo[],
+): ModelInfo[] {
+  if (
+    selectedModel &&
+    !discoveredModels.some((model) => model.id === selectedModel)
+  ) {
+    return [
+      { id: selectedModel, name: selectedModel },
+      ...discoveredModels,
+    ];
+  }
+  return [...discoveredModels];
+}
+
+function HelperTargetsSettings({
+  settings,
+  updateSetting,
+}: HelperTargetsSettingsProps) {
+  const { t } = useI18n();
+  const targets = settings?.helperTargets ?? [];
+  const [draft, setDraft] = useState<HelperTargetDraft>(
+    DEFAULT_HELPER_TARGET_DRAFT,
+  );
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [discoveredModels, setDiscoveredModels] = useState<ModelInfo[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDiscovering, setIsDiscovering] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const resetDraft = useCallback(() => {
+    setDraft(DEFAULT_HELPER_TARGET_DRAFT);
+    setEditingId(null);
+    setDiscoveredModels([]);
+    setMessage(null);
+    setError(null);
+  }, []);
+
+  const beginEdit = useCallback((target: HelperTargetConfig) => {
+    setDraft(draftFromTarget(target));
+    setEditingId(target.id);
+    setDiscoveredModels(target.model ? [{ id: target.model, name: target.model }] : []);
+    setMessage(null);
+    setError(null);
+  }, []);
+
+  const deleteTarget = useCallback(
+    async (targetId: string) => {
+      setIsSaving(true);
+      setError(null);
+      try {
+        await updateSetting(
+          "helperTargets",
+          targets.filter((target) => target.id !== targetId),
+        );
+        if (editingId === targetId) {
+          resetDraft();
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t("helperTargetsSaveError"));
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [editingId, resetDraft, t, targets, updateSetting],
+  );
+
+  const discoverModels = useCallback(async () => {
+    setIsDiscovering(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await api.discoverHelperTargetModels(draft.baseUrl);
+      setDraft((prev) => ({ ...prev, baseUrl: result.baseUrl }));
+      setDiscoveredModels(result.models);
+      setMessage(
+        t("helperTargetsDiscovered", {
+          count: String(result.models.length),
+        }),
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : t("helperTargetsLoadError"),
+      );
+    } finally {
+      setIsDiscovering(false);
+    }
+  }, [draft.baseUrl, t]);
+
+  const saveTarget = useCallback(async () => {
+    if (!draft.name.trim() || !draft.baseUrl.trim()) {
+      setError(t("helperTargetsInvalid"));
+      return;
+    }
+
+    const nextTarget = targetFromDraft(draft, targets);
+    const nextTargets = editingId
+      ? targets.map((target) =>
+          target.id === editingId ? nextTarget : target,
+        )
+      : [...targets, nextTarget];
+
+    setIsSaving(true);
+    setError(null);
+    try {
+      await updateSetting("helperTargets", nextTargets);
+      resetDraft();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("helperTargetsSaveError"));
+    } finally {
+      setIsSaving(false);
+    }
+  }, [draft, editingId, resetDraft, t, targets, updateSetting]);
+
+  const modelOptions = mergeModelOptions(draft.model, discoveredModels);
+
+  return (
+    <div className="settings-item helper-targets-settings">
+      <div className="settings-item-info">
+        <strong>{t("helperTargetsTitle")}</strong>
+        <p>{t("helperTargetsDescription")}</p>
+        <p className="settings-hint">{t("helperTargetsRuntimeNote")}</p>
+      </div>
+
+      <div className="helper-targets-panel">
+        {targets.length === 0 ? (
+          <p className="settings-hint">{t("helperTargetsEmpty")}</p>
+        ) : (
+          <div className="helper-target-list">
+            {targets.map((target) => (
+              <div key={target.id} className="helper-target-row">
+                <div className="helper-target-row-main">
+                  <strong>{target.name}</strong>
+                  <span>{helperTargetDescription(target)}</span>
+                  <code>
+                    {t("helperTargetsIdPrefix")}{" "}
+                    {helperTargetValue(target)}
+                  </code>
+                </div>
+                <div className="helper-target-row-actions">
+                  <button
+                    type="button"
+                    className="settings-button settings-button-secondary"
+                    onClick={() => beginEdit(target)}
+                    disabled={isSaving}
+                  >
+                    {t("helperTargetsEdit")}
+                  </button>
+                  <button
+                    type="button"
+                    className="settings-button settings-button-secondary"
+                    onClick={() => void deleteTarget(target.id)}
+                    disabled={isSaving}
+                  >
+                    {t("helperTargetsDelete")}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="helper-target-editor">
+          <label>
+            <span>{t("helperTargetsNameLabel")}</span>
+            <input
+              type="text"
+              className="settings-input"
+              value={draft.name}
+              onChange={(event) =>
+                setDraft((prev) => ({ ...prev, name: event.target.value }))
+              }
+            />
+          </label>
+          <label>
+            <span>{t("helperTargetsBaseUrlLabel")}</span>
+            <input
+              type="text"
+              className="settings-input"
+              value={draft.baseUrl}
+              placeholder={t("helperTargetsBaseUrlPlaceholder")}
+              onChange={(event) =>
+                setDraft((prev) => ({ ...prev, baseUrl: event.target.value }))
+              }
+            />
+          </label>
+          <label>
+            <span>{t("helperTargetsModelLabel")}</span>
+            {modelOptions.length > 0 ? (
+              <select
+                className="settings-select"
+                value={draft.model}
+                onChange={(event) =>
+                  setDraft((prev) => ({
+                    ...prev,
+                    model: event.target.value,
+                  }))
+                }
+              >
+                <option value="">{t("helperTargetsModelDefault")}</option>
+                {modelOptions.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                className="settings-input"
+                value={draft.model}
+                placeholder={t("helperTargetsModelPlaceholder")}
+                onChange={(event) =>
+                  setDraft((prev) => ({
+                    ...prev,
+                    model: event.target.value,
+                  }))
+                }
+              />
+            )}
+          </label>
+        </div>
+
+        <div className="helper-target-actions">
+          <button
+            type="button"
+            className="settings-button settings-button-secondary"
+            onClick={() => void discoverModels()}
+            disabled={isDiscovering || !draft.baseUrl.trim()}
+          >
+            {isDiscovering
+              ? t("helperTargetsDiscovering")
+              : t("helperTargetsDiscover")}
+          </button>
+          {editingId && (
+            <button
+              type="button"
+              className="settings-button settings-button-secondary"
+              onClick={resetDraft}
+              disabled={isSaving}
+            >
+              {t("helperTargetsCancelEdit")}
+            </button>
+          )}
+          <button
+            type="button"
+            className="settings-button"
+            onClick={() => void saveTarget()}
+            disabled={isSaving}
+          >
+            {isSaving
+              ? t("providersSaving")
+              : editingId
+                ? t("helperTargetsSave")
+                : t("helperTargetsAdd")}
+          </button>
+        </div>
+
+        {message && <p className="settings-hint">{message}</p>}
+        {error && <p className="settings-warning">{error}</p>}
+      </div>
+    </div>
+  );
+}
 
 function OllamaUrlInput() {
   const { t } = useI18n();
@@ -422,6 +766,9 @@ export function ProvidersSettings() {
         : "off";
   const defaultHelperSideModel =
     newSessionDefaults?.helperSideModel ?? HELPER_SIDE_MODEL_CHEAPEST;
+  const helperTargetModelOptions = helperTargetsToModelOptions(
+    settings?.helperTargets,
+  );
   const recapModeLabels: Record<RecapMode, string> = {
     off: t("recapModeOff"),
     native: t("recapModeNative"),
@@ -455,6 +802,12 @@ export function ProvidersSettings() {
       <p className="settings-section-description">
         {t("providersSectionDescription")}
       </p>
+      <div className="settings-group">
+        <HelperTargetsSettings
+          settings={settings}
+          updateSetting={updateSetting}
+        />
+      </div>
       <div className="settings-group">
         <div className="settings-item model-settings-item">
           <div className="settings-item-info">
@@ -523,6 +876,11 @@ export function ProvidersSettings() {
             <option value={HELPER_SIDE_MODEL_SAME_AS_MAIN}>
               {t("helperSideModelSameAsMain")}
             </option>
+            {helperTargetModelOptions.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.name}
+              </option>
+            ))}
             {(defaultProviderInfo?.models ?? []).map((model) => (
               <option key={model.id} value={model.id}>
                 {model.name}

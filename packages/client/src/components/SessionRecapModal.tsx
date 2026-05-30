@@ -8,7 +8,9 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { useProviders } from "../hooks/useProviders";
+import { useServerSettings } from "../hooks/useServerSettings";
 import { useI18n } from "../i18n";
+import { helperTargetsToModelOptions } from "../lib/helperTargets";
 import { Modal } from "./ui/Modal";
 
 interface SessionRecapModalProps {
@@ -50,6 +52,7 @@ export function SessionRecapModal({
 }: SessionRecapModalProps) {
   const { t } = useI18n();
   const { providers } = useProviders();
+  const { settings } = useServerSettings();
   const [recapMode, setRecapMode] = useState<RecapMode>("off");
   const [helperSideModel, setHelperSideModel] = useState<string>(
     HELPER_SIDE_MODEL_CHEAPEST,
@@ -99,6 +102,10 @@ export function SessionRecapModal({
 
   const providerInfo = providers.find((p) => p.name === processProvider);
   const models = providerInfo?.models ?? [];
+  const helperTargetModelOptions = useMemo(
+    () => helperTargetsToModelOptions(settings?.helperTargets),
+    [settings?.helperTargets],
+  );
   const modeAvailability = useMemo(
     () => ({
       off: true,
@@ -121,9 +128,10 @@ export function SessionRecapModal({
             ? processModel
             : undefined,
       },
+      ...helperTargetModelOptions,
       ...models,
     ],
-    [models, processModel, t],
+    [helperTargetModelOptions, models, processModel, t],
   );
 
   const save = useCallback(async () => {

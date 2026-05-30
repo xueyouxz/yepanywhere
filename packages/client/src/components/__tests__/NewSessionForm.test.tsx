@@ -40,6 +40,8 @@ const {
       enabled?: boolean;
       supportsPermissionMode?: boolean;
       supportsThinkingToggle?: boolean;
+      supportsRecaps?: boolean;
+      supportsNativeRecaps?: boolean;
       supportsNativePromptSuggestions?: boolean;
       models?: Array<{ id: string; name: string; description?: string }>;
     }>,
@@ -51,8 +53,17 @@ const {
         provider?: "claude" | "codex";
         model?: string;
         permissionMode?: "default";
+        recapMode?: "off" | "native" | "side-session";
         promptSuggestionMode?: "off" | "native";
+        helperSideModel?: string;
       };
+      helperTargets?: Array<{
+        id: string;
+        name: string;
+        kind: "openai-compatible";
+        baseUrl: string;
+        model?: string;
+      }>;
     } | null,
     isLoading: true,
   },
@@ -256,6 +267,7 @@ describe("NewSessionForm", () => {
         authenticated: true,
         supportsPermissionMode: true,
         supportsThinkingToggle: true,
+        supportsRecaps: true,
         supportsNativePromptSuggestions: true,
         models: [
           { id: "default", name: "Default" },
@@ -269,6 +281,7 @@ describe("NewSessionForm", () => {
         authenticated: true,
         supportsPermissionMode: true,
         supportsThinkingToggle: true,
+        supportsRecaps: true,
         supportsNativePromptSuggestions: false,
         models: [
           { id: "gpt-5.4", name: "GPT-5.4" },
@@ -534,6 +547,34 @@ describe("NewSessionForm", () => {
     expect(screen.queryByRole("button", { name: "HD" })).toBeNull();
   });
 
+  it("orders permission mode before helper controls", async () => {
+    serverSettingsState.isLoading = false;
+
+    const { container } = render(
+      <NewSessionForm
+        projectId="project-1"
+        selectedProject={chooserProjects[0]}
+        projects={[...chooserProjects]}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("newSessionRecapTitle")).toBeDefined();
+      expect(screen.getByText("newSessionPromptSuggestionsTitle")).toBeDefined();
+    });
+
+    const headings = Array.from(
+      container.querySelectorAll(".new-session-provider-slot h3"),
+      (element) => element.textContent,
+    );
+    expect(headings.indexOf("newSessionModeTitle")).toBeLessThan(
+      headings.indexOf("newSessionRecapTitle"),
+    );
+    expect(headings.indexOf("newSessionModeTitle")).toBeLessThan(
+      headings.indexOf("newSessionPromptSuggestionsTitle"),
+    );
+  });
+
   it("keeps the drafted prompt when switching from detached to a project", async () => {
     const onProjectChange = vi.fn();
 
@@ -638,10 +679,12 @@ describe("NewSessionForm", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Codex" }));
-    const nativeSuggestionButton = screen.getByRole("button", {
-      name: /promptSuggestionModeNative/,
-    });
-    expect((nativeSuggestionButton as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      screen.queryByRole("button", {
+        name: /promptSuggestionModeNative/,
+      }),
+    ).toBeNull();
+    expect(screen.getByText("promptSuggestionNativeUnsupported")).toBeDefined();
     fireEvent.change(screen.getByPlaceholderText("newSessionPlaceholder"), {
       target: { value: "hello" },
     });
@@ -654,6 +697,93 @@ describe("NewSessionForm", () => {
         expect.objectContaining({
           provider: "codex",
           promptSuggestionMode: "off",
+        }),
+        undefined,
+        expect.any(Number),
+      );
+    });
+  });
+
+  it("keeps simulated recaps available when native suggestions are unsupported", async () => {
+    serverSettingsState.isLoading = false;
+
+    render(
+      <NewSessionForm
+        projectId="project-1"
+        selectedProject={chooserProjects[0]}
+        projects={[...chooserProjects]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
+    expect(
+      screen.getByRole("button", { name: /recapModeSideSession/ }),
+    ).toBeDefined();
+    expect(
+      screen.queryByRole("button", {
+        name: /promptSuggestionModeNative/,
+      }),
+    ).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /recapModeSideSession/ }),
+    );
+    fireEvent.change(screen.getByPlaceholderText("newSessionPlaceholder"), {
+      target: { value: "hello" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "newSessionStartAction" }));
+
+    await waitFor(() => {
+      expect(mockStartSession).toHaveBeenCalledWith(
+        "project-1",
+        "hello",
+        expect.objectContaining({
+          provider: "codex",
+          recapMode: "side-session",
+          promptSuggestionMode: "off",
+        }),
+        undefined,
+        expect.any(Number),
+      );
+    });
+  });
+
+  it("offers configured helper targets for side-session recaps", async () => {
+    serverSettingsState.settings = {
+      helperTargets: [
+        {
+          id: "local-vllm",
+          name: "Local vLLM",
+          kind: "openai-compatible",
+          baseUrl: "http://localhost:8001/v1",
+          model: "Qwen/Qwen3.6-27B",
+        },
+      ],
+    };
+    serverSettingsState.isLoading = false;
+
+    render(
+      <NewSessionForm
+        projectId="project-1"
+        selectedProject={chooserProjects[0]}
+        projects={[...chooserProjects]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /recapModeSideSession/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Local vLLM" }));
+    fireEvent.change(screen.getByPlaceholderText("newSessionPlaceholder"), {
+      target: { value: "hello" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "newSessionStartAction" }));
+
+    await waitFor(() => {
+      expect(mockStartSession).toHaveBeenCalledWith(
+        "project-1",
+        "hello",
+        expect.objectContaining({
+          recapMode: "side-session",
+          helperSideModel: "helper-target:local-vllm",
         }),
         undefined,
         expect.any(Number),

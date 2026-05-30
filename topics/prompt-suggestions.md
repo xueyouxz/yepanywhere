@@ -72,6 +72,42 @@ session. The remaining gap is current-session mutation: there is not yet a
 live-session toggle that changes future suggestions without starting a new
 session.
 
+## Simulated Suggestions Gap
+
+YA does not yet implement simulated prompt suggestions for providers without
+native support. For those providers, the new-session UI should avoid implying a
+hidden implementation exists: show `Off` as the only selectable mode and explain
+that the provider does not natively support suggestions.
+
+Preferred future shape remains provider-native prediction if an API exposes it,
+ideally by asking the provider to continue from a start-user-turn boundary and
+return likely user text without appending it to transcript state. No current
+provider API has been verified to expose that exact primitive.
+
+Fallback designs are plausible, and all must use
+[side-session-config.md](side-session-config.md) rather than a
+prompt-suggestion-specific model choice:
+
+- **Operator-run token predictor.** For regular, frivolous suggestion work,
+  a YA operator may configure a weaker open-weight helper model served through
+  vLLM or another local/remote inference server. The request should be framed
+  as low-deliberation next-user-turn token prediction, not as a reasoned agent
+  task: no hidden thinking, no tool use, and no transcript mutation. Lower
+  model quality is acceptable because the suggestion is disposable and must be
+  accepted or edited before it becomes user input. This path is still a
+  simulated helper backend and should lose to a provider API that can natively
+  predict user-turn tokens from a start-user-turn boundary.
+- **Inline main-session tag.** Add an instruction to the parent session that,
+  when it is coming to rest and has an appropriate suggested next turn, it may
+  emit a specially tagged `<suggestion>...</suggestion>` block. YA would strip
+  and surface the tag as composer suggestion UI. This is simple, but it spends
+  parent-session context and risks contaminating normal assistant output.
+- **Shared helper side session.** After an assistant turn ends, synchronize the
+  shared helper side session after a brief inactivity timer, then ask it for a
+  next-user-turn suggestion only when a useful default seems available. This
+  keeps suggestions out of the parent transcript and matches recap-side-query
+  lifecycle rules, but pays catch-up and helper-session latency.
+
 ## Tests That Should Fail On Contract Regressions
 
 - A `prompt_suggestion` SDK message updates the composer suggestion state and
@@ -81,3 +117,6 @@ session.
 - A simulated suggestion request for a non-native provider is disabled by
   default unless session/provider settings opt in through side-session
   configuration.
+- A simulated suggestion can use a provider-qualified helper model from a
+  different provider or operator-run backend without changing the parent
+  session's provider/model.

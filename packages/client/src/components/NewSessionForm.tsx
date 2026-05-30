@@ -47,6 +47,7 @@ import { useI18n } from "../i18n";
 import { prepareImageUpload } from "../lib/imageAttachmentResize";
 import { hasCoarsePointer } from "../lib/deviceDetection";
 import { logSessionUiTrace } from "../lib/diagnostics/uiTrace";
+import { helperTargetsToModelOptions } from "../lib/helperTargets";
 import {
   clearNewSessionPrefill,
   getNewSessionPrefill,
@@ -395,6 +396,14 @@ export function NewSessionForm({
     (p) => p.name === selectedProvider,
   );
   const availableModels: ModelInfo[] = selectedProviderInfo?.models ?? [];
+  const helperTargetModelOptions = useMemo(
+    () => helperTargetsToModelOptions(settings?.helperTargets),
+    [settings?.helperTargets],
+  );
+  const helperSelectableModels = useMemo(
+    () => [...helperTargetModelOptions, ...availableModels],
+    [availableModels, helperTargetModelOptions],
+  );
   const helperSideModelOptions: FilterOption<string>[] = useMemo(
     () => [
       {
@@ -406,19 +415,28 @@ export function NewSessionForm({
         label: t("helperSideModelSameAsMain"),
         description: selectedModel ?? undefined,
       },
-      ...availableModels.map((model) => ({
+      ...helperSelectableModels.map((model) => ({
         value: model.id,
         label: model.name,
         description: model.description,
       })),
     ],
-    [availableModels, selectedModel, t],
+    [helperSelectableModels, selectedModel, t],
   );
   // Default to true for backwards compatibility with providers that don't set these flags
   const supportsPermissionMode =
     selectedProviderInfo?.supportsPermissionMode ?? true;
   const supportsThinkingToggle =
     selectedProviderInfo?.supportsThinkingToggle ?? true;
+  const selectedProviderDisplayName =
+    selectedProviderInfo?.displayName ?? selectedProvider ?? "";
+  const availableRecapModes = RECAP_MODE_ORDER.filter((modeValue) =>
+    providerSupportsRecapMode(selectedProviderInfo, modeValue),
+  );
+  const availablePromptSuggestionModes = PROMPT_SUGGESTION_MODE_ORDER.filter(
+    (modeValue) =>
+      providerSupportsPromptSuggestionMode(selectedProviderInfo, modeValue),
+  );
   const sortedProjects = useMemo(
     () => sortProjectsForChooser(projects, recentProjectIds),
     [projects, recentProjectIds],
@@ -623,7 +641,12 @@ export function NewSessionForm({
     setSelectedPromptSuggestionMode(
       getDefaultPromptSuggestionMode(initialProvider, savedDefaults),
     );
-    setHelperSideModel(getDefaultHelperSideModel(initialModels, savedDefaults));
+    setHelperSideModel(
+      getDefaultHelperSideModel(
+        [...helperTargetModelOptions, ...initialModels],
+        savedDefaults,
+      ),
+    );
     setMode(savedDefaults?.permissionMode ?? "default");
   }, [
     availableProviders,
@@ -631,6 +654,7 @@ export function NewSessionForm({
     providersLoading,
     settings,
     settingsLoading,
+    helperTargetModelOptions,
   ]);
 
   useEffect(() => {
@@ -667,7 +691,10 @@ export function NewSessionForm({
       getDefaultPromptSuggestionMode(provider, settings?.newSessionDefaults),
     );
     setHelperSideModel(
-      getDefaultHelperSideModel(providerModels, settings?.newSessionDefaults),
+      getDefaultHelperSideModel(
+        [...helperTargetModelOptions, ...providerModels],
+        settings?.newSessionDefaults,
+      ),
     );
   };
 
@@ -1240,7 +1267,7 @@ export function NewSessionForm({
     savedDefaults,
   );
   const defaultHelperSideModel = getDefaultHelperSideModel(
-    availableModels,
+    helperSelectableModels,
     savedDefaults,
   );
   const defaultPromptSuggestionMode = getDefaultPromptSuggestionMode(
@@ -1625,38 +1652,27 @@ export function NewSessionForm({
       </div>
     ) : null;
   const recapSection = selectedProvider ? (
-    <div className="new-session-recap-section">
+    <div className="new-session-helper-section">
       <h3>{t("newSessionRecapTitle")}</h3>
-      <div className="mode-options">
-        {RECAP_MODE_ORDER.map((modeValue) => {
-          const isAvailable = providerSupportsRecapMode(
-            selectedProviderInfo,
-            modeValue,
-          );
-          return (
-            <button
-              key={modeValue}
-              type="button"
-              className={`mode-option ${selectedRecapMode === modeValue ? "selected" : ""}`}
-              onClick={() => {
-                hasUserCustomizedDefaultsRef.current = true;
-                setSelectedRecapMode(modeValue);
-              }}
-              disabled={isStarting || !isAvailable}
-              title={recapModeDescriptions[modeValue]}
-            >
-              <span className={`mode-option-dot recap-${modeValue}`} />
-              <div className="mode-option-content">
-                <span className="mode-option-label">
-                  {recapModeLabels[modeValue]}
-                </span>
-                <span className="mode-option-desc">
-                  {recapModeDescriptions[modeValue]}
-                </span>
-              </div>
-            </button>
-          );
-        })}
+      <div className="new-session-helper-options">
+        {availableRecapModes.map((modeValue) => (
+          <button
+            key={modeValue}
+            type="button"
+            className={`new-session-helper-option ${
+              selectedRecapMode === modeValue ? "selected" : ""
+            }`}
+            onClick={() => {
+              hasUserCustomizedDefaultsRef.current = true;
+              setSelectedRecapMode(modeValue);
+            }}
+            disabled={isStarting}
+            title={recapModeDescriptions[modeValue]}
+          >
+            <span className={`mode-option-dot recap-${modeValue}`} />
+            <span>{recapModeLabels[modeValue]}</span>
+          </button>
+        ))}
       </div>
       {selectedRecapMode === "side-session" && (
         <div className="new-session-helper-model">
@@ -1667,9 +1683,7 @@ export function NewSessionForm({
             selected={[helperSideModel]}
             onChange={(selected) => {
               hasUserCustomizedDefaultsRef.current = true;
-              setHelperSideModel(
-                selected[0] ?? HELPER_SIDE_MODEL_CHEAPEST,
-              );
+              setHelperSideModel(selected[0] ?? HELPER_SIDE_MODEL_CHEAPEST);
             }}
             multiSelect={false}
             placeholder={t("helperSideModelCheapest")}
@@ -1679,39 +1693,37 @@ export function NewSessionForm({
     </div>
   ) : null;
   const promptSuggestionSection = selectedProvider ? (
-    <div className="new-session-recap-section">
+    <div className="new-session-helper-section">
       <h3>{t("newSessionPromptSuggestionsTitle")}</h3>
-      <div className="mode-options">
-        {PROMPT_SUGGESTION_MODE_ORDER.map((modeValue) => {
-          const isAvailable = providerSupportsPromptSuggestionMode(
-            selectedProviderInfo,
-            modeValue,
-          );
-          return (
-            <button
-              key={modeValue}
-              type="button"
-              className={`mode-option ${selectedPromptSuggestionMode === modeValue ? "selected" : ""}`}
-              onClick={() => {
-                hasUserCustomizedDefaultsRef.current = true;
-                setSelectedPromptSuggestionMode(modeValue);
-              }}
-              disabled={isStarting || !isAvailable}
-              title={promptSuggestionModeDescriptions[modeValue]}
-            >
-              <span className={`mode-option-dot suggestion-${modeValue}`} />
-              <div className="mode-option-content">
-                <span className="mode-option-label">
-                  {promptSuggestionModeLabels[modeValue]}
-                </span>
-                <span className="mode-option-desc">
-                  {promptSuggestionModeDescriptions[modeValue]}
-                </span>
-              </div>
-            </button>
-          );
-        })}
+      <div className="new-session-helper-options">
+        {availablePromptSuggestionModes.map((modeValue) => (
+          <button
+            key={modeValue}
+            type="button"
+            className={`new-session-helper-option ${
+              selectedPromptSuggestionMode === modeValue ? "selected" : ""
+            }`}
+            onClick={() => {
+              hasUserCustomizedDefaultsRef.current = true;
+              setSelectedPromptSuggestionMode(modeValue);
+            }}
+            disabled={isStarting}
+            title={promptSuggestionModeDescriptions[modeValue]}
+          >
+            <span className={`mode-option-dot suggestion-${modeValue}`} />
+            <span>{promptSuggestionModeLabels[modeValue]}</span>
+          </button>
+        ))}
       </div>
+      {availablePromptSuggestionModes.length === 1 &&
+        availablePromptSuggestionModes[0] === "off" &&
+        selectedProviderDisplayName && (
+          <p className="new-session-helper-note">
+            {t("promptSuggestionNativeUnsupported", {
+              provider: selectedProviderDisplayName,
+            })}
+          </p>
+        )}
     </div>
   ) : null;
   const permissionSection = supportsPermissionMode ? (
@@ -1736,28 +1748,35 @@ export function NewSessionForm({
           </button>
         ))}
       </div>
-
-      <div className="new-session-defaults-bar">
-        <p className="new-session-defaults-copy">
-          {t("newSessionDefaultsDescription")}
-        </p>
-        <button
-          type="button"
-          className="new-session-defaults-button"
-          onClick={handleSaveDefaults}
-          disabled={
-            isStarting ||
-            isSavingDefaults ||
-            settingsLoading ||
-            !selectedProvider ||
-            defaultsMatchCurrent
-          }
-        >
-          {isSavingDefaults
-            ? t("newSessionDefaultsSaving")
-            : t("newSessionDefaultsAction")}
-        </button>
-      </div>
+    </div>
+  ) : null;
+  const hasConfigControls = Boolean(
+    selectedProvider ||
+      permissionSection ||
+      recapSection ||
+      promptSuggestionSection,
+  );
+  const defaultsBar = hasConfigControls ? (
+    <div className="new-session-defaults-bar">
+      <p className="new-session-defaults-copy">
+        {t("newSessionDefaultsDescription")}
+      </p>
+      <button
+        type="button"
+        className="new-session-defaults-button"
+        onClick={handleSaveDefaults}
+        disabled={
+          isStarting ||
+          isSavingDefaults ||
+          settingsLoading ||
+          !selectedProvider ||
+          defaultsMatchCurrent
+        }
+      >
+        {isSavingDefaults
+          ? t("newSessionDefaultsSaving")
+          : t("newSessionDefaultsAction")}
+      </button>
     </div>
   ) : null;
 
@@ -1790,13 +1809,15 @@ export function NewSessionForm({
           modelSection ||
           recapSection ||
           promptSuggestionSection ||
-          permissionSection) && (
+          permissionSection ||
+          defaultsBar) && (
           <div className="new-session-provider-slot">
             {providerSection}
             {modelSection}
+            {permissionSection}
             {recapSection}
             {promptSuggestionSection}
-            {permissionSection}
+            {defaultsBar}
           </div>
         )}
       </div>

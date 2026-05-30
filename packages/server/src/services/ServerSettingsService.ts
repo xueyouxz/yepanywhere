@@ -7,7 +7,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { NewSessionDefaults } from "@yep-anywhere/shared";
+import type { HelperTargetConfig, NewSessionDefaults } from "@yep-anywhere/shared";
 
 const CURRENT_VERSION = 1;
 
@@ -41,6 +41,8 @@ export interface ServerSettings {
   deviceBridgeEnabled?: boolean;
   /** Defaults applied when opening the new session form */
   newSessionDefaults?: NewSessionDefaults;
+  /** OpenAI-compatible helper endpoints for side-session helper work */
+  helperTargets?: HelperTargetConfig[];
   /** Whether lifecycle webhook delivery is enabled */
   lifecycleWebhooksEnabled?: boolean;
   /** External webhook URL that receives lifecycle events */

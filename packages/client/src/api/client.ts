@@ -9,6 +9,8 @@ import type {
   FileContentResponse,
   FreezePublicSessionLiveSharesResponse,
   GitStatusInfo,
+  HelperTargetConfig,
+  ModelInfo,
   NewSessionDefaults,
   PendingInputType,
   PromptSuggestionMode,
@@ -1196,6 +1198,15 @@ export const api = {
       ),
     }),
 
+  discoverHelperTargetModels: (baseUrl: string) =>
+    fetchJSON<{ baseUrl: string; models: ModelInfo[] }>(
+      "/settings/helper-targets/models",
+      {
+        method: "POST",
+        body: JSON.stringify({ baseUrl }),
+      },
+    ),
+
   // Codex CLI update checker
   getCodexUpdateStatus: (force?: boolean) =>
     fetchJSON<{ status: CodexUpdateStatus }>(
@@ -1372,6 +1383,8 @@ export interface ServerSettings {
   deviceBridgeEnabled?: boolean;
   /** Defaults applied when opening the new session form */
   newSessionDefaults?: NewSessionDefaults;
+  /** OpenAI-compatible helper endpoints for side-session helper work */
+  helperTargets?: HelperTargetConfig[];
   /** Whether lifecycle webhook delivery is enabled */
   lifecycleWebhooksEnabled?: boolean;
   /** External webhook URL that receives lifecycle events */

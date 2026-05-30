@@ -18,6 +18,7 @@ import { api } from "../api/client";
 import { getModelSetting } from "../hooks/useModelSettings";
 import { getAvailableProviders, getDefaultProvider } from "../hooks/useProviders";
 import { useServerSettings } from "../hooks/useServerSettings";
+import { helperTargetsToModelOptions } from "../lib/helperTargets";
 import type { PermissionMode } from "../types";
 import { useI18n } from "../i18n";
 import { Modal } from "./ui/Modal";
@@ -283,6 +284,14 @@ export function RestartSessionModal({
     if (selectedProviderModels.length > 0) return selectedProviderModels;
     return [{ id: "default", name: "Default" }];
   }, [selectedProviderModels]);
+  const helperTargetModelOptions = useMemo(
+    () => helperTargetsToModelOptions(settings?.helperTargets),
+    [settings?.helperTargets],
+  );
+  const helperSelectableModels = useMemo(
+    () => [...helperTargetModelOptions, ...modelOptions],
+    [helperTargetModelOptions, modelOptions],
+  );
   const [selectedModel, setSelectedModel] = useState<string>(
     getRestartDefaultModel({
       provider: selectedProvider,
@@ -311,7 +320,7 @@ export function RestartSessionModal({
     );
   const [helperSideModel, setHelperSideModel] = useState<string>(() =>
     getRestartDefaultHelperSideModel({
-      models: modelOptions,
+      models: helperSelectableModels,
       defaults: settings?.newSessionDefaults,
     }),
   );
@@ -390,12 +399,12 @@ export function RestartSessionModal({
     );
     setHelperSideModel(
       getRestartDefaultHelperSideModel({
-        models: modelOptions,
+        models: helperSelectableModels,
         defaults: settings?.newSessionDefaults,
       }),
     );
   }, [
-    modelOptions,
+    helperSelectableModels,
     promptSuggestionMode,
     selectedProviderInfo,
     settings,
@@ -487,7 +496,7 @@ export function RestartSessionModal({
     );
     setHelperSideModel(
       getRestartDefaultHelperSideModel({
-        models: nextModelOptions,
+        models: [...helperTargetModelOptions, ...nextModelOptions],
         defaults: settings?.newSessionDefaults,
       }),
     );
@@ -523,7 +532,7 @@ export function RestartSessionModal({
       name: t("helperSideModelSameAsMain"),
       description: selectedModel,
     },
-    ...modelOptions,
+    ...helperSelectableModels,
   ];
 
   return (

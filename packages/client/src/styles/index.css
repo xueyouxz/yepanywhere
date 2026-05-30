@@ -6042,6 +6042,90 @@ a.sidebar-nav-item {
   padding: var(--space-1) var(--space-2);
 }
 
+.helper-targets-settings {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.helper-targets-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.helper-target-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.helper-target-row {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+}
+
+.helper-target-row-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.helper-target-row-main span,
+.helper-target-row-main code {
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.helper-target-row-actions,
+.helper-target-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.helper-target-editor {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(180px, 1.1fr) minmax(240px, 1fr);
+  gap: var(--space-2);
+}
+
+.helper-target-editor label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+@media (max-width: 1050px) {
+  .helper-targets-settings,
+  .helper-target-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .helper-targets-panel {
+    width: 100%;
+  }
+
+  .helper-target-editor {
+    grid-template-columns: 1fr;
+  }
+}
+
 .settings-pending {
   color: var(--warning-color);
 }
@@ -8144,12 +8228,12 @@ a.sidebar-nav-item {
   margin: 0 0 var(--space-2);
 }
 
-.new-session-recap-section,
+.new-session-helper-section,
 .new-session-helper-model {
-  margin-bottom: 0.9rem;
+  margin-bottom: 0.65rem;
 }
 
-.new-session-recap-section h3,
+.new-session-helper-section h3,
 .new-session-helper-model h3 {
   font-size: var(--font-size-sm);
   font-weight: 600;
@@ -8159,9 +8243,58 @@ a.sidebar-nav-item {
   margin: 0 0 var(--space-2);
 }
 
+.new-session-helper-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.new-session-helper-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 32px;
+  padding: 0.35rem 0.55rem;
+  background: var(--bg-code);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.new-session-helper-option:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--text-dimmed);
+}
+
+.new-session-helper-option.selected {
+  border-color: var(--app-yep-green);
+  background: rgba(217, 119, 87, 0.08);
+}
+
+.new-session-helper-option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.new-session-helper-option .mode-option-dot {
+  width: 9px;
+  height: 9px;
+}
+
+.new-session-helper-note {
+  margin: 0.35rem 0 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.35;
+}
+
 /* Permission Mode Section */
 .new-session-mode-section {
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
 }
 
 .new-session-mode-section h3 {
@@ -8241,6 +8374,14 @@ a.sidebar-nav-item {
 
 .mode-option-dot.recap-side-session {
   background: var(--link-color);
+}
+
+.mode-option-dot.suggestion-off {
+  background: var(--text-muted);
+}
+
+.mode-option-dot.suggestion-native {
+  background: var(--success-color);
 }
 
 .mode-option-content {

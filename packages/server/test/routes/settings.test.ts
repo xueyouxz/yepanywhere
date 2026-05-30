@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSettingsRoutes } from "../../src/routes/settings.js";
 import type {
   ServerSettings,
@@ -23,6 +23,10 @@ describe("Settings Routes", () => {
         return settings;
       }),
     } as unknown as ServerSettingsService;
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   describe("PUT /remote-executors", () => {
@@ -195,6 +199,139 @@ describe("Settings Routes", () => {
       expect(mockServerSettingsService.updateSettings).toHaveBeenCalledWith({
         clientLogCollectionRequested: true,
       });
+    });
+
+    it("accepts and normalizes helper target settings", async () => {
+      const routes = createSettingsRoutes({
+        serverSettingsService: mockServerSettingsService,
+      });
+
+      const response = await routes.request("/", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          helperTargets: [
+            {
+              id: "local-vllm",
+              name: "Local vLLM",
+              kind: "openai-compatible",
+              baseUrl: "localhost:8001",
+              model: "",
+            },
+          ],
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const json = await response.json();
+      expect(json.settings.helperTargets).toEqual([
+        {
+          id: "local-vllm",
+          name: "Local vLLM",
+          kind: "openai-compatible",
+          baseUrl: "http://localhost:8001/v1",
+        },
+      ]);
+      expect(mockServerSettingsService.updateSettings).toHaveBeenCalledWith({
+        helperTargets: [
+          {
+            id: "local-vllm",
+            name: "Local vLLM",
+            kind: "openai-compatible",
+            baseUrl: "http://localhost:8001/v1",
+          },
+        ],
+      });
+    });
+
+    it("rejects invalid helper target settings", async () => {
+      const routes = createSettingsRoutes({
+        serverSettingsService: mockServerSettingsService,
+      });
+
+      const response = await routes.request("/", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          helperTargets: [
+            {
+              id: "bad/id",
+              name: "Local vLLM",
+              kind: "openai-compatible",
+              baseUrl: "localhost:8001",
+            },
+          ],
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      const json = await response.json();
+      expect(json.error).toBe("Invalid helperTargets setting");
+      expect(mockServerSettingsService.updateSettings).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("POST /helper-targets/models", () => {
+    it("discovers OpenAI-compatible model ids through the server", async () => {
+      const routes = createSettingsRoutes({
+        serverSettingsService: mockServerSettingsService,
+      });
+      const fetchMock = vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: "Qwen/Qwen3.6-27B",
+                max_model_len: 161072,
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const response = await routes.request("/helper-targets/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseUrl: "localhost:8001" }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://localhost:8001/v1/models",
+        expect.objectContaining({ signal: expect.any(Object) }),
+      );
+      const json = await response.json();
+      expect(json).toEqual({
+        baseUrl: "http://localhost:8001/v1",
+        models: [
+          {
+            id: "Qwen/Qwen3.6-27B",
+            name: "Qwen/Qwen3.6-27B",
+            contextWindow: 161072,
+          },
+        ],
+      });
+    });
+
+    it("rejects invalid helper target discovery URLs", async () => {
+      const routes = createSettingsRoutes({
+        serverSettingsService: mockServerSettingsService,
+      });
+
+      const response = await routes.request("/helper-targets/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseUrl: "file:///etc/passwd" }),
+      });
+
+      expect(response.status).toBe(400);
+      const json = await response.json();
+      expect(json.error).toBe("baseUrl must be an http(s) URL");
     });
   });
 
