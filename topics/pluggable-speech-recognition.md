@@ -20,8 +20,8 @@ Topic: pluggable-speech-recognition
   not a YA server backend. The browser still owns its recognizer, credentials,
   latency, and failure modes.
 - The user chooses among advertised methods. YA should not silently fall back
-  from one configured method to another, and it should not auto-enable a
-  backend merely because its code exists — enablement requires an explicit
+  from one configured server method to another, and it should not auto-enable
+  a backend merely because its code exists — enablement requires an explicit
   signal: a `YA_VOICE_BACKENDS` entry, or a provided cloud key.
 - OS keyboard dictation is outside YA's speech stack. If the user taps the
   keyboard's mic glyph, that is device-native text entry, not YA-mediated
@@ -66,11 +66,17 @@ Backends should implement a common `SpeechBackend` contract:
 - `useSpeechRecognition` selects browser-native when the method is
   `browser-native`; any other method constructs `YaServerProvider` with the
   advertised backend id unchanged.
-- `NewSessionForm` builds a speech-method dropdown from
-  `/api/version.voiceBackends` plus browser-native. The dropdown is shown only
-  when more than one method is available.
-- `useModelSettings` persists a server-scoped `speechMethod`; the default is
-  `browser-native`.
+- The client speech-method selector is data-driven from
+  `/api/version.voiceBackends` plus the special browser-native fallback. It
+  does not keep a client-side whitelist of server backend ids; unknown
+  advertised ids remain selectable and route through YA unchanged.
+- `NewSessionForm` and the active session composer toolbar build
+  speech-method dropdowns from the same advertised active backend list. The
+  dropdown is shown only when more than one method is available.
+- `useModelSettings` persists a server-scoped `speechMethod`. When there is
+  no explicit stored choice, the effective runtime default prefers active
+  server-routed STT over browser-native, with `ya-grok` ranked before
+  `ya-deepgram`; browser-native remains the explicit local escape hatch.
 - Server config parses `VOICE_INPUT`, `YA_VOICE_BACKENDS`,
   `YA_stt__DEEPGRAM_API_KEY`, `YA_stt__XAI_API_KEY`, `WHISPER_MODEL`,
   `WHISPER_DEVICE`, and `WHISPER_COMPUTE_TYPE`.
@@ -112,10 +118,11 @@ client through `fetchJSON("/speech/transcribe", ...)`.
 - The `/api/speech/ws` route is still a direct WebSocket endpoint for local
   use and future streaming work. It is not itself multiplexed through the
   secure remote transport; the batch POST path is the remote-compatible path.
-- Previously selected server methods are not reconciled against current
-  `voiceBackends` before the mic button is used. If a backend disappears, the
-  stored method can still drive `YaServerProvider` instead of forcing an
-  explicit re-pick.
+- Previously selected server methods are reconciled against current
+  `voiceBackends` before the mic button is used. If an explicit server backend
+  disappears, the current resolver falls back to browser-native rather than
+  silently choosing another server backend; a one-time notice or re-pick prompt
+  is still a UI follow-up.
 - The current UI setting is a global default, not a true per-session speech
   method. The original plan's per-new-session override is not persisted as
   session metadata or passed through message submission.
@@ -129,9 +136,8 @@ client through `fetchJSON("/speech/transcribe", ...)`.
 
 ## Remaining Plan
 
-1. Reconcile stored `speechMethod` against current advertised methods. If a
-   selected backend disappears, surface a one-time notice and require a new
-   explicit selection rather than silently falling back.
+1. Surface a one-time notice or explicit re-pick prompt when a stored server
+   `speechMethod` is no longer advertised.
 2. Decide whether speech method is global-only for the first usable release or
    truly per-session. If per-session, persist it with session metadata and pass
    the session context into speech requests.
@@ -166,6 +172,10 @@ client through `fetchJSON("/speech/transcribe", ...)`.
   `/api/version.voiceBackends` includes `ya-grok`, and a short batch
   transcription through `/api/speech/transcribe` returns text or a provider
   error from xAI.
+- With both `ya-grok` and `ya-deepgram` advertised and no explicit stored
+  speech method, the client selects `ya-grok` as the effective mic backend.
+- With an advertised backend id not hardcoded in the client, the selector still
+  displays that id generically and sends it unchanged as `backendId`.
 - With `YA_VOICE_BACKENDS=ya-whisper` and `faster_whisper` importable, startup
   validation advertises `ya-whisper`; the first utterance warms the model once
   and later utterances reuse the worker.

@@ -59,7 +59,8 @@ import {
 } from "../lib/serverClock";
 import {
   getSpeechMethods,
-  isKnownSpeechMethodId,
+  isSpeechMethodId,
+  resolveSpeechMethod,
   type SpeechMethodId,
 } from "../lib/speechProviders/methods";
 import { useVersion } from "../hooks/useVersion";
@@ -329,6 +330,7 @@ export function NewSessionForm({
     thinkingLevel,
     voiceInputEnabled,
     speechMethod,
+    hasStoredSpeechMethod,
     setSpeechMethod,
   } = useModelSettings();
 
@@ -707,11 +709,20 @@ export function NewSessionForm({
       description: method.description,
     }));
   }, [versionInfo?.voiceBackends]);
+  const selectedSpeechMethod = useMemo(
+    () =>
+      resolveSpeechMethod(
+        speechMethod,
+        versionInfo?.voiceBackends,
+        hasStoredSpeechMethod,
+      ),
+    [speechMethod, versionInfo?.voiceBackends, hasStoredSpeechMethod],
+  );
 
   const handleSpeechMethodSelect = useCallback(
     (selected: string[]) => {
       const next = selected[0];
-      if (next && isKnownSpeechMethodId(next)) {
+      if (next && isSpeechMethodId(next)) {
         setSpeechMethod(next);
       }
     },
@@ -1299,6 +1310,7 @@ export function NewSessionForm({
             onListeningStart={() => textareaRef.current?.focus()}
             disabled={isStarting}
             className="toolbar-button"
+            speechMethod={selectedSpeechMethod}
           />
           {supportsThinkingToggle && (
             <>
@@ -1796,7 +1808,7 @@ export function NewSessionForm({
           <FilterDropdown
             label={t("newSessionSpeechTitle")}
             options={speechMethodOptions}
-            selected={[speechMethod]}
+            selected={[selectedSpeechMethod]}
             onChange={handleSpeechMethodSelect}
             multiSelect={false}
             placeholder={t("newSessionSpeechPlaceholder")}

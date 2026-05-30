@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
 } from "react";
 import { useModelSettings } from "../hooks/useModelSettings";
 import { useRemoteBasePath } from "../hooks/useRemoteBasePath";
@@ -15,6 +16,10 @@ import { useVersion } from "../hooks/useVersion";
 import { useViewportWidth } from "../hooks/useViewportWidth";
 import { useI18n } from "../i18n";
 import { hasCoarsePointer } from "../lib/deviceDetection";
+import {
+  resolveSpeechMethod,
+  type SpeechMethodId,
+} from "../lib/speechProviders/methods";
 
 export interface VoiceInputButtonRef {
   /** Stop listening and return any pending interim text */
@@ -38,6 +43,8 @@ interface VoiceInputButtonProps {
   disabled?: boolean;
   /** Additional class name */
   className?: string;
+  /** Speech method selected by an enclosing in-session selector. */
+  speechMethod?: SpeechMethodId;
 }
 
 /**
@@ -53,15 +60,35 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
     onListeningStart,
     disabled,
     className = "",
+    speechMethod: selectedSpeechMethod,
   }: VoiceInputButtonProps,
   ref: ForwardedRef<VoiceInputButtonRef>,
 ) {
   const { t } = useI18n();
-  const { voiceInputEnabled, speechMethod } = useModelSettings();
+  const {
+    voiceInputEnabled,
+    speechMethod: storedSpeechMethod,
+    hasStoredSpeechMethod,
+  } = useModelSettings();
   const { version: versionInfo } = useVersion();
   const basePath = useRemoteBasePath();
   const serverVoiceEnabled =
     versionInfo?.capabilities?.includes("voiceInput") ?? true;
+  const speechMethod = useMemo(
+    () =>
+      selectedSpeechMethod ??
+      resolveSpeechMethod(
+        storedSpeechMethod,
+        versionInfo?.voiceBackends,
+        hasStoredSpeechMethod,
+      ),
+    [
+      selectedSpeechMethod,
+      storedSpeechMethod,
+      versionInfo?.voiceBackends,
+      hasStoredSpeechMethod,
+    ],
+  );
   const viewportWidth = useViewportWidth();
 
   // Show status text on desktop with sufficient width

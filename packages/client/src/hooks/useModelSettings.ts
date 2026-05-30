@@ -8,7 +8,7 @@ import { useCallback, useState } from "react";
 import {
   DEFAULT_SPEECH_METHOD,
   type SpeechMethodId,
-  isKnownSpeechMethodId,
+  isSpeechMethodId,
 } from "../lib/speechProviders/methods";
 import {
   LEGACY_KEYS,
@@ -125,12 +125,16 @@ function saveVoiceInputEnabled(enabled: boolean) {
   );
 }
 
-function loadSpeechMethod(): SpeechMethodId {
+function loadStoredSpeechMethod(): SpeechMethodId | null {
   const stored = getServerScoped("speechMethod", LEGACY_KEYS.speechMethod);
-  if (stored && isKnownSpeechMethodId(stored)) {
+  if (stored && isSpeechMethodId(stored)) {
     return stored;
   }
-  return DEFAULT_SPEECH_METHOD;
+  return null;
+}
+
+function loadSpeechMethod(): SpeechMethodId {
+  return loadStoredSpeechMethod() ?? DEFAULT_SPEECH_METHOD;
 }
 
 function saveSpeechMethod(method: SpeechMethodId) {
@@ -151,6 +155,9 @@ export function useModelSettings() {
   );
   const [speechMethod, setSpeechMethodState] =
     useState<SpeechMethodId>(loadSpeechMethod);
+  const [hasStoredSpeechMethod, setHasStoredSpeechMethod] = useState<boolean>(
+    () => loadStoredSpeechMethod() !== null,
+  );
 
   const setModel = useCallback((m: ModelOption) => {
     setModelState(m);
@@ -187,6 +194,7 @@ export function useModelSettings() {
 
   const setSpeechMethod = useCallback((method: SpeechMethodId) => {
     setSpeechMethodState(method);
+    setHasStoredSpeechMethod(true);
     saveSpeechMethod(method);
   }, []);
 
@@ -205,6 +213,7 @@ export function useModelSettings() {
     setVoiceInputEnabled,
     toggleVoiceInput,
     speechMethod,
+    hasStoredSpeechMethod,
     setSpeechMethod,
   };
 }
@@ -248,4 +257,8 @@ export function getVoiceInputEnabled(): boolean {
  */
 export function getSpeechMethod(): SpeechMethodId {
   return loadSpeechMethod();
+}
+
+export function hasStoredSpeechMethodSetting(): boolean {
+  return loadStoredSpeechMethod() !== null;
 }

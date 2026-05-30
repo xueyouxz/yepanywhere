@@ -9,9 +9,28 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { type ComponentProps, useCallback, useMemo, useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SESSION_ISEARCH_GUIDE_EVENT } from "../../lib/sessionIsearchGuide";
 import { MessageInput } from "../MessageInput";
+
+const { versionState, modelSettingsState, mockSetSpeechMethod } = vi.hoisted(
+  () => ({
+    versionState: {
+      version: {
+        current: "test",
+        latest: null,
+        updateAvailable: false,
+        capabilities: ["voiceInput"],
+        voiceBackends: [] as string[],
+      },
+    },
+    modelSettingsState: {
+      speechMethod: "browser-native",
+      hasStoredSpeechMethod: false,
+    },
+    mockSetSpeechMethod: vi.fn(),
+  }),
+);
 
 vi.mock("../../hooks/useDraftPersistence", () => ({
   useDraftPersistence: () => {
@@ -51,6 +70,20 @@ vi.mock("../../hooks/useModelSettings", () => ({
     thinkingMode: "off",
     cycleThinkingMode: vi.fn(),
     thinkingLevel: "high",
+    voiceInputEnabled: true,
+    speechMethod: modelSettingsState.speechMethod,
+    hasStoredSpeechMethod: modelSettingsState.hasStoredSpeechMethod,
+    setSpeechMethod: mockSetSpeechMethod,
+  }),
+}));
+
+vi.mock("../../hooks/useVersion", () => ({
+  useVersion: () => ({
+    version: versionState.version,
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+    refetchFresh: vi.fn(),
   }),
 }));
 
@@ -64,16 +97,22 @@ vi.mock("../VoiceInputButton", async () => {
   const React = await import("react");
 
   return {
-    VoiceInputButton: React.forwardRef((_, ref) => {
-      React.useImperativeHandle(ref, () => ({
-        stopAndFinalize: () => "",
-        toggle: vi.fn(),
-        isAvailable: true,
-        isListening: false,
-      }));
+    VoiceInputButton: React.forwardRef(
+      (props: { speechMethod?: string }, ref) => {
+        React.useImperativeHandle(ref, () => ({
+          stopAndFinalize: () => "",
+          toggle: vi.fn(),
+          isAvailable: true,
+          isListening: false,
+        }));
 
-      return <button type="button">voice</button>;
-    }),
+        return (
+          <button type="button" data-speech-method={props.speechMethod}>
+            voice
+          </button>
+        );
+      },
+    ),
   };
 });
 
@@ -170,6 +209,19 @@ function expectSubmission(
 }
 
 describe("MessageInput", () => {
+  beforeEach(() => {
+    versionState.version = {
+      current: "test",
+      latest: null,
+      updateAvailable: false,
+      capabilities: ["voiceInput"],
+      voiceBackends: [],
+    };
+    modelSettingsState.speechMethod = "browser-native";
+    modelSettingsState.hasStoredSpeechMethod = false;
+    mockSetSpeechMethod.mockReset();
+  });
+
   afterEach(() => {
     cleanup();
     window.localStorage?.removeItem?.("test-draft:patient-queue-mode");
@@ -185,6 +237,25 @@ describe("MessageInput", () => {
     fireEvent.keyDown(textarea, { key: "p", ctrlKey: true });
 
     expect(onRecallLastSubmission).toHaveBeenCalledTimes(2);
+  });
+
+  it("selects the preferred active server STT backend for the mic button", () => {
+    versionState.version = {
+      ...versionState.version,
+      voiceBackends: ["ya-deepgram", "ya-grok"],
+    };
+
+    renderMessageInput();
+
+    expect(screen.getByText("YA Grok")).toBeDefined();
+    expect(screen.getByRole("button", { name: "voice" }).dataset.speechMethod).toBe(
+      "ya-grok",
+    );
+
+    fireEvent.click(screen.getByText("YA Grok").closest("button")!);
+    fireEvent.click(screen.getByText("YA Deepgram").closest("button")!);
+
+    expect(mockSetSpeechMethod).toHaveBeenCalledWith("ya-deepgram");
   });
 
   it("keeps Up as native navigation when the composer has text", () => {

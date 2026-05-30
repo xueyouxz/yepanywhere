@@ -1,9 +1,17 @@
 import type { SessionLivenessSnapshot } from "@yep-anywhere/shared";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { MouseEvent, RefObject, TouchEvent } from "react";
 import { useOptionalRenderModeContext } from "../contexts/RenderModeContext";
 import { useModelSettings } from "../hooks/useModelSettings";
 import { useRelativeNow } from "../hooks/useRelativeNow";
+import { useVersion } from "../hooks/useVersion";
 import { useI18n } from "../i18n";
 import {
   formatAbsoluteTimestamp,
@@ -24,8 +32,15 @@ import {
   type SessionIsearchGuideState,
   type SessionIsearchScope,
 } from "../lib/sessionIsearchGuide";
+import {
+  getSpeechMethods,
+  isSpeechMethodId,
+  resolveSpeechMethod,
+  type SpeechMethodId,
+} from "../lib/speechProviders/methods";
 import type { BtwToolbarMode } from "../lib/btwAsideRouting";
 import type { ContextUsage, PermissionMode } from "../types";
+import { FilterDropdown, type FilterOption } from "./FilterDropdown";
 import { MessageAge } from "./MessageAge";
 import { RenderModeGlyph } from "./ui/RenderModeGlyph";
 import { ContextUsageIndicator } from "./ContextUsageIndicator";
@@ -291,7 +306,16 @@ export function MessageInputToolbar({
   pendingApproval,
 }: MessageInputToolbarProps) {
   const { t } = useI18n();
-  const { thinkingMode, cycleThinkingMode, thinkingLevel } = useModelSettings();
+  const {
+    thinkingMode,
+    cycleThinkingMode,
+    thinkingLevel,
+    voiceInputEnabled = true,
+    speechMethod = "browser-native",
+    hasStoredSpeechMethod = false,
+    setSpeechMethod,
+  } = useModelSettings();
+  const { version: versionInfo } = useVersion();
   const renderMode = useOptionalRenderModeContext();
   const nowMs = useRelativeNow();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -418,6 +442,36 @@ export function MessageInputToolbar({
   const stopTitle = `${t("toolbarStop")} (Esc)`;
   const showStopButton = !!(isRunning && onStop && isThinking);
   const showSendButton = !!(onSend && (!showStopButton || canSend));
+  const serverVoiceEnabled =
+    versionInfo?.capabilities?.includes("voiceInput") ?? true;
+  const speechMethodOptions = useMemo((): FilterOption<SpeechMethodId>[] => {
+    const serverBackends = versionInfo?.voiceBackends ?? [];
+    return getSpeechMethods(serverBackends).map((method) => ({
+      value: method.id,
+      label: method.label,
+      description: method.description,
+    }));
+  }, [versionInfo?.voiceBackends]);
+  const selectedSpeechMethod = useMemo(
+    () =>
+      resolveSpeechMethod(
+        speechMethod,
+        versionInfo?.voiceBackends,
+        hasStoredSpeechMethod,
+      ),
+    [speechMethod, versionInfo?.voiceBackends, hasStoredSpeechMethod],
+  );
+  const handleSpeechMethodSelect = useCallback(
+    (selected: string[]) => {
+      const next = selected[0];
+      if (next && isSpeechMethodId(next)) {
+        setSpeechMethod?.(next);
+      }
+    },
+    [setSpeechMethod],
+  );
+  const showSpeechMethodSelector =
+    voiceInputEnabled && serverVoiceEnabled && speechMethodOptions.length > 1;
 
   useLayoutEffect(() => {
     if (typeof window === "undefined" || !hasModelIndicator) {
@@ -815,6 +869,17 @@ export function MessageInputToolbar({
             </svg>
           </button>
         )}
+        {showSpeechMethodSelector && (
+          <FilterDropdown
+            label={t("newSessionSpeechTitle")}
+            options={speechMethodOptions}
+            selected={[selectedSpeechMethod]}
+            onChange={handleSpeechMethodSelect}
+            multiSelect={false}
+            placeholder={t("newSessionSpeechPlaceholder")}
+            className="filter-dropdown--speech-toolbar"
+          />
+        )}
         {voiceButtonRef && onVoiceTranscript && onInterimTranscript && (
           <VoiceInputButton
             ref={voiceButtonRef}
@@ -822,6 +887,7 @@ export function MessageInputToolbar({
             onInterimTranscript={onInterimTranscript}
             onListeningStart={onListeningStart}
             disabled={voiceDisabled}
+            speechMethod={selectedSpeechMethod}
           />
         )}
         {hasModelIndicator && modelToolbarDensity !== "hidden" && (

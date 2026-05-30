@@ -1,10 +1,9 @@
 /**
- * Catalog of known speech-recognition methods exposed in the UI.
+ * Speech-recognition methods exposed in the UI.
  *
- * The `browser-native` method is always known but gated on
- * `window.SpeechRecognition`. Server-routed methods are only shown
- * when the server advertises them via the `voiceBackends` capability
- * field on the version response.
+ * `browser-native` is the client-side escape hatch. Every server-routed
+ * method comes directly from `/api/version.voiceBackends`; the client must not
+ * keep an independent whitelist of backend ids.
  */
 
 import {
@@ -12,13 +11,11 @@ import {
   formatBrowserNativeLabel,
 } from "./browserNativeLabel";
 
-export type SpeechMethodId =
-  | "browser-native"
-  | "ya-dummy"
-  | "ya-deepgram"
-  | "ya-whisper";
+export type SpeechMethodId = string;
 
 export const DEFAULT_SPEECH_METHOD: SpeechMethodId = "browser-native";
+
+const SERVER_BACKEND_PREFERENCE = ["ya-grok", "ya-deepgram"] as const;
 
 export interface SpeechMethodDescriptor {
   id: SpeechMethodId;
@@ -54,34 +51,86 @@ export function describeBrowserNative(
   };
 }
 
-export function describeYaDummy(): SpeechMethodDescriptor {
+function normalizeBackendLabelPart(part: string): string {
+  if (!part) return part;
+  return `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`;
+}
+
+function formatServerBackendLabel(id: string): string {
+  const trimmed = id.trim();
+  const withoutYaPrefix = trimmed.startsWith("ya-")
+    ? trimmed.slice("ya-".length)
+    : trimmed;
+  const formatted =
+    withoutYaPrefix
+      .split(/[-_]+/)
+      .filter(Boolean)
+      .map(normalizeBackendLabelPart)
+      .join(" ") || trimmed;
+  return trimmed.startsWith("ya-") ? `YA ${formatted}` : formatted;
+}
+
+export function describeServerBackend(id: string): SpeechMethodDescriptor {
   return {
-    id: "ya-dummy",
-    label: "YA dummy (test only)",
-    description: "Fake server backend that echoes a canned transcript.",
+    id,
+    label: formatServerBackendLabel(id),
+    description: "Server-routed transcription through YA.",
     clientSupported: true,
     serverRouted: true,
   };
 }
 
-export function describeYaDeepgram(): SpeechMethodDescriptor {
-  return {
-    id: "ya-deepgram",
-    label: "Deepgram (cloud)",
-    description: "Server-routed cloud transcription with keyterm boosting.",
-    clientSupported: true,
-    serverRouted: true,
+export function getOrderedServerSpeechBackends(
+  serverBackends: readonly string[] = [],
+): string[] {
+  const seen = new Set<string>();
+  const unique = serverBackends
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0 && id !== DEFAULT_SPEECH_METHOD)
+    .filter((id) => {
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  const rank = (id: string) => {
+    const index = SERVER_BACKEND_PREFERENCE.indexOf(
+      id as (typeof SERVER_BACKEND_PREFERENCE)[number],
+    );
+    return index === -1 ? Number.POSITIVE_INFINITY : index;
   };
+  return unique
+    .map((id, index) => ({ id, index }))
+    .sort((a, b) => rank(a.id) - rank(b.id) || a.index - b.index)
+    .map(({ id }) => id);
 }
 
-export function describeYaWhisper(): SpeechMethodDescriptor {
-  return {
-    id: "ya-whisper",
-    label: "Local Whisper (CPU)",
-    description: "Server-local faster-whisper model; no audio leaves the server.",
-    clientSupported: true,
-    serverRouted: true,
-  };
+export function getPreferredSpeechMethod(
+  serverBackends: readonly string[] = [],
+): SpeechMethodId {
+  return getOrderedServerSpeechBackends(serverBackends)[0] ?? DEFAULT_SPEECH_METHOD;
+}
+
+export function resolveSpeechMethod(
+  storedMethod: SpeechMethodId,
+  serverBackends: readonly string[] | undefined,
+  hasStoredMethod: boolean,
+): SpeechMethodId {
+  if (serverBackends === undefined) {
+    return hasStoredMethod ? storedMethod : DEFAULT_SPEECH_METHOD;
+  }
+
+  const activeServerBackends = getOrderedServerSpeechBackends(serverBackends);
+  if (!hasStoredMethod) {
+    return activeServerBackends[0] ?? DEFAULT_SPEECH_METHOD;
+  }
+
+  if (storedMethod === DEFAULT_SPEECH_METHOD) {
+    return DEFAULT_SPEECH_METHOD;
+  }
+
+  return activeServerBackends.includes(storedMethod)
+    ? storedMethod
+    : DEFAULT_SPEECH_METHOD;
 }
 
 /**
@@ -90,40 +139,22 @@ export function describeYaWhisper(): SpeechMethodDescriptor {
  * appear in the selector — no phantom options for unconfigured backends.
  */
 export function getSpeechMethods(
-  serverBackends: string[] = [],
+  serverBackends: readonly string[] = [],
   userAgent?: string,
 ): SpeechMethodDescriptor[] {
-  const methods: SpeechMethodDescriptor[] = [describeBrowserNative(userAgent)];
-
-  for (const id of serverBackends) {
-    switch (id) {
-      case "ya-dummy":
-        methods.push(describeYaDummy());
-        break;
-      case "ya-deepgram":
-        methods.push(describeYaDeepgram());
-        break;
-      case "ya-whisper":
-        methods.push(describeYaWhisper());
-        break;
-    }
-  }
-
-  return methods;
+  return [
+    ...getOrderedServerSpeechBackends(serverBackends).map(describeServerBackend),
+    describeBrowserNative(userAgent),
+  ];
 }
 
 /** @deprecated Use getSpeechMethods(serverBackends) instead. */
 export function getBuiltinSpeechMethods(
   userAgent?: string,
 ): SpeechMethodDescriptor[] {
-  return [describeBrowserNative(userAgent), describeYaDummy()];
+  return [describeBrowserNative(userAgent)];
 }
 
-export function isKnownSpeechMethodId(value: string): value is SpeechMethodId {
-  return (
-    value === "browser-native" ||
-    value === "ya-dummy" ||
-    value === "ya-deepgram" ||
-    value === "ya-whisper"
-  );
+export function isSpeechMethodId(value: string): value is SpeechMethodId {
+  return value.trim().length > 0;
 }

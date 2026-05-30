@@ -3995,6 +3995,28 @@ a.sidebar-nav-item {
   cursor: not-allowed;
 }
 
+.filter-dropdown--speech-toolbar {
+  flex: 0 1 8.5rem;
+  min-width: 5.75rem;
+  max-width: 9rem;
+}
+
+.message-input-left .filter-dropdown--speech-toolbar .filter-dropdown-button {
+  width: 100%;
+  height: var(--composer-control-size);
+  min-width: 0;
+  justify-content: space-between;
+  padding: 0 0.45rem;
+  background: transparent;
+  font-size: var(--font-size-xs);
+}
+
+.message-input-left
+  .filter-dropdown--speech-toolbar
+  .filter-dropdown-button-label {
+  min-width: 0;
+}
+
 .attach-count {
   position: absolute;
   top: -6px;
@@ -7259,6 +7281,12 @@ a.sidebar-nav-item {
   .message-input-left {
     flex: 0 1 auto;
     overflow: visible;
+  }
+
+  .filter-dropdown--speech-toolbar {
+    flex-basis: 6.5rem;
+    min-width: 4.75rem;
+    max-width: 6.5rem;
   }
 
   .composer-status-ages {
