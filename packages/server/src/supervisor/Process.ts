@@ -3,16 +3,27 @@ import type {
   EffortLevel,
   ModelInfo,
   PermissionRules,
+  PromptSuggestionMode,
   ProviderName,
+  RecapMode,
   SessionLivenessSnapshot,
   SlashCommand,
   ThinkingConfig,
   UrlProjectId,
 } from "@yep-anywhere/shared";
+import {
+  HELPER_SIDE_MODEL_CHEAPEST,
+  HELPER_SIDE_MODEL_SAME_AS_MAIN,
+} from "@yep-anywhere/shared";
 import { getLogger } from "../logging/logger.js";
 import { getProjectName } from "../projects/paths.js";
 import { concatUserMessages, INTERRUPT_PREAMBLE } from "../sdk/messageQueue.js";
 import type { MessageQueue } from "../sdk/messageQueue.js";
+import type { AgentProvider } from "../sdk/providers/types.js";
+import {
+  expandSlashCommandEmulation,
+  isSlashCommandSubmission,
+} from "../sdk/slashCommandEmulation.js";
 import type {
   PermissionMode,
   ProviderActivitySnapshot,
@@ -51,6 +62,14 @@ export interface TakenDeferredMessage {
 }
 
 type DeferredQueueEntry = { message: UserMessage; timestamp: string };
+type RecentAssistantRecapEntry = {
+  completedAtMs: number;
+  text: string;
+};
+type PendingRecapRequest = {
+  provider: AgentProvider;
+  sinceMs: number | null;
+};
 
 /**
  * IMPORTANT: Never filter out messages by type before emitting to SSE!
@@ -149,6 +168,14 @@ export interface ProcessConstructorOptions extends ProcessOptions {
   supportedCommandsFn?: () => Promise<SlashCommand[]>;
   /** Function to change model mid-session (SDK 0.2.7+) */
   setModelFn?: (model?: string) => Promise<void>;
+  /** Deprecated compatibility flag; prefer recapMode. */
+  recapsEnabled?: boolean;
+  /** How this process should answer away-recap requests. */
+  recapMode?: RecapMode;
+  /** How this process should request native prompt suggestions. */
+  promptSuggestionMode?: PromptSuggestionMode;
+  /** Session-level helper side model for simulated helper features. */
+  helperSideModel?: string;
 }
 
 export class Process {
@@ -191,6 +218,25 @@ export class Process {
   /** Message ID for current streaming response */
   private _streamingMessageId: string | null = null;
 
+  /**
+   * Rolling buffer of recent assistant text turns used as context for
+   * server-synthesized recaps. See topics/recaps.md. We capture text here
+   * rather than reading the JSONL because the recap path is hot and the
+   * buffer is bounded; older entries are dropped as new ones arrive.
+   */
+  private recentAssistantRecapEntries: RecentAssistantRecapEntry[] = [];
+  private static readonly RECENT_TEXT_MAX_ENTRIES = 15;
+  private static readonly RECENT_TEXT_MAX_CHARS_PER_ENTRY = 1500;
+  /**
+   * Guard against overlapping recap requests for the same process; the
+   * route handler short-circuits when a generation is already in flight.
+   */
+  private recapInFlight = false;
+  private pendingRecapRequest: PendingRecapRequest | null = null;
+  private _recapMode: RecapMode;
+  private _promptSuggestionMode: PromptSuggestionMode;
+  private _helperSideModel: string;
+
   /** Pending tool approval requests (from canUseTool callback) - supports concurrent approvals */
   private pendingToolApprovals: Map<string, PendingToolApproval> = new Map();
   /** Order of pending approval request IDs for FIFO processing */
@@ -225,6 +271,10 @@ export class Process {
 
   /** Function to get supported slash commands (SDK 0.2.7+) */
   private supportedCommandsFn: (() => Promise<SlashCommand[]>) | null;
+  private supportedCommandsCache: SlashCommand[] | null = null;
+  private supportedCommandsRefreshInFlight: Promise<
+    SlashCommand[] | null
+  > | null = null;
 
   /** Function to change model mid-session (SDK 0.2.7+) */
   private setModelFn: ((model?: string) => Promise<void>) | null;
@@ -304,6 +354,11 @@ export class Process {
     this._isProcessAlive = options.isProcessAlive ?? null;
     this.probeLivenessFn = options.probeLivenessFn ?? null;
     this.getProviderActivityFn = options.getProviderActivityFn ?? null;
+    this._recapMode =
+      options.recapMode ?? (options.recapsEnabled ? "side-session" : "off");
+    this._promptSuggestionMode = options.promptSuggestionMode ?? "off";
+    this._helperSideModel =
+      options.helperSideModel ?? HELPER_SIDE_MODEL_CHEAPEST;
     this._lastMessageTime = new Date();
     this._lastProviderMessageTime = null;
     this._lastStateChangeTime = new Date();
@@ -389,6 +444,31 @@ export class Process {
 
   get liveness(): SessionLivenessSnapshot {
     return this.getLivenessSnapshot();
+  }
+
+  get recapMode(): RecapMode {
+    return this._recapMode;
+  }
+
+  get helperSideModel(): string {
+    return this._helperSideModel;
+  }
+
+  get promptSuggestionMode(): PromptSuggestionMode {
+    return this._promptSuggestionMode;
+  }
+
+  setRecapConfig(config: {
+    recapMode?: RecapMode;
+    helperSideModel?: string;
+  }): void {
+    if (config.recapMode !== undefined) {
+      this._recapMode = config.recapMode;
+    }
+    if (config.helperSideModel !== undefined) {
+      this._helperSideModel =
+        config.helperSideModel || HELPER_SIDE_MODEL_CHEAPEST;
+    }
   }
 
   /** OS PID of the spawned agent child process */
@@ -675,7 +755,38 @@ export class Process {
     if (!this.supportedCommandsFn) {
       return null;
     }
-    return this.supportedCommandsFn();
+    return this.primeSupportedCommands();
+  }
+
+  async primeSupportedCommands(): Promise<SlashCommand[] | null> {
+    if (!this.supportedCommandsFn) {
+      return null;
+    }
+    if (this.supportedCommandsRefreshInFlight) {
+      return this.supportedCommandsRefreshInFlight;
+    }
+
+    const refresh = this.supportedCommandsFn()
+      .then((commands) => {
+        this.supportedCommandsCache = commands;
+        return commands;
+      })
+      .finally(() => {
+        if (this.supportedCommandsRefreshInFlight === refresh) {
+          this.supportedCommandsRefreshInFlight = null;
+        }
+      });
+    this.supportedCommandsRefreshInFlight = refresh;
+    return refresh;
+  }
+
+  async primeSupportedCommandsForMessage(
+    message: UserMessage,
+  ): Promise<void> {
+    if (!isSlashCommandSubmission(message.text)) {
+      return;
+    }
+    await this.primeSupportedCommands();
   }
 
   /**
@@ -936,6 +1047,9 @@ export class Process {
       executor: this.executor,
       pid: this.pid,
       liveness: this.getLivenessSnapshot(),
+      recapMode: this._recapMode,
+      promptSuggestionMode: this._promptSuggestionMode,
+      helperSideModel: this._helperSideModel,
     };
 
     // Add idleSince if idle
@@ -993,6 +1107,193 @@ export class Process {
   clearStreamingText(): void {
     this._streamingText = "";
     this._streamingMessageId = null;
+  }
+
+  /**
+   * Push the text of a completed assistant turn into the recap buffer.
+   * Per-entry length is capped so a long single turn does not dominate the
+   * buffer; total entries are bounded by RECENT_TEXT_MAX_ENTRIES. See
+   * topics/recaps.md.
+   */
+  private pushRecentAssistantText(text: string, completedAtMs: number): void {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return;
+    }
+    const capped =
+      trimmed.length > Process.RECENT_TEXT_MAX_CHARS_PER_ENTRY
+        ? `${trimmed.slice(0, Process.RECENT_TEXT_MAX_CHARS_PER_ENTRY)} …[truncated]`
+        : trimmed;
+    this.recentAssistantRecapEntries.push({ completedAtMs, text: capped });
+    while (
+      this.recentAssistantRecapEntries.length >
+      Process.RECENT_TEXT_MAX_ENTRIES
+    ) {
+      this.recentAssistantRecapEntries.shift();
+    }
+  }
+
+  /**
+   * Snapshot of recent assistant text used as context for a recap.
+   */
+  getRecentAssistantText(sinceMs?: number | null): string[] {
+    return this.recentAssistantRecapEntries
+      .filter(
+        (entry) =>
+          sinceMs === null ||
+          sinceMs === undefined ||
+          entry.completedAtMs > sinceMs,
+      )
+      .map((entry) => entry.text);
+  }
+
+  /**
+   * Emit a synthetic system message (no provider involvement) into the
+   * session's broadcast stream. Used for YA-side recaps so they reach SSE
+   * subscribers via the same path as provider-emitted messages, without
+   * touching the underlying JSONL transcript.
+   */
+  emitSyntheticSystemMessage(subtype: string, content: string): void {
+    const synthetic = this.withTimestamp({
+      type: "system",
+      subtype,
+      content,
+      session_id: this._sessionId,
+      uuid: randomUUID(),
+      isMeta: false,
+    } as unknown as SDKMessage);
+    this.currentBucket.push(synthetic);
+    this.emit({ type: "message", message: synthetic });
+  }
+
+  /**
+   * Run a server-side recap of recent assistant activity and emit the
+   * result as a synthetic `away_summary` system message. The provider is
+   * looked up by the caller (Supervisor) and passed in to keep Process
+   * free of provider-registry imports. See topics/recaps.md.
+   *
+   * Returns shape:
+   *  - `supported: false` — provider does not implement recaps.
+   *  - `supported: true, emitted: false` — supported but suppressed
+   *    (no recent activity, already in-flight, etc.).
+   *  - `supported: true, emitted: true` — recap was generated and emitted.
+   */
+  async requestRecap(
+    provider: AgentProvider,
+    options?: { sinceMs?: number | null },
+  ): Promise<{ supported: boolean; emitted: boolean; reason?: string }> {
+    if (this._recapMode === "off") {
+      return {
+        supported: true,
+        emitted: false,
+        reason: "recaps disabled for this session",
+      };
+    }
+    if (this._recapMode === "native") {
+      if (!provider.supportsNativeRecaps) {
+        return {
+          supported: false,
+          emitted: false,
+          reason: "provider does not support native recaps",
+        };
+      }
+      return {
+        supported: true,
+        emitted: false,
+        reason: "native recaps are provider-owned",
+      };
+    }
+    if (!provider.supportsRecaps || !provider.generateRecap) {
+      return {
+        supported: false,
+        emitted: false,
+        reason: "provider does not support recaps",
+      };
+    }
+    if (this.recapInFlight) {
+      return {
+        supported: true,
+        emitted: false,
+        reason: "recap already in flight",
+      };
+    }
+    const sinceMs = options?.sinceMs ?? null;
+    if (this._state.type === "in-turn") {
+      this.pendingRecapRequest = { provider, sinceMs };
+      return {
+        supported: true,
+        emitted: false,
+        reason: "recap deferred until turn completes",
+      };
+    }
+
+    return this.generateAndEmitRecap(provider, sinceMs);
+  }
+
+  private async generateAndEmitRecap(
+    provider: AgentProvider,
+    sinceMs: number | null,
+  ): Promise<{ supported: boolean; emitted: boolean; reason?: string }> {
+    if (!provider.supportsRecaps || !provider.generateRecap) {
+      return {
+        supported: false,
+        emitted: false,
+        reason: "provider does not support recaps",
+      };
+    }
+
+    const recent = this.getRecentAssistantText(sinceMs);
+    if (recent.length === 0) {
+      return {
+        supported: true,
+        emitted: false,
+        reason: "no recent assistant activity to summarize",
+      };
+    }
+
+    this.recapInFlight = true;
+    try {
+      const text = (
+        await provider.generateRecap(recent, {
+          model: this.resolveHelperSideModel(),
+        })
+      ).trim();
+      if (!text) {
+        return {
+          supported: true,
+          emitted: false,
+          reason: "provider returned empty recap",
+        };
+      }
+      this.emitSyntheticSystemMessage("away_summary", text);
+      return { supported: true, emitted: true };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const log = getLogger();
+      log.warn(
+        {
+          event: "session_recap_failed",
+          sessionId: this._sessionId,
+          processId: this.id,
+          projectId: this.projectId,
+          error: reason,
+        },
+        `Recap generation failed: ${reason}`,
+      );
+      return { supported: true, emitted: false, reason };
+    } finally {
+      this.recapInFlight = false;
+    }
+  }
+
+  private resolveHelperSideModel(): string | undefined {
+    if (this._helperSideModel === HELPER_SIDE_MODEL_CHEAPEST) {
+      return HELPER_SIDE_MODEL_CHEAPEST;
+    }
+    if (this._helperSideModel === HELPER_SIDE_MODEL_SAME_AS_MAIN) {
+      return this._resolvedModel ?? this.model;
+    }
+    return this._helperSideModel || undefined;
   }
 
   /**
@@ -1097,6 +1398,10 @@ export class Process {
     );
   }
 
+  private expandEmulatedSlashCommand(message: UserMessage): UserMessage {
+    return expandSlashCommandEmulation(message, this.supportedCommandsCache);
+  }
+
   /**
    * Queue a message to be sent to the SDK.
    * For real SDK, pushes to MessageQueue.
@@ -1129,13 +1434,15 @@ export class Process {
       };
     }
 
+    const providerMessage = this.expandEmulatedSlashCommand(message);
+
     // Create user message with UUID - this UUID will be used by both SSE and SDK
-    const uuid = randomUUID();
-    const messageWithUuid: UserMessage = { ...message, uuid };
+    const uuid = providerMessage.uuid ?? randomUUID();
+    const messageWithUuid: UserMessage = { ...providerMessage, uuid };
 
     // Build content that matches what the SDK will write to JSONL.
     // This ensures SSE/history messages can be deduplicated against JSONL.
-    const content = this.buildUserMessageContent(message);
+    const content = this.buildUserMessageContent(providerMessage);
 
     const sdkMessage = this.withTimestamp({
       type: "user",
@@ -1219,7 +1526,7 @@ export class Process {
     }
 
     // Legacy behavior for mock SDK
-    this.legacyQueue.push(message);
+    this.legacyQueue.push(providerMessage);
     if (this._state.type === "idle") {
       this.processNextInQueue();
     }
@@ -1951,6 +2258,16 @@ export class Process {
           }
         }
 
+        // Capture assistant text for the recap buffer (topics/recaps.md).
+        // Stream_event partials are skipped — we only want completed assistant
+        // turns so the recap input is coherent.
+        if (message.type === "assistant") {
+          const text = extractMessageText(message);
+          if (text) {
+            this.pushRecentAssistantText(text, receivedAt.getTime());
+          }
+        }
+
         // Extract session ID from init message
         if (
           message.type === "system" &&
@@ -2133,7 +2450,17 @@ export class Process {
 
     this.setState({ type: "idle", since: new Date() });
     this.startIdleTimer();
+    this.flushPendingRecapRequest();
     this.processNextInQueue();
+  }
+
+  private flushPendingRecapRequest(): void {
+    const pending = this.pendingRecapRequest;
+    if (!pending || this.recapInFlight || this._state.type !== "idle") {
+      return;
+    }
+    this.pendingRecapRequest = null;
+    void this.generateAndEmitRecap(pending.provider, pending.sinceMs);
   }
 
   /**

@@ -1,5 +1,6 @@
 import type {
   AppContentBlock,
+  PromptSuggestionMode,
   ProviderName,
   PublicSessionShareSessionStatusResponse,
   ThinkingOption,
@@ -37,6 +38,7 @@ import { RecentSessionsDropdown } from "../components/RecentSessionsDropdown";
 import { RestartSessionModal } from "../components/RestartSessionModal";
 import { SessionHeartbeatModal } from "../components/SessionHeartbeatModal";
 import { SessionMenu } from "../components/SessionMenu";
+import { SessionRecapModal } from "../components/SessionRecapModal";
 import { SessionShareModal } from "../components/SessionShareModal";
 import { ToolApprovalPanel } from "../components/ToolApprovalPanel";
 import type { ModalAnchorRect } from "../components/ui/Modal";
@@ -721,6 +723,7 @@ function SessionPageContent({
     model?: string;
     thinking?: { type: string };
     effort?: string;
+    promptSuggestionMode?: PromptSuggestionMode;
   } | null>(null);
 
   const [scrollTrigger, setScrollTrigger] = useState(0);
@@ -901,6 +904,7 @@ function SessionPageContent({
                 model: process.model,
                 thinking: process.thinking,
                 effort: process.effort,
+                promptSuggestionMode: process.promptSuggestionMode,
               }
             : null,
         );
@@ -1181,6 +1185,7 @@ function SessionPageContent({
   // Process info modal state
   const [showProcessInfoModal, setShowProcessInfoModal] = useState(false);
   const [showHeartbeatModal, setShowHeartbeatModal] = useState(false);
+  const [showRecapModal, setShowRecapModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareModalAnchor, setShareModalAnchor] =
     useState<ModalAnchorRect | null>(null);
@@ -1897,11 +1902,12 @@ function SessionPageContent({
         showToast(t("sessionSwitchedModel", { model: next.model }), "success");
       }
       if (next.thinking !== undefined || next.effort !== undefined) {
-        setLiveModelConfig({
-          model: next.model ?? liveModelConfig?.model,
+        setLiveModelConfig((prev) => ({
+          model: next.model ?? prev?.model,
           thinking: next.thinking,
           effort: next.effort,
-        });
+          promptSuggestionMode: prev?.promptSuggestionMode,
+        }));
       } else if (next.model) {
         setLiveModelConfig((prev) =>
           prev ? { ...prev, model: next.model } : { model: next.model },
@@ -1914,7 +1920,7 @@ function SessionPageContent({
         }
       }
     },
-    [liveModelConfig?.model, reconnectStream, setSessionModel, showToast, status.owner, t],
+    [reconnectStream, setSessionModel, showToast, status.owner, t],
   );
 
   const handleCompactSession = useCallback(async () => {
@@ -3379,6 +3385,11 @@ function SessionPageContent({
                     onToggleRead={handleToggleRead}
                     onRename={handleStartEditingTitle}
                     onConfigureHeartbeat={() => setShowHeartbeatModal(true)}
+                    onConfigureRecaps={
+                      status.owner === "self"
+                        ? () => setShowRecapModal(true)
+                        : undefined
+                    }
                     warningRestoreAvailable={
                       hasPendingToolCalls && pendingElsewhereDismissed
                     }
@@ -3492,6 +3503,19 @@ function SessionPageContent({
           />
         )}
 
+        {showRecapModal && status.owner === "self" && (
+          <SessionRecapModal
+            sessionId={actualSessionId}
+            processId={status.processId}
+            provider={effectiveProvider}
+            currentModel={liveBadgeModel}
+            onClose={() => setShowRecapModal(false)}
+            onSaved={() => {
+              showToast(t("sessionRecapSaved"), "success");
+            }}
+          />
+        )}
+
         {showShareModal && (
           <SessionShareModal
             anchorRect={shareModalAnchor}
@@ -3531,6 +3555,7 @@ function SessionPageContent({
             currentModel={liveBadgeModel}
             mode={permissionMode}
             thinking={getThinkingSetting()}
+            promptSuggestionMode={liveModelConfig?.promptSuggestionMode}
             executor={session?.executor}
             onRestarted={(result, options) => {
               setShowHandoffModal(false);

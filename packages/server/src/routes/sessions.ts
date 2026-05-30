@@ -1,7 +1,13 @@
 import {
   type ContextUsage,
   type PermissionRules,
+  PROMPT_SUGGESTION_MODES,
+  type PromptSuggestionMode,
   type ProviderName,
+  HELPER_SIDE_MODEL_CHEAPEST,
+  HELPER_SIDE_MODEL_SAME_AS_MAIN,
+  RECAP_MODES,
+  type RecapMode,
   type ThinkingOption,
   type UploadedFile,
   type UserMessageDeliveryIntent,
@@ -107,6 +113,114 @@ function parseOptionalExecutor(rawExecutor: unknown): {
   }
 
   return { executor };
+}
+
+function parseOptionalRecapMode(rawMode: unknown): {
+  recapMode: RecapMode | undefined;
+  error?: string;
+} {
+  if (rawMode === undefined || rawMode === null || rawMode === "") {
+    return { recapMode: undefined };
+  }
+  if (
+    typeof rawMode !== "string" ||
+    !RECAP_MODES.includes(rawMode as RecapMode)
+  ) {
+    return {
+      recapMode: undefined,
+      error: "recapMode must be one of: off, native, side-session",
+    };
+  }
+  return { recapMode: rawMode as RecapMode };
+}
+
+function parseOptionalPromptSuggestionMode(rawMode: unknown): {
+  promptSuggestionMode: PromptSuggestionMode | undefined;
+  error?: string;
+} {
+  if (rawMode === undefined || rawMode === null || rawMode === "") {
+    return { promptSuggestionMode: undefined };
+  }
+  if (
+    typeof rawMode !== "string" ||
+    !PROMPT_SUGGESTION_MODES.includes(rawMode as PromptSuggestionMode)
+  ) {
+    return {
+      promptSuggestionMode: undefined,
+      error: "promptSuggestionMode must be one of: off, native",
+    };
+  }
+  return { promptSuggestionMode: rawMode as PromptSuggestionMode };
+}
+
+function parseOptionalHelperSideModel(rawModel: unknown): {
+  helperSideModel: string | undefined;
+  error?: string;
+} {
+  if (rawModel === undefined || rawModel === null || rawModel === "") {
+    return { helperSideModel: undefined };
+  }
+  if (typeof rawModel !== "string") {
+    return { helperSideModel: undefined, error: "helperSideModel must be a string" };
+  }
+  const trimmed = rawModel.trim();
+  if (!trimmed) {
+    return { helperSideModel: undefined };
+  }
+  return {
+    helperSideModel:
+      trimmed === HELPER_SIDE_MODEL_SAME_AS_MAIN
+        ? HELPER_SIDE_MODEL_SAME_AS_MAIN
+        : trimmed === HELPER_SIDE_MODEL_CHEAPEST
+          ? HELPER_SIDE_MODEL_CHEAPEST
+          : trimmed.slice(0, 200),
+  };
+}
+
+function parseHelperSettings(body: {
+  recapMode?: unknown;
+  promptSuggestionMode?: unknown;
+  helperSideModel?: unknown;
+}): {
+  recapMode: RecapMode | undefined;
+  promptSuggestionMode: PromptSuggestionMode | undefined;
+  helperSideModel: string | undefined;
+  error?: string;
+} {
+  const recap = parseOptionalRecapMode(body.recapMode);
+  if (recap.error) {
+    return {
+      recapMode: undefined,
+      promptSuggestionMode: undefined,
+      helperSideModel: undefined,
+      error: recap.error,
+    };
+  }
+  const promptSuggestion = parseOptionalPromptSuggestionMode(
+    body.promptSuggestionMode,
+  );
+  if (promptSuggestion.error) {
+    return {
+      recapMode: undefined,
+      promptSuggestionMode: undefined,
+      helperSideModel: undefined,
+      error: promptSuggestion.error,
+    };
+  }
+  const helperModel = parseOptionalHelperSideModel(body.helperSideModel);
+  if (helperModel.error) {
+    return {
+      recapMode: undefined,
+      promptSuggestionMode: undefined,
+      helperSideModel: undefined,
+      error: helperModel.error,
+    };
+  }
+  return {
+    recapMode: recap.recapMode,
+    promptSuggestionMode: promptSuggestion.promptSuggestionMode,
+    helperSideModel: helperModel.helperSideModel,
+  };
 }
 
 function isCodexProviderName(
@@ -263,6 +377,12 @@ interface StartSessionBody {
   executor?: string;
   /** Permission rules for tool filtering (deny/allow patterns) */
   permissions?: PermissionRules;
+  /** Session recap behavior for future away-return triggers. */
+  recapMode?: RecapMode;
+  /** Prompt suggestion behavior for this session. */
+  promptSuggestionMode?: PromptSuggestionMode;
+  /** Session-level helper side model for simulated helper features. */
+  helperSideModel?: string;
 }
 
 interface CreateSessionBody {
@@ -274,6 +394,12 @@ interface CreateSessionBody {
   executor?: string;
   /** Permission rules for tool filtering (deny/allow patterns) */
   permissions?: PermissionRules;
+  /** Session recap behavior for future away-return triggers. */
+  recapMode?: RecapMode;
+  /** Prompt suggestion behavior for this session. */
+  promptSuggestionMode?: PromptSuggestionMode;
+  /** Session-level helper side model for simulated helper features. */
+  helperSideModel?: string;
 }
 
 interface InputResponseBody {
@@ -2095,6 +2221,10 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     if (executorError) {
       return c.json({ error: executorError }, 400);
     }
+    const helperSettings = parseHelperSettings(body);
+    if (helperSettings.error) {
+      return c.json({ error: helperSettings.error }, 400);
+    }
 
     const serverTimestamp = Date.now();
     const userMessage: UserMessage = {
@@ -2135,6 +2265,9 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         executor,
         globalInstructions: getGlobalInstructions(),
         permissions: body.permissions,
+        recapMode: helperSettings.recapMode,
+        promptSuggestionMode: helperSettings.promptSuggestionMode,
+        helperSideModel: helperSettings.helperSideModel,
       },
     );
 
@@ -2200,6 +2333,10 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     if (executorError) {
       return c.json({ error: executorError }, 400);
     }
+    const helperSettings = parseHelperSettings(body);
+    if (helperSettings.error) {
+      return c.json({ error: helperSettings.error }, 400);
+    }
 
     // Convert thinking option to SDK config
     const { thinking, effort } = body.thinking
@@ -2221,6 +2358,9 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         executor,
         globalInstructions: getGlobalInstructions(),
         permissions: body.permissions,
+        recapMode: helperSettings.recapMode,
+        promptSuggestionMode: helperSettings.promptSuggestionMode,
+        helperSideModel: helperSettings.helperSideModel,
       },
     );
 
@@ -2270,6 +2410,10 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     if (executorError) {
       return c.json({ error: executorError }, 400);
     }
+    const helperSettings = parseHelperSettings(body);
+    if (helperSettings.error) {
+      return c.json({ error: helperSettings.error }, 400);
+    }
 
     const projectPath = await ensureDetachedProjectPath(executor);
     const serverTimestamp = Date.now();
@@ -2301,6 +2445,9 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         executor,
         globalInstructions: getGlobalInstructions(),
         permissions: body.permissions,
+        recapMode: helperSettings.recapMode,
+        promptSuggestionMode: helperSettings.promptSuggestionMode,
+        helperSideModel: helperSettings.helperSideModel,
       },
     );
 
@@ -2350,6 +2497,10 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     if (executorError) {
       return c.json({ error: executorError }, 400);
     }
+    const helperSettings = parseHelperSettings(body);
+    if (helperSettings.error) {
+      return c.json({ error: helperSettings.error }, 400);
+    }
 
     const projectPath = await ensureDetachedProjectPath(executor);
     const { thinking, effort } = body.thinking
@@ -2369,6 +2520,9 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         executor,
         globalInstructions: getGlobalInstructions(),
         permissions: body.permissions,
+        recapMode: helperSettings.recapMode,
+        promptSuggestionMode: helperSettings.promptSuggestionMode,
+        helperSideModel: helperSettings.helperSideModel,
       },
     );
 
@@ -2427,6 +2581,10 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     const parsedBodyExecutor = parseOptionalExecutor(body.executor);
     if (parsedBodyExecutor.error) {
       return c.json({ error: parsedBodyExecutor.error }, 400);
+    }
+    const helperSettings = parseHelperSettings(body);
+    if (helperSettings.error) {
+      return c.json({ error: helperSettings.error }, 400);
     }
 
     const serverTimestamp = Date.now();
@@ -2532,6 +2690,9 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         executor,
         globalInstructions,
         permissions: body.permissions,
+        recapMode: helperSettings.recapMode,
+        promptSuggestionMode: helperSettings.promptSuggestionMode,
+        helperSideModel: helperSettings.helperSideModel,
       },
     );
 
@@ -2584,6 +2745,10 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     const parsedBodyExecutor = parseOptionalExecutor(body.executor);
     if (parsedBodyExecutor.error) {
       return c.json({ error: parsedBodyExecutor.error }, 400);
+    }
+    const helperSettings = parseHelperSettings(body);
+    if (helperSettings.error) {
+      return c.json({ error: helperSettings.error }, 400);
     }
 
     let executor = parsedBodyExecutor.executor;
@@ -2663,6 +2828,9 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         executor,
         globalInstructions: getGlobalInstructions(),
         permissions: body.permissions,
+        recapMode: helperSettings.recapMode,
+        promptSuggestionMode: helperSettings.promptSuggestionMode,
+        helperSideModel: helperSettings.helperSideModel,
       },
     );
 
@@ -2791,6 +2959,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       if (body.mode) {
         process.setPermissionMode(body.mode);
       }
+      await process.primeSupportedCommandsForMessage(userMessage);
       const deferredResult = process.deferMessage(userMessage, {
         promoteIfReady: true,
         placement: parseDeferredPlacement(body),

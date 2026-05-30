@@ -10,6 +10,13 @@ import type {
 } from "../types/renderItems";
 import { getMessageId } from "./mergeMessages";
 
+const AWAY_SUMMARY_HINT_SUFFIX_RE =
+  /\s*\(disable recaps in \/config\)\s*$/u;
+
+export function stripAwaySummaryHintSuffix(content: string): string {
+  return content.replace(AWAY_SUMMARY_HINT_SUFFIX_RE, "");
+}
+
 /**
  * When true, indicates the session has active tool work or approval.
  * Orphaned tools in the current trailing user turn are treated as pending.
@@ -253,22 +260,29 @@ function processMessage(
     if (
       subtype === "compact_boundary" ||
       subtype === "turn_aborted" ||
-      subtype === "config_ack"
+      subtype === "config_ack" ||
+      subtype === "away_summary"
     ) {
       const configSignature =
         subtype === "config_ack" ? getConfigAckSignature(msg) : null;
+      const content =
+        typeof msg.content === "string"
+          ? msg.content
+          : subtype === "turn_aborted"
+            ? "Turn aborted"
+            : subtype === "config_ack"
+              ? "Configuration updated"
+              : subtype === "away_summary"
+                ? "Recap unavailable"
+                : "Context compacted";
       const systemItem: SystemItem = {
         type: "system",
         id: msgId,
         subtype,
         content:
-          typeof msg.content === "string"
-            ? msg.content
-            : subtype === "turn_aborted"
-              ? "Turn aborted"
-              : subtype === "config_ack"
-                ? "Configuration updated"
-              : "Context compacted",
+          subtype === "away_summary"
+            ? stripAwaySummaryHintSuffix(content)
+            : content,
         sourceMessages: [msg],
         ...(subtype === "config_ack"
           ? {

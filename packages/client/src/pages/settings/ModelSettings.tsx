@@ -104,6 +104,7 @@ export function ModelSettings() {
 
     try {
       await updateSetting("newSessionDefaults", {
+        ...settings?.newSessionDefaults,
         provider: provider.name,
         model:
           getPreferredProviderModel(
@@ -111,7 +112,6 @@ export function ModelSettings() {
             provider.models ?? [],
             settings?.newSessionDefaults,
           ) ?? undefined,
-        permissionMode: settings?.newSessionDefaults?.permissionMode,
       });
       showToast(t("newSessionDefaultsSaved"), "success");
     } catch (err) {
@@ -127,9 +127,9 @@ export function ModelSettings() {
 
     try {
       await updateSetting("newSessionDefaults", {
+        ...settings?.newSessionDefaults,
         provider: selectedProvider.name,
         model: modelId,
-        permissionMode: settings?.newSessionDefaults?.permissionMode,
       });
       showToast(t("newSessionDefaultsSaved"), "success");
     } catch (err) {

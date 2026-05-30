@@ -5,9 +5,15 @@
 import {
   ALL_PERMISSION_MODES,
   ALL_PROVIDERS,
+  HELPER_SIDE_MODEL_CHEAPEST,
+  HELPER_SIDE_MODEL_SAME_AS_MAIN,
+  PROMPT_SUGGESTION_MODES,
+  RECAP_MODES,
   type NewSessionDefaults,
   type PermissionMode,
+  type PromptSuggestionMode,
   type ProviderName,
+  type RecapMode,
 } from "@yep-anywhere/shared";
 import { Hono } from "hono";
 import { testSSHConnection } from "../sdk/remote-spawn.js";
@@ -120,6 +126,62 @@ function parseNewSessionDefaults(
       input.permissionMode.length > 0
     ) {
       parsed.permissionMode = input.permissionMode as PermissionMode;
+    }
+  }
+
+  if ("recapMode" in input) {
+    if (
+      input.recapMode !== undefined &&
+      input.recapMode !== null &&
+      input.recapMode !== "" &&
+      !RECAP_MODES.includes(input.recapMode as RecapMode)
+    ) {
+      return null;
+    }
+    if (typeof input.recapMode === "string" && input.recapMode.length > 0) {
+      parsed.recapMode = input.recapMode as RecapMode;
+    }
+  }
+
+  if ("promptSuggestionMode" in input) {
+    if (
+      input.promptSuggestionMode !== undefined &&
+      input.promptSuggestionMode !== null &&
+      input.promptSuggestionMode !== "" &&
+      !PROMPT_SUGGESTION_MODES.includes(
+        input.promptSuggestionMode as PromptSuggestionMode,
+      )
+    ) {
+      return null;
+    }
+    if (
+      typeof input.promptSuggestionMode === "string" &&
+      input.promptSuggestionMode.length > 0
+    ) {
+      parsed.promptSuggestionMode =
+        input.promptSuggestionMode as PromptSuggestionMode;
+    }
+  }
+
+  if ("helperSideModel" in input) {
+    if (
+      input.helperSideModel !== undefined &&
+      input.helperSideModel !== null &&
+      input.helperSideModel !== "" &&
+      typeof input.helperSideModel !== "string"
+    ) {
+      return null;
+    }
+    if (
+      typeof input.helperSideModel === "string" &&
+      input.helperSideModel.length > 0
+    ) {
+      parsed.helperSideModel =
+        input.helperSideModel === HELPER_SIDE_MODEL_SAME_AS_MAIN
+          ? HELPER_SIDE_MODEL_SAME_AS_MAIN
+          : input.helperSideModel === HELPER_SIDE_MODEL_CHEAPEST
+            ? HELPER_SIDE_MODEL_CHEAPEST
+            : input.helperSideModel.slice(0, 200);
     }
   }
 

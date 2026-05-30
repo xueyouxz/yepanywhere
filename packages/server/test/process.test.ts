@@ -4,6 +4,7 @@ import {
   CONCAT_SEPARATOR,
   MessageQueue,
 } from "../src/sdk/messageQueue.js";
+import type { AgentProvider } from "../src/sdk/providers/types.js";
 import type { SDKMessage } from "../src/sdk/types.js";
 import { Process } from "../src/supervisor/Process.js";
 import type { ProcessEvent } from "../src/supervisor/types.js";
@@ -71,6 +72,32 @@ async function waitFor(assertion: () => void): Promise<void> {
     }
   }
   assertion();
+}
+
+function createRecapProvider(
+  generateRecap: AgentProvider["generateRecap"],
+): AgentProvider {
+  return {
+    name: "claude",
+    displayName: "Claude",
+    supportsPermissionMode: true,
+    supportsThinkingToggle: true,
+    supportsSlashCommands: true,
+    supportsSteering: false,
+    supportsRecaps: true,
+    isInstalled: async () => true,
+    isAuthenticated: async () => true,
+    getAuthStatus: async () => ({
+      installed: true,
+      authenticated: true,
+      enabled: true,
+    }),
+    getAvailableModels: async () => [],
+    startSession: async () => {
+      throw new Error("not used");
+    },
+    generateRecap,
+  };
 }
 
 describe("Process", () => {
@@ -262,6 +289,224 @@ describe("Process", () => {
 
       // Let the iterator complete so abort() doesn't hang
       resolveIterator?.();
+      await process.abort();
+    });
+
+    it("expands cached slash-command emulation before queueing", async () => {
+      let resolveIterator: () => void;
+      const iterator: AsyncIterator<SDKMessage> = {
+        next: () =>
+          new Promise((resolve) => {
+            resolveIterator = () => resolve({ done: true, value: undefined });
+          }),
+      };
+      const queue = new MessageQueue();
+      const process = new Process(iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        idleTimeoutMs: 100,
+        queue,
+        supportedCommandsFn: async () => [
+          {
+            name: "goal",
+            description: "Keep working until done",
+            emulation: { providerText: "/loop wish {{argument}}" },
+          },
+        ],
+      });
+
+      await process.supportedCommands();
+      const result = process.queueMessage({
+        text: "/goal Make tests pass",
+      });
+
+      expect(result.success).toBe(true);
+      expect(process.getMessageHistory()[0]?.message?.content).toBe(
+        "/loop wish Make tests pass",
+      );
+      const queuedProviderTurn = await queue[Symbol.asyncIterator]().next();
+      expect(queuedProviderTurn.value?.message.content).toBe(
+        "/loop wish Make tests pass",
+      );
+
+      resolveIterator?.();
+      await process.abort();
+    });
+  });
+
+  describe("recaps", () => {
+    it("keeps simulated recaps disabled by default", async () => {
+      const generateRecap = vi.fn(async () => "summary");
+      const process = new Process(createMockIterator([]), {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        idleTimeoutMs: 100,
+      });
+
+      const result = await process.requestRecap(
+        createRecapProvider(generateRecap),
+      );
+
+      expect(result).toMatchObject({
+        supported: true,
+        emitted: false,
+        reason: "recaps disabled for this session",
+      });
+      expect(generateRecap).not.toHaveBeenCalled();
+    });
+
+    it("does not run the simulated recap generator in native mode", async () => {
+      const generateRecap = vi.fn(async () => "summary");
+      const process = new Process(createMockIterator([]), {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        idleTimeoutMs: 100,
+        recapMode: "native",
+      });
+      const provider = {
+        ...createRecapProvider(generateRecap),
+        supportsNativeRecaps: true,
+      };
+
+      const result = await process.requestRecap(provider);
+
+      expect(result).toMatchObject({
+        supported: true,
+        emitted: false,
+        reason: "native recaps are provider-owned",
+      });
+      expect(generateRecap).not.toHaveBeenCalled();
+    });
+
+    it("summarizes only assistant turns after the away boundary", async () => {
+      const controller = createControllableIterator();
+      const generateRecap = vi.fn(async (recent: string[]) =>
+        recent.join(" | "),
+      );
+      const process = new Process(controller.iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        idleTimeoutMs: 100,
+        recapsEnabled: true,
+      });
+      const recaps: SDKMessage[] = [];
+      process.subscribe((event) => {
+        if (
+          event.type === "message" &&
+          event.message.type === "system" &&
+          event.message.subtype === "away_summary"
+        ) {
+          recaps.push(event.message);
+        }
+      });
+
+      controller.push({ type: "system", subtype: "init", session_id: "sess-1" });
+      controller.push({ type: "assistant", message: { content: "before" } });
+      await waitFor(() =>
+        expect(process.getRecentAssistantText()).toEqual(["before"]),
+      );
+      const sinceMs = Date.now();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      controller.push({ type: "assistant", message: { content: "after" } });
+      controller.push({ type: "result", session_id: "sess-1" });
+      await waitFor(() => expect(process.state.type).toBe("idle"));
+
+      const result = await process.requestRecap(
+        createRecapProvider(generateRecap),
+        { sinceMs },
+      );
+
+      expect(result).toMatchObject({ supported: true, emitted: true });
+      expect(generateRecap).toHaveBeenCalledWith(["after"], {
+        model: "cheapest",
+      });
+      expect(recaps.at(-1)?.content).toBe("after");
+      controller.finish();
+      await process.abort();
+    });
+
+    it("defers recap generation until the active turn completes", async () => {
+      const controller = createControllableIterator();
+      const generateRecap = vi.fn(async (recent: string[]) =>
+        recent.join(" | "),
+      );
+      const process = new Process(controller.iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        idleTimeoutMs: 100,
+        recapsEnabled: true,
+      });
+      const recaps: SDKMessage[] = [];
+      process.subscribe((event) => {
+        if (
+          event.type === "message" &&
+          event.message.type === "system" &&
+          event.message.subtype === "away_summary"
+        ) {
+          recaps.push(event.message);
+        }
+      });
+
+      const sinceMs = Date.now() - 1;
+      controller.push({ type: "system", subtype: "init", session_id: "sess-1" });
+      controller.push({ type: "assistant", message: { content: "during" } });
+      await waitFor(() =>
+        expect(process.getRecentAssistantText()).toEqual(["during"]),
+      );
+
+      const result = await process.requestRecap(
+        createRecapProvider(generateRecap),
+        { sinceMs },
+      );
+
+      expect(result).toMatchObject({
+        supported: true,
+        emitted: false,
+        reason: "recap deferred until turn completes",
+      });
+      expect(generateRecap).not.toHaveBeenCalled();
+
+      controller.push({ type: "result", session_id: "sess-1" });
+      await waitFor(() =>
+        expect(generateRecap).toHaveBeenCalledWith(["during"], {
+          model: "cheapest",
+        }),
+      );
+      expect(recaps.at(-1)?.content).toBe("during");
+      controller.finish();
+      await process.abort();
+    });
+
+    it("resolves same-as-main helper model for recap generation", async () => {
+      const controller = createControllableIterator();
+      const generateRecap = vi.fn(async (recent: string[]) =>
+        recent.join(" | "),
+      );
+      const process = new Process(controller.iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        idleTimeoutMs: 100,
+        recapMode: "side-session",
+        helperSideModel: "same-as-main",
+        model: "sonnet",
+      });
+
+      controller.push({ type: "system", subtype: "init", session_id: "sess-1" });
+      controller.push({ type: "assistant", message: { content: "after" } });
+      controller.push({ type: "result", session_id: "sess-1" });
+      await waitFor(() => expect(process.state.type).toBe("idle"));
+      await process.requestRecap(createRecapProvider(generateRecap));
+
+      expect(generateRecap).toHaveBeenCalledWith(["after"], {
+        model: "sonnet",
+      });
+      controller.finish();
       await process.abort();
     });
   });
@@ -858,6 +1103,7 @@ describe("Process", () => {
         projectId: "proj-123",
         sessionId: "sess-456",
         idleTimeoutMs: 100,
+        promptSuggestionMode: "native",
       });
 
       const info = process.getInfo();
@@ -867,6 +1113,7 @@ describe("Process", () => {
       expect(info.projectId).toBe("proj-123");
       expect(info.projectPath).toBe("/test/path");
       expect(info.startedAt).toBeDefined();
+      expect(info.promptSuggestionMode).toBe("native");
     });
   });
 

@@ -9,6 +9,8 @@ import type {
 export type {
   PermissionMode,
   ProviderName,
+  RecapMode,
+  PromptSuggestionMode,
   UrlProjectId,
   // SDK schema types (for strict typing when needed)
   AssistantEntry,

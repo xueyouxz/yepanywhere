@@ -94,6 +94,16 @@ export interface ProviderImageSizing {
   note?: string;
 }
 
+export const RECAP_MODES = ["off", "native", "side-session"] as const;
+export type RecapMode = (typeof RECAP_MODES)[number];
+
+export const PROMPT_SUGGESTION_MODES = ["off", "native"] as const;
+export type PromptSuggestionMode =
+  (typeof PROMPT_SUGGESTION_MODES)[number];
+
+export const HELPER_SIDE_MODEL_SAME_AS_MAIN = "same-as-main" as const;
+export const HELPER_SIDE_MODEL_CHEAPEST = "cheapest" as const;
+
 /**
  * Slash command (skill) available in a session.
  */
@@ -111,6 +121,11 @@ export interface SlashCommandProviderDetails {
   [provider: string]: unknown;
 }
 
+export interface SlashCommandEmulation {
+  /** Provider-visible command template YA sends for this advertised command. */
+  providerText: string;
+}
+
 export interface SlashCommand {
   /** Command name without leading slash (e.g., "commit", "review-pr") */
   name: string;
@@ -118,6 +133,8 @@ export interface SlashCommand {
   description: string;
   /** Hint for command arguments (e.g., "<file>") */
   argumentHint?: string;
+  /** YA-owned fallback behavior for a command the provider does not expose. */
+  emulation?: SlashCommandEmulation;
   /** Optional provider-specific provenance or capability detail. */
   providerDetails?: SlashCommandProviderDetails;
 }
@@ -145,6 +162,12 @@ export interface ProviderInfo {
   supportsSlashCommands?: boolean;
   /** Whether this provider supports active turn steering (default: false) */
   supportsSteering?: boolean;
+  /** Whether this provider can generate YA-triggered recap messages. */
+  supportsRecaps?: boolean;
+  /** Whether this provider emits recaps natively without a YA side query. */
+  supportsNativeRecaps?: boolean;
+  /** Whether this provider emits prompt suggestions in its ordinary protocol. */
+  supportsNativePromptSuggestions?: boolean;
 }
 
 /**
@@ -179,6 +202,10 @@ export interface NewSessionDefaults {
   provider?: ProviderName;
   model?: string;
   permissionMode?: PermissionMode;
+  recapMode?: RecapMode;
+  promptSuggestionMode?: PromptSuggestionMode;
+  /** Provider-mapped helper side model, e.g. "cheapest" or a provider model id. */
+  helperSideModel?: string;
 }
 
 /**

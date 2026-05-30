@@ -1,6 +1,11 @@
 import {
+  HELPER_SIDE_MODEL_CHEAPEST,
+  HELPER_SIDE_MODEL_SAME_AS_MAIN,
+  PROMPT_SUGGESTION_MODES,
   type ModelInfo,
+  type PromptSuggestionMode,
   type ProviderName,
+  type RecapMode,
   resolveModel,
 } from "@yep-anywhere/shared";
 import {
@@ -75,6 +80,10 @@ const MODE_ORDER: PermissionMode[] = [
   "plan",
   "bypassPermissions",
 ];
+const RECAP_MODE_ORDER: RecapMode[] = ["off", "native", "side-session"];
+const PROMPT_SUGGESTION_MODE_ORDER: PromptSuggestionMode[] = [
+  ...PROMPT_SUGGESTION_MODES,
+];
 const NEW_SESSION_DRAFT_KEY = "draft-new-session";
 const QUICK_PROJECT_COUNT = 10;
 const PROJECT_SUGGESTION_COUNT = 10;
@@ -116,6 +125,74 @@ function getPreferredProviderModelId(
     models,
     sessionDefaultModel ?? legacyClaudeFallbackModel,
   );
+}
+
+function providerSupportsRecapMode(
+  provider: {
+    supportsRecaps?: boolean;
+    supportsNativeRecaps?: boolean;
+  } | null | undefined,
+  mode: RecapMode,
+): boolean {
+  if (mode === "off") return true;
+  if (mode === "native") return provider?.supportsNativeRecaps === true;
+  return provider?.supportsRecaps === true;
+}
+
+function getDefaultRecapMode(
+  provider: {
+    supportsRecaps?: boolean;
+    supportsNativeRecaps?: boolean;
+  } | null | undefined,
+  defaults?: { recapMode?: RecapMode } | null,
+): RecapMode {
+  if (
+    defaults?.recapMode &&
+    providerSupportsRecapMode(provider, defaults.recapMode)
+  ) {
+    return defaults.recapMode;
+  }
+  return provider?.supportsNativeRecaps ? "native" : "off";
+}
+
+function providerSupportsPromptSuggestionMode(
+  provider: { supportsNativePromptSuggestions?: boolean } | null | undefined,
+  mode: PromptSuggestionMode,
+): boolean {
+  if (mode === "off") return true;
+  return provider?.supportsNativePromptSuggestions === true;
+}
+
+function getDefaultPromptSuggestionMode(
+  provider: { supportsNativePromptSuggestions?: boolean } | null | undefined,
+  defaults?: { promptSuggestionMode?: PromptSuggestionMode } | null,
+): PromptSuggestionMode {
+  if (
+    defaults?.promptSuggestionMode &&
+    providerSupportsPromptSuggestionMode(
+      provider,
+      defaults.promptSuggestionMode,
+    )
+  ) {
+    return defaults.promptSuggestionMode;
+  }
+  return provider?.supportsNativePromptSuggestions ? "native" : "off";
+}
+
+function getDefaultHelperSideModel(
+  models: ModelInfo[],
+  defaults?: { helperSideModel?: string } | null,
+): string {
+  const defaultModel = defaults?.helperSideModel;
+  if (
+    defaultModel &&
+    (defaultModel === HELPER_SIDE_MODEL_CHEAPEST ||
+      defaultModel === HELPER_SIDE_MODEL_SAME_AS_MAIN ||
+      models.some((model) => model.id === defaultModel))
+  ) {
+    return defaultModel;
+  }
+  return HELPER_SIDE_MODEL_CHEAPEST;
 }
 
 function getProjectSortValue(project: Project): number {
@@ -213,6 +290,13 @@ export function NewSessionForm({
     null,
   );
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [selectedRecapMode, setSelectedRecapMode] =
+    useState<RecapMode>("off");
+  const [selectedPromptSuggestionMode, setSelectedPromptSuggestionMode] =
+    useState<PromptSuggestionMode>("off");
+  const [helperSideModel, setHelperSideModel] = useState<string>(
+    HELPER_SIDE_MODEL_CHEAPEST,
+  );
   // null = local, string = remote host
   const [selectedExecutor, setSelectedExecutor] = useState<string | null>(null);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
@@ -282,12 +366,52 @@ export function NewSessionForm({
     plan: t("modePlanDescription"),
     bypassPermissions: t("modeBypassPermissionsDescription"),
   };
+  const recapModeLabels: Record<RecapMode, string> = {
+    off: t("recapModeOff"),
+    native: t("recapModeNative"),
+    "side-session": t("recapModeSideSession"),
+  };
+  const recapModeDescriptions: Record<RecapMode, string> = {
+    off: t("recapModeOffDescription"),
+    native: t("recapModeNativeDescription"),
+    "side-session": t("recapModeSideSessionDescription"),
+  };
+  const promptSuggestionModeLabels: Record<PromptSuggestionMode, string> = {
+    off: t("promptSuggestionModeOff"),
+    native: t("promptSuggestionModeNative"),
+  };
+  const promptSuggestionModeDescriptions: Record<
+    PromptSuggestionMode,
+    string
+  > = {
+    off: t("promptSuggestionModeOffDescription"),
+    native: t("promptSuggestionModeNativeDescription"),
+  };
 
   // Get models and capabilities for the currently selected provider
   const selectedProviderInfo = providers.find(
     (p) => p.name === selectedProvider,
   );
   const availableModels: ModelInfo[] = selectedProviderInfo?.models ?? [];
+  const helperSideModelOptions: FilterOption<string>[] = useMemo(
+    () => [
+      {
+        value: HELPER_SIDE_MODEL_CHEAPEST,
+        label: t("helperSideModelCheapest"),
+      },
+      {
+        value: HELPER_SIDE_MODEL_SAME_AS_MAIN,
+        label: t("helperSideModelSameAsMain"),
+        description: selectedModel ?? undefined,
+      },
+      ...availableModels.map((model) => ({
+        value: model.id,
+        label: model.name,
+        description: model.description,
+      })),
+    ],
+    [availableModels, selectedModel, t],
+  );
   // Default to true for backwards compatibility with providers that don't set these flags
   const supportsPermissionMode =
     selectedProviderInfo?.supportsPermissionMode ?? true;
@@ -484,14 +608,20 @@ export function NewSessionForm({
 
     if (!initialProvider) return;
 
+    const initialModels = initialProvider.models ?? [];
     setSelectedProvider(initialProvider.name);
     setSelectedModel(
       getPreferredProviderModelId(
         initialProvider.name,
-        initialProvider.models ?? [],
+        initialModels,
         savedDefaults,
       ),
     );
+    setSelectedRecapMode(getDefaultRecapMode(initialProvider, savedDefaults));
+    setSelectedPromptSuggestionMode(
+      getDefaultPromptSuggestionMode(initialProvider, savedDefaults),
+    );
+    setHelperSideModel(getDefaultHelperSideModel(initialModels, savedDefaults));
     setMode(savedDefaults?.permissionMode ?? "default");
   }, [
     availableProviders,
@@ -516,17 +646,27 @@ export function NewSessionForm({
     hasUserCustomizedDefaultsRef.current = true;
     setSelectedProvider(providerName);
     const provider = providers.find((p) => p.name === providerName);
+    const providerModels = provider?.models ?? [];
     if (provider?.models && provider.models.length > 0) {
       setSelectedModel(
         getPreferredProviderModelId(
           providerName,
-          provider.models,
+          providerModels,
           settings?.newSessionDefaults,
         ),
       );
     } else {
       setSelectedModel(null);
     }
+    setSelectedRecapMode(
+      getDefaultRecapMode(provider, settings?.newSessionDefaults),
+    );
+    setSelectedPromptSuggestionMode(
+      getDefaultPromptSuggestionMode(provider, settings?.newSessionDefaults),
+    );
+    setHelperSideModel(
+      getDefaultHelperSideModel(providerModels, settings?.newSessionDefaults),
+    );
   };
 
   // Build model options for FilterDropdown
@@ -675,6 +815,9 @@ export function NewSessionForm({
         provider: selectedProvider ?? undefined,
         model: selectedModel ?? undefined,
         permissionMode: mode,
+        recapMode: selectedRecapMode,
+        promptSuggestionMode: selectedPromptSuggestionMode,
+        helperSideModel,
       });
       showToast(t("newSessionDefaultsSaved"), "success");
     } catch (err) {
@@ -688,8 +831,11 @@ export function NewSessionForm({
     }
   }, [
     mode,
+    helperSideModel,
     selectedModel,
     selectedProvider,
+    selectedPromptSuggestionMode,
+    selectedRecapMode,
     showToast,
     t,
     updateServerSetting,
@@ -745,6 +891,9 @@ export function NewSessionForm({
         thinking,
         provider: selectedProvider ?? undefined,
         executor: selectedExecutor ?? undefined,
+        recapMode: selectedRecapMode,
+        promptSuggestionMode: selectedPromptSuggestionMode,
+        helperSideModel,
       };
       logSessionUiTrace("new-session-submit", {
         projectId: resolvedProjectId ?? null,
@@ -754,6 +903,9 @@ export function NewSessionForm({
         thinking,
         provider: selectedProvider ?? null,
         executor: selectedExecutor ?? null,
+        recapMode: selectedRecapMode,
+        promptSuggestionMode: selectedPromptSuggestionMode,
+        helperSideModel,
         textLength: trimmedMessage.length,
         pendingFileCount: pendingFiles.length,
         clientTimestamp,
@@ -1072,11 +1224,28 @@ export function NewSessionForm({
   const hasContent = message.trim() || pendingFiles.length > 0;
   const canStart = Boolean(hasContent);
   const savedDefaults = settings?.newSessionDefaults;
+  const defaultRecapMode = getDefaultRecapMode(
+    selectedProviderInfo,
+    savedDefaults,
+  );
+  const defaultHelperSideModel = getDefaultHelperSideModel(
+    availableModels,
+    savedDefaults,
+  );
+  const defaultPromptSuggestionMode = getDefaultPromptSuggestionMode(
+    selectedProviderInfo,
+    savedDefaults,
+  );
+  const savedPromptSuggestionModeForMatch =
+    savedDefaults?.promptSuggestionMode ?? defaultPromptSuggestionMode;
   const defaultsMatchCurrent =
     (savedDefaults?.provider ?? undefined) ===
       (selectedProvider ?? undefined) &&
     (savedDefaults?.model ?? undefined) === (selectedModel ?? undefined) &&
-    (savedDefaults?.permissionMode ?? "default") === mode;
+    (savedDefaults?.permissionMode ?? "default") === mode &&
+    defaultRecapMode === selectedRecapMode &&
+    savedPromptSuggestionModeForMatch === selectedPromptSuggestionMode &&
+    defaultHelperSideModel === helperSideModel;
 
   // Shared input area with toolbar (textarea + attach/voice on left, send on right)
   const inputArea = (
@@ -1443,6 +1612,96 @@ export function NewSessionForm({
         />
       </div>
     ) : null;
+  const recapSection = selectedProvider ? (
+    <div className="new-session-recap-section">
+      <h3>{t("newSessionRecapTitle")}</h3>
+      <div className="mode-options">
+        {RECAP_MODE_ORDER.map((modeValue) => {
+          const isAvailable = providerSupportsRecapMode(
+            selectedProviderInfo,
+            modeValue,
+          );
+          return (
+            <button
+              key={modeValue}
+              type="button"
+              className={`mode-option ${selectedRecapMode === modeValue ? "selected" : ""}`}
+              onClick={() => {
+                hasUserCustomizedDefaultsRef.current = true;
+                setSelectedRecapMode(modeValue);
+              }}
+              disabled={isStarting || !isAvailable}
+              title={recapModeDescriptions[modeValue]}
+            >
+              <span className={`mode-option-dot recap-${modeValue}`} />
+              <div className="mode-option-content">
+                <span className="mode-option-label">
+                  {recapModeLabels[modeValue]}
+                </span>
+                <span className="mode-option-desc">
+                  {recapModeDescriptions[modeValue]}
+                </span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      {selectedRecapMode === "side-session" && (
+        <div className="new-session-helper-model">
+          <h3>{t("helperSideModelTitle")}</h3>
+          <FilterDropdown
+            label={t("helperSideModelTitle")}
+            options={helperSideModelOptions}
+            selected={[helperSideModel]}
+            onChange={(selected) => {
+              hasUserCustomizedDefaultsRef.current = true;
+              setHelperSideModel(
+                selected[0] ?? HELPER_SIDE_MODEL_CHEAPEST,
+              );
+            }}
+            multiSelect={false}
+            placeholder={t("helperSideModelCheapest")}
+          />
+        </div>
+      )}
+    </div>
+  ) : null;
+  const promptSuggestionSection = selectedProvider ? (
+    <div className="new-session-recap-section">
+      <h3>{t("newSessionPromptSuggestionsTitle")}</h3>
+      <div className="mode-options">
+        {PROMPT_SUGGESTION_MODE_ORDER.map((modeValue) => {
+          const isAvailable = providerSupportsPromptSuggestionMode(
+            selectedProviderInfo,
+            modeValue,
+          );
+          return (
+            <button
+              key={modeValue}
+              type="button"
+              className={`mode-option ${selectedPromptSuggestionMode === modeValue ? "selected" : ""}`}
+              onClick={() => {
+                hasUserCustomizedDefaultsRef.current = true;
+                setSelectedPromptSuggestionMode(modeValue);
+              }}
+              disabled={isStarting || !isAvailable}
+              title={promptSuggestionModeDescriptions[modeValue]}
+            >
+              <span className={`mode-option-dot suggestion-${modeValue}`} />
+              <div className="mode-option-content">
+                <span className="mode-option-label">
+                  {promptSuggestionModeLabels[modeValue]}
+                </span>
+                <span className="mode-option-desc">
+                  {promptSuggestionModeDescriptions[modeValue]}
+                </span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  ) : null;
   const permissionSection = supportsPermissionMode ? (
     <div className="new-session-mode-section">
       <h3>{t("newSessionModeTitle")}</h3>
@@ -1515,13 +1774,19 @@ export function NewSessionForm({
           <div className="new-session-input-area">{inputArea}</div>
         </div>
         <aside className="new-session-project-slot">{projectChooser}</aside>
-      {(providerSection || modelSection || permissionSection) && (
-        <div className="new-session-provider-slot">
-          {providerSection}
-          {modelSection}
-          {permissionSection}
-        </div>
-      )}
+        {(providerSection ||
+          modelSection ||
+          recapSection ||
+          promptSuggestionSection ||
+          permissionSection) && (
+          <div className="new-session-provider-slot">
+            {providerSection}
+            {modelSection}
+            {recapSection}
+            {promptSuggestionSection}
+            {permissionSection}
+          </div>
+        )}
       </div>
 
       {/* Voice transcription method */}

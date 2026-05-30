@@ -12,6 +12,7 @@ import {
   query,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
+  HELPER_SIDE_MODEL_CHEAPEST,
   type ModelInfo,
   type SlashCommand,
   getModelContextWindow,
@@ -309,6 +310,8 @@ export class ClaudeProvider implements AgentProvider {
   readonly supportsThinkingToggle = true;
   readonly supportsSlashCommands = true;
   readonly supportsSteering = false;
+  readonly supportsRecaps = true;
+  readonly supportsNativePromptSuggestions = true;
 
   /**
    * Check if Claude SDK is available.
@@ -576,6 +579,145 @@ export class ClaudeProvider implements AgentProvider {
   }
 
   /**
+   * Synthesize a short on-return recap from recent assistant text. See
+   * topics/recaps.md for the design rationale (SDK does not auto-emit
+   * recaps in --print mode, so YA generates one ephemerally).
+   *
+   * Runs a non-persisted helper query so nothing lands in the underlying
+   * session's JSONL. The `cheapest` helper token maps to Haiku for Claude.
+   * The recap text is bounded by the
+   * system prompt to roughly the Claude TUI's recap shape (≤40 words,
+   * 1–2 plain sentences). The trailing "(disable recaps in /config)"
+   * hint the TUI sometimes appends is a TUI affordance only — we do not
+   * generate it here, so consumers do not need to strip it from YA-side
+   * recaps; the renderer should still strip defensively in case the SDK
+   * later forwards a TUI-shaped recap unchanged.
+   */
+  async generateRecap(
+    recentAssistantText: string[],
+    options?: { model?: string },
+  ): Promise<string> {
+    const trimmed = recentAssistantText
+      .map((text) => text.trim())
+      .filter((text) => text.length > 0);
+    if (trimmed.length === 0) {
+      throw new Error("No recent assistant text to summarize");
+    }
+
+    // Bound the input. The recent buffer is already small per entry, but
+    // cap total to keep the ephemeral query cheap and well within the
+    // helper context window even on long sessions.
+    const MAX_TOTAL_CHARS = 6000;
+    let total = 0;
+    const tail: string[] = [];
+    for (let i = trimmed.length - 1; i >= 0; i--) {
+      const entry = trimmed[i] ?? "";
+      if (total + entry.length > MAX_TOTAL_CHARS) {
+        break;
+      }
+      tail.unshift(entry);
+      total += entry.length;
+    }
+    if (tail.length === 0) {
+      // The most recent entry alone exceeded the cap; take its tail.
+      const last = trimmed[trimmed.length - 1] ?? "";
+      tail.push(last.slice(-MAX_TOTAL_CHARS));
+    }
+
+    const transcript = tail
+      .map((text, idx) => `--- Assistant turn ${idx + 1} ---\n${text}`)
+      .join("\n\n");
+    const userPrompt = [
+      "The user stepped away and is coming back. Recap in under 40 words,",
+      "1-2 plain sentences, no markdown. Lead with the overall thrust of what",
+      "the assistant did or is doing; mention any pending next action.",
+      "Do not greet, do not ask a question, do not add a sign-off.",
+      "",
+      "Recent assistant output:",
+      transcript,
+    ].join("\n");
+
+    const abortController = new AbortController();
+    const RECAP_TIMEOUT_MS = 20_000;
+    const timeout = setTimeout(() => abortController.abort(), RECAP_TIMEOUT_MS);
+    timeout.unref?.();
+
+    async function* singlePrompt(): AsyncGenerator<{
+      type: "user";
+      message: { role: "user"; content: string };
+      parent_tool_use_id: null;
+      session_id: string;
+    }> {
+      yield {
+        type: "user",
+        message: { role: "user", content: userPrompt },
+        parent_tool_use_id: null,
+        session_id: "",
+      };
+    }
+
+    const helperModel =
+      options?.model === HELPER_SIDE_MODEL_CHEAPEST
+        ? "haiku"
+        : options?.model;
+
+    try {
+      const sdkQuery = query({
+        prompt: singlePrompt(),
+        options: {
+          cwd: homedir(),
+          abortController,
+          permissionMode: "default",
+          persistSession: false,
+          pathToClaudeCodeExecutable: resolveLocalClaudeCodeExecutable(),
+          env: this.getEnv(),
+          model: helperModel,
+          maxTurns: 1,
+          systemPrompt:
+            "You are a recap helper. Reply with the recap text only, no preamble.",
+        },
+      });
+
+      let text = "";
+      for await (const message of sdkQuery as AsyncIterable<AgentSDKMessage>) {
+        if (
+          message.type === "assistant" &&
+          typeof message.message?.content !== "undefined"
+        ) {
+          const content = message.message.content;
+          if (typeof content === "string") {
+            text += content;
+          } else if (Array.isArray(content)) {
+            for (const block of content) {
+              if (
+                block &&
+                typeof block === "object" &&
+                (block as { type?: string }).type === "text" &&
+                typeof (block as { text?: string }).text === "string"
+              ) {
+                text += (block as { text: string }).text;
+              }
+            }
+          }
+        }
+        if (message.type === "result") {
+          break;
+        }
+      }
+      const cleaned = text
+        .replace(/\s*\(disable recaps in \/config\)\s*$/u, "")
+        .trim();
+      if (!cleaned) {
+        throw new Error("Recap generation returned empty text");
+      }
+      return cleaned;
+    } finally {
+      clearTimeout(timeout);
+      abortController.abort();
+    }
+  }
+
+  /**
    * Start a new Claude session.
    */
   async startSession(options: StartSessionOptions): Promise<AgentSession> {
@@ -736,7 +878,7 @@ export class ClaudeProvider implements AgentProvider {
           systemPrompt: this.getSystemPrompt(options.globalInstructions),
           settingSources: ["user", "project", "local"],
           includePartialMessages: true,
-          promptSuggestions: true,
+          promptSuggestions: options.promptSuggestions === true,
           // Model, thinking, and effort options
           model: options.model,
           thinking: options.thinking,

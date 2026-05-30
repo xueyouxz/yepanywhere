@@ -4,6 +4,9 @@ This topic covers YA-owned `/btw` side sessions: short side requests that
 should run beside a parent session without being treated as active-turn
 steering, patient queueing, or provider-native slash-command pass-through.
 
+Related topic: [side session configuration](side-session-config.md) for
+silent helper queries and lightweight fallback side-query envelopes.
+
 ## Contracts
 
 - `/btw` is a YA routing command. It starts or focuses an aside session when

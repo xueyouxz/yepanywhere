@@ -165,6 +165,8 @@ export interface StartSessionOptions {
   remoteEnv?: Record<string, string>;
   /** Global instructions to append to system prompt (from server settings) */
   globalInstructions?: string;
+  /** Native prompt-suggestion protocol opt-in for providers that support it. */
+  promptSuggestions?: boolean;
 }
 
 export interface StartSessionResult {

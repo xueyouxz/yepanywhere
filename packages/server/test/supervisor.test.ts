@@ -295,12 +295,14 @@ describe("Supervisor", () => {
 
       const realSdk: RealClaudeSDKInterface = {
         startSession: async () => {
+          const queue = new MessageQueue();
           async function* iterator() {
             yield {
               type: "system",
               subtype: "init",
               session_id: "interrupt-timeout-session",
             };
+            await queue[Symbol.asyncIterator]().next();
             while (!aborted) {
               await new Promise((resolve) => setTimeout(resolve, 10));
             }
@@ -308,7 +310,7 @@ describe("Supervisor", () => {
 
           return {
             iterator: iterator(),
-            queue: new MessageQueue(),
+            queue,
             abort: () => {
               aborted = true;
             },
@@ -346,17 +348,15 @@ describe("Supervisor", () => {
     });
 
     it("recovers deferred messages onto a replacement after hard abort", async () => {
-      const startMessages: Array<{ text?: string; tempId?: string }> = [];
+      let startCount = 0;
       const aborts: Array<() => void> = [];
       const interrupt = vi.fn(async () => false);
 
       const realSdk: RealClaudeSDKInterface = {
         startSession: async (options) => {
+          startCount++;
           const run = { aborted: false };
-          startMessages.push({
-            text: options.initialMessage?.text,
-            tempId: options.initialMessage?.tempId,
-          });
+          const queue = new MessageQueue();
 
           async function* iterator() {
             yield {
@@ -364,8 +364,9 @@ describe("Supervisor", () => {
               subtype: "init",
               session_id:
                 options.resumeSessionId ??
-                `interrupt-recovery-${startMessages.length}`,
+                `interrupt-recovery-${startCount}`,
             };
+            await queue[Symbol.asyncIterator]().next();
             while (!run.aborted) {
               await new Promise((resolve) => setTimeout(resolve, 10));
             }
@@ -378,7 +379,7 @@ describe("Supervisor", () => {
 
           return {
             iterator: iterator(),
-            queue: new MessageQueue(),
+            queue,
             abort,
             interrupt,
           };
@@ -408,10 +409,13 @@ describe("Supervisor", () => {
         hardAborted: true,
       });
       await vi.waitFor(() => {
-        expect(startMessages[1]).toMatchObject({
-          text: "ping",
-          tempId: "temp-ping",
-        });
+        const replacement = supervisorWithRealSdk.getProcessForSession(
+          "interrupt-fallback-session",
+        );
+        const recovered = replacement
+          ?.getMessageHistory()
+          .find((message) => message.tempId === "temp-ping");
+        expect(recovered?.message?.content).toBe("ping");
       });
 
       const replacement = supervisorWithRealSdk.getProcessForSession(
@@ -425,22 +429,15 @@ describe("Supervisor", () => {
     });
 
     it("recovers queued provider messages onto a replacement after hard abort", async () => {
-      const startMessages: Array<{
-        text?: string;
-        tempId?: string;
-        uuid?: string;
-      }> = [];
+      let startCount = 0;
       const aborts: Array<() => void> = [];
       const interrupt = vi.fn(async () => false);
 
       const realSdk: RealClaudeSDKInterface = {
         startSession: async (options) => {
+          startCount++;
           const run = { aborted: false };
-          startMessages.push({
-            text: options.initialMessage?.text,
-            tempId: options.initialMessage?.tempId,
-            uuid: options.initialMessage?.uuid,
-          });
+          const queue = new MessageQueue();
 
           async function* iterator() {
             yield {
@@ -448,8 +445,9 @@ describe("Supervisor", () => {
               subtype: "init",
               session_id:
                 options.resumeSessionId ??
-                `interrupt-queue-recovery-${startMessages.length}`,
+                `interrupt-queue-recovery-${startCount}`,
             };
+            await queue[Symbol.asyncIterator]().next();
             while (!run.aborted) {
               await new Promise((resolve) => setTimeout(resolve, 10));
             }
@@ -462,7 +460,7 @@ describe("Supervisor", () => {
 
           return {
             iterator: iterator(),
-            queue: new MessageQueue(),
+            queue,
             abort,
             interrupt,
           };
@@ -489,13 +487,16 @@ describe("Supervisor", () => {
         hardAborted: true,
       });
       await vi.waitFor(() => {
-        expect(startMessages[1]).toMatchObject({
-          text: "ping",
-          tempId: "temp-ping",
-        });
+        const replacement = supervisorWithRealSdk.getProcessForSession(
+          "interrupt-queued-provider-session",
+        );
+        const recovered = replacement
+          ?.getMessageHistory()
+          .find((message) => message.tempId === "temp-ping");
+        expect(recovered?.message?.content).toBe("ping");
+        expect(recovered?.uuid).toBeDefined();
       });
 
-      expect(startMessages[1]?.uuid).toBeDefined();
       const replacement = supervisorWithRealSdk.getProcessForSession(
         "interrupt-queued-provider-session",
       );
@@ -506,24 +507,116 @@ describe("Supervisor", () => {
     });
   });
 
-  describe("queue propagation", () => {
-    it("preserves model settings when a queued session starts later", async () => {
-      let aborted = false;
-      const startSession = vi.fn(
-        async (options: {
-          model?: string;
-          thinking?: { type: "adaptive" | "enabled" | "disabled" };
-          effort?: "low" | "medium" | "high" | "max";
-          resumeSessionId?: string;
-          initialMessage?: { text: string };
-        }) => {
+  describe("prompt suggestion options", () => {
+    it("passes native prompt suggestions only for supporting providers", async () => {
+      const startedOptions: Array<
+        Parameters<AgentProvider["startSession"]>[0]
+      > = [];
+      const makeProvider = (
+        supportsNativePromptSuggestions: boolean,
+      ): AgentProvider => ({
+        name: "claude",
+        displayName: "Claude",
+        supportsPermissionMode: true,
+        supportsThinkingToggle: true,
+        supportsSlashCommands: true,
+        supportsSteering: false,
+        supportsNativePromptSuggestions,
+        isInstalled: async () => true,
+        isAuthenticated: async () => true,
+        getAuthStatus: async () => ({
+          installed: true,
+          authenticated: true,
+          enabled: true,
+        }),
+        getAvailableModels: async () => [],
+        startSession: async (options) => {
+          startedOptions.push(options);
+          const queue = new MessageQueue();
+          let aborted = false;
           async function* iterator() {
             yield {
               type: "system",
               subtype: "init",
-              session_id:
-                options.resumeSessionId ??
-                `queued-session-${options.initialMessage?.text ?? "none"}`,
+              session_id: options.resumeSessionId ?? randomSessionId(),
+            };
+            while (!aborted) {
+              await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+          }
+          return {
+            iterator: iterator(),
+            queue,
+            abort: () => {
+              aborted = true;
+            },
+          };
+        },
+      });
+      const randomSessionId = () =>
+        `prompt-suggestion-${startedOptions.length}`;
+
+      const nativeSupervisor = new Supervisor({
+        provider: makeProvider(true),
+        idleTimeoutMs: 100,
+      });
+      const nativeProcess = await nativeSupervisor.startSession("/tmp/test", {
+        text: "hi",
+      });
+      if (!("id" in nativeProcess)) {
+        throw new Error("expected process");
+      }
+
+      const explicitOffProcess = await nativeSupervisor.startSession(
+        "/tmp/test",
+        { text: "hi" },
+        undefined,
+        { promptSuggestionMode: "off" },
+      );
+      if (!("id" in explicitOffProcess)) {
+        throw new Error("expected process");
+      }
+
+      const unsupportedSupervisor = new Supervisor({
+        provider: makeProvider(false),
+        idleTimeoutMs: 100,
+      });
+      const unsupportedProcess = await unsupportedSupervisor.startSession(
+        "/tmp/test",
+        { text: "hi" },
+        undefined,
+        { promptSuggestionMode: "native" },
+      );
+      if (!("id" in unsupportedProcess)) {
+        throw new Error("expected process");
+      }
+
+      expect(startedOptions.map((options) => options.promptSuggestions)).toEqual(
+        [true, false, false],
+      );
+      expect(nativeProcess.promptSuggestionMode).toBe("native");
+      expect(explicitOffProcess.promptSuggestionMode).toBe("off");
+      expect(unsupportedProcess.promptSuggestionMode).toBe("off");
+
+      await nativeProcess.abort();
+      await explicitOffProcess.abort();
+      await unsupportedProcess.abort();
+    });
+  });
+
+  describe("queue propagation", () => {
+    it("expands emulated slash commands for the first provider message", async () => {
+      let aborted = false;
+      const queues: MessageQueue[] = [];
+      const startSession = vi.fn(
+        async (options: Parameters<AgentProvider["startSession"]>[0]) => {
+          const queue = new MessageQueue();
+          queues.push(queue);
+          async function* iterator() {
+            yield {
+              type: "system",
+              subtype: "init",
+              session_id: options.resumeSessionId ?? "slash-emulation-session",
             };
             while (!aborted) {
               await new Promise((resolve) => setTimeout(resolve, 10));
@@ -532,7 +625,90 @@ describe("Supervisor", () => {
 
           return {
             iterator: iterator(),
-            queue: new MessageQueue(),
+            queue,
+            abort: () => {
+              aborted = true;
+            },
+            supportedCommands: async () => [
+              {
+                name: "goal",
+                description: "Keep working until done",
+                emulation: { providerText: "/loop wish {{argument}}" },
+              },
+            ],
+          };
+        },
+      );
+      const provider: AgentProvider = {
+        name: "claude",
+        displayName: "Claude",
+        supportsPermissionMode: true,
+        supportsThinkingToggle: true,
+        supportsSlashCommands: true,
+        supportsSteering: false,
+        isInstalled: async () => true,
+        isAuthenticated: async () => true,
+        getAuthStatus: async () => ({
+          installed: true,
+          authenticated: true,
+          enabled: true,
+        }),
+        startSession,
+        getAvailableModels: async () => [],
+      };
+      const supervisorWithProvider = new Supervisor({
+        provider,
+        idleTimeoutMs: 100,
+      });
+
+      const process = await supervisorWithProvider.startSession("/tmp/test", {
+        text: "/goal Make tests pass",
+      });
+      if (!("id" in process)) {
+        throw new Error("expected process");
+      }
+
+      expect(startSession.mock.calls[0]?.[0].initialMessage).toBeUndefined();
+      const queuedProviderTurn = await queues[0]?.[Symbol.asyncIterator]().next();
+      expect(queuedProviderTurn?.value?.message.content).toBe(
+        "/loop wish Make tests pass",
+      );
+      expect(
+        process
+          .getMessageHistory()
+          .some(
+            (message) =>
+              message.type === "user" &&
+              message.message?.content === "/loop wish Make tests pass",
+          ),
+      ).toBe(true);
+
+      await process.abort();
+    });
+
+    it("preserves model settings when a queued session starts later", async () => {
+      let aborted = false;
+      const queues: MessageQueue[] = [];
+      const startSession = vi.fn(
+        async (options: Parameters<AgentProvider["startSession"]>[0]) => {
+          const queue = new MessageQueue();
+          queues.push(queue);
+          async function* iterator() {
+            yield {
+              type: "system",
+              subtype: "init",
+              session_id:
+                options.resumeSessionId ??
+                `queued-session-${queues.length}`,
+            };
+            while (!aborted) {
+              await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+          }
+
+          return {
+            iterator: iterator(),
+            queue,
             abort: () => {
               aborted = true;
             },
@@ -592,8 +768,10 @@ describe("Supervisor", () => {
         model: "gpt-5.4",
         thinking: { type: "adaptive" },
         effort: "high",
-        initialMessage: { text: "second" },
       });
+      expect(startSession.mock.calls[1]?.[0].initialMessage).toBeUndefined();
+      const secondMessage = await queues[1]?.[Symbol.asyncIterator]().next();
+      expect(secondMessage?.value?.message.content).toBe("second");
     });
 
     it("steers active turns without restarting for composer thinking drift", async () => {
@@ -701,12 +879,14 @@ describe("Supervisor", () => {
       try {
         const realSdk: RealClaudeSDKInterface = {
           startSession: async () => {
+            const queue = new MessageQueue();
             async function* iterator() {
               yield {
                 type: "system",
                 subtype: "init",
                 session_id: "heartbeat-session-1",
               };
+              await queue[Symbol.asyncIterator]().next();
               yield { type: "result", session_id: "heartbeat-session-1" };
 
               while (!aborted) {
@@ -716,7 +896,7 @@ describe("Supervisor", () => {
 
             return {
               iterator: iterator(),
-              queue: new MessageQueue(),
+              queue,
               abort: () => {
                 aborted = true;
               },
@@ -781,12 +961,14 @@ describe("Supervisor", () => {
       try {
         const realSdk: RealClaudeSDKInterface = {
           startSession: async () => {
+            const queue = new MessageQueue();
             async function* iterator() {
               yield {
                 type: "system",
                 subtype: "init",
                 session_id: "heartbeat-session-2",
               };
+              await queue[Symbol.asyncIterator]().next();
               yield { type: "result", session_id: "heartbeat-session-2" };
 
               while (!aborted) {
@@ -796,7 +978,7 @@ describe("Supervisor", () => {
 
             return {
               iterator: iterator(),
-              queue: new MessageQueue(),
+              queue,
               abort: () => {
                 aborted = true;
               },
@@ -885,12 +1067,14 @@ describe("Supervisor", () => {
           }),
           getAvailableModels: async () => [],
           startSession: async () => {
+            const queue = new MessageQueue();
             async function* iterator() {
               yield {
                 type: "system",
                 subtype: "init",
                 session_id: "heartbeat-active-session",
               };
+              await queue[Symbol.asyncIterator]().next();
 
               while (!aborted) {
                 await new Promise((resolve) => setTimeout(resolve, 10));
@@ -899,7 +1083,7 @@ describe("Supervisor", () => {
 
             return {
               iterator: iterator(),
-              queue: new MessageQueue(),
+              queue,
               abort: () => {
                 aborted = true;
               },
@@ -950,8 +1134,11 @@ describe("Supervisor", () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-05-06T00:00:00.000Z"));
       let aborted = false;
+      const queues: MessageQueue[] = [];
       const startSession = vi.fn(
         async (options: Parameters<AgentProvider["startSession"]>[0]) => {
+          const queue = new MessageQueue();
+          queues.push(queue);
           async function* iterator() {
             yield {
               type: "system",
@@ -970,7 +1157,7 @@ describe("Supervisor", () => {
 
           return {
             iterator: iterator(),
-            queue: new MessageQueue(),
+            queue,
             abort: () => {
               aborted = true;
             },
@@ -1024,9 +1211,11 @@ describe("Supervisor", () => {
         });
         expect(startSession.mock.calls[0]?.[0]).toMatchObject({
           resumeSessionId: "heartbeat-unowned-session",
-          initialMessage: { text: "heartbeat check" },
           model: "gpt-5.5",
         });
+        expect(startSession.mock.calls[0]?.[0].initialMessage).toBeUndefined();
+        const heartbeatMessage = await queues[0]?.[Symbol.asyncIterator]().next();
+        expect(heartbeatMessage?.value?.message.content).toBe("heartbeat check");
 
         const started = supervisorWithHeartbeat.getProcessForSession(
           "heartbeat-unowned-session",
@@ -1320,9 +1509,11 @@ describe("Supervisor", () => {
         eventBus,
       });
 
-      await supervisorWithBus.startSession("/tmp/test", {
-        text: "Trigger failure",
-      });
+      await expect(
+        supervisorWithBus.startSession("/tmp/test", {
+          text: "Trigger failure",
+        }),
+      ).rejects.toThrow(/Process terminated|Failed to queue initial message/);
 
       await vi.waitFor(() => {
         expect(

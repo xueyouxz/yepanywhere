@@ -5,7 +5,9 @@ import type {
   InputRequest,
   PendingInputType,
   PermissionRules,
+  PromptSuggestionMode,
   ProviderName,
+  RecapMode,
   ThinkingConfig,
   UrlProjectId,
   SessionLivenessSnapshot,
@@ -217,6 +219,12 @@ export interface ProcessInfo {
   pid?: number;
   /** Provider/session progress evidence, separate from transport liveness. */
   liveness?: SessionLivenessSnapshot;
+  /** Current recap behavior for this live process. */
+  recapMode?: RecapMode;
+  /** Current prompt-suggestion behavior for this live process. */
+  promptSuggestionMode?: PromptSuggestionMode;
+  /** Session-level helper side model for simulated helper features. */
+  helperSideModel?: string;
 }
 
 // Process events for subscribers
@@ -258,6 +266,12 @@ export interface ProcessOptions {
   model?: string;
   /** SSH host for remote execution (undefined = local) */
   executor?: string;
+  /** How this process should answer away-recap requests. */
+  recapMode?: RecapMode;
+  /** How this process should request native prompt suggestions. */
+  promptSuggestionMode?: PromptSuggestionMode;
+  /** Session-level helper side model for simulated helper features. */
+  helperSideModel?: string;
   /** Permission rules for tool filtering (deny/allow patterns) */
   permissions?: PermissionRules;
   /** OS PID of the spawned agent child process, or getter for deferred resolution */

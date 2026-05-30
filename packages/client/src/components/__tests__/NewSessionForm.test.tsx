@@ -40,6 +40,7 @@ const {
       enabled?: boolean;
       supportsPermissionMode?: boolean;
       supportsThinkingToggle?: boolean;
+      supportsNativePromptSuggestions?: boolean;
       models?: Array<{ id: string; name: string; description?: string }>;
     }>,
     loading: false,
@@ -50,6 +51,7 @@ const {
         provider?: "claude" | "codex";
         model?: string;
         permissionMode?: "default";
+        promptSuggestionMode?: "off" | "native";
       };
     } | null,
     isLoading: true,
@@ -254,6 +256,7 @@ describe("NewSessionForm", () => {
         authenticated: true,
         supportsPermissionMode: true,
         supportsThinkingToggle: true,
+        supportsNativePromptSuggestions: true,
         models: [
           { id: "default", name: "Default" },
           { id: "opus", name: "Opus 4.8" },
@@ -266,6 +269,7 @@ describe("NewSessionForm", () => {
         authenticated: true,
         supportsPermissionMode: true,
         supportsThinkingToggle: true,
+        supportsNativePromptSuggestions: false,
         models: [
           { id: "gpt-5.4", name: "GPT-5.4" },
           { id: "gpt-5.3-codex", name: "GPT-5.3-Codex" },
@@ -406,6 +410,7 @@ describe("NewSessionForm", () => {
       expect.objectContaining({
         provider: "claude",
         model: "opus",
+        promptSuggestionMode: "native",
       }),
       undefined,
       expect.any(Number),
@@ -619,5 +624,40 @@ describe("NewSessionForm", () => {
       "/projects/detached-project/sessions/session-detached",
       expect.any(Object),
     );
+  });
+
+  it("defaults prompt suggestions off when the provider lacks native support", async () => {
+    serverSettingsState.isLoading = false;
+
+    render(
+      <NewSessionForm
+        projectId="project-1"
+        selectedProject={chooserProjects[0]}
+        projects={[...chooserProjects]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
+    const nativeSuggestionButton = screen.getByRole("button", {
+      name: /promptSuggestionModeNative/,
+    });
+    expect((nativeSuggestionButton as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByPlaceholderText("newSessionPlaceholder"), {
+      target: { value: "hello" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "newSessionStartAction" }));
+
+    await waitFor(() => {
+      expect(mockStartSession).toHaveBeenCalledWith(
+        "project-1",
+        "hello",
+        expect.objectContaining({
+          provider: "codex",
+          promptSuggestionMode: "off",
+        }),
+        undefined,
+        expect.any(Number),
+      );
+    });
   });
 });

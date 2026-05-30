@@ -5020,6 +5020,36 @@ a.sidebar-nav-item {
   font-style: italic;
 }
 
+.system-message-recap {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  max-width: min(760px, 100%);
+  margin: 8px 0 12px 24px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-md, 6px);
+  background: color-mix(in srgb, var(--bg-secondary, #242424) 82%, transparent);
+  color: var(--text-muted);
+}
+
+.system-message-recap-mark {
+  color: var(--text-dimmed);
+  font-size: 1.05rem;
+  line-height: 1.45;
+  opacity: 0.72;
+  text-align: center;
+}
+
+.system-message-recap-body {
+  min-width: 0;
+  opacity: 0.65;
+  font-style: italic;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
 /* Compacting state - animated indicator */
 .system-message-compacting {
   border-left-color: var(--accent-primary, #3b82f6);
@@ -8086,6 +8116,21 @@ a.sidebar-nav-item {
   margin: 0 0 var(--space-2);
 }
 
+.new-session-recap-section,
+.new-session-helper-model {
+  margin-bottom: 0.9rem;
+}
+
+.new-session-recap-section h3,
+.new-session-helper-model h3 {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 var(--space-2);
+}
+
 /* Permission Mode Section */
 .new-session-mode-section {
   margin-bottom: 1rem;
@@ -8156,6 +8201,18 @@ a.sidebar-nav-item {
 
 .mode-option-dot.mode-bypassPermissions {
   background: var(--error-color);
+}
+
+.mode-option-dot.recap-off {
+  background: var(--text-muted);
+}
+
+.mode-option-dot.recap-native {
+  background: var(--success-color);
+}
+
+.mode-option-dot.recap-side-session {
+  background: var(--link-color);
 }
 
 .mode-option-content {

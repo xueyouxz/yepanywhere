@@ -227,6 +227,17 @@ export const RenderItemComponent = memo(function RenderItemComponent({
         return <SessionSetupBlock title={item.title} prompts={item.prompts} />;
 
       case "system": {
+        if (item.subtype === "away_summary") {
+          return (
+            <div className="system-message-recap">
+              <span className="system-message-recap-mark">※</span>
+              <span className="system-message-recap-body">
+                {item.content}
+              </span>
+            </div>
+          );
+        }
+
         // Different styling for compacting vs completed compaction
         const isCompacting =
           item.subtype === "status" && item.status === "compacting";

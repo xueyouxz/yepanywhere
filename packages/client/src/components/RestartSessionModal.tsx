@@ -2,11 +2,17 @@ import type {
   EffortLevel,
   ModelInfo,
   NewSessionDefaults,
+  PromptSuggestionMode,
   ProviderInfo,
   ProviderName,
+  RecapMode,
   ThinkingOption,
 } from "@yep-anywhere/shared";
-import { resolveModel } from "@yep-anywhere/shared";
+import {
+  HELPER_SIDE_MODEL_CHEAPEST,
+  HELPER_SIDE_MODEL_SAME_AS_MAIN,
+  resolveModel,
+} from "@yep-anywhere/shared";
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import { getModelSetting } from "../hooks/useModelSettings";
@@ -19,6 +25,8 @@ import { Modal } from "./ui/Modal";
 type ThinkingMode = "off" | "auto" | "on";
 
 const EFFORT_LEVELS: EffortLevel[] = ["low", "medium", "high", "max"];
+const RECAP_MODE_ORDER: RecapMode[] = ["off", "native", "side-session"];
+const PROMPT_SUGGESTION_MODE_ORDER: PromptSuggestionMode[] = ["off", "native"];
 
 function parseThinkingOption(option: ThinkingOption | undefined): {
   mode: ThinkingMode;
@@ -124,6 +132,81 @@ function getProviderModels(
   );
 }
 
+function providerSupportsRecapMode(
+  provider:
+    | Pick<ProviderInfo, "supportsRecaps" | "supportsNativeRecaps">
+    | null
+    | undefined,
+  mode: RecapMode,
+): boolean {
+  if (mode === "off") return true;
+  if (mode === "native") return provider?.supportsNativeRecaps === true;
+  return provider?.supportsRecaps === true;
+}
+
+function getRestartDefaultRecapMode(params: {
+  provider: ProviderInfo | null | undefined;
+  defaults?: NewSessionDefaults | null;
+}): RecapMode {
+  if (
+    params.defaults?.recapMode &&
+    providerSupportsRecapMode(params.provider, params.defaults.recapMode)
+  ) {
+    return params.defaults.recapMode;
+  }
+  return params.provider?.supportsNativeRecaps ? "native" : "off";
+}
+
+function providerSupportsPromptSuggestionMode(
+  provider:
+    | Pick<ProviderInfo, "supportsNativePromptSuggestions">
+    | null
+    | undefined,
+  mode: PromptSuggestionMode,
+): boolean {
+  if (mode === "off") return true;
+  return provider?.supportsNativePromptSuggestions === true;
+}
+
+function getRestartDefaultPromptSuggestionMode(params: {
+  provider: ProviderInfo | null | undefined;
+  currentMode?: PromptSuggestionMode;
+  defaults?: NewSessionDefaults | null;
+}): PromptSuggestionMode {
+  if (
+    params.currentMode &&
+    providerSupportsPromptSuggestionMode(params.provider, params.currentMode)
+  ) {
+    return params.currentMode;
+  }
+  if (
+    params.defaults?.promptSuggestionMode &&
+    providerSupportsPromptSuggestionMode(
+      params.provider,
+      params.defaults.promptSuggestionMode,
+    )
+  ) {
+    return params.defaults.promptSuggestionMode;
+  }
+  return params.provider?.supportsNativePromptSuggestions ? "native" : "off";
+}
+
+function getRestartDefaultHelperSideModel(params: {
+  models: ModelInfo[];
+  defaults?: NewSessionDefaults | null;
+}): string {
+  const defaultModel = params.defaults?.helperSideModel;
+  if (
+    defaultModel &&
+    (defaultModel === HELPER_SIDE_MODEL_CHEAPEST ||
+      defaultModel === HELPER_SIDE_MODEL_SAME_AS_MAIN ||
+      params.models.some((model) => model.id === defaultModel))
+  ) {
+    return defaultModel;
+  }
+  return HELPER_SIDE_MODEL_CHEAPEST;
+}
+
 interface RestartSessionModalProps {
   projectId: string;
   sessionId: string;
@@ -134,6 +217,7 @@ interface RestartSessionModalProps {
   currentModel?: string;
   mode?: PermissionMode;
   thinking?: ThinkingOption;
+  promptSuggestionMode?: PromptSuggestionMode;
   executor?: string;
   onRestarted: (result: {
     sessionId: string;
@@ -159,6 +243,7 @@ export function RestartSessionModal({
   currentModel,
   mode,
   thinking,
+  promptSuggestionMode,
   executor,
   onRestarted,
   onClose,
@@ -207,6 +292,30 @@ export function RestartSessionModal({
     }),
   );
   const hasUserSelectedModelRef = useRef(false);
+  const selectedProviderInfo = providerOptions.find(
+    (p) => p.name === selectedProvider,
+  );
+  const [selectedRecapMode, setSelectedRecapMode] = useState<RecapMode>(() =>
+    getRestartDefaultRecapMode({
+      provider: selectedProviderInfo,
+      defaults: settings?.newSessionDefaults,
+    }),
+  );
+  const [selectedPromptSuggestionMode, setSelectedPromptSuggestionMode] =
+    useState<PromptSuggestionMode>(() =>
+      getRestartDefaultPromptSuggestionMode({
+        provider: selectedProviderInfo,
+        currentMode: promptSuggestionMode,
+        defaults: settings?.newSessionDefaults,
+      }),
+    );
+  const [helperSideModel, setHelperSideModel] = useState<string>(() =>
+    getRestartDefaultHelperSideModel({
+      models: modelOptions,
+      defaults: settings?.newSessionDefaults,
+    }),
+  );
+  const hasUserSelectedHelperConfigRef = useRef(false);
   const initialThinking = useMemo(
     () => parseThinkingOption(thinking),
     [thinking],
@@ -220,9 +329,6 @@ export function RestartSessionModal({
   const [openInNewWindow, setOpenInNewWindow] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const selectedProviderInfo = providerOptions.find(
-    (p) => p.name === selectedProvider,
-  );
   const selectedProviderDisplayName =
     selectedProviderInfo?.displayName ??
     (selectedProvider === provider ? providerDisplayName : undefined) ??
@@ -266,6 +372,37 @@ export function RestartSessionModal({
   ]);
 
   useEffect(() => {
+    if (settingsLoading || hasUserSelectedHelperConfigRef.current) {
+      return;
+    }
+    setSelectedRecapMode(
+      getRestartDefaultRecapMode({
+        provider: selectedProviderInfo,
+        defaults: settings?.newSessionDefaults,
+      }),
+    );
+    setSelectedPromptSuggestionMode(
+      getRestartDefaultPromptSuggestionMode({
+        provider: selectedProviderInfo,
+        currentMode: promptSuggestionMode,
+        defaults: settings?.newSessionDefaults,
+      }),
+    );
+    setHelperSideModel(
+      getRestartDefaultHelperSideModel({
+        models: modelOptions,
+        defaults: settings?.newSessionDefaults,
+      }),
+    );
+  }, [
+    modelOptions,
+    promptSuggestionMode,
+    selectedProviderInfo,
+    settings,
+    settingsLoading,
+  ]);
+
+  useEffect(() => {
     setThinkingMode(initialThinking.mode);
     setEffortLevel(initialThinking.effort);
   }, [initialThinking]);
@@ -296,6 +433,9 @@ export function RestartSessionModal({
           : undefined,
         provider: selectedProvider,
         executor,
+        recapMode: selectedRecapMode,
+        promptSuggestionMode: selectedPromptSuggestionMode,
+        helperSideModel,
         reason: "Manual restart from Yep Anywhere",
       });
       onRestarted(result, {
@@ -312,6 +452,7 @@ export function RestartSessionModal({
   const handleProviderSelect = (providerName: ProviderName) => {
     hasUserSelectedProviderRef.current = true;
     hasUserSelectedModelRef.current = false;
+    hasUserSelectedHelperConfigRef.current = false;
     setSelectedProvider(providerName);
     const providerModels = getProviderModels(
       providerName,
@@ -331,6 +472,25 @@ export function RestartSessionModal({
         defaults: settings?.newSessionDefaults,
       }),
     );
+    setSelectedRecapMode(
+      getRestartDefaultRecapMode({
+        provider: providerOptions.find((p) => p.name === providerName),
+        defaults: settings?.newSessionDefaults,
+      }),
+    );
+    setSelectedPromptSuggestionMode(
+      getRestartDefaultPromptSuggestionMode({
+        provider: providerOptions.find((p) => p.name === providerName),
+        currentMode: selectedPromptSuggestionMode,
+        defaults: settings?.newSessionDefaults,
+      }),
+    );
+    setHelperSideModel(
+      getRestartDefaultHelperSideModel({
+        models: nextModelOptions,
+        defaults: settings?.newSessionDefaults,
+      }),
+    );
   };
 
   const handleStartClick = (
@@ -346,6 +506,25 @@ export function RestartSessionModal({
     event.preventDefault();
     void restart(true);
   };
+
+  const recapModeLabels: Record<RecapMode, string> = {
+    off: t("recapModeOff"),
+    native: t("recapModeNative"),
+    "side-session": t("recapModeSideSession"),
+  };
+  const promptSuggestionModeLabels: Record<PromptSuggestionMode, string> = {
+    off: t("promptSuggestionModeOff"),
+    native: t("promptSuggestionModeNative"),
+  };
+  const helperSideModelOptions = [
+    { id: HELPER_SIDE_MODEL_CHEAPEST, name: t("helperSideModelCheapest") },
+    {
+      id: HELPER_SIDE_MODEL_SAME_AS_MAIN,
+      name: t("helperSideModelSameAsMain"),
+      description: selectedModel,
+    },
+    ...modelOptions,
+  ];
 
   return (
     <Modal title={t("sessionRestartTitle")} onClose={restarting ? () => {} : onClose}>
@@ -540,6 +719,109 @@ export function RestartSessionModal({
               </div>
             </section>
           </>
+        )}
+
+        <section className="model-switch-section">
+          <div className="model-switch-section-header">
+            <strong>{t("newSessionRecapTitle")}</strong>
+          </div>
+          <div className="model-switch-chip-group">
+            {RECAP_MODE_ORDER.map((recapMode) => {
+              const isAvailable = providerSupportsRecapMode(
+                selectedProviderInfo,
+                recapMode,
+              );
+              return (
+                <button
+                  key={recapMode}
+                  type="button"
+                  className={`model-switch-chip ${
+                    selectedRecapMode === recapMode ? "active" : ""
+                  }`}
+                  onClick={() => {
+                    hasUserSelectedHelperConfigRef.current = true;
+                    setSelectedRecapMode(recapMode);
+                  }}
+                  disabled={restarting || !isAvailable}
+                >
+                  <span>{recapModeLabels[recapMode]}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="model-switch-section">
+          <div className="model-switch-section-header">
+            <strong>{t("newSessionPromptSuggestionsTitle")}</strong>
+          </div>
+          <div className="model-switch-chip-group">
+            {PROMPT_SUGGESTION_MODE_ORDER.map((modeValue) => {
+              const isAvailable = providerSupportsPromptSuggestionMode(
+                selectedProviderInfo,
+                modeValue,
+              );
+              return (
+                <button
+                  key={modeValue}
+                  type="button"
+                  className={`model-switch-chip ${
+                    selectedPromptSuggestionMode === modeValue ? "active" : ""
+                  }`}
+                  onClick={() => {
+                    hasUserSelectedHelperConfigRef.current = true;
+                    setSelectedPromptSuggestionMode(modeValue);
+                  }}
+                  disabled={restarting || !isAvailable}
+                >
+                  <span>{promptSuggestionModeLabels[modeValue]}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {selectedRecapMode === "side-session" && (
+          <section className="model-switch-section">
+            <div className="model-switch-section-header">
+              <strong>{t("helperSideModelTitle")}</strong>
+            </div>
+            <div className="model-switch-list">
+              {helperSideModelOptions.map((model) => {
+                const isSelected = helperSideModel === model.id;
+                return (
+                  <div key={model.id} className="model-switch-item-row">
+                    <button
+                      type="button"
+                      className={`model-switch-item ${isSelected ? "active" : ""}`}
+                      onClick={() => {
+                        hasUserSelectedHelperConfigRef.current = true;
+                        setHelperSideModel(model.id);
+                      }}
+                      disabled={restarting}
+                    >
+                      <span className="model-switch-item-main">
+                        <span className="model-switch-name">{model.name}</span>
+                        {model.description && (
+                          <span className="model-switch-description">
+                            {model.description}
+                          </span>
+                        )}
+                      </span>
+                      <span className="model-switch-item-meta">
+                        <span
+                          className={`model-switch-radio ${isSelected ? "selected" : ""}`}
+                          aria-hidden="true"
+                        >
+                          {isSelected ? "●" : "○"}
+                        </span>
+                      </span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
         )}
 
         <label className="model-switch-chip">

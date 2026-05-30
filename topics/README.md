@@ -10,7 +10,10 @@
 - OpenCode ses_ session ID unification with YA session ID
 - MessageQueue batch delivery and steering UI
 - Message-control and queue intent (`/btw`, queue intent, later-interrupt state contract)
+- Emulated slash commands
 - Provider-agnostic /btw asides
+- Side session configuration
+- Prompt suggestions
 - Session liveness and queue intent
 - Provider process state machine
 - Compact-and-handoff guardrail (targeted provider/model policy)

@@ -1,4 +1,8 @@
 import {
+  HELPER_SIDE_MODEL_CHEAPEST,
+  HELPER_SIDE_MODEL_SAME_AS_MAIN,
+  RECAP_MODES,
+  type RecapMode,
   type ThinkingOption,
   type UrlProjectId,
   getSessionDisplayTitle,
@@ -170,6 +174,92 @@ export function createProcessesRoutes(deps: ProcessesDeps): Hono {
       interrupted: result.success,
       supported: result.supported,
       aborted: result.hardAborted === true,
+    });
+  });
+
+  // POST /api/processes/:processId/recap - Summarize recent activity.
+  routes.post("/:processId/recap", async (c) => {
+    const processId = c.req.param("processId");
+    let sinceMs: number | null = null;
+    try {
+      const body = await c.req.json<{ hiddenSinceMs?: unknown }>();
+      if (
+        typeof body.hiddenSinceMs === "number" &&
+        Number.isFinite(body.hiddenSinceMs)
+      ) {
+        sinceMs = body.hiddenSinceMs;
+      }
+    } catch {
+      // Empty body is accepted for backward compatibility.
+    }
+
+    const result = await deps.supervisor.requestRecap(processId, { sinceMs });
+    if (!result.supported && result.reason === "process not found") {
+      return c.json({ error: "Process not found" }, 404);
+    }
+
+    return c.json(result);
+  });
+
+  routes.post("/:processId/recap-config", async (c) => {
+    const processId = c.req.param("processId");
+    const process = deps.supervisor.getProcess(processId);
+    if (!process) {
+      return c.json({ error: "Process not found" }, 404);
+    }
+
+    let body: { recapMode?: unknown; helperSideModel?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+
+    const updates: { recapMode?: RecapMode; helperSideModel?: string } = {};
+    if ("recapMode" in body) {
+      if (
+        typeof body.recapMode !== "string" ||
+        !RECAP_MODES.includes(body.recapMode as RecapMode)
+      ) {
+        return c.json(
+          { error: "recapMode must be one of: off, native, side-session" },
+          400,
+        );
+      }
+      updates.recapMode = body.recapMode as RecapMode;
+    }
+    if ("helperSideModel" in body) {
+      if (
+        body.helperSideModel !== undefined &&
+        body.helperSideModel !== null &&
+        typeof body.helperSideModel !== "string"
+      ) {
+        return c.json({ error: "helperSideModel must be a string" }, 400);
+      }
+      const trimmed =
+        typeof body.helperSideModel === "string"
+          ? body.helperSideModel.trim()
+          : "";
+      updates.helperSideModel =
+        trimmed === HELPER_SIDE_MODEL_SAME_AS_MAIN
+          ? HELPER_SIDE_MODEL_SAME_AS_MAIN
+          : trimmed === HELPER_SIDE_MODEL_CHEAPEST
+            ? HELPER_SIDE_MODEL_CHEAPEST
+            : trimmed || HELPER_SIDE_MODEL_CHEAPEST;
+    }
+
+    const updatedProcess = deps.supervisor.configureProcessRecaps(
+      processId,
+      updates,
+    );
+    if (!updatedProcess) {
+      return c.json({ error: "Process not found" }, 404);
+    }
+    return c.json({
+      success: true,
+      processId,
+      recapMode: updatedProcess.recapMode,
+      helperSideModel: updatedProcess.helperSideModel,
     });
   });
 

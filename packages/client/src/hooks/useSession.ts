@@ -53,6 +53,8 @@ const THROTTLE_MS = 500;
 const STREAM_ACTIVITY_TOKEN_UPDATE_MS = 500;
 const STREAM_LIVENESS_UPDATE_MS = 500;
 const FALLBACK_STREAM_LONG_SILENCE_THRESHOLD_MS = 300_000;
+const RECAP_AWAY_THRESHOLD_MS = 5 * 60 * 1000;
+const RECAP_REQUEST_COOLDOWN_MS = 30_000;
 
 function hasUserVisibleStreamProgress(streamEvent: Record<string, unknown>): boolean {
   // "user-visible liveness": only content chunks that can render visible text/thinking
@@ -836,6 +838,9 @@ export function useSession(
   // For Codex providers, the first connected-event catch-up fetch can duplicate
   // freshly streamed messages because JSONL and stream IDs are not yet aligned.
   const hasHandledConnectedEventRef = useRef(false);
+  const hiddenSinceMsRef = useRef<number | null>(null);
+  const lastRecapRequestMsRef = useRef<number | null>(null);
+  const liveProcessId = status.owner === "self" ? status.processId : null;
 
   // Reset connected-event tracking when switching sessions.
   // biome-ignore lint/correctness/useExhaustiveDependencies: effect intentionally runs on session switches
@@ -843,6 +848,48 @@ export function useSession(
     hasHandledConnectedEventRef.current = false;
     setSessionLiveness(null);
   }, [sessionId]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const handleVisibilityChange = () => {
+      const nowMs = Date.now();
+      if (document.visibilityState === "hidden") {
+        hiddenSinceMsRef.current = nowMs;
+        return;
+      }
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      const hiddenSinceMs = hiddenSinceMsRef.current;
+      hiddenSinceMsRef.current = null;
+      if (hiddenSinceMs === null || !liveProcessId) {
+        return;
+      }
+
+      const hiddenDurationMs = nowMs - hiddenSinceMs;
+      const previousRequestMs = lastRecapRequestMsRef.current;
+      const isCoolingDown =
+        previousRequestMs !== null &&
+        nowMs - previousRequestMs < RECAP_REQUEST_COOLDOWN_MS;
+      if (hiddenDurationMs < RECAP_AWAY_THRESHOLD_MS || isCoolingDown) {
+        return;
+      }
+
+      lastRecapRequestMsRef.current = nowMs;
+      void api.requestRecap(liveProcessId, hiddenSinceMs).catch((error) => {
+        console.warn("Failed to request recap:", error);
+      });
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [liveProcessId]);
 
   // Slash commands available for this session (from init message)
   const [slashCommands, setSlashCommands] = useState<string[]>([]);

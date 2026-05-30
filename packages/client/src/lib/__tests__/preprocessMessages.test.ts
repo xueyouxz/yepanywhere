@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Message } from "../../types";
-import { preprocessMessages } from "../preprocessMessages";
+import {
+  preprocessMessages,
+  stripAwaySummaryHintSuffix,
+} from "../preprocessMessages";
 
 describe("preprocessMessages", () => {
   it("pairs tool_use with tool_result", () => {
@@ -844,6 +847,32 @@ describe("preprocessMessages", () => {
       type: "system",
       subtype: "turn_aborted",
       content: "approval denied",
+    });
+  });
+
+  it("renders away summaries without the Claude config hint suffix", () => {
+    expect(
+      stripAwaySummaryHintSuffix(
+        "Finished the route and started tests (disable recaps in /config)  \n",
+      ),
+    ).toBe("Finished the route and started tests");
+
+    const messages: Message[] = [
+      {
+        id: "msg-recap-1",
+        type: "system",
+        subtype: "away_summary",
+        content: "Ran typecheck (disable recaps in /config)\n",
+        timestamp: "2024-01-01T00:00:00Z",
+      },
+    ];
+
+    const items = preprocessMessages(messages);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      type: "system",
+      subtype: "away_summary",
+      content: "Ran typecheck",
     });
   });
 

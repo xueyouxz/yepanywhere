@@ -1,4 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
+import {
+  HELPER_SIDE_MODEL_CHEAPEST,
+  HELPER_SIDE_MODEL_SAME_AS_MAIN,
+  type PromptSuggestionMode,
+  type RecapMode,
+} from "@yep-anywhere/shared";
 import { useToastContext } from "../../contexts/ToastContext";
 import { useCodexUpdateStatus } from "../../hooks/useCodexUpdateStatus";
 import { useProviders } from "../../hooks/useProviders";
@@ -375,6 +381,7 @@ export function ProvidersSettings() {
   const { showToast } = useToastContext();
   const { providers: serverProviders, loading: providersLoading } =
     useProviders();
+  const { settings, updateSetting } = useServerSettings();
 
   const handleCopyClaudeLoginCommand = useCallback(async () => {
     try {
@@ -397,6 +404,50 @@ export function ProvidersSettings() {
       authenticated: serverInfo?.authenticated ?? false,
     };
   });
+  const newSessionDefaults = settings?.newSessionDefaults;
+  const defaultProviderInfo =
+    serverProviders.find((p) => p.name === newSessionDefaults?.provider) ??
+    serverProviders.find((p) => p.installed && (p.authenticated || p.enabled));
+  const defaultRecapMode =
+    newSessionDefaults?.recapMode ??
+    (defaultProviderInfo?.supportsNativeRecaps ? "native" : "off");
+  const storedPromptSuggestionMode = newSessionDefaults?.promptSuggestionMode;
+  const defaultPromptSuggestionMode =
+    storedPromptSuggestionMode === "off" ||
+    (storedPromptSuggestionMode === "native" &&
+      defaultProviderInfo?.supportsNativePromptSuggestions)
+      ? storedPromptSuggestionMode
+      : defaultProviderInfo?.supportsNativePromptSuggestions
+        ? "native"
+        : "off";
+  const defaultHelperSideModel =
+    newSessionDefaults?.helperSideModel ?? HELPER_SIDE_MODEL_CHEAPEST;
+  const recapModeLabels: Record<RecapMode, string> = {
+    off: t("recapModeOff"),
+    native: t("recapModeNative"),
+    "side-session": t("recapModeSideSession"),
+  };
+  const promptSuggestionModeLabels: Record<PromptSuggestionMode, string> = {
+    off: t("promptSuggestionModeOff"),
+    native: t("promptSuggestionModeNative"),
+  };
+  const isRecapModeAvailable = (mode: RecapMode) => {
+    if (mode === "off") return true;
+    if (mode === "native") return defaultProviderInfo?.supportsNativeRecaps === true;
+    return defaultProviderInfo?.supportsRecaps === true;
+  };
+  const isPromptSuggestionModeAvailable = (mode: PromptSuggestionMode) => {
+    if (mode === "off") return true;
+    return defaultProviderInfo?.supportsNativePromptSuggestions === true;
+  };
+  const updateNewSessionDefaults = async (
+    updates: NonNullable<typeof newSessionDefaults>,
+  ) => {
+    await updateSetting("newSessionDefaults", {
+      ...newSessionDefaults,
+      ...updates,
+    });
+  };
 
   return (
     <section className="settings-section">
@@ -404,6 +455,82 @@ export function ProvidersSettings() {
       <p className="settings-section-description">
         {t("providersSectionDescription")}
       </p>
+      <div className="settings-group">
+        <div className="settings-item model-settings-item">
+          <div className="settings-item-info">
+            <strong>{t("providersRecapDefaultsTitle")}</strong>
+            <p>{t("providersRecapDefaultsDescription")}</p>
+          </div>
+          <div className="font-size-selector model-settings-chip-group">
+            {(["off", "native", "side-session"] as RecapMode[]).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={`font-size-option ${defaultRecapMode === mode ? "active" : ""}`}
+                disabled={providersLoading || !isRecapModeAvailable(mode)}
+                onClick={() => void updateNewSessionDefaults({ recapMode: mode })}
+              >
+                {recapModeLabels[mode]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="settings-item model-settings-item">
+          <div className="settings-item-info">
+            <strong>{t("providersPromptSuggestionDefaultsTitle")}</strong>
+            <p>{t("providersPromptSuggestionDefaultsDescription")}</p>
+          </div>
+          <div className="font-size-selector model-settings-chip-group">
+            {(["off", "native"] as PromptSuggestionMode[]).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={`font-size-option ${defaultPromptSuggestionMode === mode ? "active" : ""}`}
+                disabled={
+                  providersLoading || !isPromptSuggestionModeAvailable(mode)
+                }
+                onClick={() =>
+                  void updateNewSessionDefaults({
+                    promptSuggestionMode: mode,
+                  })
+                }
+              >
+                {promptSuggestionModeLabels[mode]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <label className="settings-item model-settings-item">
+          <div className="settings-item-info">
+            <strong>{t("helperSideModelTitle")}</strong>
+            <p>{t("helperSideModelDescription")}</p>
+          </div>
+          <select
+            className="settings-select"
+            value={defaultHelperSideModel}
+            onChange={(event) =>
+              void updateNewSessionDefaults({
+                helperSideModel: event.target.value,
+              })
+            }
+            disabled={providersLoading}
+          >
+            <option value={HELPER_SIDE_MODEL_CHEAPEST}>
+              {t("helperSideModelCheapest")}
+            </option>
+            <option value={HELPER_SIDE_MODEL_SAME_AS_MAIN}>
+              {t("helperSideModelSameAsMain")}
+            </option>
+            {(defaultProviderInfo?.models ?? []).map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
       <div className="settings-group">
         {providerDisplayList.map((provider) => (
           <div key={provider.id} className="settings-item">

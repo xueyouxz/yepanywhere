@@ -77,6 +77,8 @@ export interface StartSessionOptions {
   remoteEnv?: Record<string, string>;
   /** Global instructions to append to system prompt (from server settings) */
   globalInstructions?: string;
+  /** Native prompt-suggestion protocol opt-in for providers that support it. */
+  promptSuggestions?: boolean;
 }
 
 /**
@@ -151,6 +153,23 @@ export interface AgentProvider {
   readonly supportsSlashCommands: boolean;
   /** Whether this provider supports active turn steering (default: false) */
   readonly supportsSteering: boolean;
+  /**
+   * Whether this provider can synthesize an on-return recap of recent
+   * activity. See topics/recaps.md. Optional; absent means false.
+   */
+  readonly supportsRecaps?: boolean;
+  /**
+   * Whether this provider emits recaps natively without YA spawning a side
+   * query. Native support still must be user-disableable because it consumes
+   * provider tokens/compute.
+   */
+  readonly supportsNativeRecaps?: boolean;
+  /**
+   * Whether this provider emits prompt suggestions natively in the ordinary
+   * session protocol. YA-simulated suggestions are a separate side-session
+   * feature and must not be implied by this flag.
+   */
+  readonly supportsNativePromptSuggestions?: boolean;
 
   /**
    * Check if this provider is installed and available.
@@ -182,4 +201,21 @@ export interface AgentProvider {
    * For cloud providers (Claude, Gemini), this returns a static list.
    */
   getAvailableModels(): Promise<ModelInfo[]>;
+
+  /**
+   * Synthesize a short recap of recent agent activity from already-emitted
+   * assistant text. The provider runs an ephemeral, non-persisted query —
+   * the output must not appear in the underlying session transcript.
+   * See topics/recaps.md.
+   *
+   * Implementations may apply timeouts and length limits. Returns the recap
+   * text on success; throws on unrecoverable failure. Implementations should
+   * NOT include trailing CLI-side hints (e.g., the Claude TUI's
+   * `(disable recaps in /config)` suffix) — those are TUI affordances that
+   * do not apply to a YA-generated recap.
+   */
+  generateRecap?: (
+    recentAssistantText: string[],
+    options?: { model?: string },
+  ) => Promise<string>;
 }

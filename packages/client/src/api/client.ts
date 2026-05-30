@@ -11,8 +11,10 @@ import type {
   GitStatusInfo,
   NewSessionDefaults,
   PendingInputType,
+  PromptSuggestionMode,
   ProviderInfo,
   ProviderName,
+  RecapMode,
   PublicSessionShareSessionStatusResponse,
   PublicSessionShareViewerActionResponse,
   RevokePublicSessionSharesResponse,
@@ -151,6 +153,12 @@ export interface SessionOptions {
   provider?: ProviderName;
   /** SSH host alias for remote execution (undefined = local) */
   executor?: string;
+  /** Recap behavior for future away-return triggers in this session. */
+  recapMode?: RecapMode;
+  /** Prompt suggestion behavior for this session. */
+  promptSuggestionMode?: PromptSuggestionMode;
+  /** Session-level helper side model for simulated helper features. */
+  helperSideModel?: string;
 }
 
 export type { UploadedFile } from "@yep-anywhere/shared";
@@ -498,6 +506,9 @@ export const api = {
         thinking: options?.thinking,
         provider: options?.provider,
         executor: options?.executor,
+        recapMode: options?.recapMode,
+        promptSuggestionMode: options?.promptSuggestionMode,
+        helperSideModel: options?.helperSideModel,
         attachments,
         clientTimestamp,
         messageMetadata,
@@ -524,6 +535,9 @@ export const api = {
         thinking: options?.thinking,
         provider: options?.provider,
         executor: options?.executor,
+        recapMode: options?.recapMode,
+        promptSuggestionMode: options?.promptSuggestionMode,
+        helperSideModel: options?.helperSideModel,
       }),
     }),
 
@@ -550,6 +564,9 @@ export const api = {
         thinking: options?.thinking,
         provider: options?.provider,
         executor: options?.executor,
+        recapMode: options?.recapMode,
+        promptSuggestionMode: options?.promptSuggestionMode,
+        helperSideModel: options?.helperSideModel,
         attachments,
         clientTimestamp,
         messageMetadata,
@@ -572,6 +589,9 @@ export const api = {
         thinking: options?.thinking,
         provider: options?.provider,
         executor: options?.executor,
+        recapMode: options?.recapMode,
+        promptSuggestionMode: options?.promptSuggestionMode,
+        helperSideModel: options?.helperSideModel,
       }),
     }),
 
@@ -599,6 +619,9 @@ export const api = {
         thinking: options?.thinking,
         provider: options?.provider,
         executor: options?.executor,
+        recapMode: options?.recapMode,
+        promptSuggestionMode: options?.promptSuggestionMode,
+        helperSideModel: options?.helperSideModel,
         attachments,
         tempId,
         clientTimestamp,
@@ -632,6 +655,9 @@ export const api = {
         thinking: options?.thinking,
         provider: options?.provider,
         executor: options?.executor,
+        recapMode: options?.recapMode,
+        promptSuggestionMode: options?.promptSuggestionMode,
+        helperSideModel: options?.helperSideModel,
         reason: options?.reason,
       }),
     }),
@@ -708,6 +734,31 @@ export const api = {
       `/processes/${processId}/interrupt`,
       { method: "POST" },
     ),
+
+  requestRecap: (processId: string, hiddenSinceMs?: number) =>
+    fetchJSON<{ supported: boolean; emitted: boolean; reason?: string }>(
+      `/processes/${processId}/recap`,
+      {
+        method: "POST",
+        ...(hiddenSinceMs === undefined
+          ? {}
+          : { body: JSON.stringify({ hiddenSinceMs }) }),
+      },
+    ),
+
+  setProcessRecapConfig: (
+    processId: string,
+    config: { recapMode?: RecapMode; helperSideModel?: string },
+  ) =>
+    fetchJSON<{
+      success: boolean;
+      processId: string;
+      recapMode: RecapMode;
+      helperSideModel: string;
+    }>(`/processes/${processId}/recap-config`, {
+      method: "POST",
+      body: JSON.stringify(config),
+    }),
 
   getProcessModels: (processId: string) =>
     fetchJSON<{
@@ -788,6 +839,9 @@ export const api = {
         effort?: string;
         model?: string;
         liveness?: SessionLivenessSnapshot;
+        recapMode?: RecapMode;
+        promptSuggestionMode?: PromptSuggestionMode;
+        helperSideModel?: string;
       } | null;
     }>(`/sessions/${sessionId}/process`),
 

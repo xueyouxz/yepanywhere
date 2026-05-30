@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import {
   type EffortLevel,
   type PermissionRules,
+  type PromptSuggestionMode,
   type ProviderName,
+  type RecapMode,
   type SessionLivenessProbeStatus,
   type SessionLivenessSnapshot,
   type ThinkingConfig,
@@ -206,6 +208,12 @@ export interface ModelSettings {
   globalInstructions?: string;
   /** Permission rules for tool filtering (deny/allow patterns) */
   permissions?: PermissionRules;
+  /** How this session should answer away-recap requests. */
+  recapMode?: RecapMode;
+  /** How this session should request native prompt suggestions. */
+  promptSuggestionMode?: PromptSuggestionMode;
+  /** Session-level helper side model for simulated helper features. */
+  helperSideModel?: string;
 }
 
 /** Error response when queue is full */
@@ -284,6 +292,7 @@ export interface SupervisorOptions {
 export class Supervisor {
   private processes: Map<string, Process> = new Map();
   private sessionToProcess: Map<string, string> = new Map(); // sessionId -> processId
+  private observedProcessIds: Set<string> = new Set();
   private everOwnedSessions: Set<string> = new Set(); // Sessions we've ever owned (for orphan detection)
   private terminatedProcesses: ProcessInfo[] = []; // Recently terminated processes
   private provider: AgentProvider | null;
@@ -367,6 +376,19 @@ export class Supervisor {
       return this.provider;
     }
     return getProvider(providerName);
+  }
+
+  private resolvePromptSuggestionMode(
+    requestedMode: PromptSuggestionMode | undefined,
+    provider: Pick<AgentProvider, "supportsNativePromptSuggestions">,
+  ): PromptSuggestionMode {
+    if (requestedMode === "off") {
+      return "off";
+    }
+    if (provider.supportsNativePromptSuggestions === true) {
+      return "native";
+    }
+    return "off";
   }
 
   async startSession(
@@ -528,6 +550,10 @@ export class Supervisor {
 
     const processHolder: { process: Process | null } = { process: null };
     const effectiveMode = permissionMode ?? this.defaultPermissionMode;
+    const promptSuggestionMode = this.resolvePromptSuggestionMode(
+      modelSettings?.promptSuggestionMode,
+      { supportsNativePromptSuggestions: true },
+    );
 
     // Start session WITHOUT an initial message - agent will wait
     const result = await this.realSdk.startSession({
@@ -540,6 +566,7 @@ export class Supervisor {
       effort: modelSettings?.effort,
       clientName: modelSettings?.clientName,
       globalInstructions: modelSettings?.globalInstructions,
+      promptSuggestions: promptSuggestionMode === "native",
       onToolApproval: async (toolName, input, opts) => {
         if (!processHolder.process) {
           return { behavior: "deny", message: "Process not ready" };
@@ -589,10 +616,14 @@ export class Supervisor {
       effort: modelSettings?.effort,
       executor: modelSettings?.executor,
       permissions: modelSettings?.permissions,
+      recapMode: modelSettings?.recapMode,
+      promptSuggestionMode,
+      helperSideModel: modelSettings?.helperSideModel,
     };
 
     const process = new Process(iterator, options);
     processHolder.process = process;
+    this.observeProcessEvents(process);
 
     // Wait for the real session ID from the SDK
     if (!resumeSessionId) {
@@ -603,6 +634,15 @@ export class Supervisor {
     this.registerProcess(process, !resumeSessionId);
 
     return process;
+  }
+
+  private async queueProcessMessage(
+    process: Process,
+    message: UserMessage,
+    options?: { allowSteer?: boolean },
+  ): Promise<ReturnType<Process["queueMessage"]>> {
+    await process.primeSupportedCommandsForMessage(message);
+    return process.queueMessage(message, options);
   }
 
   /**
@@ -616,7 +656,6 @@ export class Supervisor {
     permissionMode?: PermissionMode,
     modelSettings?: ModelSettings,
   ): Promise<Process> {
-    // Create a placeholder process first (needed for tool approval callback)
     const tempSessionId = resumeSessionId ?? randomUUID();
 
     // realSdk is guaranteed to exist here (checked in startSession)
@@ -630,16 +669,13 @@ export class Supervisor {
 
     // Use provided mode or fall back to default
     const effectiveMode = permissionMode ?? this.defaultPermissionMode;
-
-    // Generate UUID for the initial message so SDK and SSE use the same ID.
-    // This ensures the client can match the SSE replay to its temp message,
-    // and prevents duplicates when JSONL is later fetched.
-    const messageUuid = message.uuid ?? randomUUID();
-    const messageWithUuid: UserMessage = { ...message, uuid: messageUuid };
+    const promptSuggestionMode = this.resolvePromptSuggestionMode(
+      modelSettings?.promptSuggestionMode,
+      { supportsNativePromptSuggestions: true },
+    );
 
     const result = await this.realSdk.startSession({
       cwd: projectPath,
-      initialMessage: messageWithUuid,
       resumeSessionId,
       permissionMode: effectiveMode,
       model: modelSettings?.model,
@@ -649,6 +685,7 @@ export class Supervisor {
       executor: modelSettings?.executor,
       remoteEnv: modelSettings?.remoteEnv,
       globalInstructions: modelSettings?.globalInstructions,
+      promptSuggestions: promptSuggestionMode === "native",
       onToolApproval: async (toolName, input, opts) => {
         // Delegate to the process's handleToolApproval
         if (!processHolder.process) {
@@ -698,21 +735,27 @@ export class Supervisor {
       effort: modelSettings?.effort,
       executor: modelSettings?.executor,
       permissions: modelSettings?.permissions,
+      recapMode: modelSettings?.recapMode,
+      promptSuggestionMode,
+      helperSideModel: modelSettings?.helperSideModel,
     };
 
     const process = new Process(iterator, options);
     processHolder.process = process;
-
-    // Add the initial user message to history with the same UUID we passed to SDK.
-    // This ensures SSE replay includes the user message so the client can replace
-    // its temp message. The SDK also writes to JSONL with this UUID, so both SSE
-    // and JSONL will have matching IDs (no duplicates).
-    process.addInitialUserMessage(messageWithUuid, messageUuid, message.tempId);
+    this.observeProcessEvents(process);
 
     // Wait for the real session ID from the SDK before registering
     // This ensures the client gets the correct ID to use for persistence
     if (!resumeSessionId) {
       await process.waitForSessionId();
+    }
+
+    const queued = await this.queueProcessMessage(process, message, {
+      allowSteer: false,
+    });
+    if (!queued.success) {
+      await process.abort();
+      throw new Error(queued.error ?? "Failed to queue initial message");
     }
 
     this.registerProcess(process, !resumeSessionId);
@@ -739,6 +782,10 @@ export class Supervisor {
 
     const processHolder: { process: Process | null } = { process: null };
     const effectiveMode = permissionMode ?? this.defaultPermissionMode;
+    const promptSuggestionMode = this.resolvePromptSuggestionMode(
+      modelSettings?.promptSuggestionMode,
+      activeProvider,
+    );
 
     // Start session WITHOUT an initial message - agent will wait
     const result = await activeProvider.startSession({
@@ -753,6 +800,7 @@ export class Supervisor {
       executor: modelSettings?.executor,
       remoteEnv: modelSettings?.remoteEnv,
       globalInstructions: modelSettings?.globalInstructions,
+      promptSuggestions: promptSuggestionMode === "native",
       onToolApproval: async (toolName, input, opts) => {
         if (!processHolder.process) {
           return { behavior: "deny", message: "Process not ready" };
@@ -804,10 +852,14 @@ export class Supervisor {
       effort: modelSettings?.effort,
       executor: modelSettings?.executor,
       permissions: modelSettings?.permissions,
+      recapMode: modelSettings?.recapMode,
+      promptSuggestionMode,
+      helperSideModel: modelSettings?.helperSideModel,
     };
 
     const process = new Process(iterator, options);
     processHolder.process = process;
+    this.observeProcessEvents(process);
 
     // Wait for the real session ID from the provider
     if (!resumeSessionId) {
@@ -837,21 +889,18 @@ export class Supervisor {
       throw new Error("provider is not available");
     }
 
-    const tempSessionId = resumeSessionId ?? randomUUID();
-
     // We need to reference process in the callback before it's assigned
     const processHolder: { process: Process | null } = { process: null };
 
     // Use provided mode or fall back to default
     const effectiveMode = permissionMode ?? this.defaultPermissionMode;
-
-    // Generate UUID for the initial message so SDK and SSE use the same ID.
-    const messageUuid = message.uuid ?? randomUUID();
-    const messageWithUuid: UserMessage = { ...message, uuid: messageUuid };
+    const promptSuggestionMode = this.resolvePromptSuggestionMode(
+      modelSettings?.promptSuggestionMode,
+      activeProvider,
+    );
 
     const result = await activeProvider.startSession({
       cwd: projectPath,
-      initialMessage: messageWithUuid,
       resumeSessionId,
       permissionMode: effectiveMode,
       model: modelSettings?.model,
@@ -860,6 +909,7 @@ export class Supervisor {
       executor: modelSettings?.executor,
       remoteEnv: modelSettings?.remoteEnv,
       globalInstructions: modelSettings?.globalInstructions,
+      promptSuggestions: promptSuggestionMode === "native",
       onToolApproval: async (toolName, input, opts) => {
         if (!processHolder.process) {
           return { behavior: "deny", message: "Process not ready" };
@@ -883,6 +933,7 @@ export class Supervisor {
       setModel,
     } = result;
 
+    const tempSessionId = resumeSessionId ?? randomUUID();
     const options: ProcessConstructorOptions = {
       projectPath,
       projectId,
@@ -910,17 +961,26 @@ export class Supervisor {
       effort: modelSettings?.effort,
       executor: modelSettings?.executor,
       permissions: modelSettings?.permissions,
+      recapMode: modelSettings?.recapMode,
+      promptSuggestionMode,
+      helperSideModel: modelSettings?.helperSideModel,
     };
 
     const process = new Process(iterator, options);
     processHolder.process = process;
-
-    // Add the initial user message to history with the same UUID we passed to provider.
-    process.addInitialUserMessage(messageWithUuid, messageUuid, message.tempId);
+    this.observeProcessEvents(process);
 
     // Wait for the real session ID from the provider before registering
     if (!resumeSessionId) {
       await process.waitForSessionId();
+    }
+
+    const queued = await this.queueProcessMessage(process, message, {
+      allowSteer: false,
+    });
+    if (!queued.success) {
+      await process.abort();
+      throw new Error(queued.error ?? "Failed to queue initial message");
     }
 
     this.registerProcess(process, !resumeSessionId);
@@ -1048,7 +1108,10 @@ export class Supervisor {
           }
           // Queue message to existing process (if we didn't fall through to restart)
           if (!existingProcess.isTerminated) {
-            const result = existingProcess.queueMessage(message);
+            const result = await this.queueProcessMessage(
+              existingProcess,
+              message,
+            );
             if (result.success) {
               return existingProcess;
             }
@@ -1195,6 +1258,9 @@ export class Supervisor {
       effort: nextEffort,
       providerName: process.provider,
       executor: process.executor,
+      recapMode: process.recapMode,
+      promptSuggestionMode: process.promptSuggestionMode,
+      helperSideModel: process.helperSideModel,
     };
 
     await process.abort();
@@ -1208,6 +1274,18 @@ export class Supervisor {
       effectiveProvider,
       process.sessionId,
     );
+  }
+
+  configureProcessRecaps(
+    processId: string,
+    config: { recapMode?: RecapMode; helperSideModel?: string },
+  ): Process | null {
+    const process = this.getProcess(processId);
+    if (!process || process.isTerminated) {
+      return null;
+    }
+    process.setRecapConfig(config);
+    return process;
   }
 
   getProcessForSession(sessionId: string): Process | undefined {
@@ -1305,12 +1383,21 @@ export class Supervisor {
         await process.abort();
         this.unregisterProcess(process);
 
+        const restartModelSettings: ModelSettings = {
+          ...modelSettings,
+          recapMode: modelSettings?.recapMode ?? process.recapMode,
+          promptSuggestionMode:
+            modelSettings?.promptSuggestionMode ?? process.promptSuggestionMode,
+          helperSideModel:
+            modelSettings?.helperSideModel ?? process.helperSideModel,
+        };
+
         const result = await this.resumeSession(
           sessionId,
           projectPath,
           message,
           permissionMode,
-          modelSettings,
+          restartModelSettings,
         );
 
         if ("id" in result) {
@@ -1325,7 +1412,7 @@ export class Supervisor {
       process.setPermissionMode(permissionMode);
     }
 
-    const result = process.queueMessage(message);
+    const result = await this.queueProcessMessage(process, message);
     if (result.success) {
       return { success: true, process, restarted: false };
     }
@@ -1347,7 +1434,7 @@ export class Supervisor {
 
     try {
       for (const process of this.processes.values()) {
-        this.queueHeartbeatTurnForProcess(process, now, log);
+        await this.queueHeartbeatTurnForProcess(process, now, log);
       }
 
       if (!this.getHeartbeatTurnCandidates) {
@@ -1362,11 +1449,11 @@ export class Supervisor {
     }
   }
 
-  private queueHeartbeatTurnForProcess(
+  private async queueHeartbeatTurnForProcess(
     process: Process,
     now: number,
     log: ReturnType<typeof getLogger>,
-  ): void {
+  ): Promise<void> {
     const settings = this.getHeartbeatTurnSettings?.(process.sessionId);
     if (!settings?.enabled) {
       return;
@@ -1436,7 +1523,7 @@ export class Supervisor {
       return;
     }
 
-    const result = process.queueMessage({ text });
+    const result = await this.queueProcessMessage(process, { text });
     if (result.success) {
       log.info(
         {
@@ -1532,7 +1619,7 @@ export class Supervisor {
       );
     }
 
-    const result = process.queueMessage({
+    const result = await this.queueProcessMessage(process, {
       text: `${FORCED_HEARTBEAT_INTERRUPT_PREAMBLE}\n\n${details.text}`,
     });
     log.warn(
@@ -1819,6 +1906,31 @@ export class Supervisor {
     return { success: false, supported: true, hardAborted: true };
   }
 
+  async requestRecap(
+    processId: string,
+    options?: { sinceMs?: number | null },
+  ): Promise<{ supported: boolean; emitted: boolean; reason?: string }> {
+    const process = this.processes.get(processId);
+    if (!process) {
+      return {
+        supported: false,
+        emitted: false,
+        reason: "process not found",
+      };
+    }
+
+    const provider = getProvider(process.provider);
+    if (!provider) {
+      return {
+        supported: false,
+        emitted: false,
+        reason: "provider not found",
+      };
+    }
+
+    return process.requestRecap(provider, options);
+  }
+
   private async interruptProcessWithTimeout(
     process: Process,
     options?: { extraMessages?: UserMessage[]; preamble?: string },
@@ -1942,6 +2054,7 @@ export class Supervisor {
       if (message.mode) {
         result.setPermissionMode(message.mode);
       }
+      await result.primeSupportedCommandsForMessage(message);
       const queued = result.deferMessage(message, { promoteIfReady: false });
       if (!queued.success) {
         log.warn(
@@ -1971,69 +2084,11 @@ export class Supervisor {
     this.eventBus.emit(event);
   }
 
-  private registerProcess(process: Process, isNewSession: boolean): void {
-    const log = getLogger();
-    log.info(
-      {
-        event: "session_registered",
-        sessionId: process.sessionId,
-        processId: process.id,
-        projectId: process.projectId,
-        projectPath: process.projectPath,
-        isNewSession,
-        permissionMode: process.permissionMode,
-      },
-      `Session registered: ${process.sessionId} (process: ${process.id})`,
-    );
-
-    this.processes.set(process.id, process);
-    this.sessionToProcess.set(process.sessionId, process.id);
-    this.everOwnedSessions.add(process.sessionId);
-
-    const ownership: SessionOwnership = {
-      owner: "self",
-      processId: process.id,
-      permissionMode: process.permissionMode,
-      modeVersion: process.modeVersion,
-    };
-
-    // Emit session created event for new sessions
-    if (isNewSession) {
-      this.emitSessionCreated(process, ownership);
-      this.scheduleInitialSessionReconciliation(
-        process.sessionId,
-        process.projectId,
-      );
+  private observeProcessEvents(process: Process): void {
+    if (this.observedProcessIds.has(process.id)) {
+      return;
     }
-
-    // Emit ownership change event
-    this.emitOwnershipChange(process.sessionId, process.projectId, ownership);
-
-    // Emit initial agent activity (process starts in in-turn state)
-    const initialState = process.state;
-    if (
-      initialState.type === "in-turn" ||
-      initialState.type === "waiting-input"
-    ) {
-      // Convert InputRequest.type to PendingInputType if waiting for input at start
-      let pendingInputType: PendingInputType | undefined;
-      if (initialState.type === "waiting-input") {
-        const requestType = initialState.request.type;
-        pendingInputType =
-          requestType === "tool-approval" ? "tool-approval" : "user-question";
-      }
-      this.emitAgentActivityChange(
-        process.sessionId,
-        process.projectId,
-        initialState.type,
-        pendingInputType,
-      );
-    }
-
-    // Emit worker activity after registering (new worker added)
-    this.emitWorkerActivity();
-
-    // Listen for completion to auto-cleanup, and state changes for process state events
+    this.observedProcessIds.add(process.id);
     process.subscribe((event) => {
       if (event.type === "complete") {
         this.unregisterProcess(process);
@@ -2134,7 +2189,73 @@ export class Supervisor {
     });
   }
 
+  private registerProcess(process: Process, isNewSession: boolean): void {
+    this.observeProcessEvents(process);
+
+    const log = getLogger();
+    log.info(
+      {
+        event: "session_registered",
+        sessionId: process.sessionId,
+        processId: process.id,
+        projectId: process.projectId,
+        projectPath: process.projectPath,
+        isNewSession,
+        permissionMode: process.permissionMode,
+      },
+      `Session registered: ${process.sessionId} (process: ${process.id})`,
+    );
+
+    this.processes.set(process.id, process);
+    this.sessionToProcess.set(process.sessionId, process.id);
+    this.everOwnedSessions.add(process.sessionId);
+
+    const ownership: SessionOwnership = {
+      owner: "self",
+      processId: process.id,
+      permissionMode: process.permissionMode,
+      modeVersion: process.modeVersion,
+    };
+
+    // Emit session created event for new sessions
+    if (isNewSession) {
+      this.emitSessionCreated(process, ownership);
+      this.scheduleInitialSessionReconciliation(
+        process.sessionId,
+        process.projectId,
+      );
+    }
+
+    // Emit ownership change event
+    this.emitOwnershipChange(process.sessionId, process.projectId, ownership);
+
+    // Emit initial agent activity (process starts in in-turn state)
+    const initialState = process.state;
+    if (
+      initialState.type === "in-turn" ||
+      initialState.type === "waiting-input"
+    ) {
+      // Convert InputRequest.type to PendingInputType if waiting for input at start
+      let pendingInputType: PendingInputType | undefined;
+      if (initialState.type === "waiting-input") {
+        const requestType = initialState.request.type;
+        pendingInputType =
+          requestType === "tool-approval" ? "tool-approval" : "user-question";
+      }
+      this.emitAgentActivityChange(
+        process.sessionId,
+        process.projectId,
+        initialState.type,
+        pendingInputType,
+      );
+    }
+
+    // Emit worker activity after registering (new worker added)
+    this.emitWorkerActivity();
+  }
+
   private unregisterProcess(process: Process): void {
+    this.observedProcessIds.delete(process.id);
     if (!this.processes.has(process.id)) {
       return;
     }

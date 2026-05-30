@@ -32,6 +32,8 @@ export interface SessionMenuProps {
   onReload?: () => void;
   /** Called to configure session heartbeat settings */
   onConfigureHeartbeat?: () => void;
+  /** Called to configure session recap settings */
+  onConfigureRecaps?: () => void;
   /** Whether dismissed warnings can be restored */
   warningRestoreAvailable?: boolean;
   /** Restore dismissed per-session warnings */
@@ -67,6 +69,7 @@ export function SessionMenu({
   onTerminate,
   onReload,
   onConfigureHeartbeat,
+  onConfigureRecaps,
   warningRestoreAvailable = false,
   onRestoreWarnings,
   onShare,
@@ -315,6 +318,25 @@ export function SessionMenu({
             <path d="m16.24 7.76 2.83-2.83" />
           </svg>
           {t("sessionMenuHeartbeat")}
+        </button>
+      )}
+      {onConfigureRecaps && (
+        <button type="button" onClick={() => handleAction(onConfigureRecaps)}>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
+            <path d="M4 19h16" />
+            <path d="M6 5h12" />
+            <path d="M6 9h12" />
+            <path d="M6 13h8" />
+          </svg>
+          {t("sessionMenuRecaps")}
         </button>
       )}
       {warningRestoreAvailable && onRestoreWarnings && (
