@@ -11,8 +11,6 @@
  */
 
 import {
-  type RelayClientConnected,
-  type RelayClientError,
   isRelayClientConnected,
   isRelayClientError,
 } from "@yep-anywhere/shared";

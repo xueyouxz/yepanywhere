@@ -5,10 +5,7 @@ import {
 } from "./entry/AssistantEntrySchema.js";
 import { FileHistorySnapshotEntrySchema } from "./entry/FileHistorySnapshotEntrySchema.js";
 import { MetadataEntrySchema } from "./entry/MetadataEntrySchema.js";
-import {
-  type ProgressEntry,
-  ProgressEntrySchema,
-} from "./entry/ProgressEntrySchema.js";
+import { ProgressEntrySchema } from "./entry/ProgressEntrySchema.js";
 import { QueueOperationEntrySchema } from "./entry/QueueOperationEntrySchema.js";
 import { SummaryEntrySchema } from "./entry/SummaryEntrySchema.js";
 import {

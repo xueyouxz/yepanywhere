@@ -15,7 +15,6 @@ import {
   createStandardScenario,
   createToolUseScenario,
 } from "../../../../src/sdk/providers/__mocks__/index.js";
-import type { ProviderName } from "../../../../src/sdk/providers/types.js";
 import type { SDKMessage } from "../../../../src/sdk/types.js";
 
 /**
@@ -240,90 +239,85 @@ describe.each(MOCK_PROVIDER_TYPES)("%s mock provider", (providerType) => {
 });
 
 describe("Cross-provider scenarios", () => {
-  it.each(MOCK_PROVIDER_TYPES)(
-    "%s handles tool use scenarios",
-    async (providerType) => {
-      const provider = createMockProvider(providerType);
-      provider.addScenario(
-        createToolUseScenario(
-          "tool-session",
-          "Read",
-          { file_path: "/test.txt" },
-          "file contents",
-          "Done reading!",
-        ),
-      );
+  it.each(
+    MOCK_PROVIDER_TYPES,
+  )("%s handles tool use scenarios", async (providerType) => {
+    const provider = createMockProvider(providerType);
+    provider.addScenario(
+      createToolUseScenario(
+        "tool-session",
+        "Read",
+        { file_path: "/test.txt" },
+        "file contents",
+        "Done reading!",
+      ),
+    );
 
-      const session = await provider.startSession({
-        cwd: "/test",
-        initialMessage: { text: "read file" },
-      });
+    const session = await provider.startSession({
+      cwd: "/test",
+      initialMessage: { text: "read file" },
+    });
 
-      const messages = await collect(session.iterator);
+    const messages = await collect(session.iterator);
 
-      // Should have: init, assistant (tool_use), user (tool_result), assistant (final), result
-      expect(messages.length).toBe(5);
+    // Should have: init, assistant (tool_use), user (tool_result), assistant (final), result
+    expect(messages.length).toBe(5);
 
-      // Find tool use message
-      const toolUseMsg = messages.find(
-        (m) =>
-          m.type === "assistant" &&
-          Array.isArray(m.message?.content) &&
-          m.message.content.some(
-            (b: { type: string }) => b.type === "tool_use",
-          ),
-      );
-      expect(toolUseMsg).toBeDefined();
-    },
-  );
+    // Find tool use message
+    const toolUseMsg = messages.find(
+      (m) =>
+        m.type === "assistant" &&
+        Array.isArray(m.message?.content) &&
+        m.message.content.some((b: { type: string }) => b.type === "tool_use"),
+    );
+    expect(toolUseMsg).toBeDefined();
+  });
 
-  it.each(MOCK_PROVIDER_TYPES)(
-    "%s handles multi-turn scenarios",
-    async (providerType) => {
-      const provider = createMockProvider(providerType);
-      provider.addScenario(
-        createMultiTurnScenario("multi-turn", [
-          { user: "Hello", assistant: "Hi there!" },
-          { user: "How are you?", assistant: "I'm doing well!" },
-        ]),
-      );
+  it.each(
+    MOCK_PROVIDER_TYPES,
+  )("%s handles multi-turn scenarios", async (providerType) => {
+    const provider = createMockProvider(providerType);
+    provider.addScenario(
+      createMultiTurnScenario("multi-turn", [
+        { user: "Hello", assistant: "Hi there!" },
+        { user: "How are you?", assistant: "I'm doing well!" },
+      ]),
+    );
 
-      const session = await provider.startSession({
-        cwd: "/test",
-        initialMessage: { text: "start" },
-      });
+    const session = await provider.startSession({
+      cwd: "/test",
+      initialMessage: { text: "start" },
+    });
 
-      const messages = await collect(session.iterator);
+    const messages = await collect(session.iterator);
 
-      // Should have: init, user, assistant, user, assistant, result
-      expect(messages.length).toBe(6);
+    // Should have: init, user, assistant, user, assistant, result
+    expect(messages.length).toBe(6);
 
-      const userMsgs = messages.filter((m) => m.type === "user");
-      const assistantMsgs = messages.filter((m) => m.type === "assistant");
-      expect(userMsgs.length).toBe(2);
-      expect(assistantMsgs.length).toBe(2);
-    },
-  );
+    const userMsgs = messages.filter((m) => m.type === "user");
+    const assistantMsgs = messages.filter((m) => m.type === "assistant");
+    expect(userMsgs.length).toBe(2);
+    expect(assistantMsgs.length).toBe(2);
+  });
 
-  it.each(MOCK_PROVIDER_TYPES)(
-    "%s preserves session_id across messages",
-    async (providerType) => {
-      const provider = createMockProvider(providerType);
-      provider.addScenario(
-        createStandardScenario("persistent-session", "response"),
-      );
+  it.each(
+    MOCK_PROVIDER_TYPES,
+  )("%s preserves session_id across messages", async (providerType) => {
+    const provider = createMockProvider(providerType);
+    provider.addScenario(
+      createStandardScenario("persistent-session", "response"),
+    );
 
-      const session = await provider.startSession({
-        cwd: "/test",
-        initialMessage: { text: "test" },
-      });
+    const session = await provider.startSession({
+      cwd: "/test",
+      initialMessage: { text: "test" },
+    });
 
-      const messages = await collect(session.iterator);
+    const messages = await collect(session.iterator);
 
-      // All messages should have the same session_id
-      const sessionIds = new Set(messages.map((m) => m.session_id));
-      expect(sessionIds.size).toBe(1);
-      expect(sessionIds.has("persistent-session")).toBe(true);
-    },
-  );
+    // All messages should have the same session_id
+    const sessionIds = new Set(messages.map((m) => m.session_id));
+    expect(sessionIds.size).toBe(1);
+    expect(sessionIds.has("persistent-session")).toBe(true);
+  });
 });

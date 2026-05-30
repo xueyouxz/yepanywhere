@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  type DetectedFilePath,
-  type TextSegment,
-  detectFilePaths,
-  splitTextWithFilePaths,
-} from "../filePathDetection";
+import { detectFilePaths, splitTextWithFilePaths } from "../filePathDetection";
 
 describe("detectFilePaths", () => {
   describe("absolute paths", () => {

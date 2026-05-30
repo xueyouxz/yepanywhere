@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   BlockDetector,
   type CompletedBlock,
-  type StreamingCodeBlock,
 } from "../../src/augments/block-detector.js";
 
 describe("BlockDetector", () => {

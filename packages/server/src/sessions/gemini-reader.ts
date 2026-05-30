@@ -11,13 +11,11 @@
  */
 
 import { readFile, readdir, stat } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import {
   type GeminiAssistantMessage,
-  type GeminiSessionFile,
   type GeminiSessionMessage,
   type GeminiUserMessage,
-  type UnifiedSession,
   type UrlProjectId,
   getGeminiUserMessageText,
   getModelContextWindow,
@@ -25,10 +23,8 @@ import {
   truncateSessionTitle,
 } from "@yep-anywhere/shared";
 import type {
-  ContentBlock,
   ContextUsage,
   Message,
-  Session,
   SessionSummary,
 } from "../supervisor/types.js";
 import type {

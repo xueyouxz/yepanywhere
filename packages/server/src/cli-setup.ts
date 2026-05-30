@@ -6,7 +6,6 @@
  */
 
 import {
-  type RelayServerRegistered,
   type RelayServerRejected,
   isRelayServerRegistered,
   isRelayServerRejected,

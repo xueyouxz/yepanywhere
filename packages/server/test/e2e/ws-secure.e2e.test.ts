@@ -22,7 +22,6 @@ import type {
   RelayUploadStart,
   SrpClientHello,
   SrpClientProof,
-  SrpError,
   SrpServerChallenge,
   SrpServerVerify,
   SrpSessionInvalid,
@@ -35,7 +34,6 @@ import type {
 import {
   BinaryFormat,
   encodeUploadChunkPayload,
-  isBinaryData,
   isEncryptedEnvelope,
   isSequencedEncryptedPayload,
   isSrpError,
@@ -57,7 +55,6 @@ import { AuthService } from "../../src/auth/AuthService.js";
 import {
   decrypt,
   decryptBinaryEnvelope,
-  decryptBinaryEnvelopeRaw,
   deriveSecretboxKey,
   deriveTransportKey,
   encrypt,

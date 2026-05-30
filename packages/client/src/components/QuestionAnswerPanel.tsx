@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuestionOtherDrafts } from "../hooks/useDrafts";
 import { useI18n } from "../i18n";
 import type { InputRequest } from "../types";
-import type { AskUserQuestionInput, Question } from "./renderers/tools/types";
+import type { AskUserQuestionInput } from "./renderers/tools/types";
 
 interface Props {
   request: InputRequest;

@@ -1,4 +1,4 @@
-import type { ContentBlock, ContentRenderer, RenderContext } from "../types";
+import type { ContentBlock, ContentRenderer } from "../types";
 
 interface TextBlock extends ContentBlock {
   type: "text";

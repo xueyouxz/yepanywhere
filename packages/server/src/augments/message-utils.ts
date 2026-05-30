@@ -3,8 +3,6 @@
  * Extracts text deltas, message IDs, and other data from SDK messages.
  */
 
-import type { SDKMessageLike } from "./types.js";
-
 /**
  * Extract text delta from stream_event messages.
  * Returns the text if this is a text_delta event, otherwise null.

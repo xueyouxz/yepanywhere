@@ -10,16 +10,11 @@
  * All routes are prefixed with /debug and live on the maintenance server port.
  */
 import type * as http from "node:http";
-import type { UrlProjectId } from "@yep-anywhere/shared";
 import type { SDKMessage } from "../sdk/types.js";
 import { normalizeSession } from "../sessions/normalization.js";
 import type { ClaudeSessionReader } from "../sessions/reader.js";
 import type { Process } from "../supervisor/Process.js";
-import type {
-  QueueFullResponse,
-  Supervisor,
-} from "../supervisor/Supervisor.js";
-import type { QueuedResponse } from "../supervisor/WorkerQueue.js";
+import type { Supervisor } from "../supervisor/Supervisor.js";
 import type { Message } from "../supervisor/types.js";
 
 /**

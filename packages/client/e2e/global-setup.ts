@@ -1,10 +1,9 @@
-import { type ChildProcess, execSync, spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { hostname, tmpdir } from "node:os";

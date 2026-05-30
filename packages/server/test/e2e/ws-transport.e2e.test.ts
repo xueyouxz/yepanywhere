@@ -19,7 +19,6 @@ import type {
   YepMessage,
 } from "@yep-anywhere/shared";
 import {
-  BinaryFormat,
   decodeJsonFrame,
   encodeJsonFrame,
   encodeUploadChunkFrame,

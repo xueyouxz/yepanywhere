@@ -2,7 +2,6 @@
 import type {
   AgentStatus as AgentStatusType,
   AppContentBlock,
-  AppMessage,
 } from "@yep-anywhere/shared";
 
 // Re-export shared types

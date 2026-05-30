@@ -13,8 +13,7 @@
 
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, join, sep } from "node:path";
-import type { UrlProjectId } from "@yep-anywhere/shared";
+import { basename, join } from "node:path";
 import { getLogger } from "../logging/logger.js";
 import type { Project } from "../supervisor/types.js";
 import { readFirstLine } from "../utils/jsonl.js";

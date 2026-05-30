@@ -10,12 +10,8 @@
  */
 
 import { readFile, readdir, stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import {
-  type GeminiSessionFile,
-  parseGeminiSessionFile,
-} from "@yep-anywhere/shared";
+import { parseGeminiSessionFile } from "@yep-anywhere/shared";
 import type { Project } from "../supervisor/types.js";
 import {
   GEMINI_DIR,

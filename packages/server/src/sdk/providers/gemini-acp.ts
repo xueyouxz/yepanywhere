@@ -26,11 +26,9 @@ import { whichCommand } from "../cli-detection.js";
 const execAsync = promisify(exec);
 import { MessageQueue } from "../messageQueue.js";
 import type {
-  CanUseTool,
   PermissionMode,
   SDKMessage,
   ToolApprovalResult,
-  UserMessage,
 } from "../types.js";
 import { ACPClient } from "./acp/client.js";
 import type {

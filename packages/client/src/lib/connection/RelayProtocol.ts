@@ -12,7 +12,6 @@ import type {
   RelayUploadProgress,
   RelayUploadStart,
   RemoteClientMessage,
-  ServerPong,
   UploadedFile,
   YepMessage,
 } from "@yep-anywhere/shared";

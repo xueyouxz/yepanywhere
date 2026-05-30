@@ -1,6 +1,5 @@
 import { getModelContextWindow } from "@yep-anywhere/shared";
 import { useCallback, useRef } from "react";
-import { getMessageId } from "../lib/mergeMessages";
 import type { ContentBlock, Message } from "../types";
 import { getStreamingEnabled } from "./useStreamingEnabled";
 
@@ -198,10 +197,7 @@ export function useStreamingContent(
 
       // If no timer running, start one
       if (!throttle.timer) {
-        throttle.timer = setTimeout(
-          flushStreamingUpdates,
-          throttle.intervalMs,
-        );
+        throttle.timer = setTimeout(flushStreamingUpdates, throttle.intervalMs);
       }
     },
     [flushStreamingUpdates],

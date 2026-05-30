@@ -13,8 +13,6 @@
 
 import { type ChildProcess, exec, execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import type { ModelInfo } from "@yep-anywhere/shared";
@@ -24,7 +22,7 @@ import {
   normalizeCodexToolInvocation,
 } from "../../codex/normalization.js";
 import { getLogger } from "../../logging/logger.js";
-import { findCodexCliPath, whichCommand } from "../cli-detection.js";
+import { findCodexCliPath } from "../cli-detection.js";
 import { MessageQueue } from "../messageQueue.js";
 import type { SDKMessage } from "../types.js";
 import type {
