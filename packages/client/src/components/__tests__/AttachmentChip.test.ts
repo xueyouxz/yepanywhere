@@ -9,8 +9,8 @@ describe("formatAttachmentName", () => {
   });
 
   it("allows a partial word only when there are no separators to cut on", () => {
-    expect(formatAttachmentName("averylongfilenamewithnospacesorbreaks.txt")).toBe(
-      "averylongfilenamewithno...",
-    );
+    expect(
+      formatAttachmentName("averylongfilenamewithnospacesorbreaks.txt"),
+    ).toBe("averylongfilenamewithnos...");
   });
 });

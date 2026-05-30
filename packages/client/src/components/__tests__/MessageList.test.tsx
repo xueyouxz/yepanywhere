@@ -76,6 +76,8 @@ function stubClipboardWriteText() {
 
 describe("MessageList", () => {
   beforeEach(() => {
+    vi.useRealTimers();
+
     class ResizeObserverMock {
       observe() {}
       disconnect() {}
@@ -88,10 +90,12 @@ describe("MessageList", () => {
   });
 
   afterEach(() => {
-    document
-      .querySelectorAll(".session-input-inner")
-      .forEach((node) => node.remove());
-    document.querySelectorAll("textarea").forEach((node) => node.remove());
+    document.querySelectorAll(".session-input-inner").forEach((node) => {
+      node.remove();
+    });
+    document.querySelectorAll("textarea").forEach((node) => {
+      node.remove();
+    });
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: originalClipboard,
@@ -238,9 +242,7 @@ describe("MessageList", () => {
 
     render(<MessageList messages={[userMessage("user-1", "sent text")]} />);
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Copy message text" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Copy message text" }));
 
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("sent text"));
   });
@@ -339,11 +341,7 @@ describe("MessageList", () => {
     const { container } = render(
       <MessageList
         messages={[
-          userMessage(
-            "user-1",
-            "stale request",
-            "2026-04-26T12:00:00.000Z",
-          ),
+          userMessage("user-1", "stale request", "2026-04-26T12:00:00.000Z"),
         ]}
       />,
     );
@@ -361,11 +359,7 @@ describe("MessageList", () => {
     const { container } = render(
       <MessageList
         messages={[
-          userMessage(
-            "user-1",
-            "older request",
-            "2026-04-26T12:00:00.000Z",
-          ),
+          userMessage("user-1", "older request", "2026-04-26T12:00:00.000Z"),
           assistantMessage(
             "assistant-1",
             "latest response",
@@ -493,8 +487,7 @@ describe("MessageList", () => {
     });
     container.scrollTo = scrollTo as typeof container.scrollTo;
 
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    fireEvent.scroll(container);
+    fireEvent.wheel(container, { deltaY: -120 });
 
     fireEvent.click(
       await screen.findByRole("button", {
@@ -539,15 +532,12 @@ describe("MessageList", () => {
     });
     container.scrollTo = scrollTo as typeof container.scrollTo;
 
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    fireEvent.scroll(container);
+    fireEvent.wheel(container, { deltaY: -120 });
     const followButton = await screen.findByRole("button", {
       name: "Follow latest session output",
     });
     vi.useFakeTimers();
-    fireEvent.click(
-      followButton,
-    );
+    fireEvent.click(followButton);
     expect(scrollTo).not.toHaveBeenCalled();
     expect(container.scrollTop).toBe(500);
 

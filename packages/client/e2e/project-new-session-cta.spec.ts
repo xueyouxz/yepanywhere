@@ -15,6 +15,12 @@ async function dismissOnboardingIfVisible(
   await expect(dialog).not.toBeVisible();
 }
 
+function projectCardForCurrentRun(page: import("@playwright/test").Page) {
+  return page.locator(
+    `.project-card__link[href*="project=${projectId}&source=projects"]`,
+  );
+}
+
 test.describe("Project-scoped new session CTA", () => {
   test("shows the CTA when entering sessions from Projects", async ({
     page,
@@ -23,9 +29,7 @@ test.describe("Project-scoped new session CTA", () => {
     await page.goto(`${baseURL}/projects`);
     await dismissOnboardingIfVisible(page);
 
-    const projectCard = page.locator(".project-card__link", {
-      hasText: "mockproject",
-    });
+    const projectCard = projectCardForCurrentRun(page);
     await expect(projectCard).toBeVisible();
 
     await projectCard.click();
@@ -35,11 +39,13 @@ test.describe("Project-scoped new session CTA", () => {
     );
     const cta = page.locator(".global-sessions-project-cta");
     await expect(cta).toBeVisible();
-    await expect(cta.locator(".global-sessions-project-cta__token")).toHaveCount(
-      2,
-    );
+    await expect(
+      cta.locator(".global-sessions-project-cta__token"),
+    ).toHaveCount(2);
     await expect(cta.getByText("Open session for")).toBeVisible();
-    await expect(cta.getByRole("button", { name: "New Session" })).toBeVisible();
+    await expect(
+      cta.getByRole("button", { name: "New Session" }),
+    ).toBeVisible();
   });
 
   test("prefills the new session prompt from project search text", async ({
@@ -49,9 +55,7 @@ test.describe("Project-scoped new session CTA", () => {
     await page.goto(`${baseURL}/projects`);
     await dismissOnboardingIfVisible(page);
 
-    const projectCard = page.locator(".project-card__link", {
-      hasText: "mockproject",
-    });
+    const projectCard = projectCardForCurrentRun(page);
     await expect(projectCard).toBeVisible();
     await projectCard.click();
 

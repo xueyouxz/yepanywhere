@@ -1,4 +1,4 @@
-import { type UrlProjectId, toUrlProjectId } from "@yep-anywhere/shared";
+import { toUrlProjectId, type UrlProjectId } from "@yep-anywhere/shared";
 import { describe, expect, it, vi } from "vitest";
 import type { ProjectMetadataService } from "../../src/metadata/index.js";
 import type { ProjectScanner } from "../../src/projects/scanner.js";
@@ -60,6 +60,7 @@ describe("Projects Routes", () => {
       codexReaderFactory: vi.fn(
         () => codexReader as unknown as CodexSessionReader,
       ),
+      sessionAutoArchiveDays: 0,
     });
 
     const response = await routes.request("/proj-1/sessions");
@@ -123,9 +124,12 @@ describe("Projects Routes", () => {
       } as unknown as ProjectMetadataService,
     });
 
-    const response = await routes.request(`/${toUrlProjectId("/tmp/missing")}`, {
-      method: "DELETE",
-    });
+    const response = await routes.request(
+      `/${toUrlProjectId("/tmp/missing")}`,
+      {
+        method: "DELETE",
+      },
+    );
     expect(response.status).toBe(404);
   });
 });

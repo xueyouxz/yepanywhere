@@ -1,11 +1,11 @@
-import { toUrlProjectId, type UrlProjectId } from "@yep-anywhere/shared";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { toUrlProjectId, type UrlProjectId } from "@yep-anywhere/shared";
 import { describe, expect, it, vi } from "vitest";
 import {
-  type SessionsDeps,
   createSessionsRoutes,
+  type SessionsDeps,
 } from "../../src/routes/sessions.js";
 import type { CodexSessionReader } from "../../src/sessions/codex-reader.js";
 import type { GrokSessionReader } from "../../src/sessions/grok-reader.js";
@@ -100,6 +100,7 @@ async function createGrokRedirectFixture(): Promise<{
 describe("Sessions metadata route", () => {
   it("returns queue summaries after accepting a deferred message", async () => {
     const deferMessage = vi.fn(() => ({ success: true, deferred: true }));
+    const primeSupportedCommandsForMessage = vi.fn(async () => {});
     const setPermissionMode = vi.fn();
     const getDeferredQueueSummary = vi.fn(() => [
       {
@@ -114,6 +115,7 @@ describe("Sessions metadata route", () => {
         getProcessForSession: vi.fn(() => ({
           isTerminated: false,
           setPermissionMode,
+          primeSupportedCommandsForMessage,
           deferMessage,
           getDeferredQueueSummary,
         })),
@@ -142,6 +144,12 @@ describe("Sessions metadata route", () => {
     });
 
     expect(response.status).toBe(200);
+    expect(primeSupportedCommandsForMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "queued text",
+        tempId: "temp-queued",
+      }),
+    );
     expect(deferMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         text: "queued text",
@@ -175,6 +183,7 @@ describe("Sessions metadata route", () => {
   });
 
   it("reports immediate promotion when returned by the process", async () => {
+    const primeSupportedCommandsForMessage = vi.fn(async () => {});
     const deferMessage = vi.fn(() => ({
       success: true,
       deferred: false,
@@ -187,6 +196,7 @@ describe("Sessions metadata route", () => {
       supervisor: {
         getProcessForSession: vi.fn(() => ({
           isTerminated: false,
+          primeSupportedCommandsForMessage,
           deferMessage,
           getDeferredQueueSummary,
         })),
@@ -204,6 +214,12 @@ describe("Sessions metadata route", () => {
     });
 
     expect(response.status).toBe(200);
+    expect(primeSupportedCommandsForMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "steer this",
+        tempId: "temp-steered",
+      }),
+    );
     expect(deferMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         text: "steer this",
@@ -307,6 +323,7 @@ describe("Sessions metadata route", () => {
   });
 
   it("passes deferred queue reinsertion anchors when queuing an edited message", async () => {
+    const primeSupportedCommandsForMessage = vi.fn(async () => {});
     const deferMessage = vi.fn(() => ({ success: true, deferred: true }));
     const getDeferredQueueSummary = vi.fn(() => [
       {
@@ -330,6 +347,7 @@ describe("Sessions metadata route", () => {
       supervisor: {
         getProcessForSession: vi.fn(() => ({
           isTerminated: false,
+          primeSupportedCommandsForMessage,
           deferMessage,
           getDeferredQueueSummary,
         })),
@@ -350,6 +368,12 @@ describe("Sessions metadata route", () => {
     });
 
     expect(response.status).toBe(200);
+    expect(primeSupportedCommandsForMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "second edited",
+        tempId: "temp-edited",
+      }),
+    );
     expect(deferMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         text: "second edited",
@@ -539,7 +563,10 @@ describe("Sessions metadata route", () => {
               toolCallId: "call-grep",
               status: "completed",
               content: [
-                { type: "content", content: { type: "text", text: "found 1 match" } },
+                {
+                  type: "content",
+                  content: { type: "text", text: "found 1 match" },
+                },
               ],
               rawOutput: {
                 type: "GrepSearch",
@@ -638,7 +665,9 @@ describe("Sessions metadata route", () => {
 
       const blocks = json.messages.flatMap((message) => {
         const content = message.message?.content;
-        return Array.isArray(content) ? (content as Record<string, unknown>[]) : [];
+        return Array.isArray(content)
+          ? (content as Record<string, unknown>[])
+          : [];
       });
       const toolUses = blocks.filter((block) => block.type === "tool_use");
       expect(toolUses).toHaveLength(2);
@@ -668,7 +697,9 @@ describe("Sessions metadata route", () => {
           const first = Array.isArray(content)
             ? (content[0] as Record<string, unknown> | undefined)
             : undefined;
-          return first?.type === "tool_result" && first.tool_use_id === toolUseId;
+          return (
+            first?.type === "tool_result" && first.tool_use_id === toolUseId
+          );
         })?.toolUseResult;
       expect(resultFor("call-grep")).toMatchObject({
         mode: "files_with_matches",
@@ -897,7 +928,9 @@ describe("Sessions metadata route", () => {
 
   it("starts a fresh handoff session before aborting the old process", async () => {
     const project = createProject();
-    let replacementListener: ((event: { type: string; message?: unknown }) => void) | undefined;
+    let replacementListener:
+      | ((event: { type: string; message?: unknown }) => void)
+      | undefined;
     const startSession = vi.fn(async () => ({
       id: "proc-new",
       sessionId: "sess-new",

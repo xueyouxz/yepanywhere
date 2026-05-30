@@ -46,7 +46,8 @@ interface NormalizedCodexToolOutputWithExitCode
 }
 
 const SHELL_EXECUTABLES = new Set(["bash", "sh", "zsh", "dash"]);
-const INLINE_IMAGE_DATA_URL_PREFIX_RE = /^data:(image\/[a-z0-9.+-]+)(?:;[^,]*)?,/i;
+const INLINE_IMAGE_DATA_URL_PREFIX_RE =
+  /^data:(image\/[a-z0-9.+-]+)(?:;[^,]*)?,/i;
 const INLINE_IMAGE_DATA_URL_GLOBAL_RE =
   /data:image\/[a-z0-9.+-]+(?:;[a-z0-9=.+-]+)*,[A-Za-z0-9+/=_-]+/gi;
 
@@ -172,14 +173,12 @@ export function normalizeCodexToolOutputWithContext(
     }
   } else if (context?.toolName === "Bash") {
     const bashContent = extractCodexShellOutputContent(content);
-    if (bashContent !== content || backgroundTaskId || interrupted) {
-      structured = createBashToolResult(
-        interrupted ? "" : bashContent,
-        isError,
-        backgroundTaskId,
-        interrupted,
-      );
-    }
+    structured = createBashToolResult(
+      interrupted ? "" : bashContent,
+      isError,
+      backgroundTaskId,
+      interrupted,
+    );
   }
 
   return { content, structured, isError };
@@ -734,9 +733,7 @@ function normalizeCodexToolOutput(
         }
       } else if (isRecord(structured)) {
         const sanitized = sanitizeInlineImageData(structured);
-        const record = isRecord(sanitized.value)
-          ? sanitized.value
-          : structured;
+        const record = isRecord(sanitized.value) ? sanitized.value : structured;
         if (sanitized.changed) {
           structured = record;
           content = JSON.stringify(record, null, 2);

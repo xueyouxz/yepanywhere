@@ -238,7 +238,7 @@ describe("Codex Normalization", () => {
     expect(renderItems[0]).toMatchObject({
       type: "tool_call",
       id: "call-bg",
-      status: "pending",
+      status: "incomplete",
     });
   });
 
