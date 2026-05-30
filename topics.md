@@ -2,6 +2,10 @@
 - predictive-scroll - Tool row on-demand hydration and placeholder sizing.
 - recaps - Away-summary recap UX and simulated-helper configuration.
 - emulated-slash-commands - Provider command aliases and skill-backed fallbacks.
+- glossary - Project vocabulary lookup and regeneration contract.
 - side-session-config - Shared helper side-session defaults and lifecycle.
 - prompt-suggestions - Next-user-turn suggestion surface and native/simulated split.
 - session-liveness - Provider/session cache state, stale entries, and recovery.
+- pluggable-speech-recognition - YA server-routed speech backends and browser-native fallback.
+- cost-efficiency - Preferring subscription/local over metered APIs; billing footgun masking.
+- ya-env-vars - Catalog of YA env vars and the YA_/YA_module__ naming conventions.
