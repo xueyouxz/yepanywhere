@@ -118,7 +118,7 @@ export class GeminiSessionScanner {
 
     // Convert to Project[]
     const projects: Project[] = [];
-    for (const [key, data] of projectMap) {
+    for (const data of projectMap.values()) {
       const path = data.cwd ?? `gemini:${data.projectHash.slice(0, 8)}`;
       const name = data.cwd
         ? basename(data.cwd)

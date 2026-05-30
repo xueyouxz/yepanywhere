@@ -119,8 +119,6 @@ describe("fileLock", () => {
       const testFile = join(testDir, "test.json");
       await writeFile(testFile, "{}");
 
-      let attempts = 0;
-
       // Hold lock in background
       const holdLock = withFileLock(testFile, async () => {
         await new Promise((r) => setTimeout(r, 100));
@@ -131,7 +129,6 @@ describe("fileLock", () => {
       const tryAcquire = withFileLock(
         testFile,
         async () => {
-          attempts++;
           return "acquired";
         },
         { retries: 5 },

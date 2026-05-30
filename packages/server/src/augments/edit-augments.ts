@@ -210,9 +210,6 @@ function computeHunkWordDiffs(
   const oldLineDiffs = new Map<number, WordDiffSegment[]>();
   const newLineDiffs = new Map<number, WordDiffSegment[]>();
 
-  // Find replacement pairs in this hunk
-  const { pairs } = findReplacePairs(hunk.lines);
-
   // For each pair, compute word diff and store by absolute line index
   // We need to map the pair's relative indices back to the oldLines/newLines arrays
 

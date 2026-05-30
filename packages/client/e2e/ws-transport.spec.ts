@@ -14,45 +14,6 @@
 
 import { expect, test } from "./fixtures.js";
 
-// Type definitions for WebSocket relay protocol
-interface RelayRequest {
-  type: "request";
-  id: string;
-  method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
-  path: string;
-  headers?: Record<string, string>;
-  body?: unknown;
-}
-
-interface RelayResponse {
-  type: "response";
-  id: string;
-  status: number;
-  headers?: Record<string, string>;
-  body: unknown;
-}
-
-interface RelaySubscribe {
-  type: "subscribe";
-  subscriptionId: string;
-  channel: "session" | "activity";
-  sessionId?: string;
-  lastEventId?: string;
-}
-
-interface RelayUnsubscribe {
-  type: "unsubscribe";
-  subscriptionId: string;
-}
-
-interface RelayEvent {
-  type: "event";
-  subscriptionId: string;
-  eventType: string;
-  eventId: string;
-  data: unknown;
-}
-
 test.describe("WebSocket Transport E2E", () => {
   test("can connect and make GET request for health endpoint", async ({
     page,

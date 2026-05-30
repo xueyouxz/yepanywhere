@@ -52,7 +52,7 @@ function findJsonlFiles(dir: string): string[] {
           files.push(fullPath);
         }
       }
-    } catch (err) {
+    } catch (_err) {
       // Skip directories we can't read
     }
   }

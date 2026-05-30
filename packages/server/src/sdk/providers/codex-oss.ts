@@ -11,7 +11,7 @@
  * See docs/research/codex-local-models.md for background.
  */
 
-import { type ChildProcess, exec, execFile, spawn } from "node:child_process";
+import { type ChildProcess, exec, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
@@ -34,7 +34,6 @@ import type {
 
 const log = getLogger().child({ component: "codex-oss-provider" });
 const execAsync = promisify(exec);
-const execFileAsync = promisify(execFile);
 
 /**
  * Configuration for CodexOSS provider.

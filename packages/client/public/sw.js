@@ -17,6 +17,7 @@
 // Increment this when making intentional SW changes
 // Browsers reinstall SW only when file content changes
 const SW_VERSION = "1.0.5";
+void SW_VERSION;
 const FRONTEND_RELOAD_QUERY_PARAM = "__ya_reload";
 
 // Resolve asset URLs relative to SW scope (handles /remote/ deployment)
@@ -94,7 +95,7 @@ async function swLog(level, message, data = {}) {
 
     await tx.complete;
     db.close();
-  } catch (e) {
+  } catch (_e) {
     // Silently fail if IndexedDB not available
   }
 }

@@ -63,14 +63,6 @@ const toolSchemas: Record<string, ZodType> = {
   ExitPlanMode: ExitPlanModeResultSchema,
 };
 
-interface ToolResultEntry {
-  lineNumber: number;
-  toolName: string;
-  toolUseId: string;
-  result: unknown;
-  sessionId?: string;
-}
-
 interface ValidationError {
   lineNumber: number;
   toolName: string;
@@ -99,7 +91,6 @@ function extractToolName(entry: Record<string, unknown>): string | null {
       block !== null &&
       (block as Record<string, unknown>).type === "tool_result"
     ) {
-      const toolUseId = (block as Record<string, unknown>).tool_use_id;
       // Try to get tool name from the entry itself
       const toolName = entry.tool_name as string | undefined;
       if (toolName) return toolName;

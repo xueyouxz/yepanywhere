@@ -1418,7 +1418,6 @@ describe("SessionReader", () => {
       // Second compaction: preTokens=168K (new overhead = 168K - 89K = 79K)
       // After second compaction: assistant at 50K
       // Adjusted: 50K + 79K = 129K → 65%
-      const t = () => new Date().toISOString();
       const jsonl = [
         userMsg("u1", null),
         assistantMsg("a1", "u1", 1, 150000, 10000), // 160001

@@ -217,7 +217,7 @@ describe("OpenCode Permissions E2E", () => {
     // Use a very direct command that requires reading the file
     // Note: Don't await - the message endpoint may block until AI responds
     log("Sending message to trigger file read...");
-    const msgPromise = fetch(`${baseUrl}/session/${sessionId}/message`, {
+    void fetch(`${baseUrl}/session/${sessionId}/message`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

@@ -84,11 +84,6 @@ describe("useStreamingMarkdown integration", () => {
     });
   }
 
-  // Helper to delay for simulating realistic timing
-  function delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
   describe("Scenario 1: Simple paragraph streaming", () => {
     it("streams chunks, shows pending, then renders augmented HTML", async () => {
       console.log("\n=== SCENARIO 1: Simple paragraph streaming ===\n");

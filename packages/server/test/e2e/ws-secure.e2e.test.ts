@@ -260,94 +260,6 @@ describe("Secure WebSocket Transport E2E", () => {
 
   /**
    * Perform full SRP handshake and return session key.
-   */
-  async function performSrpHandshake(
-    ws: WebSocket,
-    username: string,
-    password: string,
-  ): Promise<Uint8Array> {
-    // Create SRP client session before entering promise
-    const clientSession = new SRPClientSession(SRP_ROUTINES);
-    const clientStep1 = await clientSession.step1(username, password);
-
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(
-        () => reject(new Error("SRP handshake timeout")),
-        10000,
-      );
-
-      // Send hello
-      const hello: SrpClientHello = {
-        type: "srp_hello",
-        identity: username,
-      };
-      ws.send(JSON.stringify(hello));
-
-      // Handle messages
-      const messageHandler = async (data: WebSocket.RawData) => {
-        try {
-          const msg = JSON.parse(data.toString());
-
-          if (isSrpError(msg)) {
-            clearTimeout(timeout);
-            ws.off("message", messageHandler);
-            reject(new Error(`SRP error: ${msg.message}`));
-            return;
-          }
-
-          if (isSrpServerChallenge(msg)) {
-            // Process challenge
-            const saltBigInt = hexToBigInt(msg.salt);
-            const B = hexToBigInt(msg.B);
-            const clientStep2 = await clientStep1.step2(saltBigInt, B);
-
-            // Send proof
-            const proof: SrpClientProof = {
-              type: "srp_proof",
-              A: bigIntToHex(clientStep2.A),
-              M1: bigIntToHex(clientStep2.M1),
-            };
-            ws.send(JSON.stringify(proof));
-            return;
-          }
-
-          if (isSrpServerVerify(msg)) {
-            // Verify server (we trust it in tests, but verify anyway)
-            // Note: In real client, we'd verify M2
-            clearTimeout(timeout);
-            ws.off("message", messageHandler);
-
-            // Get client's S value and derive key
-            // We need to get S from clientStep2, which requires re-doing step2
-            // Actually, let's just re-do the handshake properly
-            const saltBigInt = hexToBigInt(msg.M2.split(":")[0] || "0");
-            // This is a simplification - in real code we'd keep clientStep2 around
-
-            // For testing, let's just derive a key from our password flow
-            // Re-run step2 to get S
-            const creds = remoteAccessService.getCredentials();
-            const serverStep1 = await clientStep1.step2(
-              hexToBigInt(creds?.salt ?? "0"),
-              hexToBigInt("1"), // Placeholder - we need the actual B
-            );
-
-            // Actually, let's store the step2 result in the handler closure
-            reject(new Error("Need to refactor - see comment"));
-            return;
-          }
-        } catch (err) {
-          clearTimeout(timeout);
-          ws.off("message", messageHandler);
-          reject(err);
-        }
-      };
-
-      ws.on("message", messageHandler);
-    });
-  }
-
-  /**
-   * Perform full SRP handshake and return session key.
    * Refactored version with proper state handling.
    */
   async function performSrpHandshakeV2(
@@ -1121,14 +1033,11 @@ describe("Secure WebSocket Transport E2E", () => {
         };
         ws2.send(JSON.stringify(resume));
 
-        const resumed = await waitForMessage<SrpSessionResumed>(
+        await waitForMessage<SrpSessionResumed>(
           ws2,
           (msg): msg is SrpSessionResumed => isSrpSessionResumed(msg),
           5000,
         );
-        const resumedSessionKey = resumed.transportNonce
-          ? deriveTransportKey(baseSessionKey, resumed.transportNonce)
-          : baseSessionKey;
 
         // Replay ciphertext captured on a different connection: should fail
         // decryption and close the socket.

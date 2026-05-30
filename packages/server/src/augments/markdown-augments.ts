@@ -119,7 +119,7 @@ export async function augmentTextBlocks(
         if (msg.message && typeof msg.message === "object") {
           (msg.message as { _html?: string })._html = html;
         }
-      } catch (err) {
+      } catch (_err) {
         // Ignore errors during augmentation
       }
       return;
@@ -137,7 +137,7 @@ export async function augmentTextBlocks(
         try {
           const html = await renderMarkdownToHtml(block.text);
           (block as { _html?: string })._html = html;
-        } catch (err) {
+        } catch (_err) {
           // Ignore errors during augmentation
         }
       }

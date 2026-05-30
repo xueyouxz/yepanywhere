@@ -18,7 +18,6 @@ export function LocalAccessSettings() {
   const {
     binding,
     loading: bindingLoading,
-    error: bindingError,
     applying,
     updateBinding,
   } = useNetworkBinding();

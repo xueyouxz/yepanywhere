@@ -391,7 +391,7 @@ describe("ConnectionManager", () => {
     });
 
     it("does NOT emit visibilityRestored when disconnected", () => {
-      const { cm, reconnectFn, visibility } = setup();
+      const { cm, visibility } = setup();
       const restored: number[] = [];
       cm.on("visibilityRestored", () => restored.push(1));
       // Don't start — stays disconnected

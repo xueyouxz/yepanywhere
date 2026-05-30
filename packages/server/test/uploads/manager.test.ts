@@ -103,9 +103,9 @@ describe("getUploadDir", () => {
   });
 
   it("rejects traversal-shaped upload path segments", async () => {
-    await expect(getUploadDir("encoded-project", "..", tempDir)).rejects.toThrow(
-      "Invalid upload path segment",
-    );
+    await expect(
+      getUploadDir("encoded-project", "..", tempDir),
+    ).rejects.toThrow("Invalid upload path segment");
     await expect(
       getUploadDir("encoded-project", "session/child", tempDir),
     ).rejects.toThrow("Invalid upload path segment");
@@ -172,7 +172,7 @@ describe("UploadManager", () => {
     });
 
     it("creates upload directory", async () => {
-      const { state } = await manager.startUpload(
+      await manager.startUpload(
         "encoded-project",
         "session-123",
         "test.txt",

@@ -159,33 +159,6 @@ describe("Relay Server E2E", () => {
     await connectedPromise;
   }
 
-  /**
-   * Helper to collect all messages for a duration.
-   */
-  function collectMessages(
-    ws: WebSocket,
-    durationMs: number,
-  ): Promise<string[]> {
-    return new Promise((resolve) => {
-      const messages: string[] = [];
-
-      const handler = (data: WebSocket.RawData) => {
-        if (typeof data === "string") {
-          messages.push(data);
-        } else {
-          messages.push(data.toString());
-        }
-      };
-
-      ws.on("message", handler);
-
-      setTimeout(() => {
-        ws.off("message", handler);
-        resolve(messages);
-      }, durationMs);
-    });
-  }
-
   describe("Server Registration Flow", () => {
     it("should successfully register a server with valid username", async () => {
       const ws = await connectToRelay();
