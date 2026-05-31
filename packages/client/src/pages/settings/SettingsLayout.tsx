@@ -24,6 +24,7 @@ import { NotificationsSettings } from "./NotificationsSettings";
 import { ProvidersSettings } from "./ProvidersSettings";
 import { RemoteAccessSettings } from "./RemoteAccessSettings";
 import { RemoteExecutorsSettings } from "./RemoteExecutorsSettings";
+import { SpeechSettings } from "./SpeechSettings";
 import type { SettingsCategory } from "./types";
 
 // Map category IDs to their components
@@ -37,6 +38,7 @@ const CATEGORY_COMPONENTS: Record<string, React.ComponentType> = {
   "local-access": LocalAccessSettings,
   remote: RemoteAccessSettings,
   providers: ProvidersSettings,
+  speech: SpeechSettings,
   "remote-executors": RemoteExecutorsSettings,
   advanced: AdvancedSettings,
   emulator: EmulatorSettings,

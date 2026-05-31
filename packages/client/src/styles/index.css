@@ -4034,6 +4034,46 @@ a.sidebar-nav-item {
   line-height: 1.35;
 }
 
+.speech-grok-audio-body {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.speech-grok-audio-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.speech-grok-audio-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.speech-grok-audio-option:has(input:checked) {
+  border-color: var(--app-yep-green);
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.speech-grok-audio-option input {
+  accent-color: var(--app-yep-green);
+}
+
+.speech-grok-audio-option:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .attach-count {
   position: absolute;
   top: -6px;
@@ -6208,6 +6248,74 @@ a.sidebar-nav-item {
   padding: var(--space-1) var(--space-2);
 }
 
+.settings-session-defaults-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+.settings-session-defaults-panel .new-session-provider-section,
+.settings-session-defaults-panel .new-session-model-section,
+.settings-session-defaults-panel .new-session-helper-section,
+.settings-session-defaults-panel .new-session-mode-section {
+  margin-bottom: 0;
+}
+
+.session-default-section-description {
+  margin: calc(var(--space-1) * -1) 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.35;
+}
+
+.session-default-provider-section .provider-options {
+  align-items: stretch;
+}
+
+.session-default-model-section .filter-dropdown-container,
+.session-default-model-section .filter-dropdown-button,
+.new-session-helper-model .filter-dropdown-container,
+.new-session-helper-model .filter-dropdown-button,
+.speech-backend-settings-field .filter-dropdown-container,
+.speech-backend-settings-field .filter-dropdown-button {
+  width: 100%;
+}
+
+.session-default-effort-selector {
+  margin-top: var(--space-2);
+  width: fit-content;
+  max-width: 100%;
+}
+
+.speech-backend-settings-field {
+  display: grid;
+  gap: var(--space-2);
+  width: min(100%, 28rem);
+}
+
+.mode-option-dot.thinking-off {
+  background: var(--text-muted);
+}
+
+.mode-option-dot.thinking-auto {
+  background: var(--warning-color);
+}
+
+.mode-option-dot.thinking-on {
+  background: var(--link-color);
+}
+
+@media (min-width: 900px) {
+  .settings-session-defaults-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .session-default-provider-section,
+  .session-default-model-section {
+    grid-column: 1 / -1;
+  }
+}
+
 .helper-targets-settings {
   align-items: stretch;
   flex-direction: column;
@@ -8220,11 +8328,23 @@ a.sidebar-nav-item {
   background: var(--provider-claude);
 }
 
+.provider-option-dot.provider-claude-ollama {
+  background: var(--provider-claude);
+}
+
 .provider-option-dot.provider-codex {
   background: var(--provider-codex);
 }
 
+.provider-option-dot.provider-codex-oss {
+  background: var(--provider-codex);
+}
+
 .provider-option-dot.provider-gemini {
+  background: var(--provider-gemini);
+}
+
+.provider-option-dot.provider-gemini-acp {
   background: var(--provider-gemini);
 }
 

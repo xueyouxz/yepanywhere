@@ -74,10 +74,12 @@ import type {
   SpeechTranscriptionResultMetadata,
 } from "../lib/speechProviders/SpeechProvider";
 import { appendSpeechTranscript } from "../lib/speechRecognition";
+import { isVoiceInputShortcut } from "../lib/voiceInputShortcut";
 import { useVersion } from "../hooks/useVersion";
 import { shortenPath } from "../lib/text";
 import type { PermissionMode, Project } from "../types";
 import { FilterDropdown, type FilterOption } from "./FilterDropdown";
+import { SpeechGrokAudioControls } from "./SpeechGrokAudioControls";
 import { SpeechSmartTurnControls } from "./SpeechSmartTurnControls";
 import { VoiceInputButton, type VoiceInputButtonRef } from "./VoiceInputButton";
 
@@ -360,6 +362,8 @@ export function NewSessionForm({
     setSpeechMethod,
     speechSmartTurnSettings,
     setSpeechSmartTurnSettings,
+    grokSpeechAudioSettings,
+    setGrokSpeechAudioSettings,
   } = useModelSettings();
 
   // Connection for uploads (uses WebSocket when enabled)
@@ -771,7 +775,7 @@ export function NewSessionForm({
     setSelectedModel(selected[0] ?? null);
   }, []);
 
-  // Build speech-method options for FilterDropdown.
+  // Build STT backend options for FilterDropdown.
   const speechMethodOptions = useMemo((): FilterOption<SpeechMethodId>[] => {
     const serverBackends = versionInfo?.voiceBackends ?? [];
     return getSpeechMethods(serverBackends).map((method) => ({
@@ -803,10 +807,13 @@ export function NewSessionForm({
     voiceInputEnabled && speechMethodOptions.length > 1;
   const supportsSelectedSpeechSmartTurn =
     selectedSpeechMethod !== "browser-native" &&
+    (selectedSpeechMethod !== "ya-grok" ||
+      grokSpeechAudioSettings.uplinkMode === "pcm16") &&
     versionInfo?.voiceBackendCapabilities?.[selectedSpeechMethod]?.smartTurn ===
       true;
   const activeSpeechSmartTurnSettings: SpeechSmartTurnSettings | undefined =
     supportsSelectedSpeechSmartTurn ? speechSmartTurnSettings : undefined;
+  const showGrokSpeechAudioControls = selectedSpeechMethod === "ya-grok";
 
   // Combined display text: committed text + interim transcript
   const displayText = interimTranscript
@@ -935,7 +942,7 @@ export function NewSessionForm({
     const override =
       typeof messageOverride === "string" ? messageOverride : undefined;
     // Stop voice recording and get any pending interim text unless the caller
-    // already supplied the finalized text from the speech provider.
+    // already supplied the finalized text from the STT backend.
     const pendingVoice =
       override === undefined
         ? (voiceButtonRef.current?.stopAndFinalize() ?? "")
@@ -1234,19 +1241,6 @@ export function NewSessionForm({
   };
 
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (
-      (e.key === " " || e.code === "Space") &&
-      e.ctrlKey &&
-      !e.shiftKey &&
-      !e.altKey
-    ) {
-      e.preventDefault();
-      if (voiceButtonRef.current?.isAvailable) {
-        voiceButtonRef.current.toggle();
-      }
-      return;
-    }
-
     if (e.key === "Enter") {
       // Skip Enter during IME composition (e.g. Chinese/Japanese/Korean input)
       if (e.nativeEvent.isComposing) return;
@@ -1346,6 +1340,22 @@ export function NewSessionForm({
     setInterimTranscript(transcript);
   }, []);
 
+  const handleComposerKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (!isVoiceInputShortcut(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const voice = voiceButtonRef.current;
+      if (!voice?.isAvailable) return;
+      const wasActive = voice.isListening;
+      voice.toggle();
+      if (!wasActive) {
+        textareaRef.current?.focus();
+      }
+    },
+    [],
+  );
+
   const hasContent = message.trim() || pendingFiles.length > 0;
   const canStart = Boolean(hasContent);
   const getTranscriptionContext =
@@ -1438,6 +1448,7 @@ export function NewSessionForm({
             speechMethod={selectedSpeechMethod}
             getTranscriptionContext={getTranscriptionContext}
             smartTurn={activeSpeechSmartTurnSettings}
+            grokSpeechAudioSettings={grokSpeechAudioSettings}
           />
           {supportsThinkingToggle && (
             <>
@@ -1754,7 +1765,11 @@ export function NewSessionForm({
         />
       </div>
     ) : null;
-  const speechField = showSpeechMethodSelector || supportsSelectedSpeechSmartTurn ? (
+  const shouldShowSpeechField =
+    showSpeechMethodSelector ||
+    showGrokSpeechAudioControls ||
+    supportsSelectedSpeechSmartTurn;
+  const speechField = shouldShowSpeechField ? (
     <div className="new-session-speech-field">
       <h3>{t("newSessionSpeechTitle")}</h3>
       {showSpeechMethodSelector && (
@@ -1765,6 +1780,12 @@ export function NewSessionForm({
           onChange={handleSpeechMethodSelect}
           multiSelect={false}
           placeholder={t("newSessionSpeechPlaceholder")}
+        />
+      )}
+      {showGrokSpeechAudioControls && (
+        <SpeechGrokAudioControls
+          settings={grokSpeechAudioSettings}
+          onChange={setGrokSpeechAudioSettings}
         />
       )}
       {supportsSelectedSpeechSmartTurn && (
@@ -1913,6 +1934,7 @@ export function NewSessionForm({
     return (
       <div
         className={`new-session-form new-session-form-compact ${interimTranscript ? "voice-recording" : ""}`}
+        onKeyDownCapture={handleComposerKeyDown}
       >
         {inputArea}
       </div>
@@ -1923,6 +1945,7 @@ export function NewSessionForm({
   return (
     <div
       className={`new-session-form new-session-container ${interimTranscript ? "voice-recording" : ""}`}
+      onKeyDownCapture={handleComposerKeyDown}
     >
       <div className="new-session-header">
         <p className="new-session-subtitle">{t("newSessionHeaderSubtitle")}</p>

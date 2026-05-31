@@ -11,7 +11,9 @@ import {
   isSpeechMethodId,
 } from "../lib/speechProviders/methods";
 import {
+  DEFAULT_GROK_SPEECH_AUDIO_SETTINGS,
   DEFAULT_SPEECH_SMART_TURN_SETTINGS,
+  type GrokSpeechAudioSettings,
   type SpeechSmartTurnSettings,
 } from "../lib/speechProviders/SpeechProvider";
 import {
@@ -147,11 +149,13 @@ function cleanSpeechSmartTurnSettings(
   return {
     enabled: settings.enabled === true,
     threshold:
-      typeof settings.threshold === "number" && Number.isFinite(settings.threshold)
+      typeof settings.threshold === "number" &&
+      Number.isFinite(settings.threshold)
         ? clampNumber(settings.threshold, 0, 1)
         : DEFAULT_SPEECH_SMART_TURN_SETTINGS.threshold,
     timeoutMs:
-      typeof settings.timeoutMs === "number" && Number.isFinite(settings.timeoutMs)
+      typeof settings.timeoutMs === "number" &&
+      Number.isFinite(settings.timeoutMs)
         ? Math.round(clampNumber(settings.timeoutMs, 0, 5000))
         : DEFAULT_SPEECH_SMART_TURN_SETTINGS.timeoutMs,
   };
@@ -164,7 +168,9 @@ function loadSpeechSmartTurnSettings(): SpeechSmartTurnSettings {
   );
   if (!stored) return { ...DEFAULT_SPEECH_SMART_TURN_SETTINGS };
   try {
-    return cleanSpeechSmartTurnSettings(JSON.parse(stored) as unknown as Partial<SpeechSmartTurnSettings>);
+    return cleanSpeechSmartTurnSettings(
+      JSON.parse(stored) as unknown as Partial<SpeechSmartTurnSettings>,
+    );
   } catch {
     return { ...DEFAULT_SPEECH_SMART_TURN_SETTINGS };
   }
@@ -175,6 +181,40 @@ function saveSpeechSmartTurnSettings(settings: SpeechSmartTurnSettings) {
     "speechSmartTurn",
     JSON.stringify(cleanSpeechSmartTurnSettings(settings)),
     LEGACY_KEYS.speechSmartTurn,
+  );
+}
+
+function cleanGrokSpeechAudioSettings(
+  settings: Partial<GrokSpeechAudioSettings>,
+): GrokSpeechAudioSettings {
+  return {
+    uplinkMode:
+      settings.uplinkMode === "browser-compressed"
+        ? "browser-compressed"
+        : DEFAULT_GROK_SPEECH_AUDIO_SETTINGS.uplinkMode,
+  };
+}
+
+function loadGrokSpeechAudioSettings(): GrokSpeechAudioSettings {
+  const stored = getServerScoped(
+    "grokSpeechAudio",
+    LEGACY_KEYS.grokSpeechAudio,
+  );
+  if (!stored) return { ...DEFAULT_GROK_SPEECH_AUDIO_SETTINGS };
+  try {
+    return cleanGrokSpeechAudioSettings(
+      JSON.parse(stored) as unknown as Partial<GrokSpeechAudioSettings>,
+    );
+  } catch {
+    return { ...DEFAULT_GROK_SPEECH_AUDIO_SETTINGS };
+  }
+}
+
+function saveGrokSpeechAudioSettings(settings: GrokSpeechAudioSettings) {
+  setServerScoped(
+    "grokSpeechAudio",
+    JSON.stringify(cleanGrokSpeechAudioSettings(settings)),
+    LEGACY_KEYS.grokSpeechAudio,
   );
 }
 
@@ -197,6 +237,8 @@ export function useModelSettings() {
   );
   const [speechSmartTurnSettings, setSpeechSmartTurnSettingsState] =
     useState<SpeechSmartTurnSettings>(loadSpeechSmartTurnSettings);
+  const [grokSpeechAudioSettings, setGrokSpeechAudioSettingsState] =
+    useState<GrokSpeechAudioSettings>(loadGrokSpeechAudioSettings);
 
   const setModel = useCallback((m: ModelOption) => {
     setModelState(m);
@@ -246,6 +288,15 @@ export function useModelSettings() {
     [],
   );
 
+  const setGrokSpeechAudioSettings = useCallback(
+    (settings: GrokSpeechAudioSettings) => {
+      const clean = cleanGrokSpeechAudioSettings(settings);
+      setGrokSpeechAudioSettingsState(clean);
+      saveGrokSpeechAudioSettings(clean);
+    },
+    [],
+  );
+
   return {
     model,
     setModel,
@@ -265,6 +316,8 @@ export function useModelSettings() {
     setSpeechMethod,
     speechSmartTurnSettings,
     setSpeechSmartTurnSettings,
+    grokSpeechAudioSettings,
+    setGrokSpeechAudioSettings,
   };
 }
 
@@ -317,4 +370,8 @@ export function hasStoredSpeechMethodSetting(): boolean {
 
 export function getSpeechSmartTurnSettings(): SpeechSmartTurnSettings {
   return loadSpeechSmartTurnSettings();
+}
+
+export function getGrokSpeechAudioSettings(): GrokSpeechAudioSettings {
+  return loadGrokSpeechAudioSettings();
 }
