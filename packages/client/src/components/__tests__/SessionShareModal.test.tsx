@@ -137,12 +137,14 @@ describe("SessionShareModal", () => {
         expect.objectContaining({ mode: "live" }),
       );
     });
-    expect(onStatusChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        activeCount: 1,
-        liveCount: 1,
-      }),
-    );
+    await waitFor(() => {
+      expect(onStatusChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          activeCount: 1,
+          liveCount: 1,
+        }),
+      );
+    });
   });
 
   it("falls back without surfacing raw focus errors", async () => {
