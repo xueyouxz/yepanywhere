@@ -17,6 +17,9 @@ Progress:
 - [x] 2026-05-31: Added dependency-free `i18n:check` and `i18n:prune`
   commands, then pruned 858 exact English placeholder entries from non-English
   locale files.
+- [x] 2026-05-31: Added `i18n:health` for extra locale keys and advisory
+  candidate-unused English keys; removed the stale non-English-only
+  `toolbarSendTitle` entries.
 
 ## Context
 
@@ -55,10 +58,9 @@ Read-only audit results from 2026-05-31:
 
 Total duplicate entries: 858 out of 5580 non-English entries, about 15%.
 
-Every non-English locale file also contains `toolbarSendTitle`, a key that is
-absent from `en.json`. Since message keys are typed from the English catalog,
-this looks like a stale/dead key and should be investigated separately from the
-exact-placeholder cleanup.
+The initial audit also found `toolbarSendTitle` in every non-English locale
+file, absent from `en.json`. Since message keys are typed from the English
+catalog and no client code referenced that key, it was removed as stale data.
 
 The read-only audit also found four translated Chinese strings whose placeholder
 sets differ from English:

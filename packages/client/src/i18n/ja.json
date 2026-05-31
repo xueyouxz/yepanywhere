@@ -287,7 +287,6 @@
   "toolbarQueueTooltip": "次のターンにキューする\nCtrl+Enter",
   "toolbarSteerTooltip": "現在のターンを導出する\nEnter",
   "toolbarSendTooltip": "メッセージを送信\nEnter",
-  "toolbarSendTitle": "Send message\nEnter sends on desktop\nShift+Enter inserts a newline\nEmpty composer Up recalls the last sent/queued text\nCtrl+P recalls or replaces the current draft\nCtrl+G clears the draft",
   "toolbarStop": "停止",
   "toolbarSend": "送信",
   "contextTooltipWithWindow": "コンテキスト: {percentage}%（{used} / {total} トークン）",

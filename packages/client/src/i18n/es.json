@@ -282,7 +282,6 @@
   "toolbarQueueTooltip": "Encolar para siguiente turno\nCtrl+Enter",
   "toolbarSteerTooltip": "Dirigir turno actual\nEnter",
   "toolbarSendTooltip": "Enviar mensaje\nEnter",
-  "toolbarSendTitle": "Send message\nEnter sends on desktop\nShift+Enter inserts a newline\nEmpty composer Up recalls the last sent/queued text\nCtrl+P recalls or replaces the current draft\nCtrl+G clears the draft",
   "toolbarStop": "Detener",
   "toolbarSend": "Enviar",
   "contextTooltipWithWindow": "Contexto: {percentage}% ({used} / {total} tokens)",

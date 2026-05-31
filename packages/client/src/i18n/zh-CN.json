@@ -287,7 +287,6 @@
   "toolbarQueueTooltip": "排队等待下一轮\nCtrl+Enter",
   "toolbarSteerTooltip": "引导当前回合\nEnter",
   "toolbarSendTooltip": "发送消息\nEnter",
-  "toolbarSendTitle": "Send message\nEnter sends on desktop\nShift+Enter inserts a newline\nEmpty composer Up recalls the last sent/queued text\nCtrl+P recalls or replaces the current draft\nCtrl+G clears the draft",
   "toolbarStop": "停止",
   "toolbarSend": "发送",
   "contextTooltipWithWindow": "上下文：{percentage}%（{used} / {total} tokens）",

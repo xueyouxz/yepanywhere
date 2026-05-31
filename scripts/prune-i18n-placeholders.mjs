@@ -9,15 +9,18 @@ const repoRoot = path.resolve(
   "..",
 );
 const i18nDir = path.join(repoRoot, "packages", "client", "src", "i18n");
+const clientSrcDir = path.join(repoRoot, "packages", "client", "src");
 const englishLocale = "en";
 
 function usage() {
-  console.log(`Usage: node scripts/prune-i18n-placeholders.mjs --check|--write
+  console.log(`Usage: node scripts/prune-i18n-placeholders.mjs --check|--write|--health
 
 Options:
   --check  Report non-English entries exactly equal to en.json and exit 1
            when any are found.
   --write  Remove non-English entries exactly equal to en.json.
+  --health Report placeholder duplicates, non-English keys absent from en.json,
+           and candidate unused English keys. Candidate unused keys are advisory.
   --help   Show this message.
 `);
 }
@@ -30,10 +33,12 @@ function parseArgs(argv) {
 
   const check = args.has("--check");
   const write = args.has("--write");
+  const health = args.has("--health");
   const unknown = argv.filter(
     (arg) =>
       arg !== "--check" &&
       arg !== "--write" &&
+      arg !== "--health" &&
       arg !== "--help" &&
       arg !== "-h",
   );
@@ -41,11 +46,13 @@ function parseArgs(argv) {
   if (unknown.length > 0) {
     throw new Error(`Unknown option(s): ${unknown.join(", ")}`);
   }
-  if (check === write) {
-    throw new Error("Pass exactly one of --check or --write.");
+  if ([check, write, health].filter(Boolean).length !== 1) {
+    throw new Error("Pass exactly one of --check, --write, or --health.");
   }
 
-  return write ? "write" : "check";
+  if (write) return "write";
+  if (health) return "health";
+  return "check";
 }
 
 async function readJson(filePath) {
@@ -62,11 +69,57 @@ function findExactEnglishDuplicates(localeMessages, englishMessages) {
     .map(([key]) => key);
 }
 
+function findExtraLocaleKeys(localeMessages, englishMessages) {
+  return Object.keys(localeMessages).filter(
+    (key) => !Object.hasOwn(englishMessages, key),
+  );
+}
+
 function omitKeys(object, keysToOmit) {
   const omitted = new Set(keysToOmit);
   return Object.fromEntries(
     Object.entries(object).filter(([key]) => !omitted.has(key)),
   );
+}
+
+async function collectSourceFiles(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === "__tests__") continue;
+      files.push(...(await collectSourceFiles(entryPath)));
+      continue;
+    }
+
+    if (
+      /\.(ts|tsx)$/.test(entry.name) &&
+      !/\.test\.(ts|tsx)$/.test(entry.name)
+    ) {
+      files.push(entryPath);
+    }
+  }
+
+  return files;
+}
+
+async function findCandidateUnusedEnglishKeys(englishMessages) {
+  const sourceFiles = await collectSourceFiles(clientSrcDir);
+  const sourceText = (
+    await Promise.all(sourceFiles.map((file) => readFile(file, "utf8")))
+  ).join("\n");
+
+  return Object.keys(englishMessages).filter(
+    (key) => !sourceText.includes(key),
+  );
+}
+
+function printKeySample(keys) {
+  const sample = keys.slice(0, 12).join(", ");
+  const suffix = keys.length > 12 ? ", ..." : "";
+  console.log(`  ${sample}${suffix}`);
 }
 
 async function main() {
@@ -83,6 +136,7 @@ async function main() {
   const englishMessages = await readJson(englishPath);
 
   let totalDuplicates = 0;
+  let totalExtraKeys = 0;
   const results = [];
 
   for (const file of files) {
@@ -92,8 +146,10 @@ async function main() {
     const filePath = path.join(i18nDir, file);
     const messages = await readJson(filePath);
     const duplicateKeys = findExactEnglishDuplicates(messages, englishMessages);
+    const extraKeys = findExtraLocaleKeys(messages, englishMessages);
     totalDuplicates += duplicateKeys.length;
-    results.push({ file, duplicateKeys });
+    totalExtraKeys += extraKeys.length;
+    results.push({ file, duplicateKeys, extraKeys });
 
     if (mode === "write" && duplicateKeys.length > 0) {
       const pruned = omitKeys(messages, duplicateKeys);
@@ -101,14 +157,49 @@ async function main() {
     }
   }
 
-  for (const { file, duplicateKeys } of results) {
-    const verb = mode === "write" ? "removed" : "found";
-    console.log(`${file}: ${verb} ${duplicateKeys.length}`);
-    if (mode === "check" && duplicateKeys.length > 0) {
-      const sample = duplicateKeys.slice(0, 12).join(", ");
-      const suffix = duplicateKeys.length > 12 ? ", ..." : "";
-      console.log(`  ${sample}${suffix}`);
+  for (const { file, duplicateKeys, extraKeys } of results) {
+    if (mode === "health") {
+      console.log(
+        `${file}: exact English placeholders ${duplicateKeys.length}`,
+      );
+    } else {
+      const verb = mode === "write" ? "removed" : "found";
+      console.log(`${file}: ${verb} ${duplicateKeys.length}`);
     }
+    if ((mode === "check" || mode === "health") && duplicateKeys.length > 0) {
+      printKeySample(duplicateKeys);
+    }
+    if (mode === "health") {
+      console.log(`${file}: extra keys ${extraKeys.length}`);
+      if (extraKeys.length > 0) {
+        printKeySample(extraKeys);
+      }
+    }
+  }
+
+  if (mode === "health") {
+    const candidateUnusedEnglishKeys =
+      await findCandidateUnusedEnglishKeys(englishMessages);
+    console.log(
+      `en.json: candidate unused keys ${candidateUnusedEnglishKeys.length}`,
+    );
+    if (candidateUnusedEnglishKeys.length > 0) {
+      printKeySample(candidateUnusedEnglishKeys);
+      console.log(
+        "Candidate unused keys are advisory; inspect dynamic references before removal.",
+      );
+    }
+
+    if (totalDuplicates === 0 && totalExtraKeys === 0) {
+      console.log("No blocking i18n key health issues found.");
+      return;
+    }
+
+    console.error(
+      `Found ${totalDuplicates} exact English placeholder(s) and ${totalExtraKeys} extra locale key(s).`,
+    );
+    process.exitCode = 1;
+    return;
   }
 
   if (totalDuplicates === 0) {
