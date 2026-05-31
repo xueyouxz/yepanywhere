@@ -13,6 +13,7 @@ import {
   useSessionToolbarVisibility,
 } from "../../hooks/useSessionToolbarVisibility";
 import { useStreamingEnabled } from "../../hooks/useStreamingEnabled";
+import { useTabTitleActivityPreference } from "../../hooks/useTabTitleActivityPreference";
 import { TAB_SIZES, useTabSize } from "../../hooks/useTabSize";
 import { THEMES, useTheme } from "../../hooks/useTheme";
 import { SUPPORTED_LOCALES, useI18n } from "../../i18n";
@@ -35,6 +36,12 @@ export function AppearanceSettings() {
   const { theme, setTheme } = useTheme();
   const { streamingEnabled, setStreamingEnabled } = useStreamingEnabled();
   const { funPhrasesEnabled, setFunPhrasesEnabled } = useFunPhrases();
+  const {
+    tabTitleActivityEnabled,
+    tabTitleActivityScope,
+    setTabTitleActivityEnabled,
+    setTabTitleActivityScope,
+  } = useTabTitleActivityPreference();
   const { showConnectionBars, setShowConnectionBars } = useDeveloperMode();
   const {
     visibility: toolbarVisibility,
@@ -265,6 +272,54 @@ export function AppearanceSettings() {
             />
             <span className="toggle-slider" />
           </label>
+        </div>
+        <div className="settings-item">
+          <div className="settings-item-info">
+            <strong>{t("appearanceTabTitleActivityTitle")}</strong>
+            <p>{t("appearanceTabTitleActivityDescription")}</p>
+          </div>
+          <div className="settings-item-actions">
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={tabTitleActivityEnabled}
+                onChange={(e) =>
+                  setTabTitleActivityEnabled(e.target.checked)
+                }
+              />
+              <span className="toggle-slider" />
+            </label>
+            {tabTitleActivityEnabled && (
+              <div
+                className="font-size-selector"
+                role="radiogroup"
+                aria-label={t("appearanceTabTitleActivityScopeLabel")}
+              >
+                <button
+                  type="button"
+                  className={`font-size-option ${
+                    tabTitleActivityScope === "focused" ? "active" : ""
+                  }`}
+                  onClick={() => setTabTitleActivityScope("focused")}
+                  role="radio"
+                  aria-checked={tabTitleActivityScope === "focused"}
+                >
+                  {t("appearanceTabTitleActivityScopeFocused")}
+                </button>
+                <button
+                  type="button"
+                  className={`font-size-option ${
+                    tabTitleActivityScope === "all" ? "active" : ""
+                  }`}
+                  onClick={() => setTabTitleActivityScope("all")}
+                  role="radio"
+                  aria-checked={tabTitleActivityScope === "all"}
+                >
+                  {t("appearanceTabTitleActivityScopeAll")}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
         <div className="settings-item">
           <div className="settings-item-info">

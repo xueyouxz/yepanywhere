@@ -9,6 +9,9 @@ Progress:
 - [x] 2026-05-31: Added browser-local tab-title activity preference keys,
   a defensive `useTabTitleActivityPreference` hook, same-tab update
   publication, and focused persistence/default tests.
+- [x] 2026-05-31: Added Appearance settings UI and English i18n strings for
+  enabling the tab-title activity indicator and choosing focused-session vs.
+  all-session scope.
 
 ## Context
 
