@@ -2,6 +2,10 @@ import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 import { type TrustedProxy, parseTrustedProxies } from "./client-ip.js";
 import type { LogConfig, LogLevel } from "./logger.js";
+import {
+  type RelayAllowedOriginPolicy,
+  parseRelayAllowedOrigins,
+} from "./origin-policy.js";
 
 export interface RelayTelemetryRuntimeConfig {
   enabled: boolean;
@@ -35,6 +39,8 @@ export interface RelayConfig {
    * collapses into a single global counter.
    */
   trustedProxies: TrustedProxy[];
+  /** Browser origins allowed to use the public relay websocket/HTTP endpoints. */
+  allowedOrigins: RelayAllowedOriginPolicy;
   /** Logging configuration */
   logging: LogConfig;
   /** Structured relay telemetry configuration */
@@ -75,6 +81,7 @@ export function loadConfig(): RelayConfig {
       30_000,
     ),
     trustedProxies: parseTrustedProxies(process.env.RELAY_TRUSTED_PROXIES),
+    allowedOrigins: parseRelayAllowedOrigins(process.env.RELAY_ALLOWED_ORIGINS),
     logging: {
       logDir: process.env.RELAY_LOG_DIR ?? join(dataDir, "logs"),
       logFile: process.env.RELAY_LOG_FILE ?? "relay.log",

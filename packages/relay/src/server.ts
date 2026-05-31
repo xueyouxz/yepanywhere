@@ -19,6 +19,7 @@ import type { RelayConfig } from "./config.js";
 import { ConnectionManager } from "./connections.js";
 import { createDb, createTestDb } from "./db.js";
 import type { LogLevel } from "./logger.js";
+import { parseRelayAllowedOrigins } from "./origin-policy.js";
 import { UsernameRegistry } from "./registry.js";
 import { generateRelayStatsHtml } from "./stats.js";
 import { createRelayTelemetryRecorder } from "./telemetry.js";
@@ -64,6 +65,8 @@ export interface RelayServerOptions {
    * for client-IP resolution. Default: none.
    */
   trustedProxies?: string;
+  /** Comma-separated browser Origin allowlist for relay HTTP/WS access. */
+  allowedOrigins?: string;
 }
 
 export interface RelayServer {
@@ -116,6 +119,7 @@ export async function createRelayServer(
       options.unauthenticatedConnectionTimeoutMs ??
       DEFAULT_UNAUTHENTICATED_CONNECTION_TIMEOUT_MS,
     trustedProxies: parseTrustedProxies(options.trustedProxies),
+    allowedOrigins: parseRelayAllowedOrigins(options.allowedOrigins),
     logging: {
       logDir: "",
       logFile: "relay.log",
@@ -256,7 +260,10 @@ export async function createRelayServer(
 
   // Handle WebSocket connections
   wss.on("connection", (ws, request) => {
-    unauthenticatedLimiter.track(ws, getClientIp(request, config.trustedProxies));
+    unauthenticatedLimiter.track(
+      ws,
+      getClientIp(request, config.trustedProxies),
+    );
     wsHandler.onOpen(ws);
 
     ws.on("message", (data, isBinary) => {
