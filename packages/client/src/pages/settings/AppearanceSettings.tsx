@@ -22,6 +22,7 @@ import {
   getTabSizeLabel,
   getThemeLabel,
 } from "../../i18n-settings";
+import { SessionToolbarPreview } from "../../components/SessionToolbarPreview";
 
 export function AppearanceSettings() {
   const { locale, setLocale, t } = useI18n();
@@ -45,55 +46,46 @@ export function AppearanceSettings() {
     key: SessionToolbarVisibilityKey;
     title: string;
     description: string;
-    preview: string;
   }> = [
     {
       key: "slashMenu",
       title: t("appearanceToolbarSlashTitle"),
       description: t("appearanceToolbarSlashDescription"),
-      preview: "/",
     },
     {
       key: "modelIndicator",
       title: t("appearanceToolbarModelTitle"),
       description: t("appearanceToolbarModelDescription"),
-      preview: "opus",
     },
     {
       key: "microphone",
       title: t("appearanceToolbarMicrophoneTitle"),
       description: t("appearanceToolbarMicrophoneDescription"),
-      preview: "mic",
     },
     {
       key: "contextUsage",
       title: t("appearanceToolbarContextTitle"),
       description: t("appearanceToolbarContextDescription"),
-      preview: "42%",
     },
     {
       key: "btw",
       title: t("appearanceToolbarBtwTitle"),
       description: t("appearanceToolbarBtwDescription"),
-      preview: "/btw",
     },
     {
       key: "nudge",
       title: t("appearanceToolbarNudgeTitle"),
       description: t("appearanceToolbarNudgeDescription"),
-      preview: "nudge",
     },
     {
       key: "queueControls",
       title: t("appearanceToolbarQueueTitle"),
       description: t("appearanceToolbarQueueDescription"),
-      preview: "ASAP",
     },
     {
       key: "sessionStatus",
       title: t("appearanceToolbarStatusTitle"),
       description: t("appearanceToolbarStatusDescription"),
-      preview: "idle 2m",
     },
   ];
 
@@ -269,24 +261,7 @@ export function AppearanceSettings() {
             <p>{t("appearanceSessionToolbarDescription")}</p>
           </div>
 
-          <div className="session-toolbar-preview" aria-hidden="true">
-            <span className="session-toolbar-preview-item is-fixed">mode</span>
-            <span className="session-toolbar-preview-item is-fixed">+</span>
-            {toolbarControls.map(
-              (control) =>
-                toolbarVisibility[control.key] && (
-                  <span
-                    className="session-toolbar-preview-item"
-                    key={control.key}
-                  >
-                    {control.preview}
-                  </span>
-                ),
-            )}
-            <span className="session-toolbar-preview-spacer" />
-            <span className="session-toolbar-preview-item is-fixed">?</span>
-            <span className="session-toolbar-preview-item is-fixed">send</span>
-          </div>
+          <SessionToolbarPreview />
 
           <div className="session-toolbar-control-list">
             {toolbarControls.map((control) => (

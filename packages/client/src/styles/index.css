@@ -5931,40 +5931,25 @@ a.sidebar-nav-item {
 }
 
 .session-toolbar-preview {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-height: 38px;
+  display: block;
   padding: var(--space-2);
   overflow-x: auto;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
+  pointer-events: none;
 }
 
-.session-toolbar-preview-item {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  min-width: 30px;
-  height: 28px;
-  padding: 0 var(--space-2);
-  color: var(--text-primary);
-  background: var(--bg-hover);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  line-height: 1;
-  white-space: nowrap;
+.session-toolbar-preview .message-input-toolbar {
+  min-width: 760px;
+  width: 100%;
 }
 
-.session-toolbar-preview-item.is-fixed {
-  color: var(--text-muted);
-}
-
-.session-toolbar-preview-spacer {
-  flex: 1 0 24px;
+.session-toolbar-preview .message-input-actions .context-usage-indicator {
+  position: static;
+  transform: none;
+  background: transparent;
+  box-shadow: none;
 }
 
 .session-toolbar-control-list {
