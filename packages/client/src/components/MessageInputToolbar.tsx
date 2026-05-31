@@ -29,6 +29,7 @@ import {
   isStaleTimestamp,
   parseTimestampMs,
 } from "../lib/messageAge";
+import { getEffortLevelLabel } from "../lib/effortLevels";
 import type { ModelIndicatorTone } from "../lib/modelConfigIndicator";
 import {
   getModelIndicatorTextVariants,
@@ -545,7 +546,9 @@ export function MessageInputToolbarView({
                 ? t("newSessionThinkingOff")
                 : thinkingControl.mode === "auto"
                   ? t("newSessionThinkingAuto")
-                  : t("newSessionThinkingOn", { level: thinkingControl.level })
+                  : t("newSessionThinkingOn", {
+                      level: getEffortLevelLabel(thinkingControl.level),
+                    })
             }
             aria-label={t("newSessionThinkingMode", {
               mode: thinkingControl.mode,

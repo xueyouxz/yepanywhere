@@ -1,6 +1,10 @@
 import type { ProviderName } from "@yep-anywhere/shared";
 import { getIndicatorToneFromProcess } from "../lib/modelConfigIndicator";
 import { getModelIndicatorModelLabel } from "../lib/modelIndicatorText";
+import {
+  getEffortLevelLabel,
+  normalizeEffortLevelForProvider,
+} from "../lib/effortLevels";
 
 const PROVIDER_COLORS: Record<ProviderName, string> = {
   claude: "var(--provider-claude)", // Claude orange
@@ -61,7 +65,7 @@ export function ProviderBadge({
     model.toLowerCase().startsWith("gpt-");
 
   const effortTone = isGptModel
-    ? getIndicatorToneFromProcess(thinking, effort)
+    ? getIndicatorToneFromProcess(thinking, effort, provider)
     : null;
 
   const effortLabel = (() => {
@@ -69,19 +73,11 @@ export function ProviderBadge({
     if (!thinking && !effort) return null;
     if (!thinking || thinking.type === "disabled") return "Off";
     if (!effort) return "Auto";
-    switch (effort) {
-      case "low":
-        return "Low";
-      case "medium":
-        return "Med";
-      case "high":
-        return "High";
-      case "max":
-      case "xhigh":
-        return "Max";
-      default:
-        return effort;
-    }
+    const level = normalizeEffortLevelForProvider(effort, provider);
+    const label = getEffortLevelLabel(level, provider);
+    if (level === "medium") return "Med";
+    if (level === "xhigh") return "XHigh";
+    return label;
   })();
 
   // Compact glyph label for the badge body (full text preserved in title)

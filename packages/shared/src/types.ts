@@ -74,6 +74,12 @@ export interface ModelInfo {
     reasoningEffort: string;
     description?: string;
   }>;
+  /** Whether this model supports named effort levels, when available. */
+  supportsEffort?: boolean;
+  /** Provider-reported supported effort levels, when available. */
+  supportedEffortLevels?: EffortLevel[];
+  /** Provider-reported default effort level, when available. */
+  defaultEffortLevel?: EffortLevel;
   /** Provider-reported input modalities, e.g. text/image. */
   inputModalities?: string[];
   /** Provider-reported personality support. */
@@ -259,10 +265,9 @@ export function resolveModel(
 }
 
 /**
- * Effort level for Claude's response quality.
- * Maps to the SDK's effort parameter.
+ * Effort level for provider response quality/reasoning depth.
  */
-export type EffortLevel = "low" | "medium" | "high" | "max";
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
 
 /**
  * Thinking mode for the 3-way toggle.
@@ -277,7 +282,7 @@ export type ThinkingMode = "off" | "auto" | "on";
  * Wire format (backward compatible):
  * - "off": Thinking disabled
  * - "auto": Adaptive thinking, no effort override
- * - "on:low" | "on:medium" | "on:high" | "on:max": Forced-on thinking at effort level
+ * - "on:low" | "on:medium" | "on:high" | "on:xhigh" | "on:max": Forced-on thinking at effort level
  * - EffortLevel (plain): Adaptive thinking with effort (backward compat with old clients)
  */
 export type ThinkingOption = "off" | "auto" | `on:${EffortLevel}` | EffortLevel;

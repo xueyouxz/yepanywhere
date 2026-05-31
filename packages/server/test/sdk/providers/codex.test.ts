@@ -1688,6 +1688,10 @@ describe("CodexProvider Event Normalization", () => {
       { model: "gpt-5.4-codex", cwd: "/tmp", effort: "max" },
       { approvalPolicy: "on-request", sandbox: "workspace-write" },
     );
+    const startXhigh = provider.createThreadStartParams(
+      { model: "gpt-5.4-codex", cwd: "/tmp", effort: "xhigh" },
+      { approvalPolicy: "on-request", sandbox: "workspace-write" },
+    );
     const resume = provider.createThreadResumeParams(
       {
         resumeSessionId: "thread-1",
@@ -1725,6 +1729,9 @@ describe("CodexProvider Event Normalization", () => {
     });
 
     expect(start).toMatchObject({
+      config: { model_reasoning_effort: "xhigh" },
+    });
+    expect(startXhigh).toMatchObject({
       config: { model_reasoning_effort: "xhigh" },
     });
     expect(resume).toMatchObject({

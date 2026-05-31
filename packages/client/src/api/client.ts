@@ -764,7 +764,7 @@ export const api = {
 
   getProcessModels: (processId: string) =>
     fetchJSON<{
-      models: Array<{ id: string; name: string; description?: string }>;
+      models: ModelInfo[];
     }>(`/processes/${processId}/models`),
 
   setProcessModel: (processId: string, model?: string) =>
@@ -836,7 +836,7 @@ export const api = {
         holdSince?: string;
         terminationReason?: string;
         terminatedAt?: string;
-        provider: string;
+        provider: ProviderName;
         thinking?: { type: string };
         effort?: string;
         model?: string;

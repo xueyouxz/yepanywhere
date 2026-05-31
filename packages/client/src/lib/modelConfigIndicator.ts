@@ -1,8 +1,11 @@
 import type {
   EffortLevel,
+  ProviderInfo,
+  ProviderName,
   ThinkingConfig,
   ThinkingMode,
 } from "@yep-anywhere/shared";
+import { normalizeEffortLevelForProvider } from "./effortLevels";
 
 export type ModelIndicatorTone =
   | "off"
@@ -10,20 +13,14 @@ export type ModelIndicatorTone =
   | "low"
   | "medium"
   | "high"
+  | "xhigh"
   | "max";
 
-export function normalizeEffortLevel(effort?: string): EffortLevel {
-  switch (effort) {
-    case "low":
-    case "medium":
-    case "high":
-      return effort;
-    case "max":
-    case "xhigh":
-      return "max";
-    default:
-      return "high";
-  }
+export function normalizeEffortLevel(
+  effort?: string,
+  provider?: ProviderInfo | ProviderName | null,
+): EffortLevel {
+  return normalizeEffortLevelForProvider(effort, provider);
 }
 
 export function getThinkingModeFromProcess(
@@ -39,9 +36,13 @@ export function getThinkingModeFromProcess(
 export function getIndicatorToneFromProcess(
   thinking?: ThinkingConfig | { type: string },
   effort?: string,
+  provider?: ProviderInfo | ProviderName | null,
 ): ModelIndicatorTone {
   const mode = getThinkingModeFromProcess(thinking, effort);
-  return getIndicatorToneFromSelection(mode, normalizeEffortLevel(effort));
+  return getIndicatorToneFromSelection(
+    mode,
+    normalizeEffortLevel(effort, provider),
+  );
 }
 
 export function getIndicatorToneFromSelection(

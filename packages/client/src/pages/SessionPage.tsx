@@ -89,6 +89,10 @@ import {
 import { buildCorrectionText } from "../lib/correctionText";
 import { logSessionUiTrace } from "../lib/diagnostics/uiTrace";
 import { prepareImageUpload } from "../lib/imageAttachmentResize";
+import {
+  getEffortLevelLabel,
+  normalizeEffortLevelForProvider,
+} from "../lib/effortLevels";
 import { getIndicatorToneFromProcess } from "../lib/modelConfigIndicator";
 import { getModelIndicatorModelLabel } from "../lib/modelIndicatorText";
 import { preprocessMessages } from "../lib/preprocessMessages";
@@ -2584,6 +2588,7 @@ function SessionPageContent({
       ? getIndicatorToneFromProcess(
           liveModelConfig.thinking,
           liveModelConfig.effort,
+          effectiveProvider,
         )
       : undefined;
   const liveBadgeModel = liveModelConfig?.model ?? effectiveModel;
@@ -2628,7 +2633,13 @@ function SessionPageContent({
           !liveModelConfig?.thinking
             ? "Thinking off"
             : liveModelConfig?.effort
-              ? `Effort ${liveModelConfig.effort === "xhigh" ? "max" : liveModelConfig.effort}`
+              ? `Effort ${getEffortLevelLabel(
+                  normalizeEffortLevelForProvider(
+                    liveModelConfig.effort,
+                    effectiveProvider,
+                  ),
+                  effectiveProvider,
+                )}`
               : "Thinking auto"
         }`
       : "Slash commands";

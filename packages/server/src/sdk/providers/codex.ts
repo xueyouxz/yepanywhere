@@ -1363,6 +1363,7 @@ export class CodexProvider implements AgentProvider {
         return "medium";
       case "high":
         return "high";
+      case "xhigh":
       case "max":
         return "xhigh";
     }

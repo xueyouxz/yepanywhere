@@ -13,6 +13,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import {
   HELPER_SIDE_MODEL_CHEAPEST,
+  type EffortLevel,
   type ModelInfo,
   type SlashCommand,
   getModelContextWindow,
@@ -52,6 +53,13 @@ import type {
 const USE_SPAWN_WRAPPER = true;
 const CLAUDE_LIVENESS_PROBE_TIMEOUT_MS = 5000;
 const CLAUDE_LIVENESS_PROBE_SOURCE = "claude:control/mcp_status";
+const CLAUDE_EFFORT_LEVELS: EffortLevel[] = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
 const execFileAsync = promisify(execFile);
 const requireFromHere = createRequire(import.meta.url);
 const requireFromClaudeSdk = createRequire(
@@ -204,6 +212,21 @@ const CLAUDE_GOAL_LOOP_ALIAS_COMMAND: SlashCommand = {
   },
 };
 
+function isClaudeEffortLevel(value: unknown): value is EffortLevel {
+  return (
+    typeof value === "string" &&
+    (CLAUDE_EFFORT_LEVELS as string[]).includes(value)
+  );
+}
+
+function mapClaudeSupportedEffortLevels(
+  levels: unknown,
+): EffortLevel[] | undefined {
+  if (!Array.isArray(levels)) return undefined;
+  const supported = levels.filter(isClaudeEffortLevel);
+  return supported.length > 0 ? supported : undefined;
+}
+
 function normalizedSlashCommandName(command: SlashCommand): string {
   return command.name.trim().replace(/^\/+/, "").toLowerCase();
 }
@@ -221,6 +244,8 @@ function enrichClaudeModel(model: ModelInfo): ModelInfo {
     ...model,
     contextWindow:
       model.contextWindow ?? getModelContextWindow(model.id, "claude"),
+    supportsEffort: model.supportsEffort ?? true,
+    supportedEffortLevels: model.supportedEffortLevels ?? CLAUDE_EFFORT_LEVELS,
   };
 }
 
@@ -590,6 +615,10 @@ export class ClaudeProvider implements AgentProvider {
           id: m.value,
           name: m.displayName,
           description: m.description,
+          supportsEffort: m.supportsEffort,
+          supportedEffortLevels: mapClaudeSupportedEffortLevels(
+            m.supportedEffortLevels,
+          ),
         })),
       );
     } finally {
@@ -969,6 +998,10 @@ export class ClaudeProvider implements AgentProvider {
             id: m.value,
             name: m.displayName,
             description: m.description,
+            supportsEffort: m.supportsEffort,
+            supportedEffortLevels: mapClaudeSupportedEffortLevels(
+              m.supportedEffortLevels,
+            ),
           })),
         );
         // Update cache for future getAvailableModels() calls

@@ -5,11 +5,14 @@ import {
   type ProviderName,
 } from "@yep-anywhere/shared";
 import {
-  EFFORT_LEVEL_OPTIONS,
   MODEL_OPTIONS,
   getModelSetting,
   useModelSettings,
 } from "../../hooks/useModelSettings";
+import {
+  getEffortLevelOptions,
+  resolveSupportedEffortLevel,
+} from "../../lib/effortLevels";
 import {
   getAvailableProviders,
   getDefaultProvider,
@@ -25,13 +28,18 @@ function getPreferredProvider(
 ): ProviderInfo | null {
   const availableProviders = getAvailableProviders(providers);
   if (preferredProvider) {
-    const matching = availableProviders.find((p) => p.name === preferredProvider);
+    const matching = availableProviders.find(
+      (p) => p.name === preferredProvider,
+    );
     if (matching) return matching;
   }
   return getDefaultProvider(providers);
 }
 
-function getPreferredModel(models: ModelInfo[], preferredModel?: string): string | null {
+function getPreferredModel(
+  models: ModelInfo[],
+  preferredModel?: string,
+): string | null {
   if (preferredModel) {
     const matchingModel = models.find((m) => m.id === preferredModel);
     if (matchingModel) return matchingModel.id;
@@ -52,7 +60,10 @@ function getPreferredProviderModel(
   const legacyClaudeFallbackModel =
     providerName === "claude" ? resolveModel(getModelSetting()) : undefined;
 
-  return getPreferredModel(models, sessionDefaultModel ?? legacyClaudeFallbackModel);
+  return getPreferredModel(
+    models,
+    sessionDefaultModel ?? legacyClaudeFallbackModel,
+  );
 }
 
 export function ModelSettings() {
@@ -75,10 +86,8 @@ export function ModelSettings() {
 
   const availableProviders = getAvailableProviders(providers);
   const selectedProvider =
-    getPreferredProvider(
-      providers,
-      settings?.newSessionDefaults?.provider,
-    ) ?? null;
+    getPreferredProvider(providers, settings?.newSessionDefaults?.provider) ??
+    null;
   const selectedModels = selectedProvider?.models ?? [];
   const selectedModel =
     selectedProvider === null
@@ -88,6 +97,16 @@ export function ModelSettings() {
           selectedModels,
           settings?.newSessionDefaults,
         );
+  const selectedModelInfo =
+    selectedModels.find((modelInfo) => modelInfo.id === selectedModel) ?? null;
+  const effortOptions = getEffortLevelOptions({
+    provider: selectedProvider,
+    model: selectedModelInfo,
+  });
+  const effectiveEffortLevel = resolveSupportedEffortLevel(
+    effortLevel,
+    effortOptions,
+  );
   const claudeProvider = availableProviders.find((p) => p.name === "claude");
   const thinkingOptions: Array<{
     value: "off" | "auto" | "on";
@@ -194,7 +213,9 @@ export function ModelSettings() {
                 </button>
               ))
             ) : (
-              <span className="model-settings-empty">{t("modelSwitchEmpty")}</span>
+              <span className="model-settings-empty">
+                {t("modelSwitchEmpty")}
+              </span>
             )}
           </div>
         </div>
@@ -224,11 +245,13 @@ export function ModelSettings() {
             <p>{t("modelSettingsEffortDescription")}</p>
           </div>
           <div className="font-size-selector model-settings-chip-group">
-            {EFFORT_LEVEL_OPTIONS.map((opt) => (
+            {effortOptions.map((opt) => (
               <button
                 key={opt.value}
                 type="button"
-                className={`font-size-option ${effortLevel === opt.value ? "active" : ""}`}
+                className={`font-size-option ${
+                  effectiveEffortLevel === opt.value ? "active" : ""
+                }`}
                 onClick={() => setEffortLevel(opt.value)}
                 title={opt.description}
               >

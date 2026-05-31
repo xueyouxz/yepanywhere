@@ -2325,8 +2325,12 @@ details[open] .collapsible__icon {
   background: #ea580c;
 }
 
-.model-switch-indicator-dot.tone-max {
+.model-switch-indicator-dot.tone-xhigh {
   background: #dc2626;
+}
+
+.model-switch-indicator-dot.tone-max {
+  background: #991b1b;
 }
 
 .model-switch-actions {

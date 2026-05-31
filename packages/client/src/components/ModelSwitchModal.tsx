@@ -1,7 +1,17 @@
-import { Fragment, useEffect, useState } from "react";
+import type {
+  EffortLevel,
+  ModelInfo,
+  ProviderName,
+} from "@yep-anywhere/shared";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { useModelSettings } from "../hooks/useModelSettings";
 import { useI18n } from "../i18n";
+import {
+  getEffortLevelLabel,
+  getEffortLevelOptions,
+  resolveSupportedEffortLevel,
+} from "../lib/effortLevels";
 import {
   getIndicatorToneFromProcess,
   getIndicatorToneFromSelection,
@@ -23,17 +33,8 @@ interface ModelSwitchModalProps {
   onClose: () => void;
 }
 
-interface ModelOption {
-  id: string;
-  name: string;
-  description?: string;
-}
-
 type ThinkingMode = "off" | "auto" | "on";
-type EffortLevel = "low" | "medium" | "high" | "max";
 type DirtySection = "thinking" | "effort" | "model" | null;
-
-const EFFORT_LEVELS: EffortLevel[] = ["low", "medium", "high", "max"];
 
 function toThinkingOption(
   mode: ThinkingMode,
@@ -70,7 +71,8 @@ export function ModelSwitchModal({
 }: ModelSwitchModalProps) {
   const { t } = useI18n();
   const { setThinkingMode, setEffortLevel } = useModelSettings();
-  const [models, setModels] = useState<ModelOption[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [provider, setProvider] = useState<ProviderName | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [switching, setSwitching] = useState(false);
@@ -92,20 +94,28 @@ export function ModelSwitchModal({
   useEffect(() => {
     let cancelled = false;
 
-    Promise.all([api.getProcessModels(processId), api.getProcessInfo(sessionId)])
+    Promise.all([
+      api.getProcessModels(processId),
+      api.getProcessInfo(sessionId),
+    ])
       .then(([modelsRes, processRes]) => {
         if (cancelled) return;
 
         const process = processRes.process;
         const resolvedModel =
           process?.model ?? currentModel ?? modelsRes.models[0]?.id;
-        const resolvedEffort = normalizeEffortLevel(process?.effort);
+        const processProvider = process?.provider ?? null;
+        const resolvedEffort = normalizeEffortLevel(
+          process?.effort,
+          processProvider,
+        );
         const resolvedThinkingMode = getThinkingModeFromProcess(
           process?.thinking,
           process?.effort,
         );
 
         setModels(modelsRes.models);
+        setProvider(processProvider);
         setCurrentModelId(resolvedModel);
         setSelectedModel(resolvedModel);
         setCurrentThinkingMode(resolvedThinkingMode);
@@ -130,6 +140,23 @@ export function ModelSwitchModal({
     };
   }, [currentModel, processId, sessionId, t]);
 
+  const selectedModelInfo = useMemo(
+    () => models.find((model) => model.id === selectedModel) ?? null,
+    [models, selectedModel],
+  );
+  const effortOptions = useMemo(
+    () =>
+      getEffortLevelOptions({
+        provider,
+        model: selectedModelInfo,
+      }),
+    [provider, selectedModelInfo],
+  );
+  const effectiveEffortLevel = resolveSupportedEffortLevel(
+    effortLevel,
+    effortOptions,
+  );
+
   const dirty =
     !loading &&
     !sameSelection(
@@ -138,7 +165,7 @@ export function ModelSwitchModal({
       currentEffortLevel,
       selectedModel,
       thinkingMode,
-      effortLevel,
+      effectiveEffortLevel,
     );
 
   const applyConfig = async () => {
@@ -146,13 +173,13 @@ export function ModelSwitchModal({
     setSwitching(true);
     setError(null);
     try {
-      const thinking = toThinkingOption(thinkingMode, effortLevel);
+      const thinking = toThinkingOption(thinkingMode, effectiveEffortLevel);
       const result = await api.setProcessConfig(processId, {
         model: selectedModel,
         thinking,
       });
       setThinkingMode(thinkingMode);
-      setEffortLevel(effortLevel);
+      setEffortLevel(effectiveEffortLevel);
       onModelChanged(result);
       onClose();
     } catch (err: unknown) {
@@ -175,15 +202,18 @@ export function ModelSwitchModal({
   const currentIndicatorTone = getIndicatorToneFromProcess(
     { type: currentThinkingMode === "off" ? "disabled" : "adaptive" },
     currentThinkingMode === "on" ? currentEffortLevel : undefined,
+    provider,
   );
   const pendingIndicatorTone = getIndicatorToneFromSelection(
     thinkingMode,
-    effortLevel,
+    effectiveEffortLevel,
   );
   const renderThinkingLabel = (mode: ThinkingMode, effort: EffortLevel) => {
     if (mode === "off") return t("newSessionThinkingOff");
     if (mode === "auto") return t("newSessionThinkingAuto");
-    return t("newSessionThinkingOn", { level: effort });
+    return t("newSessionThinkingOn", {
+      level: getEffortLevelLabel(effort, provider),
+    });
   };
   const renderConfigBadge = (
     modelId: string | undefined,
@@ -242,7 +272,10 @@ export function ModelSwitchModal({
               </div>
               {dirty && (
                 <div className="model-switch-status-row pending">
-                  <span className="model-switch-status-marker" aria-hidden="true">
+                  <span
+                    className="model-switch-status-marker"
+                    aria-hidden="true"
+                  >
                     →
                   </span>
                   <span
@@ -253,7 +286,7 @@ export function ModelSwitchModal({
                     {selectedModel ?? currentModelId ?? "Default"}
                   </span>
                   <span className="model-switch-status-detail">
-                    {renderThinkingLabel(thinkingMode, effortLevel)}
+                    {renderThinkingLabel(thinkingMode, effectiveEffortLevel)}
                   </span>
                 </div>
               )}
@@ -290,7 +323,7 @@ export function ModelSwitchModal({
                               ? "off"
                               : mode === "auto"
                                 ? "auto"
-                                : effortLevel
+                                : effectiveEffortLevel
                           }`}
                           aria-hidden="true"
                         />
@@ -314,32 +347,38 @@ export function ModelSwitchModal({
                 <strong>{t("modelSettingsEffortTitle")}</strong>
               </div>
               <div className="model-switch-chip-group">
-                {EFFORT_LEVELS.map((level) => {
+                {effortOptions.map((option) => {
                   const isCurrent =
-                    currentThinkingMode === "on" && currentEffortLevel === level;
+                    currentThinkingMode === "on" &&
+                    currentEffortLevel === option.value;
                   const isSelected =
-                    thinkingMode === "on" && effortLevel === level;
+                    thinkingMode === "on" &&
+                    effectiveEffortLevel === option.value;
                   const showInlineSave =
                     dirty && lastTouchedSection === "effort" && isSelected;
                   return (
-                    <Fragment key={level}>
+                    <Fragment key={option.value}>
                       <button
                         type="button"
                         className={`model-switch-chip ${isCurrent ? "current" : ""} ${isSelected ? "active" : ""}`}
                         onClick={() => {
-                          if (thinkingMode !== "on" || effortLevel !== level) {
+                          if (
+                            thinkingMode !== "on" ||
+                            effortLevel !== option.value
+                          ) {
                             setLastTouchedSection("effort");
                           }
-                          setEffortLevelState(level);
+                          setEffortLevelState(option.value);
                           setThinkingModeState("on");
                         }}
                         disabled={switching}
+                        title={option.description}
                       >
                         <span
-                          className={`model-switch-indicator-dot tone-${level}`}
+                          className={`model-switch-indicator-dot tone-${option.value}`}
                           aria-hidden="true"
                         />
-                        <span>{level}</span>
+                        <span>{option.label}</span>
                       </button>
                       {showInlineSave && renderInlineSave()}
                     </Fragment>
@@ -349,7 +388,9 @@ export function ModelSwitchModal({
             </section>
 
             {!error && models.length === 0 && (
-              <div className="model-switch-loading">{t("modelSwitchEmpty")}</div>
+              <div className="model-switch-loading">
+                {t("modelSwitchEmpty")}
+              </div>
             )}
 
             {models.length > 0 && (
@@ -377,7 +418,9 @@ export function ModelSwitchModal({
                           disabled={switching}
                         >
                           <span className="model-switch-item-main">
-                            <span className="model-switch-name">{model.name}</span>
+                            <span className="model-switch-name">
+                              {model.name}
+                            </span>
                             {model.description && (
                               <span className="model-switch-description">
                                 {model.description}
@@ -436,7 +479,7 @@ export function ModelSwitchModal({
                   {renderConfigBadge(
                     selectedModel ?? currentModelId ?? currentModel,
                     thinkingMode,
-                    effortLevel,
+                    effectiveEffortLevel,
                     pendingIndicatorTone,
                   )}
                 </button>

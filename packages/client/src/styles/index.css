@@ -4442,8 +4442,12 @@ a.sidebar-nav-item {
   background: #ea580c;
 }
 
-.slash-command-indicator.tone-max {
+.slash-command-indicator.tone-xhigh {
   background: #dc2626;
+}
+
+.slash-command-indicator.tone-max {
+  background: #991b1b;
 }
 
 .slash-command-menu {
@@ -4532,7 +4536,8 @@ a.sidebar-nav-item {
 .model-toolbar-button.tone-low { border-left-color: #2f9e44; }
 .model-toolbar-button.tone-medium { border-left-color: #d97706; }
 .model-toolbar-button.tone-high { border-left-color: #ea580c; }
-.model-toolbar-button.tone-max { border-left-color: #dc2626; }
+.model-toolbar-button.tone-xhigh { border-left-color: #dc2626; }
+.model-toolbar-button.tone-max { border-left-color: #991b1b; }
 
 .model-toolbar-label {
   overflow: hidden;
@@ -8096,8 +8101,12 @@ a.sidebar-nav-item {
   background: #ea580c;
 }
 
-.provider-badge-effort-dot.tone-max {
+.provider-badge-effort-dot.tone-xhigh {
   background: #dc2626;
+}
+
+.provider-badge-effort-dot.tone-max {
+  background: #991b1b;
 }
 
 .provider-badge-effort-label {

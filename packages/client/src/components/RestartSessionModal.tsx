@@ -16,16 +16,24 @@ import {
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import { getModelSetting } from "../hooks/useModelSettings";
-import { getAvailableProviders, getDefaultProvider } from "../hooks/useProviders";
+import {
+  getAvailableProviders,
+  getDefaultProvider,
+} from "../hooks/useProviders";
 import { useServerSettings } from "../hooks/useServerSettings";
 import { helperTargetsToModelOptions } from "../lib/helperTargets";
 import type { PermissionMode } from "../types";
 import { useI18n } from "../i18n";
+import {
+  getEffortLevelLabel,
+  getEffortLevelOptions,
+  isEffortLevel,
+  resolveSupportedEffortLevel,
+} from "../lib/effortLevels";
 import { Modal } from "./ui/Modal";
 
 type ThinkingMode = "off" | "auto" | "on";
 
-const EFFORT_LEVELS: EffortLevel[] = ["low", "medium", "high", "max"];
 const RECAP_MODE_ORDER: RecapMode[] = ["off", "native", "side-session"];
 const PROMPT_SUGGESTION_MODE_ORDER: PromptSuggestionMode[] = ["off", "native"];
 
@@ -43,16 +51,12 @@ function parseThinkingOption(option: ThinkingOption | undefined): {
     const effort = option.slice(3);
     return {
       mode: "on",
-      effort: EFFORT_LEVELS.includes(effort as EffortLevel)
-        ? (effort as EffortLevel)
-        : "high",
+      effort: isEffortLevel(effort) ? effort : "high",
     };
   }
   return {
     mode: "on",
-    effort: EFFORT_LEVELS.includes(option as EffortLevel)
-      ? (option as EffortLevel)
-      : "high",
+    effort: isEffortLevel(option) ? option : "high",
   };
 }
 
@@ -70,7 +74,9 @@ function getPreferredModelId(
   preferredModelId?: string | null,
 ): string | null {
   if (preferredModelId) {
-    const matchingPreferredModel = models.find((m) => m.id === preferredModelId);
+    const matchingPreferredModel = models.find(
+      (m) => m.id === preferredModelId,
+    );
     if (matchingPreferredModel) return matchingPreferredModel.id;
   }
 
@@ -84,7 +90,9 @@ function getRestartDefaultModel(params: {
   defaults?: NewSessionDefaults | null;
 }): string {
   const sessionDefaultModel =
-    params.defaults?.provider === params.provider ? params.defaults.model : undefined;
+    params.defaults?.provider === params.provider
+      ? params.defaults.model
+      : undefined;
   const legacyClaudeFallbackModel =
     params.provider === "claude" ? resolveModel(getModelSetting()) : undefined;
 
@@ -220,17 +228,20 @@ interface RestartSessionModalProps {
   thinking?: ThinkingOption;
   promptSuggestionMode?: PromptSuggestionMode;
   executor?: string;
-  onRestarted: (result: {
-    sessionId: string;
-    processId: string;
-    provider?: ProviderName;
-    model?: string;
-    title?: string;
-    oldProcessAborted: boolean;
-  }, options?: {
-    openInNewWindow?: boolean;
-    targetWindow?: Window | null;
-  }) => void;
+  onRestarted: (
+    result: {
+      sessionId: string;
+      processId: string;
+      provider?: ProviderName;
+      model?: string;
+      title?: string;
+      oldProcessAborted: boolean;
+    },
+    options?: {
+      openInNewWindow?: boolean;
+      targetWindow?: Window | null;
+    },
+  ) => void;
   onClose: () => void;
 }
 
@@ -277,7 +288,8 @@ export function RestartSessionModal({
   );
   const hasUserSelectedProviderRef = useRef(false);
   const selectedProviderModels = useMemo(
-    () => getProviderModels(selectedProvider, providerOptions, provider, models),
+    () =>
+      getProviderModels(selectedProvider, providerOptions, provider, models),
     [models, provider, providerOptions, selectedProvider],
   );
   const modelOptions = useMemo<ModelInfo[]>(() => {
@@ -303,6 +315,16 @@ export function RestartSessionModal({
   const hasUserSelectedModelRef = useRef(false);
   const selectedProviderInfo = providerOptions.find(
     (p) => p.name === selectedProvider,
+  );
+  const selectedModelInfo =
+    modelOptions.find((model) => model.id === selectedModel) ?? null;
+  const effortOptions = useMemo(
+    () =>
+      getEffortLevelOptions({
+        provider: selectedProviderInfo,
+        model: selectedModelInfo,
+      }),
+    [selectedModelInfo, selectedProviderInfo],
   );
   const [selectedRecapMode, setSelectedRecapMode] = useState<RecapMode>(() =>
     getRestartDefaultRecapMode({
@@ -335,6 +357,10 @@ export function RestartSessionModal({
   const [effortLevel, setEffortLevel] = useState<EffortLevel>(
     initialThinking.effort,
   );
+  const effectiveEffortLevel = resolveSupportedEffortLevel(
+    effortLevel,
+    effortOptions,
+  );
   const [openInNewWindow, setOpenInNewWindow] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -366,8 +392,7 @@ export function RestartSessionModal({
       getRestartDefaultModel({
         provider: selectedProvider,
         models: modelOptions,
-        currentModel:
-          selectedProvider === provider ? currentModel : undefined,
+        currentModel: selectedProvider === provider ? currentModel : undefined,
         defaults: settings?.newSessionDefaults,
       }),
     );
@@ -419,7 +444,9 @@ export function RestartSessionModal({
   const renderThinkingLabel = (mode: ThinkingMode, effort: EffortLevel) => {
     if (mode === "off") return t("newSessionThinkingOff");
     if (mode === "auto") return t("newSessionThinkingAuto");
-    return t("newSessionThinkingOn", { level: effort });
+    return t("newSessionThinkingOn", {
+      level: getEffortLevelLabel(effort, selectedProviderInfo),
+    });
   };
 
   const restart = async (targetNewWindow = false) => {
@@ -438,7 +465,7 @@ export function RestartSessionModal({
         mode,
         model: selectedModel,
         thinking: supportsThinkingToggle
-          ? toThinkingOption(thinkingMode, effortLevel)
+          ? toThinkingOption(thinkingMode, effectiveEffortLevel)
           : undefined,
         provider: selectedProvider,
         executor,
@@ -502,15 +529,11 @@ export function RestartSessionModal({
     );
   };
 
-  const handleStartClick = (
-    event: MouseEvent<HTMLButtonElement>,
-  ) => {
+  const handleStartClick = (event: MouseEvent<HTMLButtonElement>) => {
     void restart(event.metaKey || event.ctrlKey || event.shiftKey);
   };
 
-  const handleStartAuxClick = (
-    event: MouseEvent<HTMLButtonElement>,
-  ) => {
+  const handleStartAuxClick = (event: MouseEvent<HTMLButtonElement>) => {
     if (event.button !== 1) return;
     event.preventDefault();
     void restart(true);
@@ -536,7 +559,10 @@ export function RestartSessionModal({
   ];
 
   return (
-    <Modal title={t("sessionRestartTitle")} onClose={restarting ? () => {} : onClose}>
+    <Modal
+      title={t("sessionRestartTitle")}
+      onClose={restarting ? () => {} : onClose}
+    >
       <div className="model-switch-content">
         <div className="model-switch-status">
           <div className="model-switch-status-row">
@@ -559,7 +585,10 @@ export function RestartSessionModal({
             </span>
             <span className="model-switch-status-detail">
               {supportsThinkingToggle
-                ? `${selectedProviderDisplayName} · ${renderThinkingLabel(thinkingMode, effortLevel)}`
+                ? `${selectedProviderDisplayName} · ${renderThinkingLabel(
+                    thinkingMode,
+                    effectiveEffortLevel,
+                  )}`
                 : selectedProviderDisplayName}
             </span>
           </div>
@@ -574,7 +603,8 @@ export function RestartSessionModal({
             </div>
             <div className="provider-options">
               {providerOptions.map((p) => {
-                const isAvailable = p.installed && (p.authenticated || p.enabled);
+                const isAvailable =
+                  p.installed && (p.authenticated || p.enabled);
                 const isSelected = selectedProvider === p.name;
                 return (
                   <button
@@ -594,7 +624,9 @@ export function RestartSessionModal({
                         : p.displayName
                     }
                   >
-                    <span className={`provider-option-dot provider-${p.name}`} />
+                    <span
+                      className={`provider-option-dot provider-${p.name}`}
+                    />
                     <div className="provider-option-content">
                       <span className="provider-option-label">
                         {p.displayName}
@@ -682,7 +714,10 @@ export function RestartSessionModal({
                           ? "off"
                           : mode === "auto"
                             ? "auto"
-                            : effortLevel
+                            : getEffortLevelLabel(
+                                effectiveEffortLevel,
+                                selectedProviderInfo,
+                              )
                       }`}
                       aria-hidden="true"
                     />
@@ -691,7 +726,12 @@ export function RestartSessionModal({
                         ? t("newSessionThinkingOff")
                         : mode === "auto"
                           ? t("newSessionThinkingAuto")
-                          : t("newSessionThinkingOn", { level: effortLevel })}
+                          : t("newSessionThinkingOn", {
+                              level: getEffortLevelLabel(
+                                effectiveEffortLevel,
+                                selectedProviderInfo,
+                              ),
+                            })}
                     </span>
                   </button>
                 ))}
@@ -703,26 +743,28 @@ export function RestartSessionModal({
                 <strong>{t("modelSettingsEffortTitle")}</strong>
               </div>
               <div className="model-switch-chip-group">
-                {EFFORT_LEVELS.map((level) => (
+                {effortOptions.map((option) => (
                   <button
-                    key={level}
+                    key={option.value}
                     type="button"
                     className={`model-switch-chip ${
-                      thinkingMode === "on" && effortLevel === level
+                      thinkingMode === "on" &&
+                      effectiveEffortLevel === option.value
                         ? "active"
                         : ""
                     }`}
                     onClick={() => {
                       setThinkingMode("on");
-                      setEffortLevel(level);
+                      setEffortLevel(option.value);
                     }}
                     disabled={restarting}
+                    title={option.description}
                   >
                     <span
-                      className={`model-switch-indicator-dot tone-${level}`}
+                      className={`model-switch-indicator-dot tone-${option.value}`}
                       aria-hidden="true"
                     />
-                    <span>{level}</span>
+                    <span>{option.label}</span>
                   </button>
                 ))}
               </div>
@@ -837,7 +879,9 @@ export function RestartSessionModal({
           <input
             type="checkbox"
             checked={openInNewWindow}
-            onChange={(event) => setOpenInNewWindow(event.currentTarget.checked)}
+            onChange={(event) =>
+              setOpenInNewWindow(event.currentTarget.checked)
+            }
             disabled={restarting}
           />
           <span>{t("sessionRestartOpenNewWindow")}</span>
