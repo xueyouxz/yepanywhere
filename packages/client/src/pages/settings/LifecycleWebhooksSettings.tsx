@@ -7,28 +7,59 @@ const MAX_TOKEN_LENGTH = 5000;
 
 export function LifecycleWebhooksSettings() {
   const { t } = useI18n();
-  const { settings, isLoading, error, updateSetting } = useServerSettings();
+  const { settings, isLoading, error, updateSettings } = useServerSettings();
+  const [enabled, setEnabled] = useState(false);
   const [url, setUrl] = useState("");
   const [token, setToken] = useState("");
+  const [dryRun, setDryRun] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [hasChanges, setHasChanges] = useState(false);
+  const [hasDraftEdits, setHasDraftEdits] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  const serverEnabled = settings?.lifecycleWebhooksEnabled ?? false;
+  const serverUrl = settings?.lifecycleWebhookUrl ?? "";
+  const serverToken = settings?.lifecycleWebhookToken ?? "";
+  const serverDryRun = settings?.lifecycleWebhookDryRun ?? true;
+  const normalizedUrl = url.trim();
+  const normalizedToken = token.trim();
+  const hasChanges =
+    enabled !== serverEnabled ||
+    normalizedUrl !== serverUrl ||
+    normalizedToken !== serverToken ||
+    dryRun !== serverDryRun;
 
   useEffect(() => {
     if (!settings) return;
-    setUrl(settings.lifecycleWebhookUrl ?? "");
-    setToken(settings.lifecycleWebhookToken ?? "");
-  }, [settings]);
+    if (hasDraftEdits || isSaving) return;
+    setEnabled(serverEnabled);
+    setUrl(serverUrl);
+    setToken(serverToken);
+    setDryRun(serverDryRun);
+  }, [
+    hasDraftEdits,
+    isSaving,
+    serverDryRun,
+    serverEnabled,
+    serverToken,
+    serverUrl,
+    settings,
+  ]);
 
   const handleSave = useCallback(async () => {
     setIsSaving(true);
     setSaveError(null);
     try {
-      await Promise.all([
-        updateSetting("lifecycleWebhookUrl", url.trim() || undefined),
-        updateSetting("lifecycleWebhookToken", token.trim() || undefined),
-      ]);
-      setHasChanges(false);
+      await updateSettings({
+        lifecycleWebhooksEnabled: enabled,
+        lifecycleWebhookUrl: normalizedUrl || undefined,
+        lifecycleWebhookToken: normalizedToken || undefined,
+        lifecycleWebhookDryRun: dryRun,
+      });
+      setEnabled(enabled);
+      setUrl(normalizedUrl);
+      setToken(normalizedToken);
+      setDryRun(dryRun);
+      setHasDraftEdits(false);
     } catch (err) {
       setSaveError(
         err instanceof Error ? err.message : t("lifecycleWebhooksSaveFailed"),
@@ -36,7 +67,7 @@ export function LifecycleWebhooksSettings() {
     } finally {
       setIsSaving(false);
     }
-  }, [t, token, updateSetting, url]);
+  }, [dryRun, enabled, normalizedToken, normalizedUrl, t, updateSettings]);
 
   if (isLoading) {
     return (
@@ -48,11 +79,6 @@ export function LifecycleWebhooksSettings() {
       </section>
     );
   }
-
-  const serverUrl = settings?.lifecycleWebhookUrl ?? "";
-  const serverToken = settings?.lifecycleWebhookToken ?? "";
-  const enabled = settings?.lifecycleWebhooksEnabled ?? false;
-  const dryRun = settings?.lifecycleWebhookDryRun ?? true;
 
   return (
     <section className="settings-section">
@@ -70,9 +96,11 @@ export function LifecycleWebhooksSettings() {
           <input
             type="checkbox"
             checked={enabled}
-            onChange={(e) =>
-              void updateSetting("lifecycleWebhooksEnabled", e.target.checked)
-            }
+            onChange={(e) => {
+              setEnabled(e.target.checked);
+              setHasDraftEdits(true);
+              setSaveError(null);
+            }}
           />
         </label>
 
@@ -85,16 +113,21 @@ export function LifecycleWebhooksSettings() {
             <p>{t("lifecycleWebhooksUrlDescription")}</p>
           </div>
           <input
+            aria-label={t("lifecycleWebhooksUrlTitle")}
+            autoComplete="off"
             type="url"
             className="settings-input"
+            id="lifecycle-webhook-url"
+            name="yep-lifecycle-webhook-url"
             value={url}
             onChange={(e) => {
               const value = e.target.value.slice(0, MAX_URL_LENGTH);
               setUrl(value);
-              setHasChanges(value !== serverUrl || token !== serverToken);
+              setHasDraftEdits(true);
               setSaveError(null);
             }}
             placeholder="https://example.com/hooks/yep"
+            spellCheck={false}
           />
         </div>
 
@@ -107,16 +140,21 @@ export function LifecycleWebhooksSettings() {
             <p>{t("lifecycleWebhooksTokenDescription")}</p>
           </div>
           <input
+            aria-label={t("lifecycleWebhooksTokenTitle")}
+            autoComplete="new-password"
             type="password"
             className="settings-input"
+            id="lifecycle-webhook-token"
+            name="yep-lifecycle-webhook-token"
             value={token}
             onChange={(e) => {
               const value = e.target.value.slice(0, MAX_TOKEN_LENGTH);
               setToken(value);
-              setHasChanges(url !== serverUrl || value !== serverToken);
+              setHasDraftEdits(true);
               setSaveError(null);
             }}
             placeholder={t("lifecycleWebhooksTokenPlaceholder")}
+            spellCheck={false}
           />
         </div>
 
@@ -128,9 +166,11 @@ export function LifecycleWebhooksSettings() {
           <input
             type="checkbox"
             checked={dryRun}
-            onChange={(e) =>
-              void updateSetting("lifecycleWebhookDryRun", e.target.checked)
-            }
+            onChange={(e) => {
+              setDryRun(e.target.checked);
+              setHasDraftEdits(true);
+              setSaveError(null);
+            }}
           />
         </label>
 
