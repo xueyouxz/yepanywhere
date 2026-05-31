@@ -77,6 +77,25 @@ describe("speech provider method selection", () => {
 });
 
 describe("YA server speech provider", () => {
+  it("reports support for the capture path selected by streaming capability", () => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: vi.fn() },
+    });
+    vi.stubGlobal(
+      "AudioContext",
+      class FakeAudioContext {},
+    );
+    vi.stubGlobal("WebSocket", class FakeWebSocket {});
+    vi.stubGlobal("MediaRecorder", undefined);
+
+    expect(new YaServerProvider("ya-dummy", "").isSupported).toBe(false);
+    expect(
+      new YaServerProvider("ya-grok", "", { serverStreaming: true })
+        .isSupported,
+    ).toBe(true);
+  });
+
   it("cancels a pending start before microphone permission resolves", async () => {
     const media = deferred<MediaStream>();
     const getUserMedia = vi.fn(() => media.promise);

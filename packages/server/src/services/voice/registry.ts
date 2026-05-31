@@ -2,7 +2,11 @@ import { getLogger } from "../../logging/logger.js";
 import { DeepgramBackend } from "./deepgramBackend.js";
 import { DummyBackend } from "./dummyBackend.js";
 import { LocalWhisperBackend } from "./localWhisperBackend.js";
-import type { SpeechBackend, SpeechBackendInfo } from "./SpeechBackend.js";
+import type {
+  SpeechBackend,
+  SpeechBackendCapabilities,
+  SpeechBackendInfo,
+} from "./SpeechBackend.js";
 import { XaiSttBackend } from "./xaiSttBackend.js";
 
 const logger = getLogger();
@@ -32,6 +36,15 @@ export class SpeechBackendRegistry {
     return [...this.entries.values()].map(({ info }) => info);
   }
 
+  /** Capabilities for currently enabled backend ids. */
+  enabledCapabilities(): Record<string, SpeechBackendCapabilities> {
+    return Object.fromEntries(
+      [...this.entries.values()]
+        .filter(({ info }) => info.enabled)
+        .map(({ info }) => [info.id, info.capabilities ?? {}]),
+    );
+  }
+
   /** True when the given id is currently enabled. */
   isEnabled(id: string): boolean {
     return this.entries.get(id)?.info.enabled ?? false;
@@ -50,6 +63,7 @@ export class SpeechBackendRegistry {
       id: backend.id,
       label: backend.label,
       enabled: result.ok,
+      capabilities: backend.capabilities ?? {},
       disabledReason: result.ok ? undefined : result.reason,
     };
     this.entries.set(backend.id, { info, backend });

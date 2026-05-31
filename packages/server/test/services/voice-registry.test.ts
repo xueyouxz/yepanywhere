@@ -28,6 +28,7 @@ describe("initSpeechBackendRegistry", () => {
         id: "ya-dummy",
         label: "YA dummy (test only)",
         enabled: true,
+        capabilities: {},
         disabledReason: undefined,
       },
     ]);

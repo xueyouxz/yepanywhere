@@ -99,6 +99,9 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
       hasStoredSpeechMethod,
     ],
   );
+  const serverStreaming =
+    speechMethod !== "browser-native" &&
+    versionInfo?.voiceBackendCapabilities?.[speechMethod]?.streaming === true;
   const viewportWidth = useViewportWidth();
 
   // Show status text on desktop with sufficient width
@@ -131,6 +134,7 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
     speechMethod,
     basePath,
     getTranscriptionContext,
+    serverStreaming,
     onResult: handleResult,
     onInterimResult: handleInterim,
   });

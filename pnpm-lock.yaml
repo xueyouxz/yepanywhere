@@ -258,6 +258,9 @@ importers:
       web-push:
         specifier: ^3.6.7
         version: 3.6.7
+      ws:
+        specifier: ^8.19.0
+        version: 8.19.0
       zod:
         specifier: ^4.3.4
         version: 4.3.6
@@ -301,9 +304,6 @@ importers:
       vitest:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.15)(jsdom@29.0.0)(lightningcss@1.32.0)
-      ws:
-        specifier: ^8.19.0
-        version: 8.19.0
 
   packages/shared:
     dependencies:

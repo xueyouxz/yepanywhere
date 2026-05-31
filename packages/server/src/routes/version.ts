@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { Hono } from "hono";
+import type { SpeechBackendCapabilities } from "../services/voice/SpeechBackend.js";
 import { isNewerSemver } from "../utils/semver.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -127,6 +128,8 @@ export interface VersionInfo {
    * audio to. Browser-native remains client-side and is not listed here.
    */
   voiceBackends?: string[];
+  /** Capability map keyed by server-routed speech backend id. */
+  voiceBackendCapabilities?: Record<string, SpeechBackendCapabilities>;
   /** Device bridge availability and update state. */
   deviceBridgeState?: DeviceBridgeState;
   /** Installed managed bridge binary version when known. */
@@ -171,6 +174,8 @@ export interface VersionRouteOptions {
    * Browser-native is implicit and intentionally not included.
    */
   getEnabledVoiceBackends?: () => string[];
+  /** Returns capabilities keyed by validated backend id. */
+  getVoiceBackendCapabilities?: () => Record<string, SpeechBackendCapabilities>;
 }
 
 export interface ServerCompatibilityInfo {
@@ -227,6 +232,15 @@ export function getEnabledVoiceBackends(
   return options?.getEnabledVoiceBackends?.() ?? [];
 }
 
+export function getVoiceBackendCapabilities(
+  options?: VersionRouteOptions,
+): Record<string, SpeechBackendCapabilities> {
+  if (options?.voiceInputEnabled === false) {
+    return {};
+  }
+  return options?.getVoiceBackendCapabilities?.() ?? {};
+}
+
 export function getServerCompatibilityInfo(
   options?: VersionRouteOptions,
 ): Promise<ServerCompatibilityInfo> {
@@ -254,6 +268,7 @@ export function createVersionRoutes(options?: VersionRouteOptions): Hono {
       ...getCapabilitiesForDeviceBridgeState(deviceBridgeStatus.state, enabled),
     ];
     const voiceBackends = getEnabledVoiceBackends(options);
+    const voiceBackendCapabilities = getVoiceBackendCapabilities(options);
 
     // For dev versions like "v0.1.7-3-g050bfd2", extract base version "v0.1.7"
     // to compare against the update server.
@@ -270,6 +285,7 @@ export function createVersionRoutes(options?: VersionRouteOptions): Hono {
       resumeProtocolVersion: RESUME_PROTOCOL_VERSION,
       capabilities,
       voiceBackends,
+      voiceBackendCapabilities,
       deviceBridgeState: deviceBridgeStatus.state,
       deviceBridgeVersion: deviceBridgeStatus.installedVersion ?? null,
       latestDeviceBridgeVersion: deviceBridgeStatus.latestVersion ?? null,

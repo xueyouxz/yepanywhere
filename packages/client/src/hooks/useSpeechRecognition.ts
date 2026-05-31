@@ -19,6 +19,8 @@ export interface UseSpeechRecognitionOptions {
   basePath?: string;
   /** Context attached to YA-server transcription requests. */
   getTranscriptionContext?: () => SpeechTranscriptionContext | undefined;
+  /** Whether the selected server backend should use YA speech streaming. */
+  serverStreaming?: boolean;
   /** Callback when final transcript is available. */
   onResult?: (
     transcript: string,
@@ -52,6 +54,7 @@ function createProvider(
   events: {
     lang?: string;
     getTranscriptionContext?: () => SpeechTranscriptionContext | undefined;
+    serverStreaming?: boolean;
     onResult?: (
       t: string,
       metadata?: SpeechTranscriptionResultMetadata,
@@ -82,6 +85,7 @@ export function useSpeechRecognition(
     speechMethod,
     basePath = "",
     getTranscriptionContext,
+    serverStreaming,
     onResult,
     onInterimResult,
     onEnd,
@@ -103,6 +107,7 @@ export function useSpeechRecognition(
 
   const speechMethodRef = useRef(speechMethod);
   const basePathRef = useRef(basePath);
+  const serverStreamingRef = useRef(serverStreaming);
 
   const providerRef = useRef<SpeechProvider | null>(null);
   if (providerRef.current === null) {
@@ -112,6 +117,7 @@ export function useSpeechRecognition(
       {
         lang,
         getTranscriptionContext: () => getTranscriptionContextRef.current?.(),
+        serverStreaming: serverStreamingRef.current,
         onResult: (t, metadata) => onResultRef.current?.(t, metadata),
         onInterimResult: (t) => onInterimResultRef.current?.(t),
         onEnd: () => onEndRef.current?.(),
@@ -132,9 +138,15 @@ export function useSpeechRecognition(
 
   // Recreate provider when speechMethod changes (stop the old one first)
   useEffect(() => {
-    if (speechMethod === speechMethodRef.current) return;
+    if (
+      speechMethod === speechMethodRef.current &&
+      serverStreaming === serverStreamingRef.current
+    ) {
+      return;
+    }
     speechMethodRef.current = speechMethod;
     basePathRef.current = basePath;
+    serverStreamingRef.current = serverStreaming;
 
     const old = providerRef.current;
     old?.dispose();
@@ -142,6 +154,7 @@ export function useSpeechRecognition(
     const next = createProvider(speechMethod, basePath, {
       lang,
       getTranscriptionContext: () => getTranscriptionContextRef.current?.(),
+      serverStreaming,
       onResult: (t, metadata) => onResultRef.current?.(t, metadata),
       onInterimResult: (t) => onInterimResultRef.current?.(t),
       onEnd: () => onEndRef.current?.(),
@@ -150,7 +163,7 @@ export function useSpeechRecognition(
     providerRef.current = next;
     setState(next.getState());
     next.subscribe(setState);
-  }, [speechMethod, basePath, lang]);
+  }, [speechMethod, basePath, lang, serverStreaming]);
 
   useEffect(() => {
     return () => {

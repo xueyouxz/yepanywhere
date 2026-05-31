@@ -12,7 +12,11 @@ import {
   type SpeechTranscriptionContext,
 } from "../services/voice/audioRetention.js";
 import type { SpeechBackendRegistry } from "../services/voice/registry.js";
-import type { TranscribeOptions } from "../services/voice/SpeechBackend.js";
+import {
+  supportsStreaming,
+  type SpeechStreamSession,
+  type TranscribeOptions,
+} from "../services/voice/SpeechBackend.js";
 
 const logger = getLogger();
 const DEFAULT_MIME_TYPE = "audio/webm;codecs=opus";
@@ -32,6 +36,9 @@ interface StartMsg {
   backendId?: string;
   mimeType?: string;
   context?: unknown;
+  streaming?: boolean;
+  sampleRate?: number;
+  encoding?: string;
 }
 interface StopMsg {
   type: "stop";
@@ -43,6 +50,8 @@ interface ServerMsg {
   text?: string;
   message?: string;
   transcriptionId?: string;
+  isFinal?: boolean;
+  speechFinal?: boolean;
 }
 
 type SpeechWsData = string | ArrayBuffer | SharedArrayBuffer | Buffer | Blob;
@@ -73,6 +82,10 @@ function parseClientMsg(value: unknown): ClientMsg | null {
         typeof value.backendId === "string" ? value.backendId : undefined,
       mimeType: typeof value.mimeType === "string" ? value.mimeType : undefined,
       context: value.context,
+      streaming: value.streaming === true,
+      sampleRate:
+        typeof value.sampleRate === "number" ? value.sampleRate : undefined,
+      encoding: typeof value.encoding === "string" ? value.encoding : undefined,
     };
   }
   if (value.type === "stop") {
@@ -248,6 +261,65 @@ async function transcribeWithAudit(
   }
 }
 
+async function persistStreamingTranscription(
+  deps: SpeechRouteDeps,
+  input: {
+    requestId: string;
+    backendId: string;
+    audio: Buffer;
+    mimeType: string;
+    transcript: string;
+    startedAt: string;
+    startedAtMs: number;
+    context?: SpeechTranscriptionContext;
+  },
+): Promise<SpeechAudioRetentionResult> {
+  const completedAtMs = Date.now();
+  const completedAt = new Date(completedAtMs).toISOString();
+  const retention = await persistSpeechAudio({
+    dataDir: deps.dataDir,
+    settings: getRetentionSettings(deps),
+    requestId: input.requestId,
+    source: "ws",
+    backendId: input.backendId,
+    mimeType: input.mimeType,
+    audio: input.audio,
+    transcript: input.transcript,
+    startedAt: input.startedAt,
+    completedAt,
+    durationMs: completedAtMs - input.startedAtMs,
+    context: input.context,
+  });
+
+  logger.info(
+    {
+      component: "speech",
+      requestId: input.requestId,
+      source: "ws",
+      mode: "stream",
+      backendId: input.backendId,
+      mimeType: input.mimeType,
+      audioBytes: input.audio.length,
+      context: input.context,
+      durationMs: completedAtMs - input.startedAtMs,
+      transcriptChars: input.transcript.length,
+      transcriptionId: retention.transcriptionId,
+      retention: {
+        stored: retention.stored,
+        reason: retention.reason,
+        audioPath: retention.audioPath,
+        metadataPath: retention.metadataPath,
+        prunedFiles: retention.prunedFiles,
+        prunedBytes: retention.prunedBytes,
+        pruneError: retention.pruneError,
+      },
+    },
+    "Speech streaming transcription completed",
+  );
+
+  return retention;
+}
+
 function parseTranscribeBody(value: unknown):
   | {
       ok: true;
@@ -323,6 +395,11 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
       let mimeType = DEFAULT_MIME_TYPE;
       let backendId: string | null = null;
       let context: SpeechTranscriptionContext | undefined;
+      let streamSession: SpeechStreamSession | null = null;
+      let streamRequestId: string | null = null;
+      let streamStartedAt = "";
+      let streamStartedAtMs = 0;
+      let messageChain = Promise.resolve();
 
       const processMessage = async (
         data: SpeechWsData,
@@ -333,7 +410,12 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
 
         if (!msg) {
           if (normalized.buffer) {
-            chunks.push(normalized.buffer);
+            if (streamSession) {
+              chunks.push(normalized.buffer);
+              streamSession.sendAudio(normalized.buffer);
+            } else {
+              chunks.push(normalized.buffer);
+            }
           } else {
             logger.warn("Unparseable speech WS frame");
           }
@@ -345,6 +427,72 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
           backendId = msg.backendId ?? null;
           mimeType = msg.mimeType ?? DEFAULT_MIME_TYPE;
           context = parseTranscriptionContext(msg.context);
+          streamSession?.close();
+          streamSession = null;
+          streamRequestId = null;
+
+          if (msg.streaming && backendId) {
+            const backend = deps.speechBackendRegistry.getBackend(backendId);
+            if (!backend) {
+              send(ws, { type: "error", message: "No backend selected" });
+              return;
+            }
+            if (!supportsStreaming(backend)) {
+              send(ws, {
+                type: "error",
+                message: `Backend does not support streaming: ${backendId}`,
+              });
+              return;
+            }
+            const sampleRate = msg.sampleRate ?? 16_000;
+            const encoding = msg.encoding === "pcm" ? "pcm" : null;
+            if (!encoding) {
+              send(ws, {
+                type: "error",
+                message: "Streaming speech requires pcm encoding",
+              });
+              return;
+            }
+
+            streamRequestId = randomUUID();
+            streamStartedAtMs = Date.now();
+            streamStartedAt = new Date(streamStartedAtMs).toISOString();
+            logger.info(
+              {
+                component: "speech",
+                requestId: streamRequestId,
+                source: "ws",
+                mode: "stream",
+                backendId,
+                mimeType,
+                sampleRate,
+                encoding,
+                context,
+              },
+              "Speech streaming transcription started",
+            );
+
+            streamSession = await backend.stream(
+              {
+                mimeType,
+                sampleRate,
+                encoding,
+                interimResults: true,
+                endpointingMs: 250,
+                language: "en",
+              },
+              {
+                onPartial: (event) => {
+                  send(ws, {
+                    type: "interim",
+                    text: event.text,
+                    isFinal: event.isFinal,
+                    speechFinal: event.speechFinal,
+                  });
+                },
+              },
+            );
+          }
           return;
         }
 
@@ -353,6 +501,47 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
 
         if (!backendId) {
           send(ws, { type: "error", message: "No backend selected" });
+          return;
+        }
+
+        if (streamSession && streamRequestId) {
+          try {
+            const done = await streamSession.finish();
+            const retention = await persistStreamingTranscription(deps, {
+              requestId: streamRequestId,
+              backendId,
+              audio,
+              mimeType,
+              transcript: done.text,
+              startedAt: streamStartedAt,
+              startedAtMs: streamStartedAtMs,
+              context,
+            });
+            send(ws, {
+              type: "final",
+              text: done.text,
+              transcriptionId: retention.transcriptionId,
+            });
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            logger.error(
+              {
+                component: "speech",
+                requestId: streamRequestId,
+                source: "ws",
+                mode: "stream",
+                backendId,
+                audioBytes: audio.length,
+                context,
+                err,
+              },
+              "Speech streaming transcription failed",
+            );
+            send(ws, { type: "error", message });
+          } finally {
+            streamSession = null;
+            streamRequestId = null;
+          }
           return;
         }
 
@@ -381,10 +570,21 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
         },
 
         onMessage(evt: MessageEvent, ws: WSContext) {
-          void processMessage(evt.data as SpeechWsData, ws);
+          messageChain = messageChain
+            .then(() => processMessage(evt.data as SpeechWsData, ws))
+            .catch((err: unknown) => {
+              const message = err instanceof Error ? err.message : String(err);
+              logger.error(
+                { component: "speech", err },
+                "Speech WS message handling failed",
+              );
+              send(ws, { type: "error", message });
+            });
         },
 
         onClose() {
+          streamSession?.close();
+          streamSession = null;
           chunks.length = 0;
         },
       } satisfies WSEvents;

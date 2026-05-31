@@ -62,6 +62,8 @@ export interface SpeechProviderOptions extends SpeechProviderEvents {
   lang?: string;
   /** Context attached to YA-server transcription requests. */
   getTranscriptionContext?: () => SpeechTranscriptionContext | undefined;
+  /** Use the YA speech WebSocket streaming path when the backend supports it. */
+  serverStreaming?: boolean;
 }
 
 /** Subscriber callback receiving the latest state snapshot. */

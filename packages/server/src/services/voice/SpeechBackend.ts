@@ -5,9 +5,15 @@
  *
  * Backends are validated at startup; only those that report `enabled`
  * are advertised to clients via the version capability list. Speech
- * routes pass complete utterance audio buffers into this interface; live
- * streaming partials remain outside this contract.
+ * routes pass complete utterance audio buffers into this interface. Backends
+ * that can accept real-time audio additionally implement the streaming
+ * extension below.
  */
+
+export interface SpeechBackendCapabilities {
+  /** Backend can accept streaming raw PCM audio and emit interim/final text. */
+  streaming?: boolean;
+}
 
 export interface SpeechBackendInfo {
   /** Stable identifier shared with the client catalog (e.g. "ya-dummy"). */
@@ -16,6 +22,8 @@ export interface SpeechBackendInfo {
   label: string;
   /** True when this backend is usable right now (credentials validated, etc.). */
   enabled: boolean;
+  /** Runtime capabilities available for this backend. */
+  capabilities?: SpeechBackendCapabilities;
   /** Optional reason this backend is not enabled (for /api/version diagnostics). */
   disabledReason?: string;
 }
@@ -32,6 +40,7 @@ export interface TranscribeOptions {
 export interface SpeechBackend {
   readonly id: string;
   readonly label: string;
+  readonly capabilities?: SpeechBackendCapabilities;
   /**
    * Validate credentials/connectivity. Called once at server startup.
    * Implementations should resolve quickly; long-running setup belongs
@@ -43,4 +52,55 @@ export interface SpeechBackend {
    * batch). Streaming partials are a follow-up.
    */
   transcribe(audio: Buffer, options?: TranscribeOptions): Promise<string>;
+}
+
+export interface SpeechStreamOptions extends TranscribeOptions {
+  /** Raw audio sample rate in Hz. */
+  sampleRate: number;
+  /** Raw audio encoding. xAI currently requires signed PCM16 little-endian. */
+  encoding: "pcm";
+  /** Whether the backend should emit mutable interim transcripts. */
+  interimResults?: boolean;
+  /** Silence duration before utterance-final events, in milliseconds. */
+  endpointingMs?: number;
+  /** Language hint when supported by the backend. */
+  language?: string;
+}
+
+export interface SpeechStreamPartial {
+  text: string;
+  isFinal?: boolean;
+  speechFinal?: boolean;
+}
+
+export interface SpeechStreamDone {
+  text: string;
+  duration?: number;
+}
+
+export interface SpeechStreamHandlers {
+  onPartial?: (event: SpeechStreamPartial) => void;
+}
+
+export interface SpeechStreamSession {
+  sendAudio(audio: Buffer): void;
+  finish(): Promise<SpeechStreamDone>;
+  close(): void;
+}
+
+export interface StreamingSpeechBackend extends SpeechBackend {
+  readonly capabilities: SpeechBackendCapabilities & { streaming: true };
+  stream(
+    options: SpeechStreamOptions,
+    handlers?: SpeechStreamHandlers,
+  ): Promise<SpeechStreamSession>;
+}
+
+export function supportsStreaming(
+  backend: SpeechBackend,
+): backend is StreamingSpeechBackend {
+  return (
+    backend.capabilities?.streaming === true &&
+    typeof (backend as { stream?: unknown }).stream === "function"
+  );
 }

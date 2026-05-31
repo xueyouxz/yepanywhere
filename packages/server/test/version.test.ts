@@ -201,12 +201,32 @@ describe("GET /version", () => {
     const { createVersionRoutes } = await importVersion();
     const routes = createVersionRoutes({
       getEnabledVoiceBackends: () => ["ya-dummy"],
+      getVoiceBackendCapabilities: () => ({ "ya-dummy": {} }),
     });
     const res = await routes.request("/");
     const json = await res.json();
 
     expect(json.capabilities).toContain("voiceInput");
     expect(json.voiceBackends).toEqual(["ya-dummy"]);
+    expect(json.voiceBackendCapabilities).toEqual({ "ya-dummy": {} });
+  });
+
+  it("advertises streaming voice backend capabilities", async () => {
+    mockFetch(() => new Response(null, { status: 204 }));
+
+    const { createVersionRoutes } = await importVersion();
+    const routes = createVersionRoutes({
+      getEnabledVoiceBackends: () => ["ya-grok"],
+      getVoiceBackendCapabilities: () => ({
+        "ya-grok": { streaming: true },
+      }),
+    });
+    const res = await routes.request("/");
+    const json = await res.json();
+
+    expect(json.voiceBackendCapabilities).toEqual({
+      "ya-grok": { streaming: true },
+    });
   });
 
   it("does not advertise voice backends when voice input is disabled", async () => {
@@ -222,6 +242,7 @@ describe("GET /version", () => {
 
     expect(json.capabilities).not.toContain("voiceInput");
     expect(json.voiceBackends).toEqual([]);
+    expect(json.voiceBackendCapabilities).toEqual({});
   });
 
   it("reports update-available for stale bridge binaries", async () => {

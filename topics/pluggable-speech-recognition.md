@@ -48,20 +48,24 @@ The browser-native path uses `SpeechRecognition` /
 `webkitSpeechRecognition`. YA receives only transcript text and appends it to
 the composer as if the user had typed it.
 
-The YA-server path captures audio in the browser with `MediaRecorder` and has
-the server dispatch the utterance to the selected backend. The first usable
-shape is press-to-talk batch transcription: chunks are buffered until stop,
-then the backend returns a final transcript. The production client submits the
-complete utterance through YA's ordinary API transport so local, hosted, and
-relay clients share the same request path. The `/api/speech/ws` route remains
-available for direct/local tests and future streaming partials.
+The YA-server path captures audio in the browser and has the server dispatch it
+to the selected backend. Backends advertise optional capabilities alongside
+their ids; `streaming: true` means the client may use YA's streaming speech
+WebSocket instead of the batch POST path. Batch transcription records
+speech-appropriate compressed audio with `MediaRecorder`, buffers until stop,
+then sends the complete utterance through YA's ordinary API transport so local,
+hosted, and relay clients share the same request path. Streaming transcription
+captures Web Audio samples, converts them to raw PCM16 little-endian at a
+backend-supported sample rate, and sends binary frames to `/api/speech/ws`.
 
 Backends should implement a common `SpeechBackend` contract:
 
 - validate credentials or local runtime readiness at startup;
-- advertise only validated ids;
+- advertise only validated ids plus their capabilities;
 - transcribe a complete utterance with optional `mimeType`, `prompt`, and
   `keyterms` options;
+- optionally open a streaming session that accepts raw audio frames and emits
+  interim/final transcript events;
 - keep expensive local models warm rather than loading per utterance.
 
 ## Implemented
@@ -74,6 +78,11 @@ Backends should implement a common `SpeechBackend` contract:
   complete utterance, and posts it to `/api/speech/transcribe` through the
   shared client API helper. Remote/SecureConnection clients therefore use the
   same transport as ordinary YA API calls.
+- When the selected server backend advertises `streaming: true`,
+  `YaServerProvider` captures microphone audio through Web Audio, downsamples it
+  to 24 kHz signed PCM16 little-endian, and sends binary frames to
+  `/api/speech/ws`. Interim events update the composer; the final event carries
+  the retained transcription id.
 - `useSpeechRecognition` selects browser-native when the method is
   `browser-native`; any other method constructs `YaServerProvider` with the
   advertised backend id unchanged.
@@ -93,20 +102,22 @@ Backends should implement a common `SpeechBackend` contract:
   `WHISPER_DEVICE`, and `WHISPER_COMPUTE_TYPE`.
 - `SpeechBackendRegistry` supports `ya-dummy`, `ya-deepgram`,
   `ya-grok`, and `ya-whisper`; it validates configured backends and
-  exposes enabled ids to `/api/version`.
+  exposes enabled ids plus capability metadata to `/api/version`.
 - `ya-grok` posts batch multipart audio to xAI's `POST /v1/stt`
-  endpoint. Both cloud backends auto-enable when their YA-scoped key is
-  present (`YA_stt__XAI_API_KEY` for `ya-grok`, `YA_stt__DEEPGRAM_API_KEY`
-  for `ya-deepgram`) because providing a metered key is the operator's
-  explicit opt-in.
+  endpoint and implements xAI's `wss://api.x.ai/v1/stt` streaming endpoint.
+  Both cloud backends auto-enable when their YA-scoped key is present
+  (`YA_stt__XAI_API_KEY` for `ya-grok`, `YA_stt__DEEPGRAM_API_KEY` for
+  `ya-deepgram`) because providing a metered key is the operator's explicit
+  opt-in. `ya-grok` is currently the only backend advertising streaming.
 - Deepgram and local faster-whisper backend implementations exist. The local
   Whisper path uses a warm Python worker subprocess around `faster_whisper`.
 - The normal `index.ts` runtime mounts `/api/speech` after
   `createNodeWebSocket()` creates the shared `upgradeWebSocket` helper.
 - `createSpeechRoutes` implements `POST /api/speech/transcribe` for batch
-  transcription and `GET /api/speech/ws` for buffered WebSocket transcription.
-  The WS route accepts JSON control frames even when the unified Node WS path
-  presents text frames as `Buffer`s.
+  transcription and `GET /api/speech/ws` for both buffered WebSocket
+  transcription and streaming transcription to capable backends. The WS route
+  accepts JSON control frames even when the unified Node WS path presents text
+  frames as `Buffer`s.
 - Tests cover registry defaults, explicit backend advertisement, disabled
   voice input, `/api/version.voiceBackends`, HTTP batch transcription, and the
   dummy backend through the mounted WebSocket route.
@@ -124,11 +135,9 @@ client through `fetchJSON("/speech/transcribe", ...)`.
   `voiceInput` but `voiceBackends: []`, causing the UI to expose only
   browser-native recognition. Seeing device-native speech on mobile is
   therefore expected in that bare runtime.
-- YA-server recognition is batch-final only in the production client. There are
-  no server-side interim transcripts yet.
 - The `/api/speech/ws` route is still a direct WebSocket endpoint for local
-  use and future streaming work. It is not itself multiplexed through the
-  secure remote transport; the batch POST path is the remote-compatible path.
+  use and Grok streaming. It is not itself multiplexed through the secure
+  remote transport; the batch POST path remains the remote-compatible path.
 - Previously selected server methods are reconciled against current
   `voiceBackends` before the mic button is used. If an explicit server backend
   disappears, the current resolver falls back to browser-native rather than
@@ -144,8 +153,11 @@ client through `fetchJSON("/speech/transcribe", ...)`.
 - Backend biasing is not wired. There is no `buildBiasingContext()` helper
   feeding Whisper `initial_prompt` or Deepgram `keyterm` values from project
   and session context.
-- Deepgram streaming partials are not implemented. The current route batches
-  audio until stop and calls `transcribe()`.
+- Deepgram streaming partials are not implemented. Deepgram, Whisper, and dummy
+  backends still use batch transcription unless a future backend explicitly
+  implements the streaming extension.
+- Grok streaming has focused route tests, but it still needs a live
+  browser-plus-xAI smoke test with a real microphone or captured audio source.
 - Audio-as-modality forwarding to providers that natively accept audio is not
   implemented. All current YA-server backend code is transcript-first.
 
@@ -160,9 +172,9 @@ client through `fetchJSON("/speech/transcribe", ...)`.
    may use the default eight-week / 400 MB contract without exposing controls.
 4. Add `buildBiasingContext(session, project)` and thread its output into
    Deepgram keyterms and Whisper initial prompts.
-5. After batch transcription works, add backend-specific streaming partials
-   where the backend supports them. Deepgram is the first candidate; local
-   Whisper needs chunking or VAD and should remain a follow-up.
+5. Add backend-specific streaming partials beyond Grok where the backend
+   supports them. Deepgram is the next candidate; local Whisper needs chunking
+   or VAD and should remain a follow-up.
 6. Decide whether future streaming audio should use the existing direct
    `/api/speech/ws` endpoint only for local clients or gain an explicit secure
    remote substream.
@@ -189,6 +201,10 @@ client through `fetchJSON("/speech/transcribe", ...)`.
   `/api/version.voiceBackends` includes `ya-grok`, and a short batch
   transcription through `/api/speech/transcribe` returns text or a provider
   error from xAI.
+- With `YA_stt__XAI_API_KEY` exported in the YA server environment,
+  `/api/version.voiceBackendCapabilities["ya-grok"].streaming` is true, the
+  client uses `/api/speech/ws` for Grok STT, interim events update the composer,
+  and the final event includes the retained transcription id.
 - With both `ya-grok` and `ya-deepgram` advertised and no explicit stored
   speech method, the client selects `ya-grok` as the effective mic backend.
 - A successful server-routed transcription emits positive-path logs naming the

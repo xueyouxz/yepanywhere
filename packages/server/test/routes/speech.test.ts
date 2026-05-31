@@ -10,19 +10,72 @@ import { attachUnifiedUpgradeHandler } from "../../src/frontend/index.js";
 import { createSpeechRoutes } from "../../src/routes/speech.js";
 import { DUMMY_TRANSCRIPT } from "../../src/services/voice/dummyBackend.js";
 import { initSpeechBackendRegistry } from "../../src/services/voice/registry.js";
+import { SpeechBackendRegistry } from "../../src/services/voice/registry.js";
+import type {
+  SpeechStreamHandlers,
+  SpeechStreamOptions,
+  SpeechStreamSession,
+  StreamingSpeechBackend,
+  TranscribeOptions,
+} from "../../src/services/voice/SpeechBackend.js";
 
-async function createSpeechApp(dataDir?: string) {
+async function createSpeechApp(
+  dataDir?: string,
+  speechBackendRegistry?: SpeechBackendRegistry,
+) {
   const app = new Hono();
   const { upgradeWebSocket, wss } = createNodeWebSocket({ app });
-  const speechBackendRegistry = await initSpeechBackendRegistry({
-    voiceInputEnabled: true,
-    voiceBackends: ["ya-dummy"],
-  });
+  const registry =
+    speechBackendRegistry ??
+    (await initSpeechBackendRegistry({
+      voiceInputEnabled: true,
+      voiceBackends: ["ya-dummy"],
+    }));
   app.route(
     "/api/speech",
-    createSpeechRoutes({ speechBackendRegistry, upgradeWebSocket, dataDir }),
+    createSpeechRoutes({
+      speechBackendRegistry: registry,
+      upgradeWebSocket,
+      dataDir,
+    }),
   );
   return { app, wss };
+}
+
+class StreamingTestBackend implements StreamingSpeechBackend {
+  readonly id = "ya-streaming-test";
+  readonly label = "Streaming test";
+  readonly capabilities = { streaming: true } as const;
+  readonly chunks: Buffer[] = [];
+  options: SpeechStreamOptions | null = null;
+
+  async validate(): Promise<{ ok: true }> {
+    return { ok: true };
+  }
+
+  async transcribe(
+    _audio: Buffer,
+    _options?: TranscribeOptions,
+  ): Promise<string> {
+    throw new Error("batch transcription should not be used");
+  }
+
+  async stream(
+    options: SpeechStreamOptions,
+    handlers: SpeechStreamHandlers = {},
+  ): Promise<SpeechStreamSession> {
+    this.options = options;
+    return {
+      sendAudio: (audio) => {
+        this.chunks.push(audio);
+      },
+      finish: async () => {
+        handlers.onPartial?.({ text: "hel", isFinal: false });
+        return { text: `streamed ${Buffer.concat(this.chunks).length} bytes` };
+      },
+      close: () => {},
+    };
+  }
 }
 
 describe("speech routes", () => {
@@ -143,6 +196,58 @@ describe("speech routes", () => {
         text: DUMMY_TRANSCRIPT,
         transcriptionId: expect.any(String),
       });
+    } finally {
+      ws.close();
+    }
+  });
+
+  it("streams WebSocket audio when the backend advertises streaming", async () => {
+    const registry = new SpeechBackendRegistry();
+    const backend = new StreamingTestBackend();
+    await registry.register(backend);
+    const { app, wss } = await createSpeechApp(undefined, registry);
+    let serverPort = 0;
+    server = serve({ fetch: app.fetch, port: 0 }, (info) => {
+      serverPort = info.port;
+    });
+    attachUnifiedUpgradeHandler(server, {
+      frontendProxy: undefined,
+      isApiPath: (urlPath) => urlPath.startsWith("/api"),
+      app,
+      wss,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const ws = await connectWebSocket(
+      `ws://127.0.0.1:${serverPort}/api/speech/ws`,
+    );
+    try {
+      expect(await ws.nextJson()).toEqual({ type: "ready" });
+
+      ws.send(
+        JSON.stringify({
+          type: "start",
+          backendId: backend.id,
+          mimeType: "audio/pcm;rate=24000;encoding=s16le",
+          streaming: true,
+          sampleRate: 24000,
+          encoding: "pcm",
+        }),
+      );
+      ws.send(Buffer.from("pcm"));
+      ws.send(JSON.stringify({ type: "stop" }));
+
+      expect(await ws.nextJson()).toEqual({
+        type: "interim",
+        text: "hel",
+        isFinal: false,
+      });
+      expect(await ws.nextJson()).toEqual({
+        type: "final",
+        text: "streamed 3 bytes",
+        transcriptionId: expect.any(String),
+      });
+      expect(backend.options?.sampleRate).toBe(24000);
     } finally {
       ws.close();
     }

@@ -98,6 +98,9 @@ describe("initSpeechBackendRegistry cloud auto-enable", () => {
       xaiSttApiKey: "xai-key",
     });
     expect(registry.enabledIds()).toContain("ya-grok");
+    expect(registry.enabledCapabilities()["ya-grok"]).toEqual({
+      streaming: true,
+    });
   });
 
   it("auto-enables ya-deepgram when the key is present, without YA_VOICE_BACKENDS", async () => {
