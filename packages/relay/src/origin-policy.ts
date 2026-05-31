@@ -208,3 +208,17 @@ export function isRelayOriginAllowed(
     );
   });
 }
+
+export function getRelayCorsAllowOrigin(
+  origin: string,
+  policy: RelayAllowedOriginPolicy,
+): string | null {
+  const trimmedOrigin = origin.trim();
+  if (!trimmedOrigin) {
+    return null;
+  }
+  if (policy.allowAll) {
+    return "*";
+  }
+  return isRelayOriginAllowed(trimmedOrigin, policy) ? trimmedOrigin : null;
+}

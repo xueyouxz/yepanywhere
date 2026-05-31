@@ -6,6 +6,9 @@ Progress:
 
 - [x] 2026-05-31: Added relay allowed-origin parsing/matching and focused
   unit tests. The policy is loaded into relay config, but not enforced yet.
+- [x] 2026-05-31: Enforced the relay allowed-origin policy for HTTP CORS and
+  `/ws` upgrades. Disallowed browser websocket origins now receive 403 before
+  `handleUpgrade`; disallowed HTTP origins receive no CORS allow-origin header.
 
 ## Context
 
@@ -180,7 +183,7 @@ long-term contract for production routing.
 ## Suggested Implementation Order
 
 1. [x] Add and test relay origin parsing/matching.
-2. Enforce relay HTTP CORS and WebSocket upgrade origin checks.
+2. [x] Enforce relay HTTP CORS and WebSocket upgrade origin checks.
 3. Add server-side public-share settings and API enforcement.
 4. Add Advanced / Experimental settings UI for public share opt-in and viewer
    origin.

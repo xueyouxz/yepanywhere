@@ -19,7 +19,11 @@ import type { RelayConfig } from "./config.js";
 import { ConnectionManager } from "./connections.js";
 import { createDb, createTestDb } from "./db.js";
 import type { LogLevel } from "./logger.js";
-import { parseRelayAllowedOrigins } from "./origin-policy.js";
+import {
+  getRelayCorsAllowOrigin,
+  isRelayOriginAllowed,
+  parseRelayAllowedOrigins,
+} from "./origin-policy.js";
 import { UsernameRegistry } from "./registry.js";
 import { generateRelayStatsHtml } from "./stats.js";
 import { createRelayTelemetryRecorder } from "./telemetry.js";
@@ -155,6 +159,12 @@ export async function createRelayServer(
           },
         }),
   });
+  if (config.allowedOrigins.invalidEntries.length > 0) {
+    logger.warn(
+      { invalidAllowedOrigins: config.allowedOrigins.invalidEntries },
+      "Ignoring invalid relay allowed-origin entries",
+    );
+  }
 
   // Initialize database
   const db = options.inMemoryDb ? createTestDb() : createDb(config.dataDir);
@@ -189,7 +199,8 @@ export async function createRelayServer(
   app.use(
     "*",
     cors({
-      origin: "*",
+      origin: (origin) =>
+        getRelayCorsAllowOrigin(origin, config.allowedOrigins),
       allowMethods: ["GET", "POST", "OPTIONS"],
       allowHeaders: ["Content-Type"],
     }),
@@ -291,6 +302,16 @@ export async function createRelayServer(
     // Only handle /ws path
     if (!urlPath.startsWith("/ws")) {
       socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    const origin = request.headers.origin;
+    if (!isRelayOriginAllowed(origin, config.allowedOrigins)) {
+      logger.info(
+        { origin: origin ?? null, urlPath },
+        "Rejected relay websocket origin",
+      );
+      socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
       socket.destroy();
       return;
     }

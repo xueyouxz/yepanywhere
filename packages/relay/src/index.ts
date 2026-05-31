@@ -9,6 +9,10 @@ import { loadConfig } from "./config.js";
 import { ConnectionManager } from "./connections.js";
 import { createDb } from "./db.js";
 import { createLogger } from "./logger.js";
+import {
+  getRelayCorsAllowOrigin,
+  isRelayOriginAllowed,
+} from "./origin-policy.js";
 import { UsernameRegistry } from "./registry.js";
 import { generateRelayStatsHtml } from "./stats.js";
 import { createRelayTelemetryRecorder } from "./telemetry.js";
@@ -33,6 +37,12 @@ logger.info(
   },
   "Starting relay server",
 );
+if (config.allowedOrigins.invalidEntries.length > 0) {
+  logger.warn(
+    { invalidAllowedOrigins: config.allowedOrigins.invalidEntries },
+    "Ignoring invalid relay allowed-origin entries",
+  );
+}
 
 // Initialize database and registry
 const db = createDb(config.dataDir);
@@ -65,7 +75,7 @@ const app = new Hono();
 app.use(
   "*",
   cors({
-    origin: "*",
+    origin: (origin) => getRelayCorsAllowOrigin(origin, config.allowedOrigins),
     allowMethods: ["GET", "POST", "OPTIONS"],
     allowHeaders: ["Content-Type"],
   }),
@@ -117,9 +127,15 @@ app.get("/online/:username", (c) => {
 });
 
 // Create WebSocket handler
-const wsHandler = createWsHandler(connectionManager, config, logger, telemetry, {
-  onProtocolAccepted: (ws) => unauthenticatedLimiter.release(ws),
-});
+const wsHandler = createWsHandler(
+  connectionManager,
+  config,
+  logger,
+  telemetry,
+  {
+    onProtocolAccepted: (ws) => unauthenticatedLimiter.release(ws),
+  },
+);
 
 // Create HTTP server with Hono
 const requestListener = getRequestListener(app.fetch);
@@ -163,6 +179,16 @@ server.on("upgrade", (request, socket, head) => {
   // Only handle /ws path
   if (!urlPath.startsWith("/ws")) {
     socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+    socket.destroy();
+    return;
+  }
+  const origin = request.headers.origin;
+  if (!isRelayOriginAllowed(origin, config.allowedOrigins)) {
+    logger.info(
+      { origin: origin ?? null, urlPath },
+      "Rejected relay websocket origin",
+    );
+    socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
     socket.destroy();
     return;
   }
