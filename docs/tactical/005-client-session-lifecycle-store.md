@@ -32,6 +32,20 @@ The live sidebar stale-activity repro documented in
 The server was consistent: Claude owned an idle reusable process, not active
 work. The client sidebar cache was stale.
 
+There is a related but separate sidebar staleness class around collection
+membership and list projections. The sidebar currently keeps separate
+`useGlobalSessions` caches for the unfiltered recent/older list and the
+`starred: true` list. A star action can update local item state, then the
+metadata event removes the row from the recent projection while the starred
+projection never adds it because that hook only patches rows it already has.
+The visible result is that a starred session can disappear until a full refresh.
+Similarly, newly created sessions can be delayed or missed when creation events,
+initial list fetches, duplicate-title hiding, and reconnect refreshes race.
+
+That second class is not primarily a lifecycle-state bug. It is a
+collection/index consistency bug: "which sessions should this list contain?"
+is being derived independently by multiple hook instances.
+
 ## Goal
 
 Introduce a small shared client-side session lifecycle store so activity
@@ -165,6 +179,39 @@ Provide small selectors that encode UI semantics once:
 List components can still render their existing row data, but activity badges
 should use the lifecycle selector result as an overlay.
 
+## Related Sidebar Collection Staleness
+
+The lifecycle store is intentionally an overlay, not the canonical owner of
+sidebar row membership. It can fix stale badges such as an idle session still
+showing a spinner, but it should not be expected to fix every sidebar
+disappearance or delayed row.
+
+Observed/likely collection staleness cases:
+
+- starring a session from the sidebar can move it out of the recent/older
+  projection before the separate starred projection has fetched or inserted it;
+- unstarring has the inverse risk for starred-only rows;
+- archiving/unarchiving has similar membership implications;
+- newly created sessions depend on `session-created` events and/or a later
+  `/api/sessions` snapshot reaching every mounted list projection;
+- duplicate-title hiding can make a newly created or newly updated row appear
+  absent even when it is technically present in the cache.
+
+These should be handled as a follow-on "session collection store" or
+"global-session index" slice, not by overloading lifecycle state. That later
+store would own normalized session rows plus query projections such as:
+
+- all non-archived recent sessions;
+- starred sessions;
+- archived sessions;
+- search/filter results;
+- sidebar recent-day and older buckets.
+
+It would receive the same event and snapshot inputs, but its invariant would be
+membership and ordering rather than activity semantics. Inbox tier membership
+is adjacent but should remain server-owned at first because it is a ranked
+product surface, not just a local projection of `/api/sessions`.
+
 ## First Slice
 
 Keep the first implementation narrow:
@@ -179,12 +226,16 @@ Keep the first implementation narrow:
    depending on inbox active count.
 6. Feed Agents page snapshots into the store, but keep the Agents page itself
    using `/api/processes` as its source of process inventory.
+7. Do not solve starred/recent/sidebar membership in this slice, except where
+   lifecycle selectors can make existing rows display correct activity.
 
 This should make the current stale sidebar class harder to reproduce without
 forcing a full session-data migration.
 
 ## Later Slices
 
+- Add a normalized global-session collection store for sidebar/session-list
+  membership, including starred/recent/archived projection consistency.
 - Recent/session-title dropdown indicators read from the lifecycle store.
 - Session detail header/process badges reconcile their local stream state into
   the same store.
@@ -201,6 +252,9 @@ forcing a full session-data migration.
 - Do not replace `activityBus`; it remains the stream transport.
 - Do not move full global session rows, inbox tiers, or process inventory into
   the store yet.
+- Do not make the lifecycle store responsible for sidebar list membership,
+  starred projections, archive projections, pagination, search, or duplicate
+  hiding.
 - Do not add server polling, new watchers, or per-session loops.
 - Do not reinterpret `owner: self` as active work.
 - Do not change Claude idle process ownership or provider lifecycle behavior.
@@ -221,4 +275,5 @@ forcing a full session-data migration.
   the same session state.
 - No new recurring client/server work is created when the relevant UI surfaces
   unmount.
-
+- Starred/recent/sidebar membership bugs are tracked separately and not masked
+  as lifecycle-store regressions.
