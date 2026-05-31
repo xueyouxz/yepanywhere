@@ -8,6 +8,9 @@ Progress:
   client-state slice around activity stream consistency.
 - [x] 2026-05-31: Added the first pure reducer/selector module with focused
   tests for lifecycle semantics, snapshot/event races, and strict idle.
+- [x] 2026-05-31: Added a lazy `useSyncExternalStore` shell that subscribes
+  to activityBus events, exposes lifecycle selector hooks, and accepts API
+  snapshot reports without wiring UI consumers yet.
 
 ## Context
 
@@ -229,7 +232,8 @@ Keep the first implementation narrow:
 1. Add the lifecycle reducer/selectors and pure tests. Done in the first
    slice as `packages/client/src/lib/sessionLifecycleStore.ts`.
 2. Add the external-store shell and subscribe it to `activityBus` events.
-3. Add snapshot reporter functions, but wire only the existing
+   Done as `packages/client/src/lib/sessionLifecycleExternalStore.ts`.
+3. Wire snapshot reporter functions into the existing
    `useGlobalSessions`, `InboxContext`, and `useProcesses` fetch paths first.
 4. Move compact sidebar/global-session activity indicators to the lifecycle
    selectors.
