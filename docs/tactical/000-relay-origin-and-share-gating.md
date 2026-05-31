@@ -14,9 +14,9 @@ Progress:
   public surface now stays read-only.
 - [x] 2026-05-31: Added a default-off `publicSharesEnabled` server setting,
   enforced it for new share creation, and added an Advanced settings opt-in.
-  Existing public links and authenticated owner management routes remain usable
-  so links can still be frozen, disconnected, or revoked after disabling
-  creation.
+- [x] 2026-05-31: Tightened the setting into a kill switch. When disabled,
+  public share controls are hidden, public secret links return not found, and
+  stored shares are revoked when the setting is turned off.
 
 ## Context
 
@@ -112,10 +112,9 @@ long-term contract for production routing.
   consider renaming it to a base-URL variable.
 - Enforce `publicSharesEnabled` server-side:
   - block `POST /api/public-shares`;
-  - decide whether public reads for already-created links remain available or
-    are disabled when the setting is off;
-  - keep revocation/management endpoints usable so users can clean up existing
-    links.
+  - return not found for public reads when the setting is off;
+  - revoke stored shares when the setting is turned off so links do not come
+    back if the feature is re-enabled.
 - Update API responses so the client can distinguish:
   - feature disabled;
   - relay not configured;
@@ -172,9 +171,9 @@ long-term contract for production routing.
 
 ## Open Questions
 
-- Decision: when `publicSharesEnabled` is turned off, only new share creation is
-  blocked. Existing public links keep resolving until revoked, and owner
-  management remains available so users can clean them up.
+- Decision: when `publicSharesEnabled` is turned off, public share UI is hidden
+  and current public links are invalidated. Disabling the setting revokes stored
+  shares instead of keeping management UI around for a disabled feature.
 - Should live public shares require a separate opt-in from frozen snapshot
   shares?
 - Should `ya.graehl.org` remain in the production relay origin allowlist after
@@ -195,7 +194,7 @@ long-term contract for production routing.
 2. [x] Enforce relay HTTP CORS and WebSocket upgrade origin checks.
 3. [x] Add server-side `publicSharesEnabled` setting and creation enforcement.
 4. Add Advanced / Experimental settings UI for viewer origin configuration.
-5. [x] Gate share creation controls in session/list UI.
+5. [x] Gate share controls and status polling in session/list UI.
 6. Gate heartbeat/nudge controls behind the same advanced visibility model.
 7. Update docs and user-facing copy.
 

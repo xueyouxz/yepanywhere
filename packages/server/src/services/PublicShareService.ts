@@ -339,6 +339,18 @@ export class PublicShareService {
     };
   }
 
+  async revokeAllShares(): Promise<number> {
+    const revokedCount = this.state.shares.length;
+    if (revokedCount === 0) {
+      return 0;
+    }
+    this.state = { shares: [] };
+    this.viewerHeartbeats.clear();
+    this.viewerAccesses.clear();
+    await this.save();
+    return revokedCount;
+  }
+
   async freezeSessionLiveShares(
     projectId: UrlProjectId,
     sessionId: string,

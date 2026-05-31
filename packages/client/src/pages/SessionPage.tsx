@@ -1189,8 +1189,7 @@ function SessionPageContent({
     useState<ModalAnchorRect | null>(null);
   const [publicShareStatus, setPublicShareStatus] =
     useState<PublicSessionShareSessionStatusResponse | null>(null);
-  const hasActivePublicShares = (publicShareStatus?.activeCount ?? 0) > 0;
-  const showPublicShareControls = publicSharesEnabled || hasActivePublicShares;
+  const showPublicShareControls = publicSharesEnabled;
   const [pendingElsewhereDismissed, setPendingElsewhereDismissed] =
     useState(false);
 
@@ -3134,6 +3133,12 @@ function SessionPageContent({
     let timer: ReturnType<typeof setTimeout> | null = null;
     setPublicShareStatus(null);
 
+    if (!publicSharesEnabled) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const refreshPublicShareStatus = async () => {
       try {
         const nextStatus = await api.getPublicSessionShareStatus(
@@ -3165,7 +3170,7 @@ function SessionPageContent({
         clearTimeout(timer);
       }
     };
-  }, [actualSessionId, projectId]);
+  }, [actualSessionId, projectId, publicSharesEnabled]);
 
   const handleToggleHeartbeat = useCallback(async () => {
     const previousEnabled = heartbeatTurnsEnabled;

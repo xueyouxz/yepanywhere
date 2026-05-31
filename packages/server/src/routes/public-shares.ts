@@ -369,6 +369,9 @@ export function createPublicSharePublicRoutes(
   const app = new Hono();
 
   app.get("/:secret", async (c) => {
+    if (!(deps.getPublicSharesEnabled?.() ?? false)) {
+      return notFound(c);
+    }
     const secret = c.req.param("secret");
     const viewerId = c.req.query("viewerId");
     const afterMessageId = c.req.query("afterMessageId");

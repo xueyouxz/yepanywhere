@@ -28,6 +28,7 @@ import {
   CODEX_UPDATE_POLICIES,
   DEFAULT_SERVER_SETTINGS,
 } from "../services/ServerSettingsService.js";
+import type { PublicShareService } from "../services/PublicShareService.js";
 import {
   isValidSshHostAlias,
   normalizeSshHostAlias,
@@ -51,6 +52,8 @@ export interface SettingsRoutesDeps {
   onOllamaSystemPromptChanged?: (prompt: string | undefined) => void;
   /** Callback to apply Ollama full system prompt toggle at runtime */
   onOllamaUseFullSystemPromptChanged?: (enabled: boolean) => void;
+  /** Public share storage, used to revoke existing shares when disabled */
+  publicShareService?: PublicShareService;
 }
 
 function parseHostAliasList(rawHosts: unknown[]): {
@@ -333,6 +336,7 @@ export function createSettingsRoutes(deps: SettingsRoutesDeps): Hono {
     onOllamaUrlChanged,
     onOllamaSystemPromptChanged,
     onOllamaUseFullSystemPromptChanged,
+    publicShareService,
   } = deps;
 
   /**
@@ -590,6 +594,9 @@ export function createSettingsRoutes(deps: SettingsRoutesDeps): Hono {
       onOllamaUseFullSystemPromptChanged(
         settings.ollamaUseFullSystemPrompt ?? false,
       );
+    }
+    if (updates.publicSharesEnabled === false && publicShareService) {
+      await publicShareService.revokeAllShares();
     }
 
     return c.json({ settings });

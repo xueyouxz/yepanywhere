@@ -292,7 +292,7 @@ export function SessionShareModal({
     }
   };
 
-  const hasActiveShares = (status?.activeCount ?? 0) > 0;
+  const hasActiveShares = canCreateShares && (status?.activeCount ?? 0) > 0;
   const activeViewerCount = status?.activeViewerCount ?? 0;
   const viewers = status?.viewers ?? [];
   const viewerSummary = t("sessionShareViewerSummary", {

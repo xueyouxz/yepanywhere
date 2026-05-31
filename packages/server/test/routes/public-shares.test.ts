@@ -84,6 +84,7 @@ describe("public share public routes", () => {
     const app = createPublicSharePublicRoutes({
       publicShareService: service,
       loadSession,
+      getPublicSharesEnabled: () => true,
     });
 
     const response = await app.request(`/${secret}`);
@@ -111,6 +112,7 @@ describe("public share public routes", () => {
     const app = createPublicSharePublicRoutes({
       publicShareService: service,
       loadSession: vi.fn(async () => makeSession()),
+      getPublicSharesEnabled: () => true,
     });
 
     const response = await app.request(`/${secret}/viewers/viewer-one`, {
@@ -121,6 +123,29 @@ describe("public share public routes", () => {
     expect(
       service.getActiveViewerCount(service.getRecordBySecret(secret)!),
     ).toBe(0);
+  });
+
+  it("does not resolve secret links when the feature is disabled", async () => {
+    const { secret } = await service.createShare({
+      mode: "frozen",
+      title: "Snapshot",
+      source: {
+        projectId,
+        sessionId: "session-1",
+        projectName: "project",
+        provider: "codex",
+      },
+      snapshot: makeSession(),
+    });
+    const app = createPublicSharePublicRoutes({
+      publicShareService: service,
+      loadSession: vi.fn(async () => makeSession()),
+      getPublicSharesEnabled: () => false,
+    });
+
+    const response = await app.request(`/${secret}`);
+
+    expect(response.status).toBe(404);
   });
 });
 
@@ -196,7 +221,7 @@ describe("public share owner routes", () => {
     ).toBe(1);
   });
 
-  it("keeps authenticated management available when creation is disabled", async () => {
+  it("revokes all shares when requested by the settings kill switch", async () => {
     await service.createShare({
       mode: "frozen",
       title: "Snapshot",
@@ -208,29 +233,15 @@ describe("public share owner routes", () => {
       },
       snapshot: makeSession(),
     });
-    const app = createPublicShareRoutes({
-      publicShareService: service,
-      loadSession: vi.fn(async () => makeSession()),
-      getRelayConfig: () => ({
-        url: "wss://relay.example/ws",
-        username: "host-one",
-      }),
-      getPublicSharesEnabled: () => false,
-    });
+    expect(
+      service.getSessionShareStatus(projectId, "session-1").activeCount,
+    ).toBe(1);
 
-    const statusResponse = await app.request(
-      `/sessions/${projectId}/session-1`,
-    );
-    const status = await statusResponse.json();
-    const revokeResponse = await app.request(
-      `/sessions/${projectId}/session-1`,
-      { method: "DELETE" },
-    );
-    const revoke = await revokeResponse.json();
+    const revokedCount = await service.revokeAllShares();
 
-    expect(statusResponse.status).toBe(200);
-    expect(status.activeCount).toBe(1);
-    expect(revokeResponse.status).toBe(200);
-    expect(revoke.revokedCount).toBe(1);
+    expect(revokedCount).toBe(1);
+    expect(
+      service.getSessionShareStatus(projectId, "session-1").activeCount,
+    ).toBe(0);
   });
 });

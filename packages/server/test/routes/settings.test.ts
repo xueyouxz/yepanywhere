@@ -4,6 +4,7 @@ import type {
   ServerSettings,
   ServerSettingsService,
 } from "../../src/services/ServerSettingsService.js";
+import type { PublicShareService } from "../../src/services/PublicShareService.js";
 
 describe("Settings Routes", () => {
   let settings: ServerSettings;
@@ -219,6 +220,30 @@ describe("Settings Routes", () => {
       expect(mockServerSettingsService.updateSettings).toHaveBeenCalledWith({
         publicSharesEnabled: true,
       });
+    });
+
+    it("revokes stored public shares when disabling the feature", async () => {
+      const revokeAllShares = vi.fn(async () => 2);
+      const routes = createSettingsRoutes({
+        serverSettingsService: mockServerSettingsService,
+        publicShareService: {
+          revokeAllShares,
+        } as unknown as PublicShareService,
+      });
+
+      const response = await routes.request("/", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          publicSharesEnabled: false,
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(mockServerSettingsService.updateSettings).toHaveBeenCalledWith({
+        publicSharesEnabled: false,
+      });
+      expect(revokeAllShares).toHaveBeenCalled();
     });
 
     it("accepts and normalizes helper target settings", async () => {

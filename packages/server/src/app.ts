@@ -887,6 +887,7 @@ export function createApp(options: AppOptions): AppResult {
         onOllamaUseFullSystemPromptChanged: (enabled) => {
           ClaudeOllamaProvider.setUseFullSystemPrompt(enabled);
         },
+        publicShareService: options.publicShareService,
       }),
     );
   }
