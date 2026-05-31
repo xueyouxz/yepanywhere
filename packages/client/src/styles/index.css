@@ -2524,7 +2524,19 @@ a.sidebar-nav-item {
   white-space: pre-wrap;
 }
 
+.message-user-prompt:focus {
+  outline: none;
+}
+
+.message-user-prompt:focus-visible {
+  box-shadow: 0 0 0 1px var(--border-color);
+}
+
 .user-prompt-container {
+  --user-prompt-actions-space: calc(
+    102px + var(--space-1) + var(--space-1) + var(--space-1)
+  );
+
   display: flex;
   align-items: flex-start;
   gap: var(--space-1);
@@ -2543,6 +2555,18 @@ a.sidebar-nav-item {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
+  flex: 0 0 auto;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  visibility: hidden;
+}
+
+.user-prompt-container:hover .user-prompt-actions,
+.user-prompt-container:focus-within .user-prompt-actions {
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
 }
 
 .user-prompt-action {
@@ -2597,7 +2621,22 @@ a.sidebar-nav-item {
   }
 }
 
+@media (min-width: 701px) {
+  .message-user-prompt {
+    max-width: min(
+      88%,
+      calc(100% - var(--user-prompt-actions-space))
+    );
+  }
+}
+
 @media (max-width: 700px) {
+  .user-prompt-container {
+    --user-prompt-actions-space: calc(
+      90px + var(--space-1) + var(--space-1) + var(--space-1)
+    );
+  }
+
   .user-prompt-action {
     width: 30px;
     min-width: 30px;
