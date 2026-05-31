@@ -46,6 +46,12 @@ vi.mock("../../contexts/RemoteConnectionContext", () => ({
   useOptionalRemoteConnection: () => null,
 }));
 
+vi.mock("../../contexts/InboxContext", () => ({
+  useInboxContext: () => ({
+    totalNeedsAttention: 0,
+  }),
+}));
+
 vi.mock("../../hooks/useDrafts", () => ({
   useDrafts: () => new Set<string>(),
   useNewSessionDraft: () => newSessionDraftState.hasDraft,
@@ -54,10 +60,6 @@ vi.mock("../../hooks/useDrafts", () => ({
 vi.mock("../../hooks/useGlobalSessions", () => ({
   useGlobalSessions: (options?: { starred?: boolean }) =>
     options?.starred ? starredSessionsState : globalSessionsState,
-}));
-
-vi.mock("../../hooks/useNeedsAttentionBadge", () => ({
-  useNeedsAttentionBadge: () => 0,
 }));
 
 vi.mock("../../hooks/useRemoteBasePath", () => ({

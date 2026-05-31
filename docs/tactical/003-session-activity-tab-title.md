@@ -1,6 +1,6 @@
 # Session Activity Tab Title Indicator
 
-Status: Planned
+Status: In Progress
 
 Progress:
 
@@ -12,6 +12,8 @@ Progress:
 - [x] 2026-05-31: Added Appearance settings UI and English i18n strings for
   enabling the tab-title activity indicator and choosing focused-session vs.
   all-session scope.
+- [x] 2026-05-31: Wired all-session scope into the existing tab-title badge
+  hook using `InboxContext.totalActive`, with animation and focused tests.
 
 ## Context
 

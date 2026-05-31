@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { GlobalSessionItem } from "../api/client";
+import { useInboxContext } from "../contexts/InboxContext";
 import { useOptionalRemoteConnection } from "../contexts/RemoteConnectionContext";
 import { useDrafts, useNewSessionDraft } from "../hooks/useDrafts";
 import { useGlobalSessions } from "../hooks/useGlobalSessions";
-import { useNeedsAttentionBadge } from "../hooks/useNeedsAttentionBadge";
 import { usePublicShareStatus } from "../hooks/usePublicShareStatus";
 import { useRemoteBasePath } from "../hooks/useRemoteBasePath";
 import { useServerSettings } from "../hooks/useServerSettings";
@@ -207,8 +207,8 @@ export function Sidebar({
   const { version: versionInfo } = useVersion();
   const capabilities = versionInfo?.capabilities ?? [];
 
-  // Global inbox count
-  const inboxCount = useNeedsAttentionBadge();
+  // Global inbox count. Title badge updates are owned by the app shell.
+  const { totalNeedsAttention: inboxCount } = useInboxContext();
   const newSessionPath = "/new-session";
   const newSessionHref = `${basePath}${newSessionPath}`;
   const expandedSidebarNewSessionHref = `${newSessionHref}${newSessionHref.includes("?") ? "&" : "?"}sidebar=expanded`;
