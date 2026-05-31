@@ -66,7 +66,7 @@ export function describeBrowserNative(
     id: "browser-native",
     label: formatBrowserNativeLabel(label),
     description: label.likelySupported
-      ? "Runs in the browser; no audio leaves this device."
+      ? "Uses the browser's speech recognition directly, not through YA."
       : "This browser is unlikely to support Web Speech recognition.",
     clientSupported: browserNativeAvailable() && label.likelySupported,
     serverRouted: false,
