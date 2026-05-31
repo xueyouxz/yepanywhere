@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../../api/client";
 import { FilterDropdown } from "../../components/FilterDropdown";
 import { useOptionalAuth } from "../../contexts/AuthContext";
@@ -47,7 +47,11 @@ export function LocalAccessSettings() {
 
   // Initialize form from binding, auth, and settings state when it loads
   const [formInitialized, setFormInitialized] = useState(false);
-  if (binding && auth && serverSettings && !formInitialized) {
+  useEffect(() => {
+    if (!binding || !auth || !serverSettings || formInitialized) {
+      return;
+    }
+
     setLocalhostPort(String(binding.localhost.port));
     setNetworkEnabled(binding.network.enabled);
     setSelectedInterface(binding.network.host ?? "");
@@ -63,7 +67,7 @@ export function LocalAccessSettings() {
       setAllowedHostsText(ah ?? "");
     }
     setFormInitialized(true);
-  }
+  }, [auth, binding, formInitialized, serverSettings]);
 
   // Compute the effective allowedHosts value for comparison/saving
   const getAllowedHostsValue = (

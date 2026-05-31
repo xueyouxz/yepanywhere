@@ -48,33 +48,6 @@ export function useSessionStream(
   // True during intentional cleanup — suppresses reconnect in onClose handler
   const cleaningUpRef = useRef(false);
 
-  const connect = useCallback(() => {
-    if (!sessionId) {
-      // Reset tracking when sessionId becomes null so we can reconnect later
-      // (e.g., when status goes idle → owned again for the same session)
-      mountedSessionIdRef.current = null;
-      logSessionUiTrace("session-stream-disabled");
-      return;
-    }
-
-    // Don't create duplicate connections
-    if (wsSubscriptionRef.current) return;
-
-    // Skip StrictMode double-mount (same sessionId, already connected once)
-    if (mountedSessionIdRef.current === sessionId) return;
-    mountedSessionIdRef.current = sessionId;
-
-    // Check for global connection first (remote mode with SecureConnection)
-    const globalConn = getGlobalConnection();
-    if (globalConn) {
-      connectWithConnection(sessionId, globalConn);
-      return;
-    }
-
-    // Local mode: always use WebSocket
-    connectWithConnection(sessionId, getWebSocketConnection());
-  }, [sessionId]);
-
   /**
    * Connect using a provided connection (remote or local WebSocket).
    */
@@ -190,6 +163,33 @@ export function useSessionStream(
     },
     [],
   );
+
+  const connect = useCallback(() => {
+    if (!sessionId) {
+      // Reset tracking when sessionId becomes null so we can reconnect later
+      // (e.g., when status goes idle → owned again for the same session)
+      mountedSessionIdRef.current = null;
+      logSessionUiTrace("session-stream-disabled");
+      return;
+    }
+
+    // Don't create duplicate connections
+    if (wsSubscriptionRef.current) return;
+
+    // Skip StrictMode double-mount (same sessionId, already connected once)
+    if (mountedSessionIdRef.current === sessionId) return;
+    mountedSessionIdRef.current = sessionId;
+
+    // Check for global connection first (remote mode with SecureConnection)
+    const globalConn = getGlobalConnection();
+    if (globalConn) {
+      connectWithConnection(sessionId, globalConn);
+      return;
+    }
+
+    // Local mode: always use WebSocket
+    connectWithConnection(sessionId, getWebSocketConnection());
+  }, [connectWithConnection, sessionId]);
 
   // Listen for ConnectionManager state changes to re-subscribe
   useEffect(() => {

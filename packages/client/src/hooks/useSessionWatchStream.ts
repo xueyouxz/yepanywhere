@@ -19,6 +19,15 @@ interface UseSessionWatchStreamOptions {
   onOpen?: () => void;
 }
 
+function getSessionWatchTargetKey(
+  target: SessionWatchTarget | null,
+): string | null {
+  if (!target) {
+    return null;
+  }
+  return `${target.projectId}\0${target.sessionId}\0${target.provider ?? ""}`;
+}
+
 /**
  * Focused session file-change subscription.
  *
@@ -33,28 +42,11 @@ export function useSessionWatchStream(
   const wsSubscriptionRef = useRef<Subscription | null>(null);
   const optionsRef = useRef(options);
   optionsRef.current = options;
+  const targetRef = useRef(target);
+  targetRef.current = target;
   const mountedKeyRef = useRef<string | null>(null);
   const cleaningUpRef = useRef(false);
-
-  const connect = useCallback(() => {
-    if (!target) {
-      mountedKeyRef.current = null;
-      return;
-    }
-
-    const targetKey = `${target.projectId}:${target.sessionId}`;
-    if (wsSubscriptionRef.current) return;
-    if (mountedKeyRef.current === targetKey) return;
-    mountedKeyRef.current = targetKey;
-
-    const globalConn = getGlobalConnection();
-    if (globalConn) {
-      connectWithConnection(target, globalConn);
-      return;
-    }
-
-    connectWithConnection(target, getWebSocketConnection());
-  }, [target]);
+  const targetKey = getSessionWatchTargetKey(target);
 
   const connectWithConnection = useCallback(
     (
@@ -143,6 +135,26 @@ export function useSessionWatchStream(
     [],
   );
 
+  const connect = useCallback(() => {
+    const currentTarget = targetRef.current;
+    if (!currentTarget || !targetKey) {
+      mountedKeyRef.current = null;
+      return;
+    }
+
+    if (wsSubscriptionRef.current) return;
+    if (mountedKeyRef.current === targetKey) return;
+    mountedKeyRef.current = targetKey;
+
+    const globalConn = getGlobalConnection();
+    if (globalConn) {
+      connectWithConnection(currentTarget, globalConn);
+      return;
+    }
+
+    connectWithConnection(currentTarget, getWebSocketConnection());
+  }, [connectWithConnection, targetKey]);
+
   useEffect(() => {
     return connectionManager.on("stateChange", (state) => {
       if (state === "reconnecting" || state === "disconnected") {
@@ -154,11 +166,11 @@ export function useSessionWatchStream(
         setConnected(false);
         mountedKeyRef.current = null;
       }
-      if (state === "connected" && target && !wsSubscriptionRef.current) {
+      if (state === "connected" && targetKey && !wsSubscriptionRef.current) {
         connect();
       }
     });
-  }, [target, connect]);
+  }, [targetKey, connect]);
 
   useEffect(() => {
     connect();
