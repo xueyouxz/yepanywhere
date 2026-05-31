@@ -1,6 +1,6 @@
 # I18n Sparse Locale Cleanup
 
-Status: Proposed
+Status: In Progress
 
 Progress:
 
@@ -14,6 +14,9 @@ Progress:
 - [x] 2026-05-31: Added a focused client test that loads a mocked sparse
   Spanish catalog and verifies missing non-English messages fall back to
   English.
+- [x] 2026-05-31: Added dependency-free `i18n:check` and `i18n:prune`
+  commands, then pruned 858 exact English placeholder entries from non-English
+  locale files.
 
 ## Context
 

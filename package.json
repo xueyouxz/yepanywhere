@@ -7,6 +7,8 @@
     "setup-vapid": "tsx scripts/setup-vapid.ts",
     "codex:protocol:update": "node scripts/update-codex-protocol.mjs",
     "codex:protocol:check": "node scripts/update-codex-protocol.mjs --check",
+    "i18n:check": "node scripts/prune-i18n-placeholders.mjs --check",
+    "i18n:prune": "node scripts/prune-i18n-placeholders.mjs --write",
     "dev": "node scripts/dev.js",
     "staging": "node scripts/staging.js",
     "dev:auto": "pnpm --filter server dev & pnpm --filter client dev",
