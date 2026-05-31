@@ -420,7 +420,7 @@ export function LocalAccessSettings() {
           {networkEnabled &&
             !binding?.network.overriddenByCli &&
             selectedInterface === "custom" && (
-              <div className="settings-item">
+              <div className="settings-item settings-item-inline-field">
                 <div className="settings-item-info">
                   <strong>{t("localAccessCustomIpTitle")}</strong>
                   <p>{t("localAccessCustomIpDescription")}</p>
@@ -454,7 +454,7 @@ export function LocalAccessSettings() {
             </label>
           </div>
           {!allowAllHostsToggle && (
-            <div className="settings-item">
+            <div className="settings-item settings-item-inline-field">
               <div className="settings-item-info">
                 <strong>{t("localAccessAllowedHostsTitle")}</strong>
                 <p>{t("localAccessAllowedHostsDescription")}</p>
@@ -509,7 +509,7 @@ export function LocalAccessSettings() {
                 }}
                 tabIndex={-1}
               />
-              <div className="settings-item">
+              <div className="settings-item settings-item-inline-field">
                 <div className="settings-item-info">
                   <strong>{t("localAccessPasswordTitle")}</strong>
                   <p>
@@ -535,7 +535,7 @@ export function LocalAccessSettings() {
                 />
               </div>
               {authPassword.length > 0 && (
-                <div className="settings-item">
+                <div className="settings-item settings-item-inline-field">
                   <div className="settings-item-info">
                     <strong>{t("localAccessConfirmPasswordTitle")}</strong>
                   </div>

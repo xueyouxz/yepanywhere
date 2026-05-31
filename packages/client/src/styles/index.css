@@ -5908,6 +5908,23 @@ a.sidebar-nav-item {
   border-radius: var(--radius-md);
 }
 
+.settings-item-inline-field {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.settings-item-inline-field .settings-item-info {
+  flex: 1 1 18rem;
+}
+
+.settings-item-inline-field > .settings-input {
+  flex: 1 1 20rem;
+  width: auto;
+  min-width: min(100%, 18rem);
+  max-width: 28rem;
+  margin-top: 0;
+}
+
 .session-toolbar-settings {
   flex-direction: column;
   align-items: stretch;
