@@ -11,6 +11,9 @@ Progress:
 - [x] 2026-05-31: Updated the client i18n loader/cache types so non-English
   locale bundles can be sparse `Partial<Messages>` overlays while `en.json`
   remains the complete catalog.
+- [x] 2026-05-31: Added a focused client test that loads a mocked sparse
+  Spanish catalog and verifies missing non-English messages fall back to
+  English.
 
 ## Context
 
