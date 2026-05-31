@@ -5,6 +5,11 @@ import type { UserMessage } from "./types.js";
 export const CONCAT_SEPARATOR = "--------";
 export const INTERRUPT_PREAMBLE = "interrupt resumable after:";
 
+type CancellableMessageIterator = AsyncIterator<SDKUserMessage> &
+  AsyncIterable<SDKUserMessage> & {
+    return(): Promise<IteratorResult<SDKUserMessage>>;
+  };
+
 /**
  * Concatenate multiple UserMessages into one, joined by separator lines.
  * Shared by MessageQueue and Process to avoid duplicating the merge logic.
@@ -183,27 +188,44 @@ export class MessageQueue implements AsyncIterable<SDKUserMessage> {
   /* AsyncIterable interface (consumed by SDK query loop)               */
   /* ------------------------------------------------------------------ */
 
-  [Symbol.asyncIterator](): AsyncGenerator<SDKUserMessage> {
+  [Symbol.asyncIterator](): CancellableMessageIterator {
     return this.createIterator();
   }
 
-  private async *createIterator(): AsyncGenerator<SDKUserMessage> {
-    while (true) {
-      // Wait until at least one message is available.
-      await this.waitForMessage();
+  private createIterator(): CancellableMessageIterator {
+    let closed = false;
+    const iterator: CancellableMessageIterator = {
+      [Symbol.asyncIterator]: () => iterator,
 
-      // Check if external drain stole our messages.
-      if (this.drainedByExternal) {
-        this.drainedByExternal = false;
-        continue;
-      }
+      next: async (): Promise<IteratorResult<SDKUserMessage>> => {
+        while (!closed) {
+          // Wait until at least one message is available.
+          await this.waitForMessage();
+          if (closed) break;
 
-      // Drain all accumulated and concatenate.
-      const combined = this.concatDrainInternal();
-      if (!combined) continue;
+          // Check if external drain stole our messages.
+          if (this.drainedByExternal) {
+            this.drainedByExternal = false;
+            continue;
+          }
 
-      yield this.toSDKMessage(combined);
-    }
+          // Drain all accumulated and concatenate.
+          const combined = this.concatDrainInternal();
+          if (!combined) continue;
+
+          return { done: false, value: this.toSDKMessage(combined) };
+        }
+
+        return { done: true, value: undefined };
+      },
+
+      return: (): Promise<IteratorResult<SDKUserMessage>> => {
+        closed = true;
+        this.wakeWaitingIterator();
+        return Promise.resolve({ done: true, value: undefined });
+      },
+    };
+    return iterator;
   }
 
   /** Wait until at least one message is available */
@@ -213,6 +235,13 @@ export class MessageQueue implements AsyncIterable<SDKUserMessage> {
     return new Promise((resolve) => {
       this.waiting = resolve;
     });
+  }
+
+  private wakeWaitingIterator(): void {
+    if (!this.waiting) return;
+    const resolve = this.waiting;
+    this.waiting = null;
+    resolve();
   }
 
   /** Internal drain without the drainedByExternal flag (used by iterator) */
@@ -305,7 +334,7 @@ export class MessageQueue implements AsyncIterable<SDKUserMessage> {
   }
 
   /** Backward-compatible alias for the async iterator (used by existing callers). */
-  generator(): AsyncGenerator<SDKUserMessage> {
+  generator(): CancellableMessageIterator {
     return this.createIterator();
   }
 }

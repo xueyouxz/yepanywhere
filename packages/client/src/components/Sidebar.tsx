@@ -380,10 +380,9 @@ export function Sidebar({
       const visible: GlobalSessionItem[] = [];
       const hidden: GlobalSessionItem[] = [];
       for (const arr of groups.values()) {
-        const first = arr[0];
-        if (!first) continue;
         if (arr.length === 1) {
-          visible.push(first);
+          const only = arr[0];
+          if (only) visible.push(only);
         } else {
           // Keep the best: highest messageCount wins (do not hide the one with more work).
           // On tie (or no counts), prefer the one with more recent activity.
@@ -395,7 +394,9 @@ export function Sidebar({
               new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
             );
           });
-          visible.push(first);
+          const selected = arr[0];
+          if (!selected) continue;
+          visible.push(selected);
           hidden.push(...arr.slice(1));
         }
       }

@@ -94,10 +94,20 @@ vi.mock("../AgentsNavItem", () => ({
 }));
 
 vi.mock("../SessionListItem", () => ({
-  SessionListItem: ({ title }: { title: string }) => <li>{title}</li>,
+  SessionListItem: ({
+    sessionId,
+    title,
+  }: {
+    sessionId: string;
+    title: string;
+  }) => <li data-testid={`session-${sessionId}`}>{title}</li>,
 }));
 
-function makeSession(id: string, updatedAt: string) {
+function makeSession(
+  id: string,
+  updatedAt: string,
+  overrides: Record<string, unknown> = {},
+) {
   return {
     id,
     projectId: "project-1",
@@ -110,6 +120,7 @@ function makeSession(id: string, updatedAt: string) {
     provider: "claude",
     isArchived: false,
     isStarred: false,
+    ...overrides,
   };
 }
 
@@ -202,6 +213,38 @@ describe("Sidebar collapsed toggle", () => {
 
     expect(screen.getByText("Session 13")).toBeDefined();
     expect(screen.queryByText("Show more")).toBeNull();
+  });
+
+  it("keeps the highest-message duplicate session visible", () => {
+    const sharedTitle = "Repeated session";
+    const now = Date.now();
+    globalSessionsState.sessions = [
+      makeSession("thin", new Date(now).toISOString(), {
+        title: sharedTitle,
+        fullTitle: sharedTitle,
+        messageCount: 1,
+      }),
+      makeSession("substantive", new Date(now - 60_000).toISOString(), {
+        title: sharedTitle,
+        fullTitle: sharedTitle,
+        messageCount: 12,
+      }),
+    ];
+
+    render(
+      <MemoryRouter>
+        <Sidebar
+          isOpen={true}
+          onClose={() => {}}
+          onNavigate={() => {}}
+          isDesktop={true}
+          isCollapsed={false}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTestId("session-substantive")).toBeDefined();
+    expect(screen.queryByTestId("session-thin")).toBeNull();
   });
 
   it("collapses and expands the last-24-hours bucket", () => {

@@ -100,6 +100,35 @@ function createRecapProvider(
   };
 }
 
+describe("MessageQueue", () => {
+  it("settles a pending iterator return without another queued message", async () => {
+    const queue = new MessageQueue();
+    const iterator = queue.generator();
+    const pendingNext = iterator.next();
+    await waitFor(() => expect(queue.isWaiting).toBe(true));
+
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const returnResult = await Promise.race([
+      iterator
+        .return()
+        .then((result) => ({ type: "returned" as const, result })),
+      new Promise<{ type: "timeout" }>((resolve) => {
+        timeout = setTimeout(() => resolve({ type: "timeout" }), 100);
+      }),
+    ]);
+    if (timeout) clearTimeout(timeout);
+
+    expect(returnResult.type).toBe("returned");
+    if (returnResult.type === "returned") {
+      expect(returnResult.result).toEqual({ done: true, value: undefined });
+    }
+    await expect(pendingNext).resolves.toEqual({
+      done: true,
+      value: undefined,
+    });
+  });
+});
+
 describe("Process", () => {
   describe("event subscription", () => {
     it("emits message events", async () => {
