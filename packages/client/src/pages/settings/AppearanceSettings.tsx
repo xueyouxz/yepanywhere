@@ -39,12 +39,8 @@ export function AppearanceSettings() {
   const { funPhrasesEnabled, setFunPhrasesEnabled } = useFunPhrases();
   const { floatingActionButtonEnabled, setFloatingActionButtonEnabled } =
     useFloatingActionButtonEnabled();
-  const {
-    tabTitleActivityEnabled,
-    tabTitleActivityScope,
-    setTabTitleActivityEnabled,
-    setTabTitleActivityScope,
-  } = useTabTitleActivityPreference();
+  const { tabTitleActivityEnabled, setTabTitleActivityEnabled } =
+    useTabTitleActivityPreference();
   const { showConnectionBars, setShowConnectionBars } = useDeveloperMode();
   const {
     visibility: toolbarVisibility,
@@ -306,36 +302,6 @@ export function AppearanceSettings() {
               />
               <span className="toggle-slider" />
             </label>
-            {tabTitleActivityEnabled && (
-              <div
-                className="font-size-selector"
-                role="radiogroup"
-                aria-label={t("appearanceTabTitleActivityScopeLabel")}
-              >
-                <button
-                  type="button"
-                  className={`font-size-option ${
-                    tabTitleActivityScope === "focused" ? "active" : ""
-                  }`}
-                  onClick={() => setTabTitleActivityScope("focused")}
-                  role="radio"
-                  aria-checked={tabTitleActivityScope === "focused"}
-                >
-                  {t("appearanceTabTitleActivityScopeFocused")}
-                </button>
-                <button
-                  type="button"
-                  className={`font-size-option ${
-                    tabTitleActivityScope === "all" ? "active" : ""
-                  }`}
-                  onClick={() => setTabTitleActivityScope("all")}
-                  role="radio"
-                  aria-checked={tabTitleActivityScope === "all"}
-                >
-                  {t("appearanceTabTitleActivityScopeAll")}
-                </button>
-              </div>
-            )}
           </div>
         </div>
         <div className="settings-item">

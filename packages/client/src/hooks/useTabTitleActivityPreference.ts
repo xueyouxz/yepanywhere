@@ -1,20 +1,15 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { UI_KEYS } from "../lib/storageKeys";
 
-export type TabTitleActivityScope = "focused" | "all";
-
 export interface TabTitleActivityPreference {
   enabled: boolean;
-  scope: TabTitleActivityScope;
 }
 
 export const DEFAULT_TAB_TITLE_ACTIVITY_PREFERENCE: TabTitleActivityPreference =
   {
     enabled: false,
-    scope: "focused",
   };
 
-const VALID_SCOPES = new Set<TabTitleActivityScope>(["focused", "all"]);
 const listeners = new Set<() => void>();
 
 function getStorage(): Storage | null {
@@ -27,13 +22,6 @@ function getStorage(): Storage | null {
   return globalThis.localStorage;
 }
 
-function normalizeScope(value: unknown): TabTitleActivityScope {
-  return typeof value === "string" &&
-    VALID_SCOPES.has(value as TabTitleActivityScope)
-    ? (value as TabTitleActivityScope)
-    : DEFAULT_TAB_TITLE_ACTIVITY_PREFERENCE.scope;
-}
-
 function loadTabTitleActivityPreference(): TabTitleActivityPreference {
   const storage = getStorage();
   if (!storage) {
@@ -41,9 +29,7 @@ function loadTabTitleActivityPreference(): TabTitleActivityPreference {
   }
 
   const enabled = storage.getItem(UI_KEYS.tabTitleActivityEnabled) === "true";
-  const scope = normalizeScope(storage.getItem(UI_KEYS.tabTitleActivityScope));
-
-  return { enabled, scope };
+  return { enabled };
 }
 
 function saveTabTitleActivityPreference(
@@ -54,20 +40,17 @@ function saveTabTitleActivityPreference(
     return;
   }
   storage.setItem(UI_KEYS.tabTitleActivityEnabled, String(preference.enabled));
-  storage.setItem(UI_KEYS.tabTitleActivityScope, preference.scope);
 }
 
 function encodePreference(preference: TabTitleActivityPreference): string {
-  return `${preference.enabled ? "1" : "0"}:${preference.scope}`;
+  return preference.enabled ? "1" : "0";
 }
 
 function decodePreferenceSnapshot(
   snapshot: string,
 ): TabTitleActivityPreference {
-  const [enabledValue, scopeValue] = snapshot.split(":");
   return {
-    enabled: enabledValue === "1",
-    scope: normalizeScope(scopeValue),
+    enabled: snapshot === "1",
   };
 }
 
@@ -114,20 +97,8 @@ export function useTabTitleActivityPreference() {
     });
   }, []);
 
-  const setTabTitleActivityScope = useCallback(
-    (scope: TabTitleActivityScope) => {
-      updatePreference({
-        ...loadTabTitleActivityPreference(),
-        scope: normalizeScope(scope),
-      });
-    },
-    [],
-  );
-
   return {
     tabTitleActivityEnabled: preference.enabled,
-    tabTitleActivityScope: preference.scope,
     setTabTitleActivityEnabled,
-    setTabTitleActivityScope,
   };
 }

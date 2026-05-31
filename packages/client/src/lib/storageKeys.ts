@@ -62,7 +62,6 @@ export const UI_KEYS = {
   emulatorAdaptiveFps: "yep-anywhere-emulator-adaptive-fps",
   attachmentUploadQuality: "yep-anywhere-attachment-upload-quality",
   tabTitleActivityEnabled: "yep-anywhere-tab-title-activity-enabled",
-  tabTitleActivityScope: "yep-anywhere-tab-title-activity-scope",
 } as const;
 
 // ============================================================================

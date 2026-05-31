@@ -59,12 +59,8 @@ export function getTabTitleActivityFrame(
 export function useNeedsAttentionBadge() {
   const activityStartedAtRef = useRef<number | null>(null);
   const { totalNeedsAttention: count, totalActive } = useInboxContext();
-  const { tabTitleActivityEnabled, tabTitleActivityScope } =
-    useTabTitleActivityPreference();
-  const showAllSessionActivity =
-    tabTitleActivityEnabled &&
-    tabTitleActivityScope === "all" &&
-    totalActive > 0;
+  const { tabTitleActivityEnabled } = useTabTitleActivityPreference();
+  const showSessionActivity = tabTitleActivityEnabled && totalActive > 0;
 
   useEffect(() => {
     return () => {
@@ -74,9 +70,9 @@ export function useNeedsAttentionBadge() {
 
   // Update document title when count or configured activity changes.
   useEffect(() => {
-    if (showAllSessionActivity && activityStartedAtRef.current === null) {
+    if (showSessionActivity && activityStartedAtRef.current === null) {
       activityStartedAtRef.current = Date.now();
-    } else if (!showAllSessionActivity) {
+    } else if (!showSessionActivity) {
       activityStartedAtRef.current = null;
     }
 
@@ -90,7 +86,7 @@ export function useNeedsAttentionBadge() {
       const baseTitle = stripTabTitlePrefixes(document.title);
       const activityStartedAt = activityStartedAtRef.current;
       const activityFrame =
-        showAllSessionActivity && activityStartedAt !== null
+        showSessionActivity && activityStartedAt !== null
           ? getTabTitleActivityFrame(activityStartedAt)
           : undefined;
 
@@ -103,7 +99,7 @@ export function useNeedsAttentionBadge() {
 
     updateTitle();
 
-    if (showAllSessionActivity) {
+    if (showSessionActivity) {
       activityTimer = setInterval(() => {
         updateTitle();
       }, TAB_TITLE_ACTIVITY_CADENCE_MS);
@@ -119,7 +115,7 @@ export function useNeedsAttentionBadge() {
       const baseTitle = stripTabTitlePrefixes(currentTitle);
       const activityStartedAt = activityStartedAtRef.current;
       const activityFrame =
-        showAllSessionActivity && activityStartedAt !== null
+        showSessionActivity && activityStartedAt !== null
           ? getTabTitleActivityFrame(activityStartedAt)
           : undefined;
       const expectedTitle = composeTabTitle(baseTitle, count, activityFrame);
@@ -144,7 +140,7 @@ export function useNeedsAttentionBadge() {
         clearInterval(activityTimer);
       }
     };
-  }, [count, showAllSessionActivity]);
+  }, [count, showSessionActivity]);
 
   return count;
 }

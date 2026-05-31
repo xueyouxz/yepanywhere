@@ -1,6 +1,6 @@
 # Session Activity Tab Title Indicator
 
-Status: In Progress
+Status: Implemented
 
 Progress:
 
@@ -16,6 +16,8 @@ Progress:
   hook using `InboxContext.totalActive`, with animation and focused tests.
 - [x] 2026-05-31: Switched activity frames to same-family circle glyphs
   and made the animation cadence an explicit 1500 ms constant.
+- [x] 2026-05-31: Removed the focused-session/all-session selector. The
+  remaining toggle now means all-session activity.
 
 ## Context
 
@@ -28,16 +30,15 @@ that a session is actively working or thinking without switching back to the
 tab. The desired indicator is opt-in UI chrome, not a change to session
 behavior.
 
-The requested settings are:
+The requested setting is:
 
 - Show session activity in tab title.
-- Scope the indicator to the focused session only, or to all sessions.
 
 ## Decisions
 
 - Store this as a browser-local Appearance preference, not a server setting.
 - Default the feature off.
-- When the feature is first enabled, default scope to focused session.
+- When enabled, show activity if any session is actively working.
 - Treat "activity" as active agent work, specifically `in-turn`.
 - Do not show the activity indicator for:
   - `idle`;
@@ -51,12 +52,8 @@ The requested settings are:
   - `(2) (●) Project - Session`
 - Compose tab-title prefixes from one place instead of adding another
   independent `document.title` mutator.
-- For focused-session scope, use the currently open session detail route. If a
-  `/btw` aside is focused and `starting` or `running`, count it as focused
-  activity because the session UI already treats that aside as the focused
-  work target.
-- For all-session scope, use global active session state already maintained by
-  the client inbox/activity paths rather than adding a new polling loop.
+- Use global active session state already maintained by the client
+  inbox/activity paths rather than adding a new polling loop.
 
 ## Non-Goals
 
@@ -66,6 +63,8 @@ The requested settings are:
 - Do not animate the favicon in this pass.
 - Do not expose this as a shared server policy. Different browsers and devices
   may choose different tab-title behavior.
+- Do not implement focused-session-only scope in this pass. The setting is now
+  intentionally a single all-session toggle.
 - Do not treat waiting-for-input as working activity. Existing badges and
   notifications already cover attention-needed state.
 
@@ -73,15 +72,10 @@ The requested settings are:
 
 ### 1. Local Preference Model
 
-- Add localStorage keys under `UI_KEYS`, likely:
-  - `tabTitleActivityEnabled`;
-  - `tabTitleActivityScope`.
-- Define a small scope type:
-  - `focused`;
-  - `all`.
+- Add a localStorage key under `UI_KEYS`:
+  - `tabTitleActivityEnabled`.
 - Add a defensive hook such as `useTabTitleActivityPreference()` that:
   - loads default settings when no stored value exists;
-  - validates stored scope values;
   - persists updates;
   - can be used by Appearance settings and the title indicator hook.
 - Consider same-tab synchronization only if multiple mounted consumers need it.
@@ -95,9 +89,6 @@ The requested settings are:
   - description: mention that it animates the browser tab title while sessions
     are working.
 - Use a checkbox/toggle for enablement.
-- When enabled, show a compact segmented control or radio group for:
-  - "Focused session";
-  - "All sessions".
 - Keep the setting in Appearance because it affects local UI chrome only.
 - Add i18n keys to the English catalog. For sparse locale files, only add
   non-English translations where an actual translation is available; otherwise
@@ -125,7 +116,8 @@ The requested settings are:
 
 ### 4. Focused-Session Activity Source
 
-- In `SessionPage`, derive focused-session activity from existing state:
+- Deferred. If reintroduced, derive focused-session activity from existing
+  `SessionPage` state:
   - mother session activity: `processState === "in-turn"`;
   - focused `/btw` aside activity: focused aside status is `starting` or
     `running`.
@@ -135,10 +127,10 @@ The requested settings are:
 - Do not use terminal pending tool rows as title activity; the planning
   decision is to show active work, not unresolved historical pending state.
 
-### 5. All-Session Activity Source
+### 5. Activity Source
 
-- Prefer `InboxContext.totalActive > 0` for all-session activity. The inbox
-  active tier already tracks `in-turn` sessions from process-state changes.
+- Prefer `InboxContext.totalActive > 0` for activity. The inbox active tier
+  already tracks `in-turn` sessions from process-state changes.
 - Avoid introducing a duplicate REST fetch loop like
   `useGlobalActiveAgents()` unless the inbox context proves insufficient.
 - Ensure remote mode behaves the same as local mode by using the same app-shell
@@ -148,10 +140,10 @@ The requested settings are:
 
 - Start a `setInterval` only when all of these are true:
   - setting is enabled;
-  - relevant activity scope currently has activity;
+  - any session currently has activity;
   - the app shell is mounted.
-- Clear the interval when activity stops, the setting is disabled, the scope
-  changes, or the component unmounts.
+- Clear the interval when activity stops, the setting is disabled, or the
+  component unmounts.
 - Use a 1500 ms cadence.
 - Reset to the non-activity composed title immediately when activity stops.
 - Keep the two frames to the same visible shape family: `(●)` and `(○)`.
@@ -169,22 +161,19 @@ The requested settings are:
   - frame flips after 1500 ms;
   - interval is cleared when disabled or inactive.
 - Add preference tests:
-  - defaults are off/focused;
-  - invalid stored scope falls back to focused;
+  - defaults are off;
   - settings persist.
-- Add a light `SessionPage` or helper-level test if the focused `/btw` aside
-  activity derivation is extracted.
 
 ## Open Questions
 
 - Should the activity indicator keep animating while the browser tab is
   focused, or only when the tab is backgrounded? The current plan animates
   whenever the setting is enabled and matching activity exists.
-- Should all-session scope include only unarchived active sessions? Using the
-  inbox active tier implies yes.
-- Should externally owned active sessions count in all-session scope? The inbox
-  active tier currently reflects server-known in-turn activity; keep that
-  behavior unless a specific external-session mismatch is found.
+- Should activity include only unarchived active sessions? Using the inbox
+  active tier implies yes.
+- Should externally owned active sessions count? The inbox active tier
+  currently reflects server-known in-turn activity; keep that behavior unless a
+  specific external-session mismatch is found.
 - Should the settings copy say "working" or "thinking"? The implementation
   should use `in-turn`; the user-facing wording can stay "working" to include
   tool-running phases.
@@ -195,17 +184,15 @@ The requested settings are:
 2. Add Appearance settings UI and English i18n keys.
 3. Extract pure title composition helpers and tests.
 4. Refactor needs-attention title badge into the shared composer.
-5. Register focused-session activity from `SessionPage`.
-6. Feed all-session activity from `InboxContext.totalActive`.
-7. Add animation lifecycle tests with fake timers.
-8. Run focused client tests, then `pnpm typecheck`.
+5. Feed activity from `InboxContext.totalActive`.
+6. Add animation lifecycle tests with fake timers.
+7. Run focused client tests, then `pnpm typecheck`.
 
 ## Verification Checklist
 
 - Fresh browser profiles do not show activity in the tab title.
 - Enabling the setting starts showing `(●)` / `(○)` only during active work.
-- Focused-session mode ignores activity in other sessions.
-- All-sessions mode shows activity when any active session is working.
+- The tab title shows activity when any active session is working.
 - Pending approvals/questions still use the existing needs-attention badge and
   do not trigger the activity spinner by themselves.
 - Existing needs-attention title counts still work and compose with the new
