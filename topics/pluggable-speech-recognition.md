@@ -34,9 +34,10 @@ Topic: pluggable-speech-recognition
   is retained for eight weeks or 400 MB, whichever limit prunes it first, using
   a speech-appropriate compressed browser recording such as Opus/WebM. Each
   retained utterance has sidecar metadata that includes backend id, MIME type,
-  byte size, timing, transcript text, and the best available session plus
-  client-turn pointer. This is intentionally useful for local speech-model
-  fine-tuning, transcription-quality audits, and debugging backend selection.
+  byte size, timing, transcript text, the ordered streaming recognizer trace
+  when available, and the best available session plus client-turn pointer. This
+  is intentionally useful for local speech-model fine-tuning,
+  transcription-quality audits, and debugging backend selection.
 - Ordinary server logs should identify the selected speech backend, request
   source, audio size, MIME type, session/turn pointer, duration, transcript
   character count, and retention result. Logs must not include the transcript
@@ -81,8 +82,10 @@ Backends should implement a common `SpeechBackend` contract:
 - When the selected server backend advertises `streaming: true`,
   `YaServerProvider` captures microphone audio through Web Audio, downsamples it
   to 24 kHz signed PCM16 little-endian, and sends binary frames to
-  `/api/speech/ws`. Interim events update the composer; the final event carries
-  the retained transcription id.
+  `/api/speech/ws`. Non-final events update the composer preview; final-ish
+  streaming partials commit transcript deltas so later interim clears cannot
+  erase already accepted speech. The final event carries the retained
+  transcription id.
 - `useSpeechRecognition` selects browser-native when the method is
   `browser-native`; any other method constructs `YaServerProvider` with the
   advertised backend id unchanged.
@@ -117,7 +120,8 @@ Backends should implement a common `SpeechBackend` contract:
   transcription and `GET /api/speech/ws` for both buffered WebSocket
   transcription and streaming transcription to capable backends. The WS route
   accepts JSON control frames even when the unified Node WS path presents text
-  frames as `Buffer`s.
+  frames as `Buffer`s. Streaming metadata includes the ordered transcript trace
+  as one recognizer event per line.
 - Tests cover registry defaults, explicit backend advertisement, disabled
   voice input, `/api/version.voiceBackends`, HTTP batch transcription, and the
   dummy backend through the mounted WebSocket route.
@@ -213,6 +217,9 @@ client through `fetchJSON("/speech/transcribe", ...)`.
   under the configured data directory by default, and the metadata contains the
   returned transcript plus session/client-turn pointers when the client has
   supplied them.
+- A successful streaming transcription writes each interim update, final-ish
+  partial, speech-final marker, and final done transcript into retained
+  metadata as an ordered one-line-per-event trace.
 - With an advertised backend id not hardcoded in the client, the selector still
   displays that id generically and sends it unchanged as `backendId`.
 - With `YA_VOICE_BACKENDS=ya-whisper` and `faster_whisper` importable, startup

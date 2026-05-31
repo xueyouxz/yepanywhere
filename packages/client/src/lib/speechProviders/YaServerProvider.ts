@@ -1,7 +1,12 @@
 import { fetchJSON } from "../../api/client";
 import {
+  appendSpeechTranscript,
+  computeSpeechDelta,
+} from "../speechRecognition";
+import {
   INITIAL_SPEECH_STATE,
   type SpeechProvider,
+  type SpeechTranscriptionResultMetadata,
   type SpeechProviderOptions,
   type SpeechProviderState,
   type SpeechProviderSubscriber,
@@ -49,6 +54,8 @@ interface SpeechWsMessage {
   text?: string;
   message?: string;
   transcriptionId?: string;
+  isFinal?: boolean;
+  speechFinal?: boolean;
 }
 
 const STREAM_SAMPLE_RATE = 24_000;
@@ -125,6 +132,7 @@ export class YaServerProvider implements SpeechProvider {
   private mimeType = "audio/webm";
   private submitOnStop = false;
   private streamingFinalReceived = false;
+  private streamingCommittedTranscript = "";
   private startToken = 0;
   private disposed = false;
 
@@ -250,6 +258,7 @@ export class YaServerProvider implements SpeechProvider {
     this.stream = stream;
     this.mimeType = STREAM_MIME_TYPE;
     this.streamingFinalReceived = false;
+    this.streamingCommittedTranscript = "";
     const ws = new WebSocket(speechWsUrl(this.basePath));
     ws.binaryType = "arraybuffer";
     this.ws = ws;
@@ -356,25 +365,35 @@ export class YaServerProvider implements SpeechProvider {
 
     if (message.type === "interim") {
       const transcript = message.text ?? "";
-      this.setState({ interimTranscript: transcript });
-      this.options.onInterimResult?.(transcript);
+      if (message.isFinal || message.speechFinal) {
+        this.commitStreamingTranscript(transcript);
+        return;
+      }
+      const interim = this.getStreamingTranscriptDelta(transcript);
+      this.setState({ interimTranscript: interim });
+      this.options.onInterimResult?.(interim);
       return;
     }
 
     if (message.type === "final") {
       this.streamingFinalReceived = true;
       this.cleanupStreamingMedia();
+      const metadata = message.transcriptionId
+        ? { transcriptionId: message.transcriptionId }
+        : undefined;
+      const committed = this.commitStreamingTranscript(
+        message.text ?? "",
+        metadata,
+      );
+      if (!committed && metadata) {
+        this.options.onResult?.("", metadata);
+      }
       this.setState({
         status: "idle",
         isListening: false,
         interimTranscript: "",
         error: null,
       });
-      if (message.text) {
-        this.options.onResult?.(message.text, {
-          transcriptionId: message.transcriptionId,
-        });
-      }
       this.options.onEnd?.();
       this.ws?.close();
       this.ws = null;
@@ -395,6 +414,36 @@ export class YaServerProvider implements SpeechProvider {
       this.ws?.close();
       this.ws = null;
     }
+  }
+
+  private getStreamingTranscriptDelta(transcript: string): string {
+    const latest = transcript.trim();
+    if (!latest) return "";
+    return computeSpeechDelta(
+      latest,
+      this.streamingCommittedTranscript,
+    ).trimStart();
+  }
+
+  private commitStreamingTranscript(
+    transcript: string,
+    metadata?: SpeechTranscriptionResultMetadata,
+  ): boolean {
+    const latest = transcript.trim();
+    const delta = this.getStreamingTranscriptDelta(latest).trim();
+
+    this.setState({ interimTranscript: "" });
+    this.options.onInterimResult?.("");
+
+    if (!latest || !delta) return false;
+
+    this.streamingCommittedTranscript = latest.startsWith(
+      this.streamingCommittedTranscript,
+    )
+      ? latest
+      : appendSpeechTranscript(this.streamingCommittedTranscript, delta);
+    this.options.onResult?.(delta, metadata);
+    return true;
   }
 
   private async transcribeRecording(): Promise<void> {

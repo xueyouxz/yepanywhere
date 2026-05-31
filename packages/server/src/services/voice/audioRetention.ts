@@ -24,6 +24,7 @@ export interface SpeechAudioRetentionInput {
   mimeType: string;
   audio: Buffer;
   transcript: string;
+  streamingTranscriptTrace?: string[];
   startedAt: string;
   completedAt: string;
   durationMs: number;
@@ -100,6 +101,10 @@ export async function persistSpeechAudio(
           audioBytes: input.audio.length,
           transcript: input.transcript,
           transcriptChars: input.transcript.length,
+          streamingTranscriptTrace: input.streamingTranscriptTrace,
+          streamingTranscriptTraceText: input.streamingTranscriptTrace?.join(
+            "\n",
+          ),
           startedAt: input.startedAt,
           completedAt: input.completedAt,
           durationMs: input.durationMs,

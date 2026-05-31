@@ -63,3 +63,11 @@ export function computeSpeechDelta(
   // New utterance - return the whole thing (desktop behavior after pause)
   return latestFinal;
 }
+
+export function appendSpeechTranscript(base: string, transcript: string): string {
+  const trimmedTranscript = transcript.trim();
+  if (!trimmedTranscript) return base;
+
+  const trimmedBase = base.trimEnd();
+  return trimmedBase ? `${trimmedBase} ${trimmedTranscript}` : trimmedTranscript;
+}

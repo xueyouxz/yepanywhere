@@ -69,6 +69,28 @@ function send(ws: WSContext, msg: ServerMsg): void {
   ws.send(JSON.stringify(msg));
 }
 
+type StreamingTranscriptTraceKind =
+  | "update"
+  | "final"
+  | "speech-final"
+  | "done";
+
+function formatStreamingTranscriptTraceLine(
+  kind: StreamingTranscriptTraceKind,
+  text: string,
+): string {
+  return `${kind}\t${text.replaceAll("\r", "\\r").replaceAll("\n", "\\n")}`;
+}
+
+function getPartialTraceKind(event: {
+  isFinal?: boolean;
+  speechFinal?: boolean;
+}): StreamingTranscriptTraceKind {
+  if (event.speechFinal) return "speech-final";
+  if (event.isFinal) return "final";
+  return "update";
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -269,6 +291,7 @@ async function persistStreamingTranscription(
     audio: Buffer;
     mimeType: string;
     transcript: string;
+    streamingTranscriptTrace?: string[];
     startedAt: string;
     startedAtMs: number;
     context?: SpeechTranscriptionContext;
@@ -285,6 +308,7 @@ async function persistStreamingTranscription(
     mimeType: input.mimeType,
     audio: input.audio,
     transcript: input.transcript,
+    streamingTranscriptTrace: input.streamingTranscriptTrace,
     startedAt: input.startedAt,
     completedAt,
     durationMs: completedAtMs - input.startedAtMs,
@@ -303,6 +327,8 @@ async function persistStreamingTranscription(
       context: input.context,
       durationMs: completedAtMs - input.startedAtMs,
       transcriptChars: input.transcript.length,
+      streamingTranscriptTraceEvents:
+        input.streamingTranscriptTrace?.length ?? 0,
       transcriptionId: retention.transcriptionId,
       retention: {
         stored: retention.stored,
@@ -399,6 +425,7 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
       let streamRequestId: string | null = null;
       let streamStartedAt = "";
       let streamStartedAtMs = 0;
+      let streamingTranscriptTrace: string[] = [];
       let messageChain = Promise.resolve();
 
       const processMessage = async (
@@ -430,6 +457,7 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
           streamSession?.close();
           streamSession = null;
           streamRequestId = null;
+          streamingTranscriptTrace = [];
 
           if (msg.streaming && backendId) {
             const backend = deps.speechBackendRegistry.getBackend(backendId);
@@ -483,6 +511,12 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
               },
               {
                 onPartial: (event) => {
+                  streamingTranscriptTrace.push(
+                    formatStreamingTranscriptTraceLine(
+                      getPartialTraceKind(event),
+                      event.text,
+                    ),
+                  );
                   send(ws, {
                     type: "interim",
                     text: event.text,
@@ -507,12 +541,16 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
         if (streamSession && streamRequestId) {
           try {
             const done = await streamSession.finish();
+            streamingTranscriptTrace.push(
+              formatStreamingTranscriptTraceLine("done", done.text),
+            );
             const retention = await persistStreamingTranscription(deps, {
               requestId: streamRequestId,
               backendId,
               audio,
               mimeType,
               transcript: done.text,
+              streamingTranscriptTrace,
               startedAt: streamStartedAt,
               startedAtMs: streamStartedAtMs,
               context,
@@ -541,6 +579,7 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
           } finally {
             streamSession = null;
             streamRequestId = null;
+            streamingTranscriptTrace = [];
           }
           return;
         }
@@ -585,6 +624,7 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
         onClose() {
           streamSession?.close();
           streamSession = null;
+          streamingTranscriptTrace = [];
           chunks.length = 0;
         },
       } satisfies WSEvents;

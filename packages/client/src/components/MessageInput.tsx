@@ -26,6 +26,7 @@ import type {
   SpeechTranscriptionContext,
   SpeechTranscriptionResultMetadata,
 } from "../lib/speechProviders/SpeechProvider";
+import { appendSpeechTranscript } from "../lib/speechRecognition";
 import type { ContextUsage, PermissionMode } from "../types";
 import { AttachmentChip } from "./AttachmentChip";
 import { MessageInputToolbar } from "./MessageInputToolbar";
@@ -734,23 +735,20 @@ export function MessageInput({
       // Append transcript to existing text with space separator
       // Trim the transcript since mobile speech API includes leading/trailing spaces
       const trimmedTranscript = transcript.trim();
-      if (!trimmedTranscript) return;
       if (metadata?.transcriptionId) {
         speechTranscriptionIdsRef.current = [
           ...speechTranscriptionIdsRef.current,
           metadata.transcriptionId,
         ];
       }
+      if (!trimmedTranscript) return;
 
-      const trimmedText = text.trimEnd();
-      if (trimmedText) {
-        const nextText = `${trimmedText} ${trimmedTranscript}`;
-        noteComposerEdit(nextText);
-        setText(nextText);
-      } else {
-        noteComposerEdit(trimmedTranscript);
-        setText(trimmedTranscript);
-      }
+      const nextText = appendSpeechTranscript(
+        controls.getDraft(),
+        trimmedTranscript,
+      );
+      noteComposerEdit(nextText);
+      controls.setDraft(nextText);
       setInterimTranscript("");
       // Scroll to bottom after committing voice transcript
       // Use setTimeout to ensure state update has rendered
@@ -761,7 +759,7 @@ export function MessageInput({
         }
       }, 0);
     },
-    [noteComposerEdit, text, setText],
+    [controls, noteComposerEdit],
   );
 
   const handleInterimTranscript = useCallback((transcript: string) => {

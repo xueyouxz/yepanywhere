@@ -12,6 +12,7 @@ import { setRecentProjectId } from "../hooks/useRecentProject";
 import { setNewSessionPrefill } from "../lib/newSessionPrefill";
 import { useRemoteBasePath } from "../hooks/useRemoteBasePath";
 import { useI18n } from "../i18n";
+import { appendSpeechTranscript } from "../lib/speechRecognition";
 import { VoiceInputButton } from "./VoiceInputButton";
 
 const FAB_DRAFT_KEY = "fab-draft";
@@ -110,15 +111,13 @@ export function FloatingActionButton() {
   // Voice input handlers
   const handleVoiceTranscript = useCallback(
     (transcript: string) => {
-      const trimmed = message.trimEnd();
-      if (trimmed) {
-        setMessage(`${trimmed} ${transcript}`);
-      } else {
-        setMessage(transcript);
-      }
+      const current = draftControls.getDraft();
+      const nextMessage = appendSpeechTranscript(current, transcript);
+      if (nextMessage === current) return;
+      draftControls.setDraft(nextMessage);
       setInterimTranscript("");
     },
-    [message, setMessage],
+    [draftControls],
   );
 
   const handleInterimTranscript = useCallback((transcript: string) => {

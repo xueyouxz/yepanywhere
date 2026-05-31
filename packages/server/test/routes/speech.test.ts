@@ -71,7 +71,13 @@ class StreamingTestBackend implements StreamingSpeechBackend {
       },
       finish: async () => {
         handlers.onPartial?.({ text: "hel", isFinal: false });
-        return { text: `streamed ${Buffer.concat(this.chunks).length} bytes` };
+        handlers.onPartial?.({ text: "hello", isFinal: true });
+        handlers.onPartial?.({
+          text: "hello world",
+          isFinal: true,
+          speechFinal: true,
+        });
+        return { text: "hello world" };
       },
       close: () => {},
     };
@@ -202,10 +208,12 @@ describe("speech routes", () => {
   });
 
   it("streams WebSocket audio when the backend advertises streaming", async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "ya-speech-"));
+    tempDirs.push(dataDir);
     const registry = new SpeechBackendRegistry();
     const backend = new StreamingTestBackend();
     await registry.register(backend);
-    const { app, wss } = await createSpeechApp(undefined, registry);
+    const { app, wss } = await createSpeechApp(dataDir, registry);
     let serverPort = 0;
     server = serve({ fetch: app.fetch, port: 0 }, (info) => {
       serverPort = info.port;
@@ -243,11 +251,40 @@ describe("speech routes", () => {
         isFinal: false,
       });
       expect(await ws.nextJson()).toEqual({
+        type: "interim",
+        text: "hello",
+        isFinal: true,
+      });
+      expect(await ws.nextJson()).toEqual({
+        type: "interim",
+        text: "hello world",
+        isFinal: true,
+        speechFinal: true,
+      });
+      const final = (await ws.nextJson()) as { transcriptionId: string };
+      expect(final).toEqual({
         type: "final",
-        text: "streamed 3 bytes",
+        text: "hello world",
         transcriptionId: expect.any(String),
       });
       expect(backend.options?.sampleRate).toBe(24000);
+      const metadataPath = await findRetainedMetadata(
+        dataDir,
+        final.transcriptionId,
+      );
+      const metadata = JSON.parse(await fs.readFile(metadataPath, "utf8")) as {
+        streamingTranscriptTrace?: string[];
+        streamingTranscriptTraceText?: string;
+      };
+      expect(metadata.streamingTranscriptTrace).toEqual([
+        "update\thel",
+        "final\thello",
+        "speech-final\thello world",
+        "done\thello world",
+      ]);
+      expect(metadata.streamingTranscriptTraceText).toBe(
+        "update\thel\nfinal\thello\nspeech-final\thello world\ndone\thello world",
+      );
     } finally {
       ws.close();
     }
@@ -258,6 +295,28 @@ interface TestWebSocket {
   send(data: string | Buffer): void;
   close(): void;
   nextJson(): Promise<unknown>;
+}
+
+async function findRetainedMetadata(
+  dataDir: string,
+  transcriptionId: string,
+): Promise<string> {
+  const dayDirs = await fs.readdir(path.join(dataDir, "speech-audio"));
+  for (const dayDir of dayDirs) {
+    const metadataPath = path.join(
+      dataDir,
+      "speech-audio",
+      dayDir,
+      `${transcriptionId}.json`,
+    );
+    try {
+      await fs.access(metadataPath);
+      return metadataPath;
+    } catch {
+      // Continue scanning date shards.
+    }
+  }
+  throw new Error(`Retained metadata not found: ${transcriptionId}`);
 }
 
 function connectWebSocket(url: string): Promise<TestWebSocket> {

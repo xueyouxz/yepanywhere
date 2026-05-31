@@ -65,6 +65,7 @@ import {
   type SpeechMethodId,
 } from "../lib/speechProviders/methods";
 import type { SpeechTranscriptionContext } from "../lib/speechProviders/SpeechProvider";
+import { appendSpeechTranscript } from "../lib/speechRecognition";
 import { useVersion } from "../hooks/useVersion";
 import { shortenPath } from "../lib/text";
 import type { PermissionMode, Project } from "../types";
@@ -1255,12 +1256,10 @@ export function NewSessionForm({
   // Voice input handlers
   const handleVoiceTranscript = useCallback(
     (transcript: string) => {
-      const trimmed = message.trimEnd();
-      if (trimmed) {
-        setMessage(`${trimmed} ${transcript}`);
-      } else {
-        setMessage(transcript);
-      }
+      const current = draftControls.getDraft();
+      const nextMessage = appendSpeechTranscript(current, transcript);
+      if (nextMessage === current) return;
+      draftControls.setDraft(nextMessage);
       setInterimTranscript("");
       // Scroll to bottom after committing voice transcript
       // Use setTimeout to ensure state update has rendered
@@ -1271,7 +1270,7 @@ export function NewSessionForm({
         }
       }, 0);
     },
-    [message, setMessage],
+    [draftControls],
   );
 
   const handleInterimTranscript = useCallback((transcript: string) => {
