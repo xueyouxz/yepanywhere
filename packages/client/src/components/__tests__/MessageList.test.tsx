@@ -417,6 +417,37 @@ describe("MessageList", () => {
     expect(setData).toHaveBeenCalledWith("text/plain", "1. Second item");
   });
 
+  it("does not drop user text from mixed turn selections", () => {
+    render(
+      <MessageList
+        messages={[
+          userMessage("user-1", "user selected text"),
+          assistantMessage("assistant-1", "assistant selected text"),
+        ]}
+      />,
+    );
+
+    const userText = screen.getByText("user selected text").firstChild;
+    const assistantText = screen.getByText("assistant selected text").firstChild;
+    expect(userText).toBeTruthy();
+    expect(assistantText).toBeTruthy();
+
+    const range = document.createRange();
+    range.setStart(userText as Node, 0);
+    range.setEnd(
+      assistantText as Node,
+      "assistant selected text".length,
+    );
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    const { event, setData } = dispatchCopyEvent();
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(setData).not.toHaveBeenCalled();
+  });
+
   it("scrolls to current from a focused composer with Ctrl+End", () => {
     const { container } = render(
       <MessageList
