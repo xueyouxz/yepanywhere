@@ -419,7 +419,7 @@ export function MessageInput({
     const pendingVoice = voiceButtonRef.current?.stopAndFinalize() ?? "";
 
     // Combine committed text with any pending voice text
-    let finalText = text.trimEnd();
+    let finalText = controls.getDraft().trimEnd();
     if (pendingVoice) {
       finalText = finalText ? `${finalText} ${pendingVoice}` : pendingVoice;
     }
@@ -445,7 +445,6 @@ export function MessageInput({
       textareaRef.current?.focus();
     }
   }, [
-    text,
     disabled,
     controls,
     onSend,
@@ -463,7 +462,7 @@ export function MessageInput({
     // Stop voice recording and get any pending interim text
     const pendingVoice = voiceButtonRef.current?.stopAndFinalize() ?? "";
 
-    let finalText = text.trimEnd();
+    let finalText = controls.getDraft().trimEnd();
     if (pendingVoice) {
       finalText = finalText ? `${finalText} ${pendingVoice}` : pendingVoice;
     }
@@ -484,7 +483,6 @@ export function MessageInput({
       textareaRef.current?.focus();
     }
   }, [
-    text,
     disabled,
     controls,
     onQueue,
@@ -499,7 +497,7 @@ export function MessageInput({
   const handleBtwClick = useCallback(() => {
     if (disabled || !onBtwShortcut) return;
     const pendingVoice = voiceButtonRef.current?.stopAndFinalize() ?? "";
-    let finalText = text.trimEnd();
+    let finalText = controls.getDraft().trimEnd();
     if (pendingVoice) {
       finalText = finalText ? `${finalText} ${pendingVoice}` : pendingVoice;
     }
@@ -510,7 +508,7 @@ export function MessageInput({
       setInterimTranscript("");
     }
     textareaRef.current?.focus();
-  }, [controls, disabled, onBtwShortcut, resetCompositionMetadata, text]);
+  }, [controls, disabled, onBtwShortcut, resetCompositionMetadata]);
 
   const submitPrimaryAction =
     effectivePrimaryActionKind === "queue" ? handleQueue : handleSubmit;
@@ -741,15 +739,23 @@ export function MessageInput({
           metadata.transcriptionId,
         ];
       }
-      if (!trimmedTranscript) return;
+      if (metadata?.smartTurnCommand === "cancel") {
+        setInterimTranscript("");
+        return;
+      }
 
-      const nextText = appendSpeechTranscript(
-        controls.getDraft(),
-        trimmedTranscript,
-      );
-      noteComposerEdit(nextText);
-      controls.setDraft(nextText);
+      const currentText = controls.getDraft();
+      const nextText = trimmedTranscript
+        ? appendSpeechTranscript(currentText, trimmedTranscript)
+        : currentText;
+      if (nextText !== currentText) {
+        noteComposerEdit(nextText);
+        controls.setDraft(nextText);
+      }
       setInterimTranscript("");
+      if (metadata?.smartTurnCommand === "send") {
+        handleSubmit();
+      }
       // Scroll to bottom after committing voice transcript
       // Use setTimeout to ensure state update has rendered
       setTimeout(() => {
@@ -759,7 +765,7 @@ export function MessageInput({
         }
       }, 0);
     },
-    [controls, noteComposerEdit],
+    [controls, handleSubmit, noteComposerEdit],
   );
 
   const handleInterimTranscript = useCallback((transcript: string) => {

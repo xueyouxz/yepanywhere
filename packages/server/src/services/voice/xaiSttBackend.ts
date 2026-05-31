@@ -5,6 +5,7 @@ import type {
   SpeechStreamHandlers,
   SpeechStreamOptions,
   SpeechStreamSession,
+  SpeechWordTimestamp,
   TranscribeOptions,
 } from "./SpeechBackend.js";
 import WebSocket from "ws";
@@ -26,6 +27,7 @@ interface XaiSttStreamEvent {
   is_final?: boolean;
   speech_final?: boolean;
   duration?: number;
+  words?: SpeechWordTimestamp[];
 }
 
 /**
@@ -40,7 +42,7 @@ interface XaiSttStreamEvent {
 export class XaiSttBackend implements SpeechBackend {
   readonly id = "ya-grok";
   readonly label = "Grok (cloud)";
-  readonly capabilities = { streaming: true } as const;
+  readonly capabilities = { streaming: true, smartTurn: true } as const;
 
   constructor(private readonly apiKey: string) {}
 
@@ -106,6 +108,19 @@ export class XaiSttBackend implements SpeechBackend {
     );
     url.searchParams.set("endpointing", String(options.endpointingMs ?? 250));
     url.searchParams.set("language", options.language ?? "en");
+    if (options.smartTurnThreshold !== undefined) {
+      url.searchParams.set("smart_turn", String(options.smartTurnThreshold));
+    }
+    if (
+      options.smartTurnThreshold !== undefined &&
+      options.smartTurnTimeoutMs !== undefined &&
+      options.smartTurnTimeoutMs > 0
+    ) {
+      url.searchParams.set(
+        "smart_turn_timeout",
+        String(options.smartTurnTimeoutMs),
+      );
+    }
 
     const ws = new WebSocket(url, {
       headers: { Authorization: `Bearer ${this.apiKey}` },
@@ -189,17 +204,17 @@ export class XaiSttBackend implements SpeechBackend {
 
       if (event.type === "transcript.partial") {
         const text = event.text ?? "";
-        if (text) doneText = text;
         handlers.onPartial?.({
           text,
           isFinal: event.is_final,
           speechFinal: event.speech_final,
+          words: event.words,
         });
         return;
       }
 
       if (event.type === "transcript.done") {
-        doneText = event.text ?? doneText;
+        doneText = event.text ?? "";
         doneDuration = event.duration;
         settled = true;
         clearTimeout(timeout);

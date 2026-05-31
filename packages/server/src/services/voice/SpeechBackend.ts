@@ -13,6 +13,8 @@
 export interface SpeechBackendCapabilities {
   /** Backend can accept streaming raw PCM audio and emit interim/final text. */
   streaming?: boolean;
+  /** Backend supports xAI-style Smart Turn end-of-turn detection. */
+  smartTurn?: boolean;
 }
 
 export interface SpeechBackendInfo {
@@ -65,12 +67,27 @@ export interface SpeechStreamOptions extends TranscribeOptions {
   endpointingMs?: number;
   /** Language hint when supported by the backend. */
   language?: string;
+  /** Smart Turn end-of-turn confidence threshold, 0.0-1.0. */
+  smartTurnThreshold?: number;
+  /** Maximum Smart Turn silence wait before speech_final, in milliseconds. */
+  smartTurnTimeoutMs?: number;
+}
+
+export interface SpeechWordTimestamp {
+  word?: string;
+  text?: string;
+  punctuated_word?: string;
+  start?: number;
+  end?: number;
+  duration?: number;
+  speaker?: number | string;
 }
 
 export interface SpeechStreamPartial {
   text: string;
   isFinal?: boolean;
   speechFinal?: boolean;
+  words?: SpeechWordTimestamp[];
 }
 
 export interface SpeechStreamDone {

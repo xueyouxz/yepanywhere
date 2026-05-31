@@ -84,11 +84,14 @@ export function useDraftPersistence(
         !stored
       ) {
         saveToStorage(key, previousValue);
+        valueRef.current = previousValue;
         setValueInternal(previousValue);
         return;
       }
+      valueRef.current = stored ?? "";
       setValueInternal(stored ?? "");
     } catch {
+      valueRef.current = "";
       setValueInternal("");
     }
   }, [key, options?.preserveValueOnKeyChange]);
@@ -131,6 +134,7 @@ export function useDraftPersistence(
   // text during HMR/reload paths that do not reliably fire page lifecycle
   // events before React remounts and restores the previous storage value.
   const setValue = useCallback((newValue: string) => {
+    valueRef.current = newValue;
     setValueInternal(newValue);
     pendingValueRef.current = null;
     if (timeoutRef.current) {
@@ -146,6 +150,7 @@ export function useDraftPersistence(
   // Replace the draft immediately. This is used when another UI action, such
   // as editing a queued message, needs to take over the composer.
   const setDraft = useCallback((newValue: string) => {
+    valueRef.current = newValue;
     setValueInternal(newValue);
     pendingValueRef.current = null;
     if (timeoutRef.current) {
@@ -160,6 +165,7 @@ export function useDraftPersistence(
     if (pendingValueRef.current !== null) {
       saveToStorage(keyRef.current, pendingValueRef.current);
     }
+    valueRef.current = "";
     setValueInternal("");
     pendingValueRef.current = null;
     // Cancel pending write so we don't overwrite the recovery draft with ""
@@ -171,6 +177,7 @@ export function useDraftPersistence(
 
   // Clear both state and localStorage (for confirmed successful send)
   const clearDraft = useCallback(() => {
+    valueRef.current = "";
     setValueInternal("");
     pendingValueRef.current = null;
     if (timeoutRef.current) {
@@ -189,7 +196,11 @@ export function useDraftPersistence(
     try {
       const stored = localStorage.getItem(keyRef.current);
       if (stored) {
+        valueRef.current = stored;
         setValueInternal(stored);
+      } else {
+        valueRef.current = "";
+        setValueInternal("");
       }
     } catch {
       // Ignore errors

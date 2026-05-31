@@ -100,6 +100,7 @@ describe("initSpeechBackendRegistry cloud auto-enable", () => {
     expect(registry.enabledIds()).toContain("ya-grok");
     expect(registry.enabledCapabilities()["ya-grok"]).toEqual({
       streaming: true,
+      smartTurn: true,
     });
   });
 

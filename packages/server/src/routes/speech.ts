@@ -16,6 +16,7 @@ import {
   supportsStreaming,
   type SpeechStreamSession,
   type TranscribeOptions,
+  type SpeechWordTimestamp,
 } from "../services/voice/SpeechBackend.js";
 
 const logger = getLogger();
@@ -39,6 +40,7 @@ interface StartMsg {
   streaming?: boolean;
   sampleRate?: number;
   encoding?: string;
+  smartTurn?: SpeechSmartTurnStartOptions;
 }
 interface StopMsg {
   type: "stop";
@@ -52,6 +54,7 @@ interface ServerMsg {
   transcriptionId?: string;
   isFinal?: boolean;
   speechFinal?: boolean;
+  words?: SpeechWordTimestamp[];
 }
 
 type SpeechWsData = string | ArrayBuffer | SharedArrayBuffer | Buffer | Blob;
@@ -63,6 +66,12 @@ interface TranscribeBody {
   prompt?: unknown;
   keyterms?: unknown;
   context?: unknown;
+}
+
+interface SpeechSmartTurnStartOptions {
+  enabled: boolean;
+  threshold?: number;
+  timeoutMs?: number;
 }
 
 function send(ws: WSContext, msg: ServerMsg): void {
@@ -91,8 +100,34 @@ function getPartialTraceKind(event: {
   return "update";
 }
 
+function joinStreamingSpeechFinals(texts: string[]): string {
+  return texts
+    .map((text) => text.trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function parseSmartTurnStartOptions(
+  value: unknown,
+): SpeechSmartTurnStartOptions | undefined {
+  if (!isRecord(value) || value.enabled !== true) return undefined;
+  const threshold =
+    typeof value.threshold === "number" && Number.isFinite(value.threshold)
+      ? clampNumber(value.threshold, 0, 1)
+      : undefined;
+  const timeoutMs =
+    typeof value.timeoutMs === "number" && Number.isFinite(value.timeoutMs)
+      ? Math.round(clampNumber(value.timeoutMs, 0, 5000))
+      : undefined;
+  return { enabled: true, threshold, timeoutMs };
 }
 
 function parseClientMsg(value: unknown): ClientMsg | null {
@@ -108,6 +143,7 @@ function parseClientMsg(value: unknown): ClientMsg | null {
       sampleRate:
         typeof value.sampleRate === "number" ? value.sampleRate : undefined,
       encoding: typeof value.encoding === "string" ? value.encoding : undefined,
+      smartTurn: parseSmartTurnStartOptions(value.smartTurn),
     };
   }
   if (value.type === "stop") {
@@ -426,6 +462,8 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
       let streamStartedAt = "";
       let streamStartedAtMs = 0;
       let streamingTranscriptTrace: string[] = [];
+      let streamingSpeechFinalTexts: string[] = [];
+      let streamingStopRequested = false;
       let messageChain = Promise.resolve();
 
       const processMessage = async (
@@ -458,6 +496,8 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
           streamSession = null;
           streamRequestId = null;
           streamingTranscriptTrace = [];
+          streamingSpeechFinalTexts = [];
+          streamingStopRequested = false;
 
           if (msg.streaming && backendId) {
             const backend = deps.speechBackendRegistry.getBackend(backendId);
@@ -481,6 +521,8 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
               });
               return;
             }
+            const smartTurn =
+              backend.capabilities.smartTurn === true ? msg.smartTurn : undefined;
 
             streamRequestId = randomUUID();
             streamStartedAtMs = Date.now();
@@ -495,6 +537,13 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
                 mimeType,
                 sampleRate,
                 encoding,
+                smartTurn:
+                  smartTurn?.enabled === true
+                    ? {
+                        threshold: smartTurn.threshold ?? null,
+                        timeoutMs: smartTurn.timeoutMs ?? null,
+                      }
+                    : null,
                 context,
               },
               "Speech streaming transcription started",
@@ -508,6 +557,8 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
                 interimResults: true,
                 endpointingMs: 250,
                 language: "en",
+                smartTurnThreshold: smartTurn?.threshold,
+                smartTurnTimeoutMs: smartTurn?.timeoutMs,
               },
               {
                 onPartial: (event) => {
@@ -517,11 +568,15 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
                       event.text,
                     ),
                   );
+                  if (event.speechFinal && !streamingStopRequested) {
+                    streamingSpeechFinalTexts.push(event.text);
+                  }
                   send(ws, {
                     type: "interim",
                     text: event.text,
                     isFinal: event.isFinal,
                     speechFinal: event.speechFinal,
+                    words: event.words,
                   });
                 },
               },
@@ -540,16 +595,20 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
 
         if (streamSession && streamRequestId) {
           try {
+            streamingStopRequested = true;
             const done = await streamSession.finish();
             streamingTranscriptTrace.push(
               formatStreamingTranscriptTraceLine("done", done.text),
             );
+            const transcript =
+              done.text.trim() ||
+              joinStreamingSpeechFinals(streamingSpeechFinalTexts);
             const retention = await persistStreamingTranscription(deps, {
               requestId: streamRequestId,
               backendId,
               audio,
               mimeType,
-              transcript: done.text,
+              transcript,
               streamingTranscriptTrace,
               startedAt: streamStartedAt,
               startedAtMs: streamStartedAtMs,
@@ -557,7 +616,7 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
             });
             send(ws, {
               type: "final",
-              text: done.text,
+              text: transcript,
               transcriptionId: retention.transcriptionId,
             });
           } catch (err: unknown) {
@@ -580,6 +639,8 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
             streamSession = null;
             streamRequestId = null;
             streamingTranscriptTrace = [];
+            streamingSpeechFinalTexts = [];
+            streamingStopRequested = false;
           }
           return;
         }
@@ -625,6 +686,8 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
           streamSession?.close();
           streamSession = null;
           streamingTranscriptTrace = [];
+          streamingSpeechFinalTexts = [];
+          streamingStopRequested = false;
           chunks.length = 0;
         },
       } satisfies WSEvents;

@@ -21,6 +21,7 @@ import {
   type SpeechMethodId,
 } from "../lib/speechProviders/methods";
 import type {
+  SpeechSmartTurnSettings,
   SpeechTranscriptionContext,
   SpeechTranscriptionResultMetadata,
 } from "../lib/speechProviders/SpeechProvider";
@@ -54,6 +55,8 @@ interface VoiceInputButtonProps {
   speechMethod?: SpeechMethodId;
   /** Context attached to YA-server transcription requests. */
   getTranscriptionContext?: () => SpeechTranscriptionContext | undefined;
+  /** Smart Turn settings for streaming STT providers that support it. */
+  smartTurn?: SpeechSmartTurnSettings;
 }
 
 /**
@@ -71,6 +74,7 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
     className = "",
     speechMethod: selectedSpeechMethod,
     getTranscriptionContext,
+    smartTurn,
   }: VoiceInputButtonProps,
   ref: ForwardedRef<VoiceInputButtonRef>,
 ) {
@@ -135,6 +139,7 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
     basePath,
     getTranscriptionContext,
     serverStreaming,
+    smartTurn: serverStreaming ? smartTurn : undefined,
     onResult: handleResult,
     onInterimResult: handleInterim,
   });

@@ -82,10 +82,15 @@ Backends should implement a common `SpeechBackend` contract:
 - When the selected server backend advertises `streaming: true`,
   `YaServerProvider` captures microphone audio through Web Audio, downsamples it
   to 24 kHz signed PCM16 little-endian, and sends binary frames to
-  `/api/speech/ws`. Non-final events update the composer preview; final-ish
-  streaming partials commit transcript deltas so later interim clears cannot
-  erase already accepted speech. The final event carries the retained
-  transcription id.
+  `/api/speech/ws`. Interim and chunk-final events update the composer
+  preview; only utterance-final streaming partials commit transcript deltas.
+  Clicking stop commits the currently visible preview before ignoring
+  stop-flush partials, and the final event carries the retained transcription
+  id.
+- Backends may advertise `smartTurn: true` when their streaming API supports
+  ML end-of-turn detection. Grok STT exposes this through the xAI
+  `smart_turn` threshold and `smart_turn_timeout` parameters. The client shows
+  Smart Turn controls only when the selected backend advertises that capability.
 - `useSpeechRecognition` selects browser-native when the method is
   `browser-native`; any other method constructs `YaServerProvider` with the
   advertised backend id unchanged.
@@ -108,6 +113,8 @@ Backends should implement a common `SpeechBackend` contract:
   exposes enabled ids plus capability metadata to `/api/version`.
 - `ya-grok` posts batch multipart audio to xAI's `POST /v1/stt`
   endpoint and implements xAI's `wss://api.x.ai/v1/stt` streaming endpoint.
+  In streaming mode it can enable Smart Turn and pass through xAI word
+  timestamps so the client can recognize optional paused end commands.
   Both cloud backends auto-enable when their YA-scoped key is present
   (`YA_stt__XAI_API_KEY` for `ya-grok`, `YA_stt__DEEPGRAM_API_KEY` for
   `ya-deepgram`) because providing a metered key is the operator's explicit
@@ -160,6 +167,15 @@ client through `fetchJSON("/speech/transcribe", ...)`.
 - Deepgram streaming partials are not implemented. Deepgram, Whisper, and dummy
   backends still use batch transcription unless a future backend explicitly
   implements the streaming extension.
+- The current Smart Turn end-command recipe is deliberately simple: when Grok
+  returns `speech_final=true`, a final `send`, `cancel`, or `wait` word only
+  acts as a command if word timestamps show a pause longer than 500 ms before
+  it; otherwise the word remains part of the dictated message. If no command is
+  recognized, the action defaults to `send`. This fixed pause rule is ripe for
+  improvement: a future model-side judge could decide whether the word is
+  likely intended as message content or as an end command, including cases with
+  a smaller pause. Do not build that extra judging layer until we have traces
+  that justify it.
 - Grok streaming has focused route tests, but it still needs a live
   browser-plus-xAI smoke test with a real microphone or captured audio source.
 - Audio-as-modality forwarding to providers that natively accept audio is not
@@ -209,6 +225,16 @@ client through `fetchJSON("/speech/transcribe", ...)`.
   `/api/version.voiceBackendCapabilities["ya-grok"].streaming` is true, the
   client uses `/api/speech/ws` for Grok STT, interim events update the composer,
   and the final event includes the retained transcription id.
+- With `YA_stt__XAI_API_KEY` exported, the version response advertises
+  `voiceBackendCapabilities["ya-grok"].smartTurn: true`. Selecting Grok STT
+  shows Smart Turn threshold and timeout controls; selecting browser-native,
+  Deepgram, Whisper, or dummy hides those controls unless that backend later
+  advertises `smartTurn: true`.
+- With Grok Smart Turn enabled, `speech_final=true` commits the utterance,
+  stops the streaming recognizer, and then applies a paused final command:
+  `send` submits, `cancel` discards the speech turn, and `wait` leaves the
+  draft for keyboard editing or thought. No recognized command defaults to
+  `send`.
 - With both `ya-grok` and `ya-deepgram` advertised and no explicit stored
   speech method, the client selects `ya-grok` as the effective mic backend.
 - A successful server-routed transcription emits positive-path logs naming the

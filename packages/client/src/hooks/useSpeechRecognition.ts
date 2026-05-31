@@ -6,6 +6,7 @@ import {
   type SpeechProvider,
   type SpeechProviderState,
   type SpeechProviderStatus,
+  type SpeechSmartTurnSettings,
   type SpeechTranscriptionContext,
   type SpeechTranscriptionResultMetadata,
 } from "../lib/speechProviders/SpeechProvider";
@@ -21,6 +22,8 @@ export interface UseSpeechRecognitionOptions {
   getTranscriptionContext?: () => SpeechTranscriptionContext | undefined;
   /** Whether the selected server backend should use YA speech streaming. */
   serverStreaming?: boolean;
+  /** Smart Turn settings for streaming backends that support it. */
+  smartTurn?: SpeechSmartTurnSettings;
   /** Callback when final transcript is available. */
   onResult?: (
     transcript: string,
@@ -55,6 +58,7 @@ function createProvider(
     lang?: string;
     getTranscriptionContext?: () => SpeechTranscriptionContext | undefined;
     serverStreaming?: boolean;
+    smartTurn?: SpeechSmartTurnSettings;
     onResult?: (
       t: string,
       metadata?: SpeechTranscriptionResultMetadata,
@@ -86,6 +90,7 @@ export function useSpeechRecognition(
     basePath = "",
     getTranscriptionContext,
     serverStreaming,
+    smartTurn,
     onResult,
     onInterimResult,
     onEnd,
@@ -108,6 +113,7 @@ export function useSpeechRecognition(
   const speechMethodRef = useRef(speechMethod);
   const basePathRef = useRef(basePath);
   const serverStreamingRef = useRef(serverStreaming);
+  const smartTurnRef = useRef(smartTurn);
 
   const providerRef = useRef<SpeechProvider | null>(null);
   if (providerRef.current === null) {
@@ -118,6 +124,7 @@ export function useSpeechRecognition(
         lang,
         getTranscriptionContext: () => getTranscriptionContextRef.current?.(),
         serverStreaming: serverStreamingRef.current,
+        smartTurn: smartTurnRef.current,
         onResult: (t, metadata) => onResultRef.current?.(t, metadata),
         onInterimResult: (t) => onInterimResultRef.current?.(t),
         onEnd: () => onEndRef.current?.(),
@@ -140,13 +147,15 @@ export function useSpeechRecognition(
   useEffect(() => {
     if (
       speechMethod === speechMethodRef.current &&
-      serverStreaming === serverStreamingRef.current
+      serverStreaming === serverStreamingRef.current &&
+      smartTurn === smartTurnRef.current
     ) {
       return;
     }
     speechMethodRef.current = speechMethod;
     basePathRef.current = basePath;
     serverStreamingRef.current = serverStreaming;
+    smartTurnRef.current = smartTurn;
 
     const old = providerRef.current;
     old?.dispose();
@@ -155,6 +164,7 @@ export function useSpeechRecognition(
       lang,
       getTranscriptionContext: () => getTranscriptionContextRef.current?.(),
       serverStreaming,
+      smartTurn,
       onResult: (t, metadata) => onResultRef.current?.(t, metadata),
       onInterimResult: (t) => onInterimResultRef.current?.(t),
       onEnd: () => onEndRef.current?.(),
@@ -163,7 +173,7 @@ export function useSpeechRecognition(
     providerRef.current = next;
     setState(next.getState());
     next.subscribe(setState);
-  }, [speechMethod, basePath, lang, serverStreaming]);
+  }, [speechMethod, basePath, lang, serverStreaming, smartTurn]);
 
   useEffect(() => {
     return () => {

@@ -37,8 +37,33 @@ export interface SpeechTranscriptionContext {
   draftKey?: string;
 }
 
+export type SpeechTurnCommand = "send" | "cancel" | "wait";
+
+export interface SpeechSmartTurnSettings {
+  enabled: boolean;
+  threshold: number;
+  timeoutMs: number;
+}
+
+export const DEFAULT_SPEECH_SMART_TURN_SETTINGS: SpeechSmartTurnSettings = {
+  enabled: false,
+  threshold: 0.7,
+  timeoutMs: 3000,
+};
+
+export interface SpeechWordTimestamp {
+  word?: string;
+  text?: string;
+  punctuated_word?: string;
+  start?: number;
+  end?: number;
+  duration?: number;
+  speaker?: number | string;
+}
+
 export interface SpeechTranscriptionResultMetadata {
   transcriptionId?: string;
+  smartTurnCommand?: SpeechTurnCommand;
 }
 
 /** Events emitted by a provider during a listening session. */
@@ -64,6 +89,8 @@ export interface SpeechProviderOptions extends SpeechProviderEvents {
   getTranscriptionContext?: () => SpeechTranscriptionContext | undefined;
   /** Use the YA speech WebSocket streaming path when the backend supports it. */
   serverStreaming?: boolean;
+  /** Smart Turn settings for streaming backends that support it. */
+  smartTurn?: SpeechSmartTurnSettings;
 }
 
 /** Subscriber callback receiving the latest state snapshot. */

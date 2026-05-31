@@ -225,11 +225,22 @@ export function reconcileCodexLinearMessages(
         if (candidate.fingerprint !== entry.fingerprint) {
           continue;
         }
-        if (
-          candidate.message._source === undefined ||
-          entry.message._source === undefined ||
-          candidate.message._source === entry.message._source
-        ) {
+        const candidateSource = candidate.message._source;
+        const entrySource = entry.message._source;
+        const sameSource = candidateSource === entrySource;
+        const canMergeDifferentSources =
+          candidateSource !== undefined &&
+          entrySource !== undefined &&
+          !sameSource;
+        const canMergeSameSource =
+          sameSource &&
+          candidateSource !== undefined &&
+          candidate.timestampMs === entry.timestampMs;
+        if (!canMergeDifferentSources && !canMergeSameSource) {
+          continue;
+        }
+        const mergeSource = entrySource ?? candidateSource;
+        if (!mergeSource) {
           continue;
         }
         const allowedDeltaMs =
@@ -242,7 +253,7 @@ export function reconcileCodexLinearMessages(
         candidate.message = mergeMessage(
           candidate.message,
           entry.message,
-          entry.message._source,
+          mergeSource,
         );
         candidate.timestampMs =
           getMessageTimestampMs(candidate.message) ?? candidate.timestampMs;

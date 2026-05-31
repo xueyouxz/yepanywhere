@@ -45,9 +45,10 @@ async function createSpeechApp(
 class StreamingTestBackend implements StreamingSpeechBackend {
   readonly id = "ya-streaming-test";
   readonly label = "Streaming test";
-  readonly capabilities = { streaming: true } as const;
+  readonly capabilities = { streaming: true, smartTurn: true } as const;
   readonly chunks: Buffer[] = [];
   options: SpeechStreamOptions | null = null;
+  private partialsSent = false;
 
   async validate(): Promise<{ ok: true }> {
     return { ok: true };
@@ -68,16 +69,22 @@ class StreamingTestBackend implements StreamingSpeechBackend {
     return {
       sendAudio: (audio) => {
         this.chunks.push(audio);
-      },
-      finish: async () => {
+        if (this.partialsSent) return;
+        this.partialsSent = true;
         handlers.onPartial?.({ text: "hel", isFinal: false });
         handlers.onPartial?.({ text: "hello", isFinal: true });
         handlers.onPartial?.({
           text: "hello world",
           isFinal: true,
           speechFinal: true,
+          words: [
+            { word: "hello", start: 0, duration: 0.2 },
+            { word: "world", start: 0.3, duration: 0.2 },
+          ],
         });
-        return { text: "hello world" };
+      },
+      finish: async () => {
+        return { text: "" };
       },
       close: () => {},
     };
@@ -240,6 +247,11 @@ describe("speech routes", () => {
           streaming: true,
           sampleRate: 24000,
           encoding: "pcm",
+          smartTurn: {
+            enabled: true,
+            threshold: 0.7,
+            timeoutMs: 3000,
+          },
         }),
       );
       ws.send(Buffer.from("pcm"));
@@ -260,6 +272,10 @@ describe("speech routes", () => {
         text: "hello world",
         isFinal: true,
         speechFinal: true,
+        words: [
+          { word: "hello", start: 0, duration: 0.2 },
+          { word: "world", start: 0.3, duration: 0.2 },
+        ],
       });
       const final = (await ws.nextJson()) as { transcriptionId: string };
       expect(final).toEqual({
@@ -268,22 +284,26 @@ describe("speech routes", () => {
         transcriptionId: expect.any(String),
       });
       expect(backend.options?.sampleRate).toBe(24000);
+      expect(backend.options?.smartTurnThreshold).toBe(0.7);
+      expect(backend.options?.smartTurnTimeoutMs).toBe(3000);
       const metadataPath = await findRetainedMetadata(
         dataDir,
         final.transcriptionId,
       );
       const metadata = JSON.parse(await fs.readFile(metadataPath, "utf8")) as {
+        transcript?: string;
         streamingTranscriptTrace?: string[];
         streamingTranscriptTraceText?: string;
       };
+      expect(metadata.transcript).toBe("hello world");
       expect(metadata.streamingTranscriptTrace).toEqual([
         "update\thel",
         "final\thello",
         "speech-final\thello world",
-        "done\thello world",
+        "done\t",
       ]);
       expect(metadata.streamingTranscriptTraceText).toBe(
-        "update\thel\nfinal\thello\nspeech-final\thello world\ndone\thello world",
+        "update\thel\nfinal\thello\nspeech-final\thello world\ndone\t",
       );
     } finally {
       ws.close();

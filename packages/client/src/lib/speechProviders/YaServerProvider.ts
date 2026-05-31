@@ -6,10 +6,12 @@ import {
 import {
   INITIAL_SPEECH_STATE,
   type SpeechProvider,
+  type SpeechTurnCommand,
   type SpeechTranscriptionResultMetadata,
   type SpeechProviderOptions,
   type SpeechProviderState,
   type SpeechProviderSubscriber,
+  type SpeechWordTimestamp,
 } from "./SpeechProvider";
 
 function preferredMimeType(): string {
@@ -56,10 +58,22 @@ interface SpeechWsMessage {
   transcriptionId?: string;
   isFinal?: boolean;
   speechFinal?: boolean;
+  words?: SpeechWordTimestamp[];
 }
 
 const STREAM_SAMPLE_RATE = 24_000;
 const STREAM_MIME_TYPE = `audio/pcm;rate=${STREAM_SAMPLE_RATE};encoding=s16le`;
+const SMART_TURN_COMMAND_PAUSE_SECONDS = 0.5;
+const SMART_TURN_COMMANDS = new Set<SpeechTurnCommand>([
+  "send",
+  "cancel",
+  "wait",
+]);
+
+interface SmartTurnDecision {
+  command: SpeechTurnCommand;
+  transcript: string;
+}
 
 function getAudioContextConstructor(): typeof AudioContext | null {
   if (typeof window === "undefined") return null;
@@ -76,6 +90,80 @@ function speechWsUrl(basePath: string): string {
   const url = new URL(`${normalizedBase}/api/speech/ws`, window.location.href);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
+}
+
+function getWordText(word: SpeechWordTimestamp | undefined): string {
+  if (!word) return "";
+  return word.punctuated_word ?? word.word ?? word.text ?? "";
+}
+
+function normalizeSmartTurnCommand(word: string): SpeechTurnCommand | null {
+  const normalized = word
+    .trim()
+    .toLowerCase()
+    .replace(/^[^a-z]+|[^a-z]+$/g, "");
+  return SMART_TURN_COMMANDS.has(normalized as SpeechTurnCommand)
+    ? (normalized as SpeechTurnCommand)
+    : null;
+}
+
+function getWordStart(word: SpeechWordTimestamp | undefined): number | null {
+  return typeof word?.start === "number" && Number.isFinite(word.start)
+    ? word.start
+    : null;
+}
+
+function getWordEnd(word: SpeechWordTimestamp | undefined): number | null {
+  if (!word) return null;
+  if (typeof word.end === "number" && Number.isFinite(word.end)) {
+    return word.end;
+  }
+  if (
+    typeof word.start === "number" &&
+    Number.isFinite(word.start) &&
+    typeof word.duration === "number" &&
+    Number.isFinite(word.duration)
+  ) {
+    return word.start + word.duration;
+  }
+  return null;
+}
+
+function hasPauseBeforeFinalWord(words: SpeechWordTimestamp[]): boolean {
+  if (words.length <= 1) return true;
+  const last = words.at(-1);
+  const previous = words.at(-2);
+  const lastStart = getWordStart(last);
+  const previousEnd = getWordEnd(previous);
+  if (lastStart === null || previousEnd === null) return false;
+  return lastStart - previousEnd > SMART_TURN_COMMAND_PAUSE_SECONDS;
+}
+
+function stripTrailingCommandWord(
+  transcript: string,
+  command: SpeechTurnCommand,
+): string {
+  const escaped = command.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return transcript
+    .replace(new RegExp(`(?:^|\\s)${escaped}[.!?,;:]*\\s*$`, "i"), "")
+    .trim();
+}
+
+function decideSmartTurn(
+  transcript: string,
+  words: SpeechWordTimestamp[] | undefined,
+): SmartTurnDecision {
+  const trimmed = transcript.trim();
+  const finalWord = words?.at(-1);
+  const command = normalizeSmartTurnCommand(getWordText(finalWord));
+  if (command && words && hasPauseBeforeFinalWord(words)) {
+    return {
+      command,
+      transcript:
+        command === "cancel" ? "" : stripTrailingCommandWord(trimmed, command),
+    };
+  }
+  return { command: "send", transcript: trimmed };
 }
 
 function floatToInt16Pcm(samples: Float32Array, sampleRate: number): ArrayBuffer {
@@ -133,6 +221,10 @@ export class YaServerProvider implements SpeechProvider {
   private submitOnStop = false;
   private streamingFinalReceived = false;
   private streamingCommittedTranscript = "";
+  private streamingPreviewBaseTranscript = "";
+  private streamingCurrentPreviewTranscript = "";
+  private streamingStopRequested = false;
+  private pendingSmartTurnCommand: SpeechTurnCommand | null = null;
   private startToken = 0;
   private disposed = false;
 
@@ -259,6 +351,10 @@ export class YaServerProvider implements SpeechProvider {
     this.mimeType = STREAM_MIME_TYPE;
     this.streamingFinalReceived = false;
     this.streamingCommittedTranscript = "";
+    this.streamingPreviewBaseTranscript = "";
+    this.streamingCurrentPreviewTranscript = "";
+    this.streamingStopRequested = false;
+    this.pendingSmartTurnCommand = null;
     const ws = new WebSocket(speechWsUrl(this.basePath));
     ws.binaryType = "arraybuffer";
     this.ws = ws;
@@ -311,6 +407,14 @@ export class YaServerProvider implements SpeechProvider {
         sampleRate: STREAM_SAMPLE_RATE,
         encoding: "pcm",
         context: this.options.getTranscriptionContext?.(),
+        smartTurn:
+          this.options.smartTurn?.enabled === true
+            ? {
+                enabled: true,
+                threshold: this.options.smartTurn.threshold,
+                timeoutMs: this.options.smartTurn.timeoutMs,
+              }
+            : undefined,
       }),
     );
 
@@ -365,26 +469,40 @@ export class YaServerProvider implements SpeechProvider {
 
     if (message.type === "interim") {
       const transcript = message.text ?? "";
-      if (message.isFinal || message.speechFinal) {
+      if (this.streamingStopRequested) return;
+      if (message.speechFinal) {
+        if (this.options.smartTurn?.enabled === true) {
+          this.handleSmartTurnSpeechFinal(transcript, message.words);
+          return;
+        }
         this.commitStreamingTranscript(transcript);
         return;
       }
-      const interim = this.getStreamingTranscriptDelta(transcript);
-      this.setState({ interimTranscript: interim });
-      this.options.onInterimResult?.(interim);
+      if (message.isFinal) {
+        this.setStreamingPreviewBase(transcript);
+        return;
+      }
+      this.setStreamingPreview(transcript);
       return;
     }
 
     if (message.type === "final") {
       this.streamingFinalReceived = true;
       this.cleanupStreamingMedia();
-      const metadata = message.transcriptionId
-        ? { transcriptionId: message.transcriptionId }
-        : undefined;
-      const committed = this.commitStreamingTranscript(
-        message.text ?? "",
-        metadata,
-      );
+      const smartTurnCommand = this.pendingSmartTurnCommand ?? undefined;
+      this.pendingSmartTurnCommand = null;
+      const metadata: SpeechTranscriptionResultMetadata | undefined =
+        message.transcriptionId || smartTurnCommand ? {} : undefined;
+      if (metadata && message.transcriptionId) {
+        metadata.transcriptionId = message.transcriptionId;
+      }
+      if (metadata && smartTurnCommand) {
+        metadata.smartTurnCommand = smartTurnCommand;
+      }
+      const committed =
+        !smartTurnCommand &&
+        !this.streamingCommittedTranscript &&
+        this.commitStreamingTranscript(message.text ?? "", metadata);
       if (!committed && metadata) {
         this.options.onResult?.("", metadata);
       }
@@ -416,6 +534,30 @@ export class YaServerProvider implements SpeechProvider {
     }
   }
 
+  private handleSmartTurnSpeechFinal(
+    transcript: string,
+    words: SpeechWordTimestamp[] | undefined,
+  ): void {
+    const decision = decideSmartTurn(transcript, words);
+    this.pendingSmartTurnCommand = decision.command;
+
+    if (decision.command !== "cancel") {
+      this.commitStreamingTranscript(decision.transcript);
+    } else {
+      this.clearStreamingPreview();
+    }
+
+    this.streamingStopRequested = true;
+    this.cleanupStreamingMedia();
+    this.setState({ status: "receiving", isListening: false, error: null });
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "stop" }));
+    } else {
+      this.ws?.close();
+      this.ws = null;
+    }
+  }
+
   private getStreamingTranscriptDelta(transcript: string): string {
     const latest = transcript.trim();
     if (!latest) return "";
@@ -423,6 +565,40 @@ export class YaServerProvider implements SpeechProvider {
       latest,
       this.streamingCommittedTranscript,
     ).trimStart();
+  }
+
+  private buildStreamingPreview(transcript: string): string {
+    const latest = transcript.trim();
+    if (!latest) return this.streamingPreviewBaseTranscript;
+    if (!this.streamingPreviewBaseTranscript) return latest;
+    if (latest.startsWith(this.streamingPreviewBaseTranscript)) return latest;
+    return appendSpeechTranscript(this.streamingPreviewBaseTranscript, latest);
+  }
+
+  private setStreamingPreview(transcript: string): void {
+    const preview = this.buildStreamingPreview(transcript);
+    this.streamingCurrentPreviewTranscript = preview;
+    this.setState({ interimTranscript: preview });
+    this.options.onInterimResult?.(preview);
+  }
+
+  private setStreamingPreviewBase(transcript: string): void {
+    const preview = this.buildStreamingPreview(transcript);
+    this.streamingPreviewBaseTranscript = preview;
+    this.streamingCurrentPreviewTranscript = preview;
+    this.setState({ interimTranscript: preview });
+    this.options.onInterimResult?.(preview);
+  }
+
+  private commitStreamingPreview(): boolean {
+    return this.commitStreamingTranscript(this.streamingCurrentPreviewTranscript);
+  }
+
+  private clearStreamingPreview(): void {
+    this.streamingPreviewBaseTranscript = "";
+    this.streamingCurrentPreviewTranscript = "";
+    this.setState({ interimTranscript: "" });
+    this.options.onInterimResult?.("");
   }
 
   private commitStreamingTranscript(
@@ -442,6 +618,8 @@ export class YaServerProvider implements SpeechProvider {
     )
       ? latest
       : appendSpeechTranscript(this.streamingCommittedTranscript, delta);
+    this.streamingPreviewBaseTranscript = "";
+    this.streamingCurrentPreviewTranscript = "";
     this.options.onResult?.(delta, metadata);
     return true;
   }
@@ -510,6 +688,9 @@ export class YaServerProvider implements SpeechProvider {
     this.setState({ status: "receiving", isListening: false });
 
     if (this.options.serverStreaming) {
+      this.streamingStopRequested = true;
+      this.pendingSmartTurnCommand = null;
+      this.commitStreamingPreview();
       this.cleanupStreamingMedia();
       if (this.ws?.readyState === WebSocket.OPEN) {
         this.ws.send(JSON.stringify({ type: "stop" }));
@@ -551,6 +732,7 @@ export class YaServerProvider implements SpeechProvider {
     this.cleanupStreamingMedia();
     this.ws?.close();
     this.ws = null;
+    this.pendingSmartTurnCommand = null;
     if (this.recorder && this.recorder.state !== "inactive") {
       this.recorder.stop();
     }

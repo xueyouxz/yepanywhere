@@ -64,12 +64,17 @@ import {
   resolveSpeechMethod,
   type SpeechMethodId,
 } from "../lib/speechProviders/methods";
-import type { SpeechTranscriptionContext } from "../lib/speechProviders/SpeechProvider";
+import type {
+  SpeechSmartTurnSettings,
+  SpeechTranscriptionContext,
+  SpeechTranscriptionResultMetadata,
+} from "../lib/speechProviders/SpeechProvider";
 import { appendSpeechTranscript } from "../lib/speechRecognition";
 import { useVersion } from "../hooks/useVersion";
 import { shortenPath } from "../lib/text";
 import type { PermissionMode, Project } from "../types";
 import { FilterDropdown, type FilterOption } from "./FilterDropdown";
+import { SpeechSmartTurnControls } from "./SpeechSmartTurnControls";
 import { VoiceInputButton, type VoiceInputButtonRef } from "./VoiceInputButton";
 
 interface PendingFile {
@@ -350,6 +355,8 @@ export function NewSessionForm({
     speechMethod,
     hasStoredSpeechMethod,
     setSpeechMethod,
+    speechSmartTurnSettings,
+    setSpeechSmartTurnSettings,
   } = useModelSettings();
 
   // Connection for uploads (uses WebSocket when enabled)
@@ -772,6 +779,12 @@ export function NewSessionForm({
   );
   const showSpeechMethodSelector =
     voiceInputEnabled && speechMethodOptions.length > 1;
+  const supportsSelectedSpeechSmartTurn =
+    selectedSpeechMethod !== "browser-native" &&
+    versionInfo?.voiceBackendCapabilities?.[selectedSpeechMethod]?.smartTurn ===
+      true;
+  const activeSpeechSmartTurnSettings: SpeechSmartTurnSettings | undefined =
+    supportsSelectedSpeechSmartTurn ? speechSmartTurnSettings : undefined;
 
   // Combined display text: committed text + interim transcript
   const displayText = interimTranscript
@@ -896,12 +909,18 @@ export function NewSessionForm({
     updateServerSetting,
   ]);
 
-  const handleStartSession = async () => {
-    // Stop voice recording and get any pending interim text
-    const pendingVoice = voiceButtonRef.current?.stopAndFinalize() ?? "";
+  const handleStartSession = async (messageOverride?: unknown) => {
+    const override =
+      typeof messageOverride === "string" ? messageOverride : undefined;
+    // Stop voice recording and get any pending interim text unless the caller
+    // already supplied the finalized text from the speech provider.
+    const pendingVoice =
+      override === undefined
+        ? (voiceButtonRef.current?.stopAndFinalize() ?? "")
+        : "";
 
     // Combine committed text with any pending voice text
-    let finalMessage = message.trimEnd();
+    let finalMessage = (override ?? message).trimEnd();
     if (pendingVoice) {
       finalMessage = finalMessage
         ? `${finalMessage} ${pendingVoice}`
@@ -1255,12 +1274,27 @@ export function NewSessionForm({
 
   // Voice input handlers
   const handleVoiceTranscript = useCallback(
-    (transcript: string) => {
+    (
+      transcript: string,
+      metadata?: SpeechTranscriptionResultMetadata,
+    ) => {
+      if (metadata?.smartTurnCommand === "cancel") {
+        setInterimTranscript("");
+        return;
+      }
+
       const current = draftControls.getDraft();
-      const nextMessage = appendSpeechTranscript(current, transcript);
-      if (nextMessage === current) return;
-      draftControls.setDraft(nextMessage);
+      const trimmedTranscript = transcript.trim();
+      const nextMessage = trimmedTranscript
+        ? appendSpeechTranscript(current, trimmedTranscript)
+        : current;
+      if (nextMessage !== current) {
+        draftControls.setDraft(nextMessage);
+      }
       setInterimTranscript("");
+      if (metadata?.smartTurnCommand === "send") {
+        void handleStartSession(nextMessage);
+      }
       // Scroll to bottom after committing voice transcript
       // Use setTimeout to ensure state update has rendered
       setTimeout(() => {
@@ -1270,7 +1304,7 @@ export function NewSessionForm({
         }
       }, 0);
     },
-    [draftControls],
+    [draftControls, handleStartSession],
   );
 
   const handleInterimTranscript = useCallback((transcript: string) => {
@@ -1368,6 +1402,7 @@ export function NewSessionForm({
             className="toolbar-button"
             speechMethod={selectedSpeechMethod}
             getTranscriptionContext={getTranscriptionContext}
+            smartTurn={activeSpeechSmartTurnSettings}
           />
           {supportsThinkingToggle && (
             <>
@@ -1682,17 +1717,25 @@ export function NewSessionForm({
         />
       </div>
     ) : null;
-  const speechField = showSpeechMethodSelector ? (
+  const speechField = showSpeechMethodSelector || supportsSelectedSpeechSmartTurn ? (
     <div className="new-session-speech-field">
       <h3>{t("newSessionSpeechTitle")}</h3>
-      <FilterDropdown
-        label={t("newSessionSpeechTitle")}
-        options={speechMethodOptions}
-        selected={[selectedSpeechMethod]}
-        onChange={handleSpeechMethodSelect}
-        multiSelect={false}
-        placeholder={t("newSessionSpeechPlaceholder")}
-      />
+      {showSpeechMethodSelector && (
+        <FilterDropdown
+          label={t("newSessionSpeechTitle")}
+          options={speechMethodOptions}
+          selected={[selectedSpeechMethod]}
+          onChange={handleSpeechMethodSelect}
+          multiSelect={false}
+          placeholder={t("newSessionSpeechPlaceholder")}
+        />
+      )}
+      {supportsSelectedSpeechSmartTurn && (
+        <SpeechSmartTurnControls
+          settings={speechSmartTurnSettings}
+          onChange={setSpeechSmartTurnSettings}
+        />
+      )}
     </div>
   ) : null;
   const modelSection =

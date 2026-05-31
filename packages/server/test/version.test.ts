@@ -218,14 +218,14 @@ describe("GET /version", () => {
     const routes = createVersionRoutes({
       getEnabledVoiceBackends: () => ["ya-grok"],
       getVoiceBackendCapabilities: () => ({
-        "ya-grok": { streaming: true },
+        "ya-grok": { streaming: true, smartTurn: true },
       }),
     });
     const res = await routes.request("/");
     const json = await res.json();
 
     expect(json.voiceBackendCapabilities).toEqual({
-      "ya-grok": { streaming: true },
+      "ya-grok": { streaming: true, smartTurn: true },
     });
   });
 

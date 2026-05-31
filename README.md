@@ -80,6 +80,24 @@ pnpm start
 
 Open http://localhost:3400 in your browser. The app auto-detects installed CLI agents.
 
+## Voice Input and STT Keys
+
+Browser-native voice input works without extra configuration. To use
+server-mediated STT, export the provider key in the Yep Anywhere server
+environment before starting the app:
+
+```bash
+export YA_stt__XAI_API_KEY="xai-..."
+export YA_stt__DEEPGRAM_API_KEY="deepgram-..."
+```
+
+Providing `YA_stt__XAI_API_KEY` auto-enables the `ya-grok` backend; providing
+`YA_stt__DEEPGRAM_API_KEY` auto-enables the `ya-deepgram` backend. These
+`YA_<module>__<NAME>` secrets are consumed by Yep Anywhere and stripped from
+child agent environments. For backend behavior and retention details, see the
+[server-mediated STT topic](topics/pluggable-speech-recognition.md); for the
+broader environment variable table, see [topics/ya-env-vars.md](topics/ya-env-vars.md).
+
 ## Remote Access
 
 **Easiest:** Use our free public relay — configure it in Settings, or via CLI for headless setups:

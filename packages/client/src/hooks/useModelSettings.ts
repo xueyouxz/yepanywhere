@@ -11,6 +11,10 @@ import {
   isSpeechMethodId,
 } from "../lib/speechProviders/methods";
 import {
+  DEFAULT_SPEECH_SMART_TURN_SETTINGS,
+  type SpeechSmartTurnSettings,
+} from "../lib/speechProviders/SpeechProvider";
+import {
   LEGACY_KEYS,
   getServerScoped,
   setServerScoped,
@@ -141,6 +145,47 @@ function saveSpeechMethod(method: SpeechMethodId) {
   setServerScoped("speechMethod", method, LEGACY_KEYS.speechMethod);
 }
 
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function cleanSpeechSmartTurnSettings(
+  settings: Partial<SpeechSmartTurnSettings>,
+): SpeechSmartTurnSettings {
+  return {
+    enabled: settings.enabled === true,
+    threshold:
+      typeof settings.threshold === "number" && Number.isFinite(settings.threshold)
+        ? clampNumber(settings.threshold, 0, 1)
+        : DEFAULT_SPEECH_SMART_TURN_SETTINGS.threshold,
+    timeoutMs:
+      typeof settings.timeoutMs === "number" && Number.isFinite(settings.timeoutMs)
+        ? Math.round(clampNumber(settings.timeoutMs, 0, 5000))
+        : DEFAULT_SPEECH_SMART_TURN_SETTINGS.timeoutMs,
+  };
+}
+
+function loadSpeechSmartTurnSettings(): SpeechSmartTurnSettings {
+  const stored = getServerScoped(
+    "speechSmartTurn",
+    LEGACY_KEYS.speechSmartTurn,
+  );
+  if (!stored) return { ...DEFAULT_SPEECH_SMART_TURN_SETTINGS };
+  try {
+    return cleanSpeechSmartTurnSettings(JSON.parse(stored) as unknown as Partial<SpeechSmartTurnSettings>);
+  } catch {
+    return { ...DEFAULT_SPEECH_SMART_TURN_SETTINGS };
+  }
+}
+
+function saveSpeechSmartTurnSettings(settings: SpeechSmartTurnSettings) {
+  setServerScoped(
+    "speechSmartTurn",
+    JSON.stringify(cleanSpeechSmartTurnSettings(settings)),
+    LEGACY_KEYS.speechSmartTurn,
+  );
+}
+
 /**
  * Hook to manage model and thinking preferences.
  */
@@ -158,6 +203,8 @@ export function useModelSettings() {
   const [hasStoredSpeechMethod, setHasStoredSpeechMethod] = useState<boolean>(
     () => loadStoredSpeechMethod() !== null,
   );
+  const [speechSmartTurnSettings, setSpeechSmartTurnSettingsState] =
+    useState<SpeechSmartTurnSettings>(loadSpeechSmartTurnSettings);
 
   const setModel = useCallback((m: ModelOption) => {
     setModelState(m);
@@ -198,6 +245,15 @@ export function useModelSettings() {
     saveSpeechMethod(method);
   }, []);
 
+  const setSpeechSmartTurnSettings = useCallback(
+    (settings: SpeechSmartTurnSettings) => {
+      const clean = cleanSpeechSmartTurnSettings(settings);
+      setSpeechSmartTurnSettingsState(clean);
+      saveSpeechSmartTurnSettings(clean);
+    },
+    [],
+  );
+
   return {
     model,
     setModel,
@@ -215,6 +271,8 @@ export function useModelSettings() {
     speechMethod,
     hasStoredSpeechMethod,
     setSpeechMethod,
+    speechSmartTurnSettings,
+    setSpeechSmartTurnSettings,
   };
 }
 
@@ -261,4 +319,8 @@ export function getSpeechMethod(): SpeechMethodId {
 
 export function hasStoredSpeechMethodSetting(): boolean {
   return loadStoredSpeechMethod() !== null;
+}
+
+export function getSpeechSmartTurnSettings(): SpeechSmartTurnSettings {
+  return loadSpeechSmartTurnSettings();
 }

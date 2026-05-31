@@ -300,7 +300,10 @@ export interface VersionInfo {
   /** Server-routed speech backend ids validated by the server. */
   voiceBackends?: string[];
   /** Capability map keyed by server-routed speech backend id. */
-  voiceBackendCapabilities?: Record<string, { streaming?: boolean }>;
+  voiceBackendCapabilities?: Record<
+    string,
+    { streaming?: boolean; smartTurn?: boolean }
+  >;
   /** Device bridge availability and update state. Undefined on older servers. */
   deviceBridgeState?:
     | "available"

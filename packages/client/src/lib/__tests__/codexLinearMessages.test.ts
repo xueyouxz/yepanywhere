@@ -154,6 +154,53 @@ describe("reconcileCodexLinearMessages", () => {
     expect(result).toHaveLength(2);
   });
 
+  it("dedupes exact same-source repeats from live stream replay", () => {
+    const messages: Message[] = [
+      {
+        uuid: "sdk-1",
+        type: "user",
+        timestamp: "2026-03-09T10:00:00.000Z",
+        _source: "sdk",
+        message: { role: "user", content: "Test this." },
+      },
+      {
+        uuid: "sdk-2",
+        type: "user",
+        timestamp: "2026-03-09T10:00:00.000Z",
+        _source: "sdk",
+        message: { role: "user", content: "Test this." },
+      },
+    ];
+
+    const result = reconcileCodexLinearMessages(messages);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.uuid).toBe("sdk-2");
+  });
+
+  it("keeps same-source repeated text with distinct timestamps", () => {
+    const messages: Message[] = [
+      {
+        uuid: "sdk-1",
+        type: "user",
+        timestamp: "2026-03-09T10:00:00.000Z",
+        _source: "sdk",
+        message: { role: "user", content: "now" },
+      },
+      {
+        uuid: "sdk-2",
+        type: "user",
+        timestamp: "2026-03-09T10:00:01.000Z",
+        _source: "sdk",
+        message: { role: "user", content: "now" },
+      },
+    ];
+
+    const result = reconcileCodexLinearMessages(messages);
+
+    expect(result).toHaveLength(2);
+  });
+
   it("merges replay/jsonl duplicates across a larger reconnect overlap window", () => {
     const messages: Message[] = [
       {

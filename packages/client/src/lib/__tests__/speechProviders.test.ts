@@ -158,7 +158,7 @@ describe("YA server speech provider", () => {
     expect(provider.getState().status).toBe("idle");
   });
 
-  it("commits final streaming partials as transcript deltas", async () => {
+  it("commits utterance-final streaming partials as transcript deltas", async () => {
     const stopTrack = vi.fn();
     const fakeStream = {
       getTracks: () => [{ stop: stopTrack }],
@@ -257,11 +257,11 @@ describe("YA server speech provider", () => {
     expect(onResult).not.toHaveBeenCalled();
 
     ws.receive({ type: "interim", text: "hello", isFinal: true });
-    expect(onInterimResult).toHaveBeenLastCalledWith("");
-    expect(onResult).toHaveBeenLastCalledWith("hello", undefined);
+    expect(onInterimResult).toHaveBeenLastCalledWith("hello");
+    expect(onResult).not.toHaveBeenCalled();
 
-    ws.receive({ type: "interim", text: "hello world", isFinal: false });
-    expect(onInterimResult).toHaveBeenLastCalledWith("world");
+    ws.receive({ type: "interim", text: "world", isFinal: false });
+    expect(onInterimResult).toHaveBeenLastCalledWith("hello world");
 
     ws.receive({
       type: "interim",
@@ -269,7 +269,7 @@ describe("YA server speech provider", () => {
       isFinal: true,
       speechFinal: true,
     });
-    expect(onResult).toHaveBeenLastCalledWith("world", undefined);
+    expect(onResult).toHaveBeenLastCalledWith("hello world", undefined);
 
     ws.receive({
       type: "final",
@@ -280,6 +280,233 @@ describe("YA server speech provider", () => {
       transcriptionId: "transcription-1",
     });
     expect(onEnd).toHaveBeenCalledTimes(1);
+
+    provider.dispose();
+  });
+
+  it("commits the current streaming preview on stop and ignores stop-flush partials", async () => {
+    const fakeStream = {
+      getTracks: () => [{ stop: vi.fn() }],
+    } as unknown as MediaStream;
+    const onResult = vi.fn();
+    const onInterimResult = vi.fn();
+
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: vi.fn(async () => fakeStream) },
+    });
+
+    class FakeWebSocket {
+      static readonly CONNECTING = 0;
+      static readonly OPEN = 1;
+      static readonly CLOSED = 3;
+      static readonly instances: FakeWebSocket[] = [];
+
+      binaryType: BinaryType = "blob";
+      readyState = FakeWebSocket.CONNECTING;
+      onopen: ((event: Event) => void) | null = null;
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      onclose: ((event: CloseEvent) => void) | null = null;
+      send = vi.fn();
+
+      constructor(readonly url: string) {
+        FakeWebSocket.instances.push(this);
+      }
+
+      open() {
+        this.readyState = FakeWebSocket.OPEN;
+        this.onopen?.(new Event("open"));
+      }
+
+      receive(message: unknown) {
+        this.onmessage?.(
+          new MessageEvent("message", { data: JSON.stringify(message) }),
+        );
+      }
+
+      close() {
+        this.readyState = FakeWebSocket.CLOSED;
+        this.onclose?.(new CloseEvent("close"));
+      }
+    }
+
+    class FakeAudioContext {
+      readonly state = "running";
+      readonly sampleRate = 48_000;
+      readonly destination = {};
+      close = vi.fn(async () => undefined);
+      createMediaStreamSource() {
+        return { connect: vi.fn(), disconnect: vi.fn() };
+      }
+      createScriptProcessor() {
+        return { connect: vi.fn(), disconnect: vi.fn(), onaudioprocess: null };
+      }
+      createGain() {
+        return { gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() };
+      }
+    }
+
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+
+    const provider = new YaServerProvider("ya-grok", "", {
+      serverStreaming: true,
+      onResult,
+      onInterimResult,
+    });
+    provider.start();
+
+    await Promise.resolve();
+    const ws = FakeWebSocket.instances[0]!;
+    ws.open();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    ws.receive({
+      type: "interim",
+      text: "does not delete the content",
+      isFinal: false,
+    });
+    provider.stop();
+    expect(onResult).toHaveBeenLastCalledWith(
+      "does not delete the content",
+      undefined,
+    );
+
+    ws.receive({
+      type: "interim",
+      text: "There's",
+      isFinal: true,
+      speechFinal: true,
+    });
+    expect(onResult).toHaveBeenCalledTimes(1);
+
+    ws.receive({
+      type: "final",
+      text: "",
+      transcriptionId: "transcription-2",
+    });
+    expect(onResult).toHaveBeenLastCalledWith("", {
+      transcriptionId: "transcription-2",
+    });
+
+    provider.dispose();
+  });
+
+  it("applies Smart Turn commands from paused final words", async () => {
+    const fakeStream = {
+      getTracks: () => [{ stop: vi.fn() }],
+    } as unknown as MediaStream;
+    const onResult = vi.fn();
+
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: vi.fn(async () => fakeStream) },
+    });
+
+    class FakeWebSocket {
+      static readonly CONNECTING = 0;
+      static readonly OPEN = 1;
+      static readonly CLOSED = 3;
+      static readonly instances: FakeWebSocket[] = [];
+
+      binaryType: BinaryType = "blob";
+      readyState = FakeWebSocket.CONNECTING;
+      onopen: ((event: Event) => void) | null = null;
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      onclose: ((event: CloseEvent) => void) | null = null;
+      send = vi.fn();
+
+      constructor(readonly url: string) {
+        FakeWebSocket.instances.push(this);
+      }
+
+      open() {
+        this.readyState = FakeWebSocket.OPEN;
+        this.onopen?.(new Event("open"));
+      }
+
+      receive(message: unknown) {
+        this.onmessage?.(
+          new MessageEvent("message", { data: JSON.stringify(message) }),
+        );
+      }
+
+      close() {
+        this.readyState = FakeWebSocket.CLOSED;
+        this.onclose?.(new CloseEvent("close"));
+      }
+    }
+
+    class FakeAudioContext {
+      readonly state = "running";
+      readonly sampleRate = 48_000;
+      readonly destination = {};
+      close = vi.fn(async () => undefined);
+      createMediaStreamSource() {
+        return { connect: vi.fn(), disconnect: vi.fn() };
+      }
+      createScriptProcessor() {
+        return { connect: vi.fn(), disconnect: vi.fn(), onaudioprocess: null };
+      }
+      createGain() {
+        return { gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() };
+      }
+    }
+
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+
+    const provider = new YaServerProvider("ya-grok", "", {
+      serverStreaming: true,
+      smartTurn: { enabled: true, threshold: 0.7, timeoutMs: 3000 },
+      onResult,
+    });
+    provider.start();
+
+    await Promise.resolve();
+    const ws = FakeWebSocket.instances[0]!;
+    ws.open();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(JSON.parse(ws.send.mock.calls[0]?.[0] as string)).toMatchObject({
+      type: "start",
+      backendId: "ya-grok",
+      smartTurn: {
+        enabled: true,
+        threshold: 0.7,
+        timeoutMs: 3000,
+      },
+    });
+
+    ws.receive({
+      type: "interim",
+      text: "hello send",
+      isFinal: true,
+      speechFinal: true,
+      words: [
+        { word: "hello", start: 0, duration: 0.2 },
+        { word: "send", start: 0.9, duration: 0.2 },
+      ],
+    });
+
+    expect(onResult).toHaveBeenLastCalledWith("hello", undefined);
+    expect(JSON.parse(ws.send.mock.calls.at(-1)?.[0] as string)).toEqual({
+      type: "stop",
+    });
+
+    ws.receive({
+      type: "final",
+      text: "",
+      transcriptionId: "transcription-smart-turn",
+    });
+    expect(onResult).toHaveBeenLastCalledWith("", {
+      transcriptionId: "transcription-smart-turn",
+      smartTurnCommand: "send",
+    });
 
     provider.dispose();
   });

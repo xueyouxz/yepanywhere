@@ -39,6 +39,7 @@ import {
   type SpeechMethodId,
 } from "../lib/speechProviders/methods";
 import type {
+  SpeechSmartTurnSettings,
   SpeechTranscriptionContext,
   SpeechTranscriptionResultMetadata,
 } from "../lib/speechProviders/SpeechProvider";
@@ -49,6 +50,7 @@ import { MessageAge } from "./MessageAge";
 import { RenderModeGlyph } from "./ui/RenderModeGlyph";
 import { ContextUsageIndicator } from "./ContextUsageIndicator";
 import { ModeSelector } from "./ModeSelector";
+import { SpeechSmartTurnControls } from "./SpeechSmartTurnControls";
 import { SlashCommandButton } from "./SlashCommandButton";
 import { VoiceInputButton, type VoiceInputButtonRef } from "./VoiceInputButton";
 
@@ -326,6 +328,8 @@ export function MessageInputToolbar({
     speechMethod = "browser-native",
     hasStoredSpeechMethod = false,
     setSpeechMethod,
+    speechSmartTurnSettings,
+    setSpeechSmartTurnSettings,
   } = useModelSettings();
   const { version: versionInfo } = useVersion();
   const renderMode = useOptionalRenderModeContext();
@@ -492,6 +496,12 @@ export function MessageInputToolbar({
   );
   const showSpeechMethodSelector =
     voiceInputEnabled && serverVoiceEnabled && speechMethodOptions.length > 1;
+  const supportsSelectedSpeechSmartTurn =
+    selectedSpeechMethod !== "browser-native" &&
+    versionInfo?.voiceBackendCapabilities?.[selectedSpeechMethod]?.smartTurn ===
+      true;
+  const activeSpeechSmartTurnSettings: SpeechSmartTurnSettings | undefined =
+    supportsSelectedSpeechSmartTurn ? speechSmartTurnSettings : undefined;
 
   useLayoutEffect(() => {
     if (typeof window === "undefined" || !hasModelIndicator) {
@@ -900,6 +910,16 @@ export function MessageInputToolbar({
             className="filter-dropdown--speech-toolbar"
           />
         )}
+        {supportsSelectedSpeechSmartTurn &&
+          speechSmartTurnSettings &&
+          setSpeechSmartTurnSettings && (
+            <SpeechSmartTurnControls
+              compact
+              settings={speechSmartTurnSettings}
+              onChange={setSpeechSmartTurnSettings}
+              disabled={voiceDisabled}
+            />
+          )}
         {voiceButtonRef && onVoiceTranscript && onInterimTranscript && (
           <VoiceInputButton
             ref={voiceButtonRef}
@@ -909,6 +929,7 @@ export function MessageInputToolbar({
             disabled={voiceDisabled}
             speechMethod={selectedSpeechMethod}
             getTranscriptionContext={getTranscriptionContext}
+            smartTurn={activeSpeechSmartTurnSettings}
           />
         )}
         {hasModelIndicator && modelToolbarDensity !== "hidden" && (
