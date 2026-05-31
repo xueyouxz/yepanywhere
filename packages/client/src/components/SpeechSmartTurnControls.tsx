@@ -44,11 +44,16 @@ export function SpeechSmartTurnControls({
   const update = (patch: Partial<SpeechSmartTurnSettings>) => {
     onChange(cleanSettings({ ...clean, ...patch }));
   };
+  const activate = () => {
+    if (!disabled && !clean.enabled) {
+      update({ enabled: true });
+    }
+  };
   const handleThresholdChange = (event: ChangeEvent<HTMLInputElement>) => {
-    update({ threshold: Number(event.target.value) });
+    update({ enabled: true, threshold: Number(event.target.value) });
   };
   const handleTimeoutChange = (event: ChangeEvent<HTMLInputElement>) => {
-    update({ timeoutMs: Number(event.target.value) });
+    update({ enabled: true, timeoutMs: Number(event.target.value) });
   };
   const body = (
     <div className="speech-smart-turn-body">
@@ -70,7 +75,9 @@ export function SpeechSmartTurnControls({
           max="1"
           step="0.01"
           value={clean.threshold}
-          disabled={disabled || !clean.enabled}
+          disabled={disabled}
+          onFocus={activate}
+          onPointerDown={activate}
           onChange={handleThresholdChange}
         />
         <input
@@ -79,7 +86,9 @@ export function SpeechSmartTurnControls({
           max="1"
           step="0.01"
           value={clean.threshold}
-          disabled={disabled || !clean.enabled}
+          disabled={disabled}
+          onFocus={activate}
+          onPointerDown={activate}
           onChange={handleThresholdChange}
           aria-label="Smart Turn threshold"
         />
@@ -93,7 +102,9 @@ export function SpeechSmartTurnControls({
           max="5000"
           step="100"
           value={clean.timeoutMs}
-          disabled={disabled || !clean.enabled}
+          disabled={disabled}
+          onFocus={activate}
+          onPointerDown={activate}
           onChange={handleTimeoutChange}
         />
         <input
@@ -102,7 +113,9 @@ export function SpeechSmartTurnControls({
           max="5000"
           step="100"
           value={clean.timeoutMs}
-          disabled={disabled || !clean.enabled}
+          disabled={disabled}
+          onFocus={activate}
+          onPointerDown={activate}
           onChange={handleTimeoutChange}
           aria-label="Smart Turn timeout milliseconds"
         />

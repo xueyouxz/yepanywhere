@@ -4081,6 +4081,11 @@ a.sidebar-nav-item {
   font-weight: 600;
 }
 
+.speech-smart-turn-toggle input,
+.speech-smart-turn-row input[type="range"] {
+  accent-color: var(--app-yep-green);
+}
+
 .speech-smart-turn-row {
   display: grid;
   grid-template-columns: minmax(4.5rem, auto) minmax(6rem, 1fr) 4.75rem;
@@ -8350,20 +8355,19 @@ a.sidebar-nav-item {
 }
 
 .new-session-model-section .filter-dropdown-container,
-.new-session-model-section .filter-dropdown-button {
+.new-session-model-section .filter-dropdown-button,
+.new-session-speech-field .filter-dropdown-container,
+.new-session-speech-field .filter-dropdown-button {
   width: 100%;
 }
 
-.new-session-model-section .filter-dropdown-button {
+.new-session-model-section .filter-dropdown-button,
+.new-session-speech-field .filter-dropdown-button {
   min-width: 0;
   justify-content: space-between;
 }
 
 @media (min-width: 760px) {
-  .new-session-model-section.has-speech {
-    grid-template-columns: minmax(0, 1.8fr) minmax(11rem, 0.8fr);
-  }
-
   .new-session-speech-field .filter-dropdown-button {
     min-width: 11rem;
   }
@@ -8436,6 +8440,13 @@ a.sidebar-nav-item {
 /* Permission Mode Section */
 .new-session-mode-section {
   margin-bottom: 0.75rem;
+}
+
+.new-session-provider-slot > .new-session-model-section,
+.new-session-provider-slot > .new-session-speech-field,
+.new-session-provider-slot > .new-session-helper-section,
+.new-session-provider-slot > .new-session-mode-section {
+  margin-bottom: 0;
 }
 
 .new-session-mode-section h3 {

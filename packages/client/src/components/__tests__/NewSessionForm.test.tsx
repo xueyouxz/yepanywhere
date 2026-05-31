@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useCallback, useMemo, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useImperativeHandle,
+  useMemo,
+  useState,
+} from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NewSessionForm } from "../NewSessionForm";
 
@@ -13,10 +19,14 @@ const {
   mockAddProject,
   mockCycleThinkingMode,
   mockSetEffortLevel,
+  mockSetSpeechMethod,
+  mockSetSpeechSmartTurnSettings,
+  mockVoiceToggle,
   draftKeys,
   modelSettingsState,
   providersState,
   serverSettingsState,
+  versionState,
   filterDropdownState,
 } = vi.hoisted(() => ({
   mockNavigate: vi.fn(),
@@ -26,10 +36,21 @@ const {
   mockAddProject: vi.fn(),
   mockCycleThinkingMode: vi.fn(),
   mockSetEffortLevel: vi.fn(),
+  mockSetSpeechMethod: vi.fn(),
+  mockSetSpeechSmartTurnSettings: vi.fn(),
+  mockVoiceToggle: vi.fn(),
   draftKeys: [] as string[],
   modelSettingsState: {
     thinkingMode: "off" as "off" | "auto" | "on",
     effortLevel: "high" as "low" | "medium" | "high" | "max",
+    voiceInputEnabled: true,
+    speechMethod: "browser-native",
+    hasStoredSpeechMethod: false,
+    speechSmartTurnSettings: {
+      enabled: false,
+      threshold: 0.7,
+      timeoutMs: 3000,
+    },
   },
   providersState: {
     providers: [] as Array<{
@@ -66,6 +87,15 @@ const {
       }>;
     } | null,
     isLoading: true,
+  },
+  versionState: {
+    version: null as {
+      voiceBackends?: string[];
+      voiceBackendCapabilities?: Record<
+        string,
+        { streaming?: boolean; smartTurn?: boolean }
+      >;
+    } | null,
   },
   filterDropdownState: {
     selected: [] as string[],
@@ -141,6 +171,12 @@ vi.mock("../../hooks/useModelSettings", () => ({
     thinkingMode: modelSettingsState.thinkingMode,
     cycleThinkingMode: mockCycleThinkingMode,
     thinkingLevel: modelSettingsState.effortLevel,
+    voiceInputEnabled: modelSettingsState.voiceInputEnabled,
+    speechMethod: modelSettingsState.speechMethod,
+    hasStoredSpeechMethod: modelSettingsState.hasStoredSpeechMethod,
+    setSpeechMethod: mockSetSpeechMethod,
+    speechSmartTurnSettings: modelSettingsState.speechSmartTurnSettings,
+    setSpeechSmartTurnSettings: mockSetSpeechSmartTurnSettings,
   }),
   getThinkingSetting: () =>
     modelSettingsState.thinkingMode === "off"
@@ -184,6 +220,16 @@ vi.mock("../../hooks/useServerSettings", () => ({
     updateSettings: vi.fn(),
     updateSetting: mockUpdateSetting,
     refetch: vi.fn(),
+  }),
+}));
+
+vi.mock("../../hooks/useVersion", () => ({
+  useVersion: () => ({
+    version: versionState.version,
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+    refetchFresh: vi.fn(),
   }),
 }));
 
@@ -233,7 +279,19 @@ vi.mock("../../lib/newSessionPrefill", () => ({
 }));
 
 vi.mock("../VoiceInputButton", () => ({
-  VoiceInputButton: () => <button type="button">voice</button>,
+  VoiceInputButton: forwardRef((_, ref) => {
+    useImperativeHandle(
+      ref,
+      () => ({
+        stopAndFinalize: () => "",
+        toggle: mockVoiceToggle,
+        isListening: false,
+        isAvailable: true,
+      }),
+      [],
+    );
+    return <button type="button">voice</button>;
+  }),
 }));
 
 const chooserProjects = [
@@ -302,7 +360,19 @@ describe("NewSessionForm", () => {
     mockAddProject.mockReset();
     mockCycleThinkingMode.mockReset();
     mockSetEffortLevel.mockReset();
+    mockSetSpeechMethod.mockReset();
+    mockSetSpeechSmartTurnSettings.mockReset();
+    mockVoiceToggle.mockReset();
     draftKeys.length = 0;
+    versionState.version = null;
+    modelSettingsState.voiceInputEnabled = true;
+    modelSettingsState.speechMethod = "browser-native";
+    modelSettingsState.hasStoredSpeechMethod = false;
+    modelSettingsState.speechSmartTurnSettings = {
+      enabled: false,
+      threshold: 0.7,
+      timeoutMs: 3000,
+    };
     mockStartSession.mockResolvedValue({
       sessionId: "session-1",
       processId: "process-1",
@@ -665,6 +735,24 @@ describe("NewSessionForm", () => {
       "/projects/detached-project/sessions/session-detached",
       expect.any(Object),
     );
+  });
+
+  it("toggles new-session voice input on Ctrl+Space", () => {
+    render(
+      <NewSessionForm
+        projectId="project-1"
+        selectedProject={chooserProjects[0]}
+        projects={[...chooserProjects]}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByPlaceholderText("newSessionPlaceholder"), {
+      key: " ",
+      code: "Space",
+      ctrlKey: true,
+    });
+
+    expect(mockVoiceToggle).toHaveBeenCalledTimes(1);
   });
 
   it("defaults prompt suggestions off when the provider lacks native support", async () => {

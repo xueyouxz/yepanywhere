@@ -1212,6 +1212,19 @@ export function NewSessionForm({
   };
 
   const handleKeyDown = (e: KeyboardEvent) => {
+    if (
+      (e.key === " " || e.code === "Space") &&
+      e.ctrlKey &&
+      !e.shiftKey &&
+      !e.altKey
+    ) {
+      e.preventDefault();
+      if (voiceButtonRef.current?.isAvailable) {
+        voiceButtonRef.current.toggle();
+      }
+      return;
+    }
+
     if (e.key === "Enter") {
       // Skip Enter during IME composition (e.g. Chinese/Japanese/Korean input)
       if (e.nativeEvent.isComposing) return;
@@ -1738,16 +1751,10 @@ export function NewSessionForm({
       )}
     </div>
   ) : null;
-  const modelSection =
-    modelField || speechField ? (
-      <div
-        className={`new-session-model-section ${
-          speechField ? "has-speech" : ""
-        }`}
-      >
-        {modelField}
-        {speechField}
-      </div>
+  const modelSection = modelField ? (
+    <div className="new-session-model-section">
+      {modelField}
+    </div>
     ) : null;
   const recapSection = selectedProvider ? (
     <div className="new-session-helper-section">
@@ -1849,6 +1856,7 @@ export function NewSessionForm({
   const hasConfigControls = Boolean(
     selectedProvider ||
       permissionSection ||
+      speechField ||
       recapSection ||
       promptSuggestionSection,
   );
@@ -1911,6 +1919,7 @@ export function NewSessionForm({
             {providerSection}
             {modelSection}
             {permissionSection}
+            {speechField}
             {recapSection}
             {promptSuggestionSection}
             {defaultsBar}
