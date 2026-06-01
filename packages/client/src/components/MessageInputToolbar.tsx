@@ -217,6 +217,14 @@ function describeSessionLiveness(
         title,
       };
   }
+
+  const unhandledStatus: never = snapshot.derivedStatus;
+  return {
+    prefix: "Unknown state",
+    timestampMs: checkedMs,
+    tone: "warn",
+    title: `${title}\nunknown status: ${String(unhandledStatus)}`,
+  };
 }
 
 function formatLivenessAge(timestampMs: number, nowMs: number): string {

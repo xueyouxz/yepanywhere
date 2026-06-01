@@ -1,5 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { toUrlProjectId } from "@yep-anywhere/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SessionMetadataProvider } from "../../../contexts/SessionMetadataContext";
 import type { Message } from "../../../types";
 import type { RenderItem, ToolCallItem } from "../../../types/renderItems";
 import {
@@ -14,6 +16,9 @@ vi.mock("../../../contexts/SchemaValidationContext", () => ({
     isToolIgnored: vi.fn(() => false),
   }),
 }));
+
+const projectRoot = "/local/graehl/yepanywhere";
+const projectId = toUrlProjectId(projectRoot);
 
 function sourceMessage(id: string, timestamp: string): Message {
   return {
@@ -118,15 +123,26 @@ describe("ExploredToolGroup", () => {
       target_directory: "packages/client/src",
     });
 
-    render(<ExploredToolGroup id="explored-test" items={[read, search, list]} />);
+    render(
+      <SessionMetadataProvider
+        projectId={projectId}
+        projectPath={projectRoot}
+        sessionId="session-1"
+      >
+        <ExploredToolGroup id="explored-test" items={[read, search, list]} />
+      </SessionMetadataProvider>,
+    );
 
     expect(screen.getByText("Explored")).toBeDefined();
     expect(screen.getByText("Read")).toBeDefined();
     expect(screen.getByText("Search")).toBeDefined();
     expect(screen.getByText("List")).toBeDefined();
-    expect(
-      screen.getByRole("button", { name: /rich-text-rendering\.md/i }),
-    ).toBeDefined();
+    const readLink = screen.getByRole("link", {
+      name: /rich-text-rendering\.md/i,
+    });
+    expect(readLink.getAttribute("href")).toBe(
+      `/projects/${projectId}/file?path=topics%2Frich-text-rendering.md`,
+    );
     expect(screen.getByText("tool|bash in packages/client/src")).toBeDefined();
     expect(screen.getByText("packages/client/src")).toBeDefined();
 
