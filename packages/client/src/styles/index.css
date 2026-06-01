@@ -6643,6 +6643,35 @@ a.sidebar-nav-item {
   text-decoration: underline;
 }
 
+.settings-remote-compatibility-notice {
+  margin-top: var(--space-3);
+  margin-bottom: 0;
+}
+
+.settings-remote-compatibility-notice--security {
+  background: color-mix(in srgb, var(--error-color) 12%, transparent);
+  border-color: var(--error-color);
+}
+
+.settings-remote-compatibility-notice__meta {
+  color: var(--text-muted);
+}
+
+.settings-remote-compatibility-notice__command {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
 .settings-button-danger {
   background: var(--error-color);
   border-color: var(--error-color);

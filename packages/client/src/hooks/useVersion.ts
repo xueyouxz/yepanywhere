@@ -27,8 +27,10 @@ export function useVersion(options?: UseVersionOptions) {
     try {
       const data = await api.getVersion({ fresh });
       setVersion(data);
+      return data;
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
+      return null;
     } finally {
       setLoading(false);
     }

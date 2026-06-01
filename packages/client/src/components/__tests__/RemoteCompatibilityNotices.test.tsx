@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -9,6 +10,8 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VersionInfo } from "../../api/client";
+import { restoreRemoteCompatibilityNoticeDismissals } from "../../hooks/useRemoteCompatibilityNoticeDismissals";
+import { getRemoteCompatibilityNotices } from "../../lib/remoteCompatibilityNotices";
 import { RemoteCompatibilityNotices } from "../RemoteCompatibilityNotices";
 
 function version(overrides: Partial<VersionInfo> = {}): VersionInfo {
@@ -138,5 +141,37 @@ describe("RemoteCompatibilityNotices", () => {
     render(<RemoteCompatibilityNotices {...props} />);
 
     expect(screen.queryByTestId("remote-compatibility-notice")).toBeNull();
+  });
+
+  it("reappears when another surface restores the dismissed notice", async () => {
+    const props = {
+      relayUsername: "dev-box",
+      versionInfo: version({
+        current: "0.4.28",
+        latest: "0.4.29",
+        updateAvailable: true,
+      }),
+    };
+    render(<RemoteCompatibilityNotices {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByTestId("remote-compatibility-notice")).toBeNull();
+
+    act(() => {
+      restoreRemoteCompatibilityNoticeDismissals(
+        getRemoteCompatibilityNotices({
+          currentVersion: props.versionInfo.current,
+          latestVersion: props.versionInfo.latest,
+          updateAvailable: props.versionInfo.updateAvailable,
+          resumeProtocolVersion: props.versionInfo.resumeProtocolVersion,
+          capabilities: props.versionInfo.capabilities,
+          relayUsername: props.relayUsername,
+        }),
+      );
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("remote-compatibility-notice")).toBeTruthy(),
+    );
   });
 });
