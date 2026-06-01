@@ -46,6 +46,7 @@ export function MainLayout() {
     if (serverStatus !== "running" || port == null) return;
 
     let cancelled = false;
+    const serverUrl = `http://localhost:${port}`;
     const poll = async () => {
       // Wait for HTTP server to be ready. The Tauri webview starts on
       // tauri://localhost, so reading the response would require server CORS.
@@ -53,7 +54,7 @@ export function MainLayout() {
       // navigating into the same-origin app.
       while (!cancelled) {
         try {
-          await fetch(`http://localhost:${port}/health`, { mode: "no-cors" });
+          await fetch(`${serverUrl}/health`, { mode: "no-cors" });
           break;
         } catch {
           // Server not ready yet
@@ -66,11 +67,11 @@ export function MainLayout() {
       try {
         const token = await getDesktopToken();
         const url = token
-          ? `http://localhost:${port}/?desktop_token=${token}`
-          : `http://localhost:${port}`;
+          ? `${serverUrl}/?desktop_token=${token}`
+          : serverUrl;
         window.location.href = url;
       } catch {
-        window.location.href = `http://localhost:${port}`;
+        window.location.href = serverUrl;
       }
     };
     poll();

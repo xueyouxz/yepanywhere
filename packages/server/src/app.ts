@@ -601,6 +601,7 @@ export function createApp(options: AppOptions): AppResult {
   }
 
   // Health check (outside /api — needs CORS for Tauri desktop app)
+  app.use("/health", corsMiddleware);
   app.use("/health/*", corsMiddleware);
   app.route("/health", health);
 

@@ -132,6 +132,12 @@ describe("allowed-hosts", () => {
       expect(isAllowedOrigin("https://localhost")).toBe(true);
     });
 
+    it("allows Tauri desktop origins", () => {
+      expect(isAllowedOrigin("tauri://localhost")).toBe(true);
+      expect(isAllowedOrigin("http://tauri.localhost")).toBe(true);
+      expect(isAllowedOrigin("https://tauri.localhost")).toBe(true);
+    });
+
     it("allows private IP origins", () => {
       expect(isAllowedOrigin("http://192.168.1.100:3400")).toBe(true);
       expect(isAllowedOrigin("http://10.0.0.1")).toBe(true);

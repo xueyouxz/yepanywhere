@@ -871,6 +871,9 @@ export class ClaudeProvider implements AgentProvider {
         ) => SpawnedProcess)
       | undefined;
     let capturedProcess: SpawnedProcess | null = null;
+    const pathToClaudeCodeExecutable = options.executor
+      ? undefined
+      : resolveLocalClaudeCodeExecutable();
 
     if (options.executor) {
       spawnClaudeCodeProcess = createRemoteSpawn({
@@ -881,11 +884,101 @@ export class ClaudeProvider implements AgentProvider {
       // Local spawn wrapper: delegates to child_process.spawn but captures the
       // SpawnedProcess reference so we can check liveness (exitCode) later.
       spawnClaudeCodeProcess = (spawnOpts) => {
+        const stderrTail: string[] = [];
         const proc = spawn(spawnOpts.command, spawnOpts.args, {
           cwd: spawnOpts.cwd,
           env: spawnOpts.env as NodeJS.ProcessEnv,
           stdio: ["pipe", "pipe", "pipe"],
           shell: process.platform === "win32",
+        });
+
+        log.info(
+          {
+            event: "claude_child_spawn_start",
+            command: spawnOpts.command,
+            args: spawnOpts.args,
+            cwd: spawnOpts.cwd,
+            shell: process.platform === "win32",
+            resolvedExecutable: pathToClaudeCodeExecutable,
+          },
+          "Starting Claude child process",
+        );
+
+        proc.once("spawn", () => {
+          log.info(
+            {
+              event: "claude_child_spawned",
+              pid: proc.pid,
+              command: spawnOpts.command,
+              cwd: spawnOpts.cwd,
+              resolvedExecutable: pathToClaudeCodeExecutable,
+            },
+            "Claude child process spawned",
+          );
+        });
+
+        proc.once("error", (error) => {
+          log.error(
+            {
+              event: "claude_child_spawn_error",
+              error: error instanceof Error ? error.message : String(error),
+              command: spawnOpts.command,
+              cwd: spawnOpts.cwd,
+              resolvedExecutable: pathToClaudeCodeExecutable,
+            },
+            "Claude child process spawn error",
+          );
+        });
+
+        proc.stdin?.on("error", (error) => {
+          log.error(
+            {
+              event: "claude_child_stdin_error",
+              pid: proc.pid,
+              error: error instanceof Error ? error.message : String(error),
+              code:
+                error && typeof error === "object" && "code" in error
+                  ? (error as { code?: unknown }).code
+                  : undefined,
+            },
+            "Claude child stdin error",
+          );
+        });
+
+        proc.stderr?.on("data", (chunk: Buffer) => {
+          const stderr = chunk.toString("utf-8");
+          stderrTail.push(stderr);
+          while (stderrTail.join("").length > 8000) {
+            stderrTail.shift();
+          }
+          const trimmed = stderr.trim();
+          if (trimmed) {
+            log.debug(
+              {
+                event: "claude_child_stderr",
+                pid: proc.pid,
+                stderr: trimmed.slice(0, 2000),
+              },
+              "Claude child stderr",
+            );
+          }
+        });
+
+        proc.once("exit", (code, signal) => {
+          const stderr = stderrTail.join("").trim();
+          log.info(
+            {
+              event: "claude_child_exit",
+              pid: proc.pid,
+              code,
+              signal,
+              command: spawnOpts.command,
+              cwd: spawnOpts.cwd,
+              resolvedExecutable: pathToClaudeCodeExecutable,
+              stderrTail: stderr ? stderr.slice(-4000) : undefined,
+            },
+            "Claude child process exited",
+          );
         });
 
         // Wire up abort signal → SIGTERM, matching remote-spawn behavior
@@ -904,9 +997,6 @@ export class ClaudeProvider implements AgentProvider {
 
     // Create the SDK query with our message generator
     let sdkQuery: Query;
-    const pathToClaudeCodeExecutable = options.executor
-      ? undefined
-      : resolveLocalClaudeCodeExecutable();
     try {
       sdkQuery = query({
         prompt: queue,

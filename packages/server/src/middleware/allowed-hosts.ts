@@ -10,7 +10,7 @@
  * | CORS        | Origin on HTTP    | security.ts  | Cross-origin data leaks    |
  *
  * Built-in allowed hostnames:
- * - localhost, 127.0.0.1, ::1, [::1]
+ * - localhost, 127.0.0.1, ::1, [::1], tauri.localhost
  * - Private IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
  * - *.ts.net (Tailscale, including nested subdomains)
  *
@@ -78,6 +78,7 @@ export function isAllowedHostname(hostname: string): boolean {
   // Localhost variants (IPv4 + IPv6)
   if (h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]")
     return true;
+  if (h === "tauri.localhost") return true;
 
   // Private IPv4 ranges
   if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
