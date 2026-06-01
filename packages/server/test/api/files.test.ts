@@ -42,6 +42,16 @@ describe("Files API", () => {
       join(projectPath, "README.md"),
       "# Test Project\n\nThis is a test.",
     );
+    await mkdir(join(projectPath, "docs", "assets"), { recursive: true });
+    await writeFile(join(projectPath, "docs", "peer.md"), "# Peer");
+    await writeFile(
+      join(projectPath, "docs", "guide.md"),
+      "# Guide\n\n[Peer](peer.md)\n\n![Diagram](assets/diagram.svg)",
+    );
+    await writeFile(
+      join(projectPath, "docs", "assets", "diagram.svg"),
+      "<svg></svg>",
+    );
     await writeFile(
       join(projectPath, "src", "index.ts"),
       'console.log("Hello, world!");',
@@ -79,6 +89,29 @@ describe("Files API", () => {
       expect(json.content).toBe("# Test Project\n\nThis is a test.");
       expect(json.rawUrl).toContain("/api/projects/");
       expect(json.rawUrl).toContain("/files/raw?path=README.md");
+    });
+
+    it("renders Markdown previews with relative project media resolved", async () => {
+      const { app } = createApp({
+        sdk: mockSdk,
+        projectsDir: join(testDir, "sessions"),
+      });
+
+      const res = await app.request(
+        `/api/projects/${projectId}/files?path=docs/guide.md&highlight=true`,
+      );
+
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as FileContentResponse;
+      expect(json.renderedMarkdownHtml).toContain("<h1>Guide</h1>");
+      expect(json.renderedMarkdownHtml).toContain(
+        `href="/api/local-file?path=${encodeURIComponent(
+          join(projectPath, "docs", "peer.md"),
+        )}&amp;render=1"`,
+      );
+      expect(json.renderedMarkdownHtml).toContain(
+        `data-media-path="${join(projectPath, "docs", "assets", "diagram.svg")}"`,
+      );
     });
 
     it("returns file metadata and content for TypeScript file", async () => {

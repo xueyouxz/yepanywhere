@@ -86,6 +86,17 @@ export {
   planThumbnail,
 } from "./attachment-thumbnail.js";
 
+export { DEFAULT_RELAY_URL, normalizeRelayUrl } from "./relay-url.js";
+
+export {
+  DEFAULT_YA_CLIENT_BASE_URL,
+  buildYaClientPublicShareBaseUrl,
+  buildYaClientPublicShareUrl,
+  buildYaClientRelayLoginUrl,
+  normalizeYaClientBaseUrl,
+  normalizeYaClientBaseUrlFromShareViewerUrl,
+} from "./ya-client-url.js";
+
 export {
   type UrlProjectId,
   type DirProjectId,

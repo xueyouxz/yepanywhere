@@ -5,7 +5,9 @@ import {
   type RendererThis,
   type Tokens,
 } from "marked";
+import { isAbsolute, normalize, resolve } from "node:path";
 import sanitizeHtml from "sanitize-html";
+import { parseLineColumn } from "@yep-anywhere/shared";
 
 const ALLOWED_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 const ALLOWED_IMAGE_PROTOCOLS = new Set(["http:", "https:"]);
@@ -25,13 +27,63 @@ const IMAGE_EXTENSIONS = new Set([
 const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mov", "avi", "mkv", "ogv"]);
 
 const MEDIA_EXTENSIONS = new Set([...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS]);
+const MARKDOWN_EXTENSIONS = new Set(["md", "markdown"]);
+
+export interface SafeMarkdownRenderOptions {
+  /**
+   * Directory that relative local markdown links are resolved against.
+   *
+   * Relative links containing `..` are left as ordinary text/links. Project
+   * file endpoints still perform their own containment checks; this renderer
+   * only resolves same-directory or child-directory links for previews.
+   */
+  localFileBasePath?: string;
+  /**
+   * Emit direct <img> tags for local images instead of the interactive YA
+   * inline-media placeholder. Used by standalone rendered documents that do
+   * not run the React inline-preview hydrator.
+   */
+  inlineLocalImages?: boolean;
+}
+
+let activeRenderOptions: SafeMarkdownRenderOptions = {};
+
+interface LocalPathReference {
+  filePath: string;
+  lineNumber?: number;
+  columnNumber?: number;
+}
+
+function stripHrefSuffix(href: string): string {
+  return href.split(/[?#]/, 1)[0] ?? "";
+}
+
+function parseLocalPathReference(path: string): LocalPathReference {
+  const parsed = parseLineColumn(stripHrefSuffix(path.trim()));
+  return {
+    filePath: parsed.path,
+    lineNumber: parsed.line,
+    columnNumber: parsed.column,
+  };
+}
+
+function formatLocalPathReference(reference: LocalPathReference): string {
+  let display = reference.filePath;
+  if (reference.lineNumber !== undefined) {
+    display += `:${reference.lineNumber}`;
+    if (reference.columnNumber !== undefined) {
+      display += `:${reference.columnNumber}`;
+    }
+  }
+  return display;
+}
 
 /**
  * Check if a string looks like an absolute local file path.
  * Must start with / (but not //) and contain a file extension.
  */
 function isLocalFilePath(href: string): boolean {
-  const trimmed = href.trim();
+  const trimmed = parseLocalPathReference(href).filePath;
   if (!trimmed.startsWith("/") || trimmed.startsWith("//")) return false;
   // Must have a file extension after the last /
   const basename = trimmed.split("/").pop() ?? "";
@@ -42,28 +94,48 @@ function isLocalFilePath(href: string): boolean {
  * Get the file extension from a path (lowercase, without the dot).
  */
 function getExtension(path: string): string {
-  return (path.split(".").pop() ?? "").toLowerCase();
+  return (parseLocalPathReference(path).filePath.split(".").pop() ?? "")
+    .toLowerCase();
 }
 
 /**
  * Get the filename from a path.
  */
 function getFileName(path: string): string {
-  return path.trim().split("/").pop() ?? path;
+  return parseLocalPathReference(path).filePath.split("/").pop() ?? path;
+}
+
+function isMarkdownExtension(ext: string): boolean {
+  return MARKDOWN_EXTENSIONS.has(ext);
 }
 
 /**
  * Rewrite a local media path to the local-image API endpoint.
  */
 function localMediaApiUrl(path: string): string {
-  return `/api/local-image?path=${encodeURIComponent(path.trim())}`;
+  return `/api/local-image?path=${encodeURIComponent(
+    parseLocalPathReference(path).filePath,
+  )}`;
 }
 
 /**
  * Rewrite a local text file path to the local-file API endpoint.
  */
-function localFileApiUrl(path: string): string {
-  return `/api/local-file?path=${encodeURIComponent(path.trim())}`;
+function localFileApiUrl(
+  reference: LocalPathReference,
+  options: { renderMarkdown?: boolean } = {},
+): string {
+  let url = `/api/local-file?path=${encodeURIComponent(reference.filePath)}`;
+  if (options.renderMarkdown) {
+    url += "&render=1";
+  }
+  if (reference.lineNumber !== undefined) {
+    url += `&line=${reference.lineNumber}`;
+  }
+  if (reference.columnNumber !== undefined) {
+    url += `&column=${reference.columnNumber}`;
+  }
+  return url;
 }
 
 /**
@@ -71,17 +143,64 @@ function localFileApiUrl(path: string): string {
  * The client intercepts clicks on .local-media-link to open a modal.
  */
 function renderLocalMediaLink(
-  path: string,
+  reference: LocalPathReference,
   label: string,
   ext: string,
 ): string {
-  const trimmedPath = path.trim();
-  const apiUrl = escapeHtml(localMediaApiUrl(trimmedPath));
-  const escapedPath = escapeHtml(trimmedPath);
-  const escapedLabel = escapeHtml(label || getFileName(path));
+  const apiUrl = escapeHtml(localMediaApiUrl(reference.filePath));
+  const escapedPath = escapeHtml(reference.filePath);
+  const escapedLabel = escapeHtml(label || getFileName(reference.filePath));
   const mediaType = VIDEO_EXTENSIONS.has(ext) ? "video" : "image";
   const typeLabel = VIDEO_EXTENSIONS.has(ext) ? "video" : "image";
   return `<span class="local-media-link-group"><button type="button" class="local-media-inline-toggle" data-media-path="${escapedPath}" data-media-type="${mediaType}" data-expanded="true" aria-label="Collapse ${mediaType}" aria-expanded="true" title="Collapse inline preview">-</button><a href="${apiUrl}" class="local-media-link" data-media-type="${mediaType}">${escapedLabel}<span class="local-media-type">(${typeLabel})</span></a></span><span class="local-media-inline-preview" data-media-path="${escapedPath}" data-media-type="${mediaType}" data-expanded="true"></span>`;
+}
+
+function renderDirectLocalImage(path: string, altText: string, title?: string) {
+  const src = escapeHtml(localMediaApiUrl(path));
+  const altAttr = altText ? ` alt="${escapeHtml(altText)}"` : ' alt=""';
+  const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
+  return `<img src="${src}"${altAttr}${titleAttr}>`;
+}
+
+function resolveLocalMarkdownHref(href: string): LocalPathReference | null {
+  const trimmed = href.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (isLocalFilePath(trimmed)) {
+    return parseLocalPathReference(trimmed);
+  }
+
+  const basePath = activeRenderOptions.localFileBasePath;
+  if (!basePath) {
+    return null;
+  }
+
+  if (
+    isAbsolute(trimmed) ||
+    trimmed.startsWith("#") ||
+    /^[a-z][a-z0-9+.-]*:/i.test(trimmed)
+  ) {
+    return null;
+  }
+
+  const parsed = parseLocalPathReference(trimmed);
+  const normalized = normalize(parsed.filePath);
+  const segments = normalized.split(/[\\/]+/);
+  if (
+    !normalized ||
+    normalized === "." ||
+    segments.some((segment) => segment === "..")
+  ) {
+    return null;
+  }
+
+  return {
+    filePath: resolve(basePath, normalized),
+    lineNumber: parsed.lineNumber,
+    columnNumber: parsed.columnNumber,
+  };
 }
 
 const MARKDOWN_SANITIZE_OPTIONS = {
@@ -155,17 +274,22 @@ const renderer: RendererObject<string, string> = {
     this: RendererThis<string, string>,
     { href, title, tokens }: Tokens.Link,
   ) {
-    // Check for local file paths first — rewrite to clickable media placeholder
-    if (isLocalFilePath(href)) {
-      const ext = getExtension(href);
+    const localPath = resolveLocalMarkdownHref(href);
+    if (localPath) {
+      const ext = getExtension(localPath.filePath);
       const renderedText = this.parser.parseInline(tokens);
 
       if (MEDIA_EXTENSIONS.has(ext)) {
-        return renderLocalMediaLink(href, renderedText, ext);
+        return renderLocalMediaLink(localPath, renderedText, ext);
       }
-      // Other local file — render as a link to the API
-      const apiUrl = escapeHtml(localFileApiUrl(href));
-      const titleAttr = ` title="${escapeHtml(title ?? href)}"`;
+      const apiUrl = escapeHtml(
+        localFileApiUrl(localPath, {
+          renderMarkdown: isMarkdownExtension(ext),
+        }),
+      );
+      const titleAttr = ` title="${escapeHtml(
+        title ?? formatLocalPathReference(localPath),
+      )}"`;
       return `<a href="${apiUrl}"${titleAttr}>${renderedText}</a>`;
     }
 
@@ -182,15 +306,25 @@ const renderer: RendererObject<string, string> = {
     return `<a href="${escapedHref}"${titleAttr}>${renderedText}</a>`;
   },
   image({ href, title, text }: Tokens.Image) {
-    // Check for local file paths first — rewrite to clickable media placeholder
-    if (isLocalFilePath(href)) {
-      const ext = getExtension(href);
+    const localPath = resolveLocalMarkdownHref(href);
+    if (localPath) {
+      const ext = getExtension(localPath.filePath);
 
       if (MEDIA_EXTENSIONS.has(ext)) {
-        return renderLocalMediaLink(href, text, ext);
+        if (
+          activeRenderOptions.inlineLocalImages &&
+          IMAGE_EXTENSIONS.has(ext)
+        ) {
+          return renderDirectLocalImage(
+            localPath.filePath,
+            text,
+            title ?? undefined,
+          );
+        }
+        return renderLocalMediaLink(localPath, text, ext);
       }
       // Unrecognized extension — just show text
-      return escapeHtml(text || getFileName(href));
+      return escapeHtml(text || getFileName(localPath.filePath));
     }
 
     const safeSrc = sanitizeUrl(href, ALLOWED_IMAGE_PROTOCOLS);
@@ -324,17 +458,25 @@ export function sanitizeUrl(
 /**
  * Render markdown to sanitized HTML with raw HTML disabled.
  */
-export function renderSafeMarkdown(markdown: string): string {
+export function renderSafeMarkdown(
+  markdown: string,
+  options: SafeMarkdownRenderOptions = {},
+): string {
+  activeRenderOptions = options;
   katexBuffer = [];
-  const rendered = markdownRenderer.parse(markdown, { async: false });
-  const html = typeof rendered === "string" ? rendered : "";
-  const sanitized = sanitizeHtml(html, MARKDOWN_SANITIZE_OPTIONS);
-  const substituted = sanitized.replace(
-    /<span class="yepkatex-placeholder yepkatex-id-(\d+)"><\/span>/g,
-    (_match, idxStr) => katexBuffer[Number(idxStr)] ?? "",
-  );
-  katexBuffer = [];
-  return substituted.trim();
+  try {
+    const rendered = markdownRenderer.parse(markdown, { async: false });
+    const html = typeof rendered === "string" ? rendered : "";
+    const sanitized = sanitizeHtml(html, MARKDOWN_SANITIZE_OPTIONS);
+    const substituted = sanitized.replace(
+      /<span class="yepkatex-placeholder yepkatex-id-(\d+)"><\/span>/g,
+      (_match, idxStr) => katexBuffer[Number(idxStr)] ?? "",
+    );
+    return substituted.trim();
+  } finally {
+    katexBuffer = [];
+    activeRenderOptions = {};
+  }
 }
 
 function escapeHtml(text: string): string {

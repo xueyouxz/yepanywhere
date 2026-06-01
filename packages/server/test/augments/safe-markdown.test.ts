@@ -89,13 +89,23 @@ describe("renderSafeMarkdown — math", () => {
 });
 
 describe("renderSafeMarkdown — local file links", () => {
-  it("routes local markdown links through the text file endpoint", () => {
+  it("routes local markdown links through the rendered text file endpoint", () => {
     const html = renderSafeMarkdown("[notes](/tmp/session-notes.md)");
 
     expect(html).toContain(
-      'href="/api/local-file?path=%2Ftmp%2Fsession-notes.md"',
+      'href="/api/local-file?path=%2Ftmp%2Fsession-notes.md&amp;render=1"',
     );
     expect(html).not.toContain("/api/local-image");
+  });
+
+  it("keeps line hints out of local markdown link paths", () => {
+    const html = renderSafeMarkdown("[notes](/tmp/session-notes.md:8)");
+
+    expect(html).toContain(
+      'href="/api/local-file?path=%2Ftmp%2Fsession-notes.md&amp;render=1&amp;line=8"',
+    );
+    expect(html).toContain('title="/tmp/session-notes.md:8"');
+    expect(html).not.toContain("session-notes.md%3A8");
   });
 
   it("keeps local media links on the media endpoint", () => {
@@ -108,5 +118,53 @@ describe("renderSafeMarkdown — local file links", () => {
     expect(html).toContain('class="local-media-inline-toggle"');
     expect(html).toContain('class="local-media-inline-preview"');
     expect(html).toContain('data-expanded="true"');
+  });
+
+  it("resolves relative local file links against a base directory", () => {
+    const html = renderSafeMarkdown("[peer](docs/peer.md)", {
+      localFileBasePath: "/workspace/project",
+    });
+
+    expect(html).toContain(
+      'href="/api/local-file?path=%2Fworkspace%2Fproject%2Fdocs%2Fpeer.md&amp;render=1"',
+    );
+    expect(html).toContain('title="/workspace/project/docs/peer.md"');
+  });
+
+  it("preserves line hints on relative local file links", () => {
+    const html = renderSafeMarkdown("[peer](docs/peer.md:12)", {
+      localFileBasePath: "/workspace/project",
+    });
+
+    expect(html).toContain(
+      'href="/api/local-file?path=%2Fworkspace%2Fproject%2Fdocs%2Fpeer.md&amp;render=1&amp;line=12"',
+    );
+    expect(html).toContain('title="/workspace/project/docs/peer.md:12"');
+  });
+
+  it("resolves relative local images as inline media placeholders", () => {
+    const html = renderSafeMarkdown("![diagram](assets/diagram.svg)", {
+      localFileBasePath: "/workspace/project/docs",
+    });
+
+    expect(html).toContain(
+      'href="/api/local-image?path=%2Fworkspace%2Fproject%2Fdocs%2Fassets%2Fdiagram.svg"',
+    );
+    expect(html).toContain(
+      'data-media-path="/workspace/project/docs/assets/diagram.svg"',
+    );
+    expect(html).toContain('class="local-media-inline-preview"');
+  });
+
+  it("can emit direct local images for standalone rendered documents", () => {
+    const html = renderSafeMarkdown("![diagram](assets/diagram.svg)", {
+      localFileBasePath: "/workspace/project/docs",
+      inlineLocalImages: true,
+    });
+
+    expect(html).toContain(
+      '<img src="/api/local-image?path=%2Fworkspace%2Fproject%2Fdocs%2Fassets%2Fdiagram.svg" alt="diagram"',
+    );
+    expect(html).not.toContain("local-media-inline-preview");
   });
 });

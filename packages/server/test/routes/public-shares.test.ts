@@ -1,4 +1,8 @@
-import type { AppSession, UrlProjectId } from "@yep-anywhere/shared";
+import {
+  DEFAULT_RELAY_URL,
+  type AppSession,
+  type UrlProjectId,
+} from "@yep-anywhere/shared";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -216,7 +220,11 @@ describe("public share owner routes", () => {
       configured: true,
       remoteAccessEnabled: true,
       relayStatus: "connecting",
+      relayUrl: "wss://relay.example/ws",
+      relayUsername: "host-one",
       canCreate: true,
+      yaClientBaseUrl: "https://yepanywhere.com/remote",
+      viewerBaseUrl: "https://yepanywhere.com/remote/share",
     });
   });
 
@@ -225,7 +233,7 @@ describe("public share owner routes", () => {
       publicShareService: service,
       loadSession: vi.fn(async () => makeSession()),
       getRelayConfig: () => ({
-        url: "wss://relay.example/ws",
+        url: DEFAULT_RELAY_URL,
         username: "host-one",
       }),
       getPublicSharesEnabled: () => true,
@@ -247,12 +255,13 @@ describe("public share owner routes", () => {
     expect(response.status).toBe(200);
     expect(body.url).toContain("https://yepanywhere.com/remote/share/");
     expect(body.url).toContain("?h=host-one");
+    expect(new URL(body.url).searchParams.get("r")).toBeNull();
     expect(
       service.getSessionShareStatus(projectId, "session-1").activeCount,
     ).toBe(1);
   });
 
-  it("creates new shares with a configured custom viewer base URL", async () => {
+  it("creates new shares with a configured custom YA client URL", async () => {
     const app = createPublicShareRoutes({
       publicShareService: service,
       loadSession: vi.fn(async () => makeSession()),
@@ -263,7 +272,7 @@ describe("public share owner routes", () => {
       getPublicSharesEnabled: () => true,
       getRemoteAccessEnabled: () => true,
       getRelayStatus: () => "waiting",
-      getPublicShareViewerBaseUrl: () => "https://shares.example/ya/share",
+      getYaClientBaseUrl: () => "shares.example/ya",
     });
 
     const response = await app.request("/", {
@@ -280,6 +289,40 @@ describe("public share owner routes", () => {
     expect(response.status).toBe(200);
     expect(body.url).toContain("https://shares.example/ya/share/");
     expect(body.url).toContain("?h=host-one");
+  });
+
+  it("includes the configured custom relay in new share links", async () => {
+    const app = createPublicShareRoutes({
+      publicShareService: service,
+      loadSession: vi.fn(async () => makeSession()),
+      getRelayConfig: () => ({
+        url: "relay.graehl.org",
+        username: "host-one",
+      }),
+      getPublicSharesEnabled: () => true,
+      getRemoteAccessEnabled: () => true,
+      getRelayStatus: () => "waiting",
+      getYaClientBaseUrl: () => "ya.graehl.org",
+    });
+
+    const response = await app.request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId,
+        sessionId: "session-1",
+        mode: "frozen",
+      }),
+    });
+    const body = await response.json();
+    const url = new URL(body.url);
+
+    expect(response.status).toBe(200);
+    expect(`${url.origin}${url.pathname}`).toContain(
+      "https://ya.graehl.org/share/",
+    );
+    expect(url.searchParams.get("h")).toBe("host-one");
+    expect(url.searchParams.get("r")).toBe("wss://relay.graehl.org/ws");
   });
 
   it("keeps legacy public share origin env compatibility", async () => {

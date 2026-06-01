@@ -247,6 +247,7 @@ export function useLocalMediaClick() {
 
 export function useLocalMediaInlinePreviews(
   rootRef: RefObject<HTMLElement | null>,
+  refreshKey?: unknown,
 ) {
   useEffect(() => {
     const root = rootRef.current;
@@ -297,5 +298,5 @@ export function useLocalMediaInlinePreviews(
         URL.revokeObjectURL(url);
       }
     };
-  }, [rootRef]);
+  }, [rootRef, refreshKey]);
 }

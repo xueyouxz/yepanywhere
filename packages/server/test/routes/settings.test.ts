@@ -294,7 +294,27 @@ describe("Settings Routes", () => {
       });
     });
 
-    it("accepts and normalizes public share viewer base URL", async () => {
+    it("accepts and normalizes bare YA client hosts", async () => {
+      const routes = createSettingsRoutes({
+        serverSettingsService: mockServerSettingsService,
+      });
+
+      const response = await routes.request("/", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          yaClientBaseUrl: "ya.graehl.org",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(mockServerSettingsService.updateSettings).toHaveBeenCalledWith({
+        yaClientBaseUrl: "https://ya.graehl.org",
+        publicShareViewerBaseUrl: undefined,
+      });
+    });
+
+    it("accepts legacy public share viewer base URLs", async () => {
       const routes = createSettingsRoutes({
         serverSettingsService: mockServerSettingsService,
       });
@@ -309,11 +329,12 @@ describe("Settings Routes", () => {
 
       expect(response.status).toBe(200);
       expect(mockServerSettingsService.updateSettings).toHaveBeenCalledWith({
-        publicShareViewerBaseUrl: "https://example.com/remote/share",
+        yaClientBaseUrl: "https://example.com/remote",
+        publicShareViewerBaseUrl: undefined,
       });
     });
 
-    it("clears public share viewer base URL for default hosted viewer", async () => {
+    it("clears YA client base URL for default hosted client", async () => {
       const routes = createSettingsRoutes({
         serverSettingsService: mockServerSettingsService,
       });
@@ -322,17 +343,18 @@ describe("Settings Routes", () => {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          publicShareViewerBaseUrl: null,
+          yaClientBaseUrl: null,
         }),
       });
 
       expect(response.status).toBe(200);
       expect(mockServerSettingsService.updateSettings).toHaveBeenCalledWith({
+        yaClientBaseUrl: undefined,
         publicShareViewerBaseUrl: undefined,
       });
     });
 
-    it("rejects public share viewer URLs with query strings", async () => {
+    it("rejects YA client URLs with query strings", async () => {
       const routes = createSettingsRoutes({
         serverSettingsService: mockServerSettingsService,
       });
@@ -341,7 +363,7 @@ describe("Settings Routes", () => {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          publicShareViewerBaseUrl: "https://example.com/share?x=1",
+          yaClientBaseUrl: "https://example.com?x=1",
         }),
       });
 

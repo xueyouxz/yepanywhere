@@ -643,6 +643,19 @@ describe("EditRenderer collapsed preview fallback", () => {
 
     const modal = document.body.querySelector(".modal");
     expect(modal?.textContent).toContain("Recent MT Adapter Progress");
+    const titleLink = modal?.querySelector(
+      ".modal-title a.file-path-link",
+    ) as HTMLAnchorElement | null;
+    expect(titleLink?.textContent).toContain("progress-2026-05-18.md");
+    expect(titleLink?.getAttribute("href")).toBe(
+      "/projects/project-1/file?path=research%2Fprogress-2026-05-18.md",
+    );
+    const pathLink = screen.getByRole("link", {
+      name: "research/progress-2026-05-18.md",
+    });
+    expect(pathLink.getAttribute("href")).toBe(
+      "/projects/project-1/file?path=research%2Fprogress-2026-05-18.md",
+    );
     const modalToggle = modal?.querySelector(".fixed-font-render-toggle__button");
     expect(modalToggle).toBeTruthy();
 

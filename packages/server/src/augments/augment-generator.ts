@@ -26,6 +26,7 @@ import {
   localFileApiUrl,
   localMediaApiUrl,
   renderSafeMarkdown,
+  type SafeMarkdownRenderOptions,
   sanitizeUrl,
 } from "./safe-markdown.js";
 
@@ -47,7 +48,11 @@ export interface AugmentGeneratorConfig {
 }
 
 export interface AugmentGenerator {
-  processBlock(block: CompletedBlock, blockIndex: number): Promise<Augment>;
+  processBlock(
+    block: CompletedBlock,
+    blockIndex: number,
+    safeMarkdownOptions?: SafeMarkdownRenderOptions,
+  ): Promise<Augment>;
   renderPending(pending: string): string; // Lightweight inline formatting for trailing text
   renderStreamingCodeBlock(
     block: StreamingCodeBlock,
@@ -84,13 +89,14 @@ export async function createAugmentGenerator(
     async processBlock(
       block: CompletedBlock,
       blockIndex: number,
+      safeMarkdownOptions?: SafeMarkdownRenderOptions,
     ): Promise<Augment> {
       if (block.type === "code") {
         const html = await renderCodeBlock(block, highlighter, loadedLanguages);
         return { blockIndex, html, type: block.type };
       }
 
-      const html = renderMarkdownBlock(block);
+      const html = renderMarkdownBlock(block, safeMarkdownOptions);
       return { blockIndex, html, type: block.type };
     },
 
@@ -234,8 +240,11 @@ function renderAnsiBlock(code: string): string {
 /**
  * Render a non-code markdown block with raw HTML disabled and sanitization.
  */
-function renderMarkdownBlock(block: CompletedBlock): string {
-  return renderSafeMarkdown(block.content);
+function renderMarkdownBlock(
+  block: CompletedBlock,
+  safeMarkdownOptions?: SafeMarkdownRenderOptions,
+): string {
+  return renderSafeMarkdown(block.content, safeMarkdownOptions);
 }
 
 /**
@@ -259,7 +268,9 @@ function renderInlineFormatting(text: string): string {
   // Links: [text](url) — handle local file paths and regular URLs
   result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label, href) => {
     if (isLocalFilePath(href)) {
-      const ext = (href.split(".").pop() ?? "").toLowerCase();
+      const ext = (
+        href.split(/[?#]/, 1)[0]?.split(".").pop() ?? ""
+      ).toLowerCase();
       if (MEDIA_EXTENSIONS.has(ext)) {
         const trimmedHref = href.trim();
         const apiUrl = escapeHtml(localMediaApiUrl(trimmedHref));
@@ -268,7 +279,11 @@ function renderInlineFormatting(text: string): string {
         const typeLabel = VIDEO_EXTENSIONS.has(ext) ? "video" : "image";
         return `<span class="local-media-link-group"><button type="button" class="local-media-inline-toggle" data-media-path="${escapedPath}" data-media-type="${mediaType}" data-expanded="true" aria-label="Collapse ${mediaType}" aria-expanded="true" title="Collapse inline preview">-</button><a href="${apiUrl}" class="local-media-link" data-media-type="${mediaType}">${label}<span class="local-media-type">(${typeLabel})</span></a></span><span class="local-media-inline-preview" data-media-path="${escapedPath}" data-media-type="${mediaType}" data-expanded="true"></span>`;
       }
-      const apiUrl = escapeHtml(localFileApiUrl(href));
+      const apiUrl = escapeHtml(
+        localFileApiUrl(href, {
+          renderMarkdown: ext === "md" || ext === "markdown",
+        }),
+      );
       return `<a href="${apiUrl}">${label}</a>`;
     }
     const safeHref = sanitizeUrl(href);

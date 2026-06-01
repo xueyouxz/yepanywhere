@@ -1376,8 +1376,10 @@ export interface ServerSettings {
   clientLogCollectionRequested?: boolean;
   /** Whether users may create public read-only share links */
   publicSharesEnabled?: boolean;
-  /** Base URL for the hosted public share viewer */
-  publicShareViewerBaseUrl?: string;
+  /** Base URL for the hosted YA client */
+  yaClientBaseUrl?: string | null;
+  /** @deprecated Use yaClientBaseUrl. */
+  publicShareViewerBaseUrl?: string | null;
   /** SSH host aliases for remote executors */
   remoteExecutors?: string[];
   /** SSH host aliases for ChromeOS device bridge targets */
@@ -1435,7 +1437,12 @@ export interface PublicShareStatusResponse {
   requiresRelay: boolean;
   remoteAccessEnabled: boolean;
   relayStatus: RelayClientStatus | null;
+  relayUrl?: string | null;
+  relayUsername?: string | null;
   canCreate: boolean;
+  yaClientBaseUrl: string | null;
+  defaultYaClientBaseUrl: string;
+  yaClientBaseUrlError?: string;
   viewerBaseUrl: string | null;
   defaultViewerBaseUrl: string;
   viewerBaseUrlError?: string;

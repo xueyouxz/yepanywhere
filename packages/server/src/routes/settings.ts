@@ -16,6 +16,8 @@ import {
   type PromptSuggestionMode,
   type ProviderName,
   type RecapMode,
+  normalizeYaClientBaseUrl,
+  normalizeYaClientBaseUrlFromShareViewerUrl,
 } from "@yep-anywhere/shared";
 import { Hono } from "hono";
 import { testSSHConnection } from "../sdk/remote-spawn.js";
@@ -32,7 +34,6 @@ import {
   DEFAULT_SPEECH_AUDIO_RETENTION_MAX_BYTES,
 } from "../services/ServerSettingsService.js";
 import type { PublicShareService } from "../services/PublicShareService.js";
-import { normalizePublicShareViewerBaseUrl } from "../utils/publicShareViewerUrl.js";
 import {
   isValidSshHostAlias,
   normalizeSshHostAlias,
@@ -419,18 +420,46 @@ export function createSettingsRoutes(deps: SettingsRoutesDeps): Hono {
       updates.publicSharesEnabled = body.publicSharesEnabled;
     }
 
-    if ("publicShareViewerBaseUrl" in body) {
+    if ("yaClientBaseUrl" in body) {
+      if (
+        body.yaClientBaseUrl === undefined ||
+        body.yaClientBaseUrl === null ||
+        body.yaClientBaseUrl === ""
+      ) {
+        updates.yaClientBaseUrl = undefined;
+        updates.publicShareViewerBaseUrl = undefined;
+      } else if (typeof body.yaClientBaseUrl === "string") {
+        try {
+          updates.yaClientBaseUrl = normalizeYaClientBaseUrl(
+            body.yaClientBaseUrl,
+          );
+          updates.publicShareViewerBaseUrl = undefined;
+        } catch (error) {
+          return c.json(
+            {
+              error:
+                error instanceof Error ? error.message : "Invalid YA URL",
+            },
+            400,
+          );
+        }
+      } else {
+        return c.json({ error: "yaClientBaseUrl must be a string URL" }, 400);
+      }
+    } else if ("publicShareViewerBaseUrl" in body) {
       if (
         body.publicShareViewerBaseUrl === undefined ||
         body.publicShareViewerBaseUrl === null ||
         body.publicShareViewerBaseUrl === ""
       ) {
+        updates.yaClientBaseUrl = undefined;
         updates.publicShareViewerBaseUrl = undefined;
       } else if (typeof body.publicShareViewerBaseUrl === "string") {
         try {
-          updates.publicShareViewerBaseUrl = normalizePublicShareViewerBaseUrl(
+          updates.yaClientBaseUrl = normalizeYaClientBaseUrlFromShareViewerUrl(
             body.publicShareViewerBaseUrl,
           );
+          updates.publicShareViewerBaseUrl = undefined;
         } catch (error) {
           return c.json(
             {

@@ -1,8 +1,10 @@
 import {
+  DEFAULT_RELAY_URL,
   sanitizeSessionTitle,
   type PublicSessionShareMode,
   type PublicSessionShareResponse,
   type RelayResponse,
+  normalizeRelayUrl,
 } from "@yep-anywhere/shared";
 import {
   useCallback,
@@ -11,6 +13,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
 } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { BrandWordmark } from "../components/BrandWordmark";
@@ -23,7 +26,6 @@ import { ToastProvider } from "../contexts/ToastContext";
 import { useI18n } from "../i18n";
 import type { Message } from "../types";
 
-const DEFAULT_RELAY_URL = "wss://relay.yepanywhere.com/ws";
 const LIVE_POLL_MS = 2000;
 const RETRY_POLL_MS = 2000;
 const PUBLIC_SHARE_BOTTOM_STICKY_PX = 96;
@@ -222,6 +224,38 @@ function isNearScrollBottom(element: HTMLElement): boolean {
   );
 }
 
+export function isPublicShareLocalAppHref(
+  href: string,
+  currentHref = window.location.href,
+): boolean {
+  let url: URL;
+  try {
+    url = new URL(href, currentHref);
+  } catch {
+    return false;
+  }
+
+  const currentUrl = new URL(currentHref);
+  if (url.origin !== currentUrl.origin) {
+    return false;
+  }
+
+  return (
+    url.pathname.startsWith("/projects/") ||
+    url.pathname === "/api/local-file" ||
+    url.pathname === "/api/local-image"
+  );
+}
+
+function getAnchorFromEventTarget(
+  target: EventTarget | null,
+): HTMLAnchorElement | null {
+  if (!(target instanceof Element)) {
+    return null;
+  }
+  return target.closest("a[href]");
+}
+
 function getPublicShareMessageId(
   message: PublicSessionShareResponse["session"]["messages"][number],
 ): string | null {
@@ -303,6 +337,7 @@ export function PublicSharePage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState(false);
+  const [linkNotice, setLinkNotice] = useState<string | null>(null);
   const [viewerId] = useState(getPublicShareViewerId);
   const scrollRef = useRef<HTMLElement | null>(null);
   const hasRenderedShareRef = useRef(false);
@@ -311,7 +346,19 @@ export function PublicSharePage() {
   const wasNearBottomRef = useRef(true);
 
   const relayUsername = searchParams.get("h") ?? "";
-  const relayUrl = searchParams.get("r") ?? DEFAULT_RELAY_URL;
+  const relayConfig = useMemo((): { error: string | null; url: string } => {
+    try {
+      return {
+        error: null,
+        url: normalizeRelayUrl(searchParams.get("r") ?? DEFAULT_RELAY_URL),
+      };
+    } catch (err) {
+      return {
+        error: err instanceof Error ? err.message : String(err),
+        url: DEFAULT_RELAY_URL,
+      };
+    }
+  }, [searchParams]);
   const hints = useMemo(() => parseShareHints(window.location.hash), []);
 
   const title = useMemo(
@@ -347,14 +394,17 @@ export function PublicSharePage() {
     if (!secret || !relayUsername) {
       throw new Error(t("publicShareMissingRelay"));
     }
+    if (relayConfig.error) {
+      throw new Error(relayConfig.error);
+    }
     return await fetchPublicShareViaRelay({
       afterMessageId,
-      relayUrl,
+      relayUrl: relayConfig.url,
       relayUsername,
       secret,
       viewerId,
     });
-  }, [relayUrl, relayUsername, secret, t, viewerId]);
+  }, [relayConfig.error, relayConfig.url, relayUsername, secret, t, viewerId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -418,6 +468,21 @@ export function PublicSharePage() {
     if (!scrollElement) return;
     wasNearBottomRef.current = isNearScrollBottom(scrollElement);
   }, []);
+
+  const handlePublicShareLinkActivation = useCallback(
+    (event: ReactMouseEvent<HTMLElement>) => {
+      const anchor = getAnchorFromEventTarget(event.target);
+      const href = anchor?.getAttribute("href");
+      if (!href || !isPublicShareLocalAppHref(href)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      setLinkNotice(t("publicShareLocalFileLinksUnavailable"));
+    },
+    [t],
+  );
 
   useLayoutEffect(() => {
     const scrollElement = scrollRef.current;
@@ -487,10 +552,17 @@ export function PublicSharePage() {
         className="public-share-scroll"
         ref={scrollRef}
         onScroll={handleScroll}
+        onClickCapture={handlePublicShareLinkActivation}
+        onAuxClickCapture={handlePublicShareLinkActivation}
       >
         <ToastProvider>
           <SchemaValidationProvider>
             <StreamingMarkdownProvider>
+              {linkNotice && (
+                <div className="public-share-notice" role="status">
+                  {linkNotice}
+                </div>
+              )}
               {error && !retrying && !share ? (
                 <div className="public-share-error public-share-error--inline">
                   {error}

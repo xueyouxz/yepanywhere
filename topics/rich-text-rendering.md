@@ -1,5 +1,9 @@
 # Rich-Text Rendering
 
+> Rendering pipeline for agent action panels and file previews, including when
+> YA turns raw provider text into sanitized markdown, syntax-highlighted code,
+> local file links, media previews, and diff views.
+
 Covers the rendering pipeline for agent action panels — what transforms apply to
 command output, file reads, diffs, and edits; which are always-on vs. user-toggleable;
 and the rationale for each choice.
@@ -26,6 +30,10 @@ These run unconditionally and are not user-configurable:
   server recognises as source code.
 - **Server markdown rendering** — server-side, for `.md`/`.markdown` files, stored
   as `_renderedMarkdownHtml`. Produces sanitised HTML used for the default preview.
+- **Explicit rendered Markdown file links** — project file links open the
+  standalone file viewer on browser link gestures, and `.md` / `.markdown`
+  local-file links can request a content-only rendered document. That document
+  includes a raw link and expands local image links directly.
 - **Line numbers** — shown in the plain-text fallback path (no Shiki highlight).
 
 ## Toggleable transforms (sigma Σ button)
@@ -139,3 +147,6 @@ formulas as literal text, matching the experience in their editor.
 - Comment/string-literal markdown rendering in source files is not attempted;
   the tradeoff between false positives and useful rendering favours
   source-only display for all code.
+- Edit diff rich render does not yet inline-expand image links. This would help
+  Markdown edits that add or update `![image](...)`, but it should share the
+  local-media hydration path rather than adding a second image loader.

@@ -11,6 +11,8 @@ export function FilePage() {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams] = useSearchParams();
   const filePath = searchParams.get("path");
+  const lineNumber = parsePositiveInteger(searchParams.get("line"));
+  const lineEnd = parsePositiveInteger(searchParams.get("lineEnd"));
 
   if (!projectId) {
     return (
@@ -53,10 +55,27 @@ export function FilePage() {
         </Link>
       </div>
       <div className="file-page-content">
-        <FileViewer projectId={projectId} filePath={filePath} standalone />
+        <FileViewer
+          projectId={projectId}
+          filePath={filePath}
+          lineNumber={lineNumber}
+          lineEnd={lineEnd}
+          standalone
+        />
       </div>
     </div>
   );
+}
+
+function parsePositiveInteger(value: string | null): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    return undefined;
+  }
+  return parsed;
 }
 
 function BackIcon() {

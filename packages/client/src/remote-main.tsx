@@ -107,6 +107,7 @@ createRoot(rootElement).render(
       <I18nProvider>
         <Routes>
           <Route path="/share/:secret" element={<PublicSharePage />} />
+          <Route path="/remote/share/:secret" element={<PublicSharePage />} />
           <Route
             path="*"
             element={

@@ -11,6 +11,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { normalizeRelayUrl } from "@yep-anywhere/shared";
 import { generateVerifier } from "../crypto/srp-server.js";
 import {
   OWNER_READ_WRITE_FILE_MODE,
@@ -214,18 +215,7 @@ export class RemoteAccessService {
    * Set the relay configuration.
    */
   async setRelayConfig(config: RelayConfig): Promise<void> {
-    // Validate URL format
-    try {
-      const url = new URL(config.url);
-      if (url.protocol !== "ws:" && url.protocol !== "wss:") {
-        throw new Error("Relay URL must use ws:// or wss:// protocol");
-      }
-    } catch (error) {
-      if (error instanceof TypeError) {
-        throw new Error("Invalid relay URL format");
-      }
-      throw error;
-    }
+    const relayUrl = normalizeRelayUrl(config.url);
 
     // Validate username format (relay usernames are more restrictive)
     if (!config.username || config.username.length < 3) {
@@ -242,7 +232,7 @@ export class RemoteAccessService {
     }
 
     this.state.relay = {
-      url: config.url,
+      url: relayUrl,
       username: config.username,
     };
     await this.save();

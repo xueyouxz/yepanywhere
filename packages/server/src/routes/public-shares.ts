@@ -1,4 +1,5 @@
 import {
+  DEFAULT_RELAY_URL,
   type AppSession,
   type CreatePublicSessionShareRequest,
   type CreatePublicSessionShareResponse,
@@ -9,6 +10,7 @@ import {
   type RevokePublicSessionSharesResponse,
   type UrlProjectId,
   isUrlProjectId,
+  normalizeRelayUrl,
 } from "@yep-anywhere/shared";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -18,10 +20,10 @@ import type { PublicShareService } from "../services/PublicShareService.js";
 import {
   buildPublicShareViewerUrl,
   getDefaultPublicShareViewerBaseUrl,
+  getDefaultYaClientBaseUrl,
   resolvePublicShareViewerBaseUrl,
+  resolveYaClientBaseUrl,
 } from "../utils/publicShareViewerUrl.js";
-
-const DEFAULT_RELAY_URL = "wss://relay.yepanywhere.com/ws";
 
 export interface RelayConfigForPublicShare {
   url: string;
@@ -50,6 +52,8 @@ export interface PublicShareRoutesDeps {
   getPublicSharesEnabled?: () => boolean;
   getRemoteAccessEnabled?: () => boolean;
   getRelayStatus?: () => RelayClientStatus | null;
+  getYaClientBaseUrl?: () => string | null | undefined;
+  /** @deprecated Use getYaClientBaseUrl. */
   getPublicShareViewerBaseUrl?: () => string | null | undefined;
 }
 
@@ -86,12 +90,13 @@ function buildPublicShareUrl(
     projectName: string;
     title: string | null;
   },
-  viewerBaseUrl: string,
+  yaClientBaseUrl: string,
 ): string {
-  const url = new URL(buildPublicShareViewerUrl(secret, viewerBaseUrl));
+  const url = new URL(buildPublicShareViewerUrl(secret, yaClientBaseUrl));
+  const relayUrl = normalizeRelayUrl(relayConfig.url);
   url.searchParams.set("h", relayConfig.username);
-  if (relayConfig.url !== DEFAULT_RELAY_URL) {
-    url.searchParams.set("r", relayConfig.url);
+  if (relayUrl !== DEFAULT_RELAY_URL) {
+    url.searchParams.set("r", relayUrl);
   }
   const displayParams = new URLSearchParams();
   displayParams.set("m", display.mode);
@@ -205,15 +210,18 @@ export function createPublicShareRoutes(deps: PublicShareRoutesDeps): Hono {
 
   app.get("/status", (c) => {
     const readiness = getPublicShareReadiness(deps);
+    let yaClientBaseUrl: string | null = null;
     let viewerBaseUrl: string | null = null;
-    let viewerBaseUrlError: string | undefined;
+    let yaClientBaseUrlError: string | undefined;
     try {
-      viewerBaseUrl = resolvePublicShareViewerBaseUrl(
+      yaClientBaseUrl = resolveYaClientBaseUrl(
+        deps.getYaClientBaseUrl?.(),
         deps.getPublicShareViewerBaseUrl?.(),
       );
+      viewerBaseUrl = resolvePublicShareViewerBaseUrl(yaClientBaseUrl);
     } catch (error) {
-      viewerBaseUrlError =
-        error instanceof Error ? error.message : "Invalid viewer URL";
+      yaClientBaseUrlError =
+        error instanceof Error ? error.message : "Invalid YA URL";
     }
     return c.json({
       enabled: readiness.enabled,
@@ -221,10 +229,19 @@ export function createPublicShareRoutes(deps: PublicShareRoutesDeps): Hono {
       requiresRelay: true,
       remoteAccessEnabled: readiness.remoteAccessEnabled,
       relayStatus: readiness.relayStatus,
+      relayUrl: readiness.relayConfig?.url ?? null,
+      relayUsername: readiness.relayConfig?.username ?? null,
       canCreate: readiness.canCreate,
+      yaClientBaseUrl,
+      defaultYaClientBaseUrl: getDefaultYaClientBaseUrl(),
       viewerBaseUrl,
       defaultViewerBaseUrl: getDefaultPublicShareViewerBaseUrl(),
-      ...(viewerBaseUrlError ? { viewerBaseUrlError } : {}),
+      ...(yaClientBaseUrlError
+        ? {
+            yaClientBaseUrlError,
+            viewerBaseUrlError: yaClientBaseUrlError,
+          }
+        : {}),
     });
   });
 
@@ -355,18 +372,17 @@ export function createPublicShareRoutes(deps: PublicShareRoutesDeps): Hono {
       );
     }
 
-    let viewerBaseUrl: string;
+    let yaClientBaseUrl: string;
     try {
-      viewerBaseUrl = resolvePublicShareViewerBaseUrl(
+      yaClientBaseUrl = resolveYaClientBaseUrl(
+        deps.getYaClientBaseUrl?.(),
         deps.getPublicShareViewerBaseUrl?.(),
       );
     } catch (error) {
       return c.json(
         {
           error:
-            error instanceof Error
-              ? error.message
-              : "Invalid public share viewer URL",
+            error instanceof Error ? error.message : "Invalid YA URL",
         },
         400,
       );
@@ -420,7 +436,7 @@ export function createPublicShareRoutes(deps: PublicShareRoutesDeps): Hono {
           projectName,
           title,
         },
-        viewerBaseUrl,
+        yaClientBaseUrl,
       ),
       mode: record.mode,
       createdAt: record.createdAt,

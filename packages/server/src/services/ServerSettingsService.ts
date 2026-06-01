@@ -11,6 +11,7 @@ import type {
   HelperTargetConfig,
   NewSessionDefaults,
 } from "@yep-anywhere/shared";
+import { normalizeYaClientBaseUrlFromShareViewerUrl } from "@yep-anywhere/shared";
 
 const CURRENT_VERSION = 1;
 export const DEFAULT_SPEECH_AUDIO_RETENTION_MAX_AGE_DAYS = 56;
@@ -35,7 +36,9 @@ export interface ServerSettings {
   clientLogCollectionRequested: boolean;
   /** Whether users may create public read-only share links */
   publicSharesEnabled: boolean;
-  /** Base URL for the hosted public share viewer; secret is appended as a path segment */
+  /** Base URL for the hosted YA client; remote login/share routes are appended */
+  yaClientBaseUrl?: string;
+  /** @deprecated Use yaClientBaseUrl. Kept to migrate older settings files. */
   publicShareViewerBaseUrl?: string;
   /** SSH host aliases for remote executors (from ~/.ssh/config) */
   remoteExecutors?: string[];
@@ -105,6 +108,21 @@ export const DEFAULT_SERVER_SETTINGS: ServerSettings = {
   codexUpdatePolicy: "notify",
 };
 
+function normalizeLoadedSettings(settings: ServerSettings): ServerSettings {
+  const normalized = { ...DEFAULT_SERVER_SETTINGS, ...settings };
+  if (!normalized.yaClientBaseUrl && normalized.publicShareViewerBaseUrl) {
+    try {
+      normalized.yaClientBaseUrl = normalizeYaClientBaseUrlFromShareViewerUrl(
+        normalized.publicShareViewerBaseUrl,
+      );
+      delete normalized.publicShareViewerBaseUrl;
+    } catch {
+      // Leave invalid legacy values for the status endpoint to report clearly.
+    }
+  }
+  return normalized;
+}
+
 /** Stored state with version for migrations */
 interface SettingsState {
   version: number;
@@ -148,13 +166,13 @@ export class ServerSettingsService {
         // Merge with defaults in case new settings were added
         this.state = {
           version: CURRENT_VERSION,
-          settings: { ...DEFAULT_SERVER_SETTINGS, ...parsed.settings },
+          settings: normalizeLoadedSettings(parsed.settings),
         };
       } else {
         // Future: handle migrations
         this.state = {
           version: CURRENT_VERSION,
-          settings: { ...DEFAULT_SERVER_SETTINGS, ...parsed.settings },
+          settings: normalizeLoadedSettings(parsed.settings),
         };
         await this.save();
       }

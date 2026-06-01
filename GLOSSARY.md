@@ -32,6 +32,7 @@ regeneration rules.
 | `recaps` | Short on-return summaries of what the agent did or is doing while the user was away, shown without polluting provider transcript state. | [recaps](topics/recaps.md) |
 | `relative-filenames` | Shortest-unambiguous file path display policy: project-relative, home-relative, then absolute as fallback. | [relative-filenames](topics/relative-filenames.md) |
 | `rich-text-rendering` | Rendering pipeline for agent action panels, including command output, file reads, diffs, edits, and their always-on or toggleable transforms. | [rich-text-rendering](topics/rich-text-rendering.md) |
+| `security` | YA's trust-boundary contract: local authenticated controls may expose privileged host state, while public and relay surfaces must stay explicit, scoped, and revocable. | [security](topics/security.md) |
 | `session-liveness` | Provider/session liveness contract and dependent behaviors such as heartbeat turns, deferred queue promotion, and experimental patient queue intent. | [session-liveness](topics/session-liveness.md) |
 | `session-ui-customization` | User control over which session controls are visible or enabled while keyboard access to advanced actions is preserved. | [session-ui-customization](topics/session-ui-customization.md) |
 | `side-session-config` | Shared opt-in, model-selection, and lifecycle contract for YA-simulated helper features that run outside the parent provider turn. | [side-session-config](topics/side-session-config.md) |

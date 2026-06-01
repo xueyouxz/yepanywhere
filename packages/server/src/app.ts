@@ -1035,6 +1035,8 @@ export function createApp(options: AppOptions): AppResult {
         options.remoteAccessService?.isEnabled() ?? false,
       getRelayStatus: () =>
         options.relayClientService?.getState().status ?? null,
+      getYaClientBaseUrl: () =>
+        options.serverSettingsService?.getSetting("yaClientBaseUrl"),
       getPublicShareViewerBaseUrl: () =>
         options.serverSettingsService?.getSetting("publicShareViewerBaseUrl"),
     };
