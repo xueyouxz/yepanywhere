@@ -223,7 +223,6 @@ describe("getModelIndicatorTextVariants", () => {
       "Compacting",
       "Slash commands",
       "Waiting for input",
-      "On hold",
     ]) {
       const variants = getModelIndicatorTextVariants(
         "claude",

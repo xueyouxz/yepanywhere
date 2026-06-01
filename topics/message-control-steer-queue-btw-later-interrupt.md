@@ -14,7 +14,6 @@ for both client behavior and provider-specific control adapters.
   - `idle`
   - `in-turn`
   - `waiting-input`
-  - `hold`
 - `isCompacting` from process status subtype (`status=compacting`).
 - `sessionLiveness.derivedStatus` for automation/scheduling decisions:
   - `verified-idle` is the key boundary used for background automation.
@@ -33,7 +32,6 @@ The expanded bottom row next to the model selector must be status-first, not mod
 2. Otherwise replace with provider-state copy:
    - `Thinking` for active turns (`in-turn`),
    - `Waiting for input` when `waiting-input`,
-   - `On hold` for `hold`,
    - `Compacting` while `isCompacting` is true.
 3. This text is also used as the canonical UX surface for compacting intent,
    both for auto-initiated compact attempts and user-issued compact flows.
@@ -110,7 +108,7 @@ Suggested reconciliation contract:
   - primary send is direct.
   - model/menu edits are available when session ownership is clear.
   - compact commands may be exposed when adapter metadata supports them.
-- `in-turn` / `waiting-input` / `hold`
+- `in-turn` / `waiting-input`
   - primary control is state-aware (`Steering/Queue/Compaction` as applicable).
   - full model editing is deferred/hidden by rule above.
   - compacting overlay remains copy-only and must not advertise model edits.

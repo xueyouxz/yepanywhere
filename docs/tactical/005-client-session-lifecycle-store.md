@@ -106,8 +106,7 @@ work are separate fields:
 - `activity: "in-turn"` means active work and may show a spinner.
 - `activity: "waiting-input"` means attention is needed and should not show a
   working spinner.
-- `idle`, `hold`, `terminated`, and missing activity normalize to no active
-  work.
+- `idle`, `terminated`, and missing activity normalize to no active work.
 
 Use React's `useSyncExternalStore` with a small hand-rolled store before adding
 a runtime dependency. If the selector/action surface grows enough to justify a

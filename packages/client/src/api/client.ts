@@ -827,12 +827,6 @@ export const api = {
       { method: "PUT", body: JSON.stringify({ mode }) },
     ),
 
-  setHold: (sessionId: string, hold: boolean) =>
-    fetchJSON<{ isHeld: boolean; holdSince: string | null; state: string }>(
-      `/sessions/${sessionId}/hold`,
-      { method: "PUT", body: JSON.stringify({ hold }) },
-    ),
-
   getProcessInfo: (sessionId: string) =>
     fetchJSON<{
       process: {
@@ -846,7 +840,6 @@ export const api = {
         startedAt: string;
         queueDepth: number;
         idleSince?: string;
-        holdSince?: string;
         terminationReason?: string;
         terminatedAt?: string;
         provider: ProviderName;

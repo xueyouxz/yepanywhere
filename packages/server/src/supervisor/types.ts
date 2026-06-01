@@ -186,7 +186,6 @@ export type ProcessState =
   | { type: "in-turn" }
   | { type: "idle"; since: Date }
   | { type: "waiting-input"; request: InputRequest }
-  | { type: "hold"; since: Date }
   | { type: "terminated"; reason: string; error?: Error };
 
 // Process info (for API responses)
@@ -201,7 +200,6 @@ export interface ProcessInfo {
   startedAt: string;
   queueDepth: number;
   idleSince?: string; // ISO timestamp when entered idle
-  holdSince?: string; // ISO timestamp when entered hold
   terminationReason?: string; // why it terminated
   terminatedAt?: string; // when it terminated (ISO timestamp)
   provider: ProviderName; // which provider is running this process

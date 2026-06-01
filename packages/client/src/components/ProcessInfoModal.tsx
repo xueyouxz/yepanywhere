@@ -23,7 +23,6 @@ interface ProcessInfo {
   startedAt: string;
   queueDepth: number;
   idleSince?: string;
-  holdSince?: string;
   terminationReason?: string;
   terminatedAt?: string;
   provider: string;
@@ -415,12 +414,6 @@ export function ProcessInfoModal({
                     <InfoRow
                       label={t("processInfoLabelIdleSince")}
                       value={formatTime(processInfo.idleSince)}
-                    />
-                  )}
-                  {processInfo.holdSince && (
-                    <InfoRow
-                      label={t("processInfoLabelHoldSince")}
-                      value={formatTime(processInfo.holdSince)}
                     />
                   )}
                 </>

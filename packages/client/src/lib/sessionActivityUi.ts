@@ -4,8 +4,7 @@ export type SessionActivityOwner = "self" | "external" | "none";
 export type SessionActivityProcessState =
   | "idle"
   | "in-turn"
-  | "waiting-input"
-  | "hold";
+  | "waiting-input";
 
 interface SessionActivityUiInput {
   owner: SessionActivityOwner;

@@ -163,7 +163,6 @@ export type AgentActivity =
   | "in-turn"
   | "idle"
   | "waiting-input"
-  | "hold"
   | "terminated";
 
 /** Context usage information extracted from the last assistant message */

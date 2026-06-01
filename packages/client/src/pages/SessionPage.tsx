@@ -704,8 +704,6 @@ function SessionPageContent({
     setProcessState,
     setPendingInputRequest,
     setPermissionMode,
-    setHold,
-    isHeld,
     pendingMessages,
     addPendingMessage,
     removePendingMessage,
@@ -731,7 +729,7 @@ function SessionPageContent({
   );
 
   // Developer mode settings
-  const { holdModeEnabled, showConnectionBars } = useDeveloperMode();
+  const { showConnectionBars } = useDeveloperMode();
   const { settings: serverSettings } = useServerSettings();
   const publicSharesEnabled = serverSettings?.publicSharesEnabled ?? false;
   const { status: publicShareGlobalStatus } = usePublicShareStatus({
@@ -2695,10 +2693,6 @@ function SessionPageContent({
       return "Waiting for input";
     }
 
-    if (processState === "hold") {
-      return "On hold";
-    }
-
     return liveBadgeModel
       ? `${stripBadgePrefix(liveBadgeModel)} · ${
           liveModelConfig?.thinking?.type === "disabled" ||
@@ -3964,8 +3958,6 @@ function SessionPageContent({
                   <MessageInputToolbar
                     mode={permissionMode}
                     onModeChange={setPermissionMode}
-                    isHeld={holdModeEnabled ? isHeld : undefined}
-                    onHoldChange={holdModeEnabled ? setHold : undefined}
                     supportsPermissionMode={supportsPermissionMode}
                     supportsThinkingToggle={supportsThinkingToggle}
                     slashCommands={
@@ -4036,8 +4028,6 @@ function SessionPageContent({
                 }
                 mode={permissionMode}
                 onModeChange={setPermissionMode}
-                isHeld={holdModeEnabled ? isHeld : undefined}
-                onHoldChange={holdModeEnabled ? setHold : undefined}
                 supportsPermissionMode={supportsPermissionMode}
                 supportsThinkingToggle={supportsThinkingToggle}
                 supportsSteering={generallySupportsSteering}

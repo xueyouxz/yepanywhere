@@ -4,14 +4,12 @@ export type SessionLivenessDerivedStatus =
   | "long-silent-unverified"
   | "verified-waiting-provider"
   | "verified-idle"
-  | "verified-held"
   | "needs-attention";
 
 export type SessionActiveWorkKind =
   | "none"
   | "agent-turn"
   | "waiting-input"
-  | "held"
   | "terminated"
   | "unknown";
 

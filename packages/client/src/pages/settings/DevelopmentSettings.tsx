@@ -19,8 +19,6 @@ export function DevelopmentSettings() {
   const { settings: validationSettings, setEnabled: setValidationEnabled } =
     useSchemaValidation();
   const {
-    holdModeEnabled,
-    setHoldModeEnabled,
     remoteLogCollectionEnabled,
     setRemoteLogCollectionEnabled,
   } = useDeveloperMode();
@@ -87,20 +85,6 @@ export function DevelopmentSettings() {
             </button>
           </div>
         )}
-        <div className="settings-item">
-          <div className="settings-item-info">
-            <strong>{t("developmentHoldModeTitle")}</strong>
-            <p>{t("developmentHoldModeDescription")}</p>
-          </div>
-          <label className="toggle-switch">
-            <input
-              type="checkbox"
-              checked={holdModeEnabled}
-              onChange={(e) => setHoldModeEnabled(e.target.checked)}
-            />
-            <span className="toggle-slider" />
-          </label>
-        </div>
         <div className="settings-item">
           <div className="settings-item-info">
             <strong>{t("developmentDiagnosticsTitle")}</strong>

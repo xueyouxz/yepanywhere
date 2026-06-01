@@ -27,7 +27,7 @@ buffer, and no batching: emit is in-process, in-thread, one frame per event.
    provider message to a unified `SDKMessage`, and (when `LOG_SDK_MESSAGES=true`)
    tees a copy to `{logDir}/sdk-raw.jsonl` via `messageLogger.ts`.
 2. **Process intake** — `Process.processMessages()` receives each `SDKMessage`,
-   updates state (idle / in-turn / waiting-input / hold), and writes it into
+   updates state (idle / in-turn / waiting-input), and writes it into
    `currentBucket` (the rolling replay buffer).
 3. **Streaming text accumulation** — for `stream_event` deltas, the Process
    appends to `_streamingText` keyed by `_streamingMessageId`

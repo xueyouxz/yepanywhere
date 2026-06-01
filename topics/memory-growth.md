@@ -33,7 +33,6 @@
 - For owned processes, supervisor checks:
   - heartbeat enabled for session,
   - `process.isTerminated === false`,
-  - `process.isHeld === false`,
   - `process.queueDepth === 0`,
   - `process.isProcessAlive === true`,
   - state/derived status is either `idle` + `verified-idle` OR `in-turn` +
@@ -57,6 +56,6 @@
 
 - At runtime, inspect the live process object for this session:
   `getProcessForSession(sessionId)` state fields (`isProcessAlive`, `queueDepth`,
-  `isHeld`, derived liveness) at heartbeat tick.
+  derived liveness) at heartbeat tick.
 - Confirm heartbeat scheduler is actually running and logger sink captures
   `heartbeat_turn_*` events in the server runtime you are attached to.

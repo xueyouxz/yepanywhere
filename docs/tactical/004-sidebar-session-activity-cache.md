@@ -34,8 +34,8 @@ Keep the existing provider lifecycle intact and make the sidebar cache more
 defensive:
 
 - Treat process-state events as lifecycle evidence, not ownership evidence.
-- Normalize inactive process-state events such as `idle`, `hold`, and
-  `terminated` to no row `activity`.
+- Normalize inactive process-state events such as `idle` and `terminated` to no
+  row `activity`.
 - Clear `pendingInputType` whenever a session leaves `waiting-input`.
 - Preserve `owner: self` for idle Claude sessions.
 - If a process-state event arrives before the row exists in the global-session

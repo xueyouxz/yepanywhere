@@ -6,14 +6,13 @@ are valid in each state.
 
 ## Source states
 
-- `processState` (`idle`, `in-turn`, `waiting-input`, `hold`) from process status
+- `processState` (`idle`, `in-turn`, `waiting-input`) from process status
 - `sessionLiveness.derivedStatus`:
   - `verified-progressing`
   - `recently-active-unverified`
   - `long-silent-unverified`
   - `verified-waiting-provider`
   - `verified-idle`
-  - `verified-held`
   - `needs-attention`
 - `isCompacting` (`system` status subtype `status` + `status=compacting`)
 - `status.owner` (`self` / `external` / `none`) for action availability
@@ -31,7 +30,6 @@ In `SessionPage`, the model selector title is computed from:
 - `isCompacting` → `Compacting`
 - `processState === "in-turn"` → `Thinking`
 - `processState === "waiting-input"` → `Waiting for input`
-- `processState === "hold"` → `On hold`
 - otherwise → normal provider/model selector text (e.g. `sonnet · Thinking off`)
 
 This text lives in `slashModelIndicatorTitle` and is passed to both:
@@ -44,7 +42,6 @@ This text lives in `slashModelIndicatorTitle` and is passed to both:
 | `idle` | Send, queue, /model, queue mode, `/compact` if exposed | stop (no active turn), tool approval controls |
 | `in-turn` (`status.owner="self"`) | Stop (interrupt/abort), queue/steer depending provider and queue mode, `/compact` if available | /model editing text; direct model/config change while active |
 | `waiting-input` (`status.owner="self"`) | Answer prompt with approval path (`ToolApprovalPanel` or `QuestionAnswerPanel`) | regular composer send action; stop is currently off |
-| `hold` | Resume/Unhold, queue text, /model (not state-advertised) | normal immediate send when active turn controls expect running progress |
 | `compacting` (overlay) | same as underlying `processState` | model/config substitution text is busy copy only |
 | `needs-attention` | show warning copy and retain manual controls as supported | no automatic idle assumptions |
 | `verified-idle` (liveness) | treat as normal boundary for automation | should not be assumed from `recently-active-unverified` / `long-silent-unverified` |

@@ -44,7 +44,7 @@ import {
   useStreamingContent,
 } from "./useStreamingContent";
 
-export type ProcessState = "idle" | "in-turn" | "waiting-input" | "hold";
+export type ProcessState = "idle" | "in-turn" | "waiting-input";
 
 // Re-export types from useSessionMessages
 export type { AgentContent, AgentContentMap } from "./useSessionMessages";
@@ -171,8 +171,7 @@ function parseProcessState(value: unknown): ProcessState | null {
   if (
     value === "idle" ||
     value === "in-turn" ||
-    value === "waiting-input" ||
-    value === "hold"
+    value === "waiting-input"
   ) {
     return value;
   }
@@ -1049,31 +1048,6 @@ export function useSession(
     [sessionId, status.owner],
   );
 
-  // Set hold state (soft pause) for the session
-  const setHold = useCallback(
-    async (hold: boolean) => {
-      // Only works if there's an active process
-      if (status.owner !== "self" && status.owner !== "external") {
-        console.warn("Cannot set hold: no active process");
-        return;
-      }
-
-      try {
-        const result = await api.setHold(sessionId, hold);
-        // Process state will be updated via stream state-change event
-        // but we can optimistically update if needed
-        if (result.state === "hold") {
-          setProcessState("hold");
-        } else if (result.state === "in-turn") {
-          setProcessState("in-turn");
-        }
-      } catch (err) {
-        console.warn("Failed to set hold:", err);
-      }
-    },
-    [sessionId, status.owner],
-  );
-
   // Throttle state for incremental fetching
   const throttleRef = useRef<{
     timer: ReturnType<typeof setTimeout> | null;
@@ -1445,8 +1419,7 @@ export function useSession(
       if (
         event.activity === "idle" ||
         event.activity === "in-turn" ||
-        event.activity === "waiting-input" ||
-        event.activity === "hold"
+        event.activity === "waiting-input"
       ) {
         logSessionUiTrace("activity-process-state", {
           sessionId,
@@ -1804,12 +1777,11 @@ export function useSession(
         if (statusData.liveness) {
           setSessionLiveness(statusData.liveness);
         }
-        // Track process state (in-turn, idle, waiting-input, hold)
+        // Track process state (in-turn, idle, waiting-input)
         if (
           statusData.state === "idle" ||
           statusData.state === "in-turn" ||
-          statusData.state === "waiting-input" ||
-          statusData.state === "hold"
+          statusData.state === "waiting-input"
         ) {
           logSessionUiTrace("stream-status", {
             sessionId,
@@ -1918,8 +1890,7 @@ export function useSession(
         if (
           connectedData.state === "idle" ||
           connectedData.state === "in-turn" ||
-          connectedData.state === "waiting-input" ||
-          connectedData.state === "hold"
+          connectedData.state === "waiting-input"
         ) {
           setProcessState(connectedData.state as ProcessState);
         }
@@ -2162,7 +2133,6 @@ export function useSession(
     processState,
     sessionLiveness,
     isCompacting, // True when context is being compressed
-    isHeld: processState === "hold", // Derived from process state
     pendingInputRequest,
     setIsCompacting,
     actualSessionId, // Real session ID from server (may differ from URL during temp→real transition)
@@ -2178,7 +2148,6 @@ export function useSession(
     setProcessState,
     setPendingInputRequest,
     setPermissionMode,
-    setHold, // Set hold (soft pause) state
     pendingMessages, // Messages waiting for server confirmation
     addPendingMessage, // Add to pending queue, returns tempId
     removePendingMessage, // Remove from pending by tempId

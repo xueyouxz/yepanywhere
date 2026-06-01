@@ -43,7 +43,6 @@ The requested setting is:
 - Do not show the activity indicator for:
   - `idle`;
   - `waiting-input`;
-  - `hold`;
   - pending approvals or questions.
 - Use a quiet two-frame indicator with same-family circle glyphs:
   - `(●) Project - Session`

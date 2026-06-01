@@ -5,7 +5,6 @@ interface DeveloperModeSettings {
   /** Enables default-off experimental UI features that may be upstream-sensitive */
   experimentalFeaturesEnabled: boolean;
   experimentalFeatures: ExperimentalFeatureSettings;
-  holdModeEnabled: boolean;
   /** Log relay requests/responses to console for debugging */
   relayDebugEnabled: boolean;
   /** Capture connection logs and send to server for debugging */
@@ -27,7 +26,6 @@ const DEFAULT_EXPERIMENTAL_FEATURES: ExperimentalFeatureSettings = {
 const DEFAULT_SETTINGS: DeveloperModeSettings = {
   experimentalFeaturesEnabled: false,
   experimentalFeatures: DEFAULT_EXPERIMENTAL_FEATURES,
-  holdModeEnabled: false,
   relayDebugEnabled: false,
   remoteLogCollectionEnabled: false,
   showConnectionBars: false,
@@ -39,12 +37,20 @@ function normalizeSettings(raw: unknown): DeveloperModeSettings {
   }
   const parsed = raw as Partial<DeveloperModeSettings>;
   return {
-    ...DEFAULT_SETTINGS,
-    ...parsed,
+    experimentalFeaturesEnabled:
+      parsed.experimentalFeaturesEnabled ??
+      DEFAULT_SETTINGS.experimentalFeaturesEnabled,
     experimentalFeatures: {
       ...DEFAULT_EXPERIMENTAL_FEATURES,
       ...parsed.experimentalFeatures,
     },
+    relayDebugEnabled:
+      parsed.relayDebugEnabled ?? DEFAULT_SETTINGS.relayDebugEnabled,
+    remoteLogCollectionEnabled:
+      parsed.remoteLogCollectionEnabled ??
+      DEFAULT_SETTINGS.remoteLogCollectionEnabled,
+    showConnectionBars:
+      parsed.showConnectionBars ?? DEFAULT_SETTINGS.showConnectionBars,
   };
 }
 
@@ -125,10 +131,6 @@ export function useDeveloperMode() {
     [],
   );
 
-  const setHoldModeEnabled = useCallback((enabled: boolean) => {
-    updateSettings({ ...currentSettings, holdModeEnabled: enabled });
-  }, []);
-
   const setRelayDebugEnabled = useCallback((enabled: boolean) => {
     updateSettings({ ...currentSettings, relayDebugEnabled: enabled });
   }, []);
@@ -147,8 +149,6 @@ export function useDeveloperMode() {
     setExperimentalFeaturesEnabled,
     experimentalFeatures: settings.experimentalFeatures,
     setExperimentalFeatureEnabled,
-    holdModeEnabled: settings.holdModeEnabled,
-    setHoldModeEnabled,
     relayDebugEnabled: settings.relayDebugEnabled,
     setRelayDebugEnabled,
     remoteLogCollectionEnabled: settings.remoteLogCollectionEnabled,

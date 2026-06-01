@@ -189,16 +189,4 @@ describe("buildSessionLivenessSnapshot", () => {
     });
   });
 
-  it("keeps user-held processes distinct from live progress", () => {
-    expect(
-      snapshot({
-        state: { type: "hold", since: new Date("2026-05-06T00:01:00.000Z") },
-      }),
-    ).toMatchObject({
-      derivedStatus: "verified-held",
-      activeWorkKind: "held",
-      state: "hold",
-      evidence: expect.arrayContaining(["held-by-user"]),
-    });
-  });
 });

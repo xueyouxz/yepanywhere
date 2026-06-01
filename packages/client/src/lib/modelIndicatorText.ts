@@ -24,7 +24,6 @@ const statusOnlyModelIndicatorTitles = new Set([
   "Compacting",
   "Thinking",
   "Waiting for input",
-  "On hold",
 ]);
 
 type ModelGlyphMatch = {

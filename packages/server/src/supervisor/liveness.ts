@@ -10,7 +10,6 @@ export type LivenessProcessState =
   | { type: "in-turn" }
   | { type: "idle"; since: Date }
   | { type: "waiting-input" }
-  | { type: "hold"; since: Date }
   | { type: "terminated"; reason: string };
 
 export interface BuildSessionLivenessSnapshotInput {
@@ -120,11 +119,6 @@ export function buildSessionLivenessSnapshot({
       derivedStatus = "needs-attention";
       activeWorkKind = "waiting-input";
       evidence.push("waiting-input");
-      break;
-    case "hold":
-      derivedStatus = "verified-held";
-      activeWorkKind = "held";
-      evidence.push("held-by-user");
       break;
     case "terminated":
       derivedStatus = "needs-attention";

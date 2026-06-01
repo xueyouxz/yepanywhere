@@ -71,8 +71,6 @@ export interface MessageInputToolbarProps {
   // Mode selector
   mode?: PermissionMode;
   onModeChange?: (mode: PermissionMode) => void;
-  isHeld?: boolean;
-  onHoldChange?: (held: boolean) => void;
   modeChangesApplyNextTurn?: boolean;
 
   // Provider capability flags (default to true for backwards compatibility)
@@ -208,13 +206,6 @@ function describeSessionLiveness(
         tone: "muted",
         title,
       };
-    case "verified-held":
-      return {
-        prefix: "Held",
-        timestampMs: stateMs ?? checkedMs,
-        tone: "muted",
-        title,
-      };
     case "needs-attention":
       return {
         prefix:
@@ -300,8 +291,6 @@ interface ToolbarRefs {
 interface ToolbarModeControl {
   mode: PermissionMode;
   onModeChange: (mode: PermissionMode) => void;
-  isHeld?: boolean;
-  onHoldChange?: (held: boolean) => void;
   changesApplyNextTurn?: boolean;
 }
 
@@ -530,8 +519,6 @@ export function MessageInputToolbarView({
             mode={modeControl.mode}
             onModeChange={modeControl.onModeChange}
             changesApplyNextTurn={modeControl.changesApplyNextTurn}
-            isHeld={modeControl.isHeld}
-            onHoldChange={modeControl.onHoldChange}
           />
         )}
         {visibility.attachments && (
@@ -1135,8 +1122,6 @@ export function MessageInputToolbarView({
 export function MessageInputToolbar({
   mode = "default",
   onModeChange,
-  isHeld,
-  onHoldChange,
   modeChangesApplyNextTurn,
   supportsPermissionMode = true,
   supportsThinkingToggle = true,
@@ -1640,8 +1625,6 @@ export function MessageInputToolbar({
               mode,
               onModeChange,
               changesApplyNextTurn: modeChangesApplyNextTurn,
-              isHeld,
-              onHoldChange,
             }
           : null
       }

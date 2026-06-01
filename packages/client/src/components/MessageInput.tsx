@@ -151,8 +151,6 @@ interface Props {
   onModeChange?: (mode: PermissionMode) => void;
   /** Permission mode changes are visibly staged for the next user turn. */
   modeChangesApplyNextTurn?: boolean;
-  isHeld?: boolean;
-  onHoldChange?: (held: boolean) => void;
   isRunning?: boolean;
   isThinking?: boolean;
   onStop?: () => void;
@@ -232,8 +230,6 @@ export function MessageInput({
   mode = "default",
   onModeChange,
   modeChangesApplyNextTurn,
-  isHeld,
-  onHoldChange,
   isRunning,
   isThinking,
   onStop,
@@ -988,8 +984,6 @@ export function MessageInput({
             mode={mode}
             onModeChange={onModeChange}
             modeChangesApplyNextTurn={modeChangesApplyNextTurn}
-            isHeld={isHeld}
-            onHoldChange={onHoldChange}
             supportsPermissionMode={supportsPermissionMode}
             supportsThinkingToggle={supportsThinkingToggle}
             canAttach={canAttach}

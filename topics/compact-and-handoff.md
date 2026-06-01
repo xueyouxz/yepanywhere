@@ -23,7 +23,6 @@ model-selector replacement text, see
 - `processState.idle` (source of truth for automation readiness)
 - `processState.in-turn`
 - `processState.waiting-input`
-- `processState.hold`
 - `isCompacting` (`status=compacting`)
 - `sessionLiveness.derivedStatus.verified-idle`
 - `sessionLiveness.derivedStatus.needs-attention`
@@ -35,8 +34,8 @@ The state-machine contract from
 This policy only narrows when the model-selector substitute text is shown:
 
 - Show full model/provider info only when the session is idle.
-- Show busy copy instead of model text while in-turn/waiting-input/hold or
-  compacting (`Thinking`, `Waiting for input`, `On hold`, `Compacting`).
+- Show busy copy instead of model text while in-turn/waiting-input or
+  compacting (`Thinking`, `Waiting for input`, `Compacting`).
 - Keep queue and manual stop/compact controls enabled according to normal
   state rules.
 

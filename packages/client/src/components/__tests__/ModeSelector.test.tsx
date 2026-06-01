@@ -9,7 +9,6 @@ const translations: Record<string, string> = {
   modeBypassPermissionsLabel: "Bypass",
   modeClickToSelect: "Click to select mode",
   modeDefaultLabel: "Ask",
-  modeHold: "Hold",
   modeNextTurnBadge: "Next turn",
   modeNextTurnHint: "Applies to the next user turn",
   modePlanLabel: "Plan",

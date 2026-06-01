@@ -3378,14 +3378,6 @@ a.sidebar-nav-item {
   background: var(--error-color);
 }
 
-.mode-dot.mode-hold {
-  background: var(--primary-color);
-}
-
-.mode-button-held {
-  border-color: var(--primary-color);
-}
-
 /* Mode Selector Bottom Sheet */
 .mode-selector-overlay {
   position: fixed;

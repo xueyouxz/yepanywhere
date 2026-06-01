@@ -1469,7 +1469,7 @@ export class Supervisor {
     if (!settings?.enabled) {
       return;
     }
-    if (process.isTerminated || process.isHeld) {
+    if (process.isTerminated) {
       return;
     }
     if (process.queueDepth > 0 || process.isProcessAlive === false) {
@@ -1747,7 +1747,7 @@ export class Supervisor {
       if (process.state.type !== "in-turn") {
         continue;
       }
-      if (process.isHeld || process.isTerminated || !process.canProbeLiveness) {
+      if (process.isTerminated || !process.canProbeLiveness) {
         continue;
       }
 
@@ -2534,7 +2534,6 @@ export class Supervisor {
 
     for (const process of this.processes.values()) {
       if (process.state.type !== "in-turn") continue;
-      if (process.isHeld) continue;
 
       const staleThresholdMs = getStaleInTurnThresholdMs(process.provider);
       const silentMs = now - process.lastMessageTime.getTime();
