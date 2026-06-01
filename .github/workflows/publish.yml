@@ -5,16 +5,15 @@ on:
     tags:
       - 'v*.*.*'
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
-  publish:
+  validate:
+    name: Validate release
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # For creating GitHub releases
-      id-token: write  # Required for OIDC token (trusted publishing)
-      attestations: write  # Required for npm provenance
-
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      contents: read
 
     steps:
       - name: Checkout code
@@ -27,7 +26,6 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -45,6 +43,57 @@ jobs:
 
       - name: Run tests
         run: pnpm test
+
+  publish:
+    name: Publish package
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # For creating GitHub releases
+      id-token: write  # Required for OIDC trusted publishing
+
+    env:
+      NPM_CONFIG_REGISTRY: "https://registry.npmjs.org/"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Verify trusted publishing runtime
+        run: |
+          set -euo pipefail
+          echo "node $(node --version)"
+          npm_version="$(npm --version)"
+          echo "npm ${npm_version}"
+          node - "${npm_version}" <<'NODE'
+          const version = process.argv[2];
+          const [major = 0, minor = 0, patch = 0] = version
+            .split(".")
+            .map((part) => Number.parseInt(part, 10));
+
+          if (
+            major < 11 ||
+            (major === 11 && minor < 5) ||
+            (major === 11 && minor === 5 && patch < 1)
+          ) {
+            console.error(
+              `npm ${version} is too old for trusted publishing; need >=11.5.1`,
+            );
+            process.exit(1);
+          }
+          NODE
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Extract version from tag
         id: version
@@ -65,23 +114,89 @@ jobs:
         env:
           NPM_VERSION: ${{ steps.version.outputs.VERSION }}
 
-      # Trusted publishing needs npm 11; keep Playwright/test validation on Node 20.
-      - name: Setup Node.js for npm publishing
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
-
       - name: Verify package contents
         run: |
           cd dist/npm-package
           npm pack --dry-run
           echo "Package contents verified"
 
+      - name: Verify npm trusted publishing OIDC
+        working-directory: dist/npm-package
+        run: |
+          set -euo pipefail
+          registry="$(npm -s config get registry || true)"
+          registry="${registry%/}"
+          if [ -z "${registry}" ] || [ "${registry}" = "undefined" ]; then
+            registry="https://registry.npmjs.org"
+          fi
+
+          host="${registry#*://}"
+          host="${host%%/*}"
+          export NPM_REGISTRY="${registry}"
+          export NPM_REGISTRY_HOST="${host}"
+
+          node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+
+          const registry = process.env.NPM_REGISTRY;
+          const host = process.env.NPM_REGISTRY_HOST;
+          const requestUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+          const requestToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+
+          if (!requestUrl || !requestToken) {
+            throw new Error("GitHub OIDC request environment is not available");
+          }
+
+          const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+          const packagePath = pkg.name.startsWith("@")
+            ? `@${encodeURIComponent(pkg.name.slice(1))}`
+            : encodeURIComponent(pkg.name);
+
+          const idTokenResponse = await fetch(
+            `${requestUrl}&audience=${encodeURIComponent(`npm:${host}`)}`,
+            {
+              headers: {
+                authorization: `bearer ${requestToken}`,
+              },
+            },
+          );
+
+          if (!idTokenResponse.ok) {
+            const body = await idTokenResponse.text();
+            throw new Error(
+              `GitHub OIDC token request failed (${idTokenResponse.status}): ${body}`,
+            );
+          }
+
+          const { value } = await idTokenResponse.json();
+          if (!value) {
+            throw new Error("GitHub OIDC token response did not include a value");
+          }
+
+          const exchangeResponse = await fetch(
+            `${registry}/-/npm/v1/oidc/token/exchange/package/${packagePath}`,
+            {
+              method: "POST",
+              headers: {
+                authorization: `Bearer ${value}`,
+              },
+            },
+          );
+
+          if (!exchangeResponse.ok) {
+            const body = await exchangeResponse.text();
+            throw new Error(
+              `npm OIDC token exchange failed (${exchangeResponse.status}): ${body}`,
+            );
+          }
+
+          console.log(`OIDC token exchange succeeded for ${pkg.name}`);
+          NODE
+
       - name: Publish to npm
         run: |
           cd dist/npm-package
-          npm publish --provenance --access public
+          npm publish --access public
 
       - name: Extract changelog for release notes
         run: |
