@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -109,8 +109,9 @@ describe("Local file routes", () => {
     const html = await response.text();
     expect(html).toContain("<h1>Notes</h1>");
     expect(html).toContain("<table>");
+    const resolvedImagePath = await realpath(imagePath);
     expect(html).toContain(
-      `src="/api/local-image?path=${encodeURIComponent(imagePath)}"`,
+      `src="/api/local-image?path=${encodeURIComponent(resolvedImagePath)}"`,
     );
     expect(html).toContain("Raw");
     expect(html).toContain("document-actions__dock");

@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useId, useState } from "react";
-import {
-  type HelperTargetConfig,
-  type ModelInfo,
-} from "@yep-anywhere/shared";
+import type { HelperTargetConfig, ModelInfo } from "@yep-anywhere/shared";
 import { api, type ServerSettings } from "../../api/client";
 import { useToastContext } from "../../contexts/ToastContext";
 import { useCodexUpdateStatus } from "../../hooks/useCodexUpdateStatus";

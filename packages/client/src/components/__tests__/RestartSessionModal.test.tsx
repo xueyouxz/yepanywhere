@@ -210,7 +210,7 @@ describe("RestartSessionModal", () => {
         "sess-1",
         expect.objectContaining({
           recapMode: "side-session",
-          promptSuggestionMode: "native",
+          promptSuggestionMode: "off",
           helperSideModel: "haiku",
         }),
       );

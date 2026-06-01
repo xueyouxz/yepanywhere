@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StoredSession } from "../connection/SecureConnection";
 import {
   getHostByRelayUsername,
@@ -23,7 +23,14 @@ describe("upsertRelayHost", () => {
       removeItem: (key: string) => {
         storage.delete(key);
       },
+      clear: () => {
+        storage.clear();
+      },
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("creates a relay host with a stored session when one does not exist", () => {

@@ -87,9 +87,9 @@ export function SpeechGrokAudioControls({
 
   return (
     <div className="speech-smart-turn speech-grok-audio">
-      <label className="speech-smart-turn-toggle">
+      <div className="speech-smart-turn-toggle">
         <span>Grok STT audio</span>
-      </label>
+      </div>
       {body}
     </div>
   );

@@ -11,6 +11,7 @@ export default defineConfig({
     globals: true,
     exclude: ["e2e/**", "node_modules/**"],
     passWithNoTests: true,
+    setupFiles: ["./vitest.setup.ts"],
     maxWorkers: 3,
     minWorkers: 1,
   },

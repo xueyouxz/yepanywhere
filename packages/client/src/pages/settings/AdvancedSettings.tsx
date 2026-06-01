@@ -117,6 +117,7 @@ export function AdvancedSettings() {
           {experimentalFeaturesEnabled && (
             <div
               className="experimental-feature-list"
+              role="group"
               aria-label={t("advancedExperimentalFeatureListLabel")}
             >
               {EXPERIMENTAL_FEATURE_OPTIONS.map((feature) => (

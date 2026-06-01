@@ -273,9 +273,6 @@ export function RemoteAccessSetup({
       ? DEFAULT_YA_CLIENT_BASE_URL
       : customYaClientUrl;
 
-  const getDisplayYaClientBaseUrl = () =>
-    normalizeYaClientUrlForComparison(getYaClientUrlInput());
-
   const getUsableYaClientBaseUrl = () => {
     try {
       return normalizeYaClientBaseUrl(getYaClientUrlInput());

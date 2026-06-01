@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FileContentResponse } from "@yep-anywhere/shared";
@@ -103,14 +103,16 @@ describe("Files API", () => {
 
       expect(res.status).toBe(200);
       const json = (await res.json()) as FileContentResponse;
+      const peerPath = await realpath(join(projectPath, "docs", "peer.md"));
+      const diagramPath = await realpath(
+        join(projectPath, "docs", "assets", "diagram.svg"),
+      );
       expect(json.renderedMarkdownHtml).toContain("<h1>Guide</h1>");
       expect(json.renderedMarkdownHtml).toContain(
-        `href="/api/local-file?path=${encodeURIComponent(
-          join(projectPath, "docs", "peer.md"),
-        )}&amp;render=1"`,
+        `href="/api/local-file?path=${encodeURIComponent(peerPath)}&amp;render=1"`,
       );
       expect(json.renderedMarkdownHtml).toContain(
-        `data-media-path="${join(projectPath, "docs", "assets", "diagram.svg")}"`,
+        `data-media-path="${diagramPath}"`,
       );
     });
 

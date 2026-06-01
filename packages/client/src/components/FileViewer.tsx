@@ -1,5 +1,12 @@
 import type { FileContentResponse } from "@yep-anywhere/shared";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import {
+  memo,
+  type KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { api } from "../api/client";
 import { useI18n } from "../i18n";
 import {
@@ -118,6 +125,19 @@ export const FileViewer = memo(function FileViewer({
     handleClick: handleLocalMediaClick,
     closeModal: closeLocalMediaModal,
   } = useLocalMediaClick();
+  const handleLocalMediaKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (event.key !== " ") return;
+      const target = (event.target as HTMLElement).closest?.(
+        "a.local-media-link",
+      ) as HTMLAnchorElement | null;
+      if (!target) return;
+
+      event.preventDefault();
+      target.click();
+    },
+    [],
+  );
   useLocalMediaInlinePreviews(
     markdownPreviewRef,
     showPreview ? fileData?.renderedMarkdownHtml : null,
@@ -278,7 +298,10 @@ export const FileViewer = memo(function FileViewer({
             {toggleButton}
             <div
               className="markdown-preview"
+              role="region"
+              aria-label={t("fileViewerPreview" as never)}
               onClick={handleLocalMediaClick}
+              onKeyDown={handleLocalMediaKeyDown}
               ref={markdownPreviewRef}
             >
               <div

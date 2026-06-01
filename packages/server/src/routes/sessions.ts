@@ -117,7 +117,7 @@ function getClaudeResumeApiErrorBlocker(
 
   for (let i = activeBranch.length - 1; i >= 0; i--) {
     const raw = activeBranch[i]?.raw;
-    if (!raw || raw.type !== "assistant") {
+    if (raw?.type !== "assistant") {
       continue;
     }
 
