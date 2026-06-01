@@ -9,6 +9,8 @@ import {
   RECAP_MODES,
   type ClaudeSessionEntry,
   type RecapMode,
+  type SessionMetadataResponse,
+  type SessionOwnership,
   type ThinkingOption,
   type UploadedFile,
   type UserMessageDeliveryIntent,
@@ -1791,13 +1793,12 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     const isExternal = deps.externalTracker?.isExternal(sessionId) ?? false;
 
     // Determine the session ownership
-    const ownership = process
+    const ownership: SessionOwnership = process
       ? {
           owner: "self" as const,
           processId: process.id,
           permissionMode: process.permissionMode,
           modeVersion: process.modeVersion,
-          state: process.state.type,
         }
       : isExternal
         ? { owner: "external" as const }
@@ -1869,10 +1870,10 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
           )
         : undefined;
 
-    return c.json({
+    const response = {
       session: {
         id: sessionId,
-        projectId,
+        projectId: projectId as UrlProjectId,
         title: sessionSummary?.title ?? null,
         fullTitle: sessionSummary?.fullTitle ?? null,
         createdAt: sessionSummary?.createdAt ?? new Date().toISOString(),
@@ -1895,18 +1896,23 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         isStarred: metadata?.isStarred,
         parentSessionId:
           metadata?.parentSessionId ?? sessionSummary?.parentSessionId,
-        initialPrompt: metadata?.initialPrompt ?? sessionSummary?.fullTitle,
+        initialPrompt:
+          metadata?.initialPrompt ?? sessionSummary?.fullTitle ?? undefined,
         heartbeatTurnsEnabled: metadata?.heartbeatTurnsEnabled,
         heartbeatTurnsAfterMinutes: metadata?.heartbeatTurnsAfterMinutes,
         heartbeatTurnText: metadata?.heartbeatTurnText,
-        heartbeatForceAfterMinutes: metadata?.heartbeatForceAfterMinutes,
+        heartbeatForceAfterMinutes:
+          metadata?.heartbeatForceAfterMinutes ?? undefined,
         lastSeenAt,
         hasUnread,
       },
       ownership,
+      processState: process?.state.type ?? null,
       pendingInputRequest,
       slashCommands,
-    });
+    } satisfies SessionMetadataResponse;
+
+    return c.json(response);
   });
 
   // GET /api/projects/:projectId/sessions/:sessionId - Get session detail

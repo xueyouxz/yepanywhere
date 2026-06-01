@@ -1,6 +1,6 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { SessionStatusBadge } from "../StatusBadge";
+import { ActiveCountBadge, SessionStatusBadge } from "../StatusBadge";
 
 describe("SessionStatusBadge", () => {
   afterEach(() => {
@@ -122,5 +122,13 @@ describe("SessionStatusBadge", () => {
     // No badge or indicator - unread is handled via CSS class on parent
     expect(container.querySelector(".status-badge")).toBeNull();
     expect(container.querySelector(".status-indicator")).toBeNull();
+  });
+
+  it("maps self count badges to the existing owned CSS class", () => {
+    const { container } = render(<ActiveCountBadge variant="self" count={2} />);
+
+    const badge = container.querySelector(".status-badge");
+    expect(badge?.classList.contains("status-owned")).toBe(true);
+    expect(badge?.textContent).toBe("2 Active");
   });
 });

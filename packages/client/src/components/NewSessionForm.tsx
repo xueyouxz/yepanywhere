@@ -62,6 +62,7 @@ import {
   measureServerLatencyMs,
   recordServerClockSample,
 } from "../lib/serverClock";
+import { createSessionNavigationState } from "../lib/sessionNavigationState";
 import {
   getSpeechMethods,
   isSpeechMethodId,
@@ -204,7 +205,7 @@ function getDefaultPromptSuggestionMode(
   ) {
     return defaults.promptSuggestionMode;
   }
-  return provider?.supportsNativePromptSuggestions ? "native" : "off";
+  return "off";
 }
 
 function getDefaultHelperSideModel(
@@ -1187,12 +1188,12 @@ export function NewSessionForm({
       navigate(
         `${basePath}/projects/${resolvedProjectId}/sessions/${sessionId}`,
         {
-          state: {
-            initialStatus: { state: "owned", processId },
+          state: createSessionNavigationState({
+            initialStatus: { owner: "self", processId },
             initialTitle: trimmedMessage,
-            initialModel: selectedModel,
-            initialProvider: selectedProvider,
-          },
+            initialModel: selectedModel ?? undefined,
+            initialProvider: selectedProvider ?? undefined,
+          }),
         },
       );
     } catch (err) {

@@ -699,11 +699,15 @@ export function useSessionMessages(
   const fetchSessionMetadata = useCallback(async () => {
     try {
       const data = await api.getSessionMetadata(projectId, sessionId);
+      const metadataSession = {
+        ...data.session,
+        ownership: data.ownership,
+      };
       // For new sessions, prev may be null if JSONL didn't exist on initial load
       setSession((prev) =>
         prev
-          ? { ...prev, ...data.session }
-          : data.session,
+          ? { ...prev, ...metadataSession }
+          : metadataSession,
       );
     } catch {
       // Silent fail for metadata updates

@@ -20,6 +20,7 @@ import type {
   PublicSessionShareSessionStatusResponse,
   PublicSessionShareViewerActionResponse,
   RevokePublicSessionSharesResponse,
+  SessionMetadataResponse,
   SessionLivenessSnapshot,
   SlashCommand,
   ThinkingOption,
@@ -464,12 +465,9 @@ export const api = {
    * Lightweight endpoint for refreshing title, status, etc. without re-fetching all messages.
    */
   getSessionMetadata: (projectId: string, sessionId: string) =>
-    fetchJSON<{
-      session: SessionMetadata;
-      ownership: SessionStatus;
-      pendingInputRequest?: InputRequest | null;
-      slashCommands?: SlashCommand[] | null;
-    }>(`/projects/${projectId}/sessions/${sessionId}/metadata`),
+    fetchJSON<SessionMetadataResponse>(
+      `/projects/${projectId}/sessions/${sessionId}/metadata`,
+    ),
 
   /**
    * Get agent session content for lazy-loading completed Tasks.

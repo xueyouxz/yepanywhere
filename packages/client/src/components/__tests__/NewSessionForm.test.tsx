@@ -504,10 +504,19 @@ describe("NewSessionForm", () => {
       expect.objectContaining({
         provider: "claude",
         model: "opus",
-        promptSuggestionMode: "native",
+        promptSuggestionMode: "off",
       }),
       undefined,
       expect.any(Number),
+    );
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/projects/project-1/sessions/session-1",
+      expect.objectContaining({
+        state: expect.objectContaining({
+          initialStatus: { owner: "self", processId: "process-1" },
+          initialProvider: "claude",
+        }),
+      }),
     );
   });
 

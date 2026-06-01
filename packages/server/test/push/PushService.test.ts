@@ -155,6 +155,31 @@ describe("PushService", () => {
     });
   });
 
+  describe("notification settings", () => {
+    it("defaults session halted notifications off", () => {
+      expect(pushService.getNotificationSettings()).toEqual({
+        toolApproval: true,
+        userQuestion: true,
+        sessionHalted: false,
+      });
+      expect(pushService.isNotificationTypeEnabled("sessionHalted")).toBe(
+        false,
+      );
+    });
+
+    it("preserves explicit session halted settings", async () => {
+      await pushService.setNotificationSettings({ sessionHalted: true });
+
+      const newService = new PushService({
+        dataDir: tempDir,
+        vapidKeys,
+      });
+      await newService.initialize();
+
+      expect(newService.isNotificationTypeEnabled("sessionHalted")).toBe(true);
+    });
+  });
+
   describe("VAPID keys", () => {
     it("should return public key when configured", () => {
       expect(pushService.getPublicKey()).toBe(vapidKeys.publicKey);

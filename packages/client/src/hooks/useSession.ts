@@ -1485,9 +1485,7 @@ export function useSession(
     fetchNewMessages();
     try {
       const data = await api.getSessionMetadata(projectId, sessionId);
-      const metadataProcessState = parseProcessState(
-        (data.ownership as { state?: unknown }).state,
-      );
+      const metadataProcessState = parseProcessState(data.processState);
       setStatus(data.ownership);
       if (metadataProcessState) {
         setProcessState(metadataProcessState);
@@ -2103,9 +2101,7 @@ export function useSession(
   const handleStreamError = useCallback(async () => {
     try {
       const data = await api.getSessionMetadata(projectId, sessionId);
-      const metadataProcessState = parseProcessState(
-        (data.ownership as { state?: unknown }).state,
-      );
+      const metadataProcessState = parseProcessState(data.processState);
       if (data.ownership.owner !== "self") {
         setStatus({ owner: "none" });
         setProcessState("idle");

@@ -242,7 +242,7 @@ export function NotificationsSettings() {
             <label className="toggle-switch">
               <input
                 type="checkbox"
-                checked={settings?.sessionHalted ?? true}
+                checked={settings?.sessionHalted ?? false}
                 onChange={(e) =>
                   updateSetting("sessionHalted", e.target.checked)
                 }

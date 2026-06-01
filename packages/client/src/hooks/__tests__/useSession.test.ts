@@ -238,8 +238,8 @@ describe("useSession completion reconciliation", () => {
       ownership: {
         owner: "self",
         processId: "proc-1",
-        state: "idle",
       },
+      processState: "idle",
       pendingInputRequest: null,
     });
     const { result } = renderHook(() =>

@@ -96,12 +96,17 @@ import {
 import { getIndicatorToneFromProcess } from "../lib/modelConfigIndicator";
 import { getModelIndicatorModelLabel } from "../lib/modelIndicatorText";
 import { preprocessMessages } from "../lib/preprocessMessages";
+import { resolveSessionProviderCapabilities } from "../lib/providerCapabilities";
 import {
   getEstimatedServerOffsetMs,
   getServerClockTimestamp,
   measureServerLatencyMs,
   recordServerClockSample,
 } from "../lib/serverClock";
+import {
+  createSessionNavigationState,
+  parseSessionNavigationState,
+} from "../lib/sessionNavigationState";
 import { getSessionActivityUiState } from "../lib/sessionActivityUi";
 import {
   CLIENT_SLASH_COMMANDS,
@@ -136,6 +141,13 @@ interface PreparedComposerSubmission {
   outgoingText: string;
   thinking?: ThinkingOption;
   slashCommand?: "fast" | "run";
+}
+
+interface LiveModelConfig {
+  model?: string;
+  thinking?: { type: string };
+  effort?: string;
+  promptSuggestionMode?: PromptSuggestionMode;
 }
 
 type BtwAsideStatus =
@@ -545,6 +557,19 @@ function parseCodexConfigAck(
   return ack.model || ack.thinking || ack.effort ? ack : null;
 }
 
+function isSameLiveModelConfig(
+  current: LiveModelConfig | null,
+  next: LiveModelConfig,
+): boolean {
+  return (
+    current !== null &&
+    current.model === next.model &&
+    current.thinking?.type === next.thinking?.type &&
+    current.effort === next.effort &&
+    current.promptSuggestionMode === next.promptSuggestionMode
+  );
+}
+
 export function SessionPage() {
   const { projectId, sessionId } = useParams<{
     projectId: string;
@@ -593,12 +618,7 @@ function SessionPageContent({
   // Get initial status and title from navigation state (passed by NewSessionPage)
   // This allows SSE to connect immediately and show optimistic title without waiting for getSession
   // Also get model/provider so ProviderBadge can render immediately
-  const navState = location.state as {
-    initialStatus?: { owner: "self"; processId: string };
-    initialTitle?: string;
-    initialModel?: string;
-    initialProvider?: ProviderName;
-  } | null;
+  const navState = parseSessionNavigationState(location.state);
   const initialStatus = navState?.initialStatus;
   const initialTitle = navState?.initialTitle;
   const initialModel = navState?.initialModel;
@@ -744,12 +764,8 @@ function SessionPageContent({
   const effectiveProvider = session?.provider ?? initialProvider;
   const effectiveModel = session?.model ?? initialModel;
   const supportsBtwAsides = providerSupportsBtwAsideFork(effectiveProvider);
-  const [liveModelConfig, setLiveModelConfig] = useState<{
-    model?: string;
-    thinking?: { type: string };
-    effort?: string;
-    promptSuggestionMode?: PromptSuggestionMode;
-  } | null>(null);
+  const [liveModelConfig, setLiveModelConfig] =
+    useState<LiveModelConfig | null>(null);
 
   const [scrollTrigger, setScrollTrigger] = useState(0);
   const draftControlsRef = useRef<DraftControls | null>(null);
@@ -863,19 +879,22 @@ function SessionPageContent({
 
   // Get provider capabilities based on session's provider
   const { providers } = useProviders();
-  const currentProviderInfo = useMemo(() => {
-    if (!session?.provider) return null;
-    return providers.find((p) => p.name === session.provider) ?? null;
-  }, [providers, session?.provider]);
+  const providerCapabilities = useMemo(
+    () =>
+      resolveSessionProviderCapabilities({
+        providers,
+        providerName: effectiveProvider,
+      }),
+    [effectiveProvider, providers],
+  );
+  const currentProviderInfo = providerCapabilities.providerInfo;
   // Default to true for backwards compatibility (except slash commands)
   const supportsPermissionMode =
     currentProviderInfo?.supportsPermissionMode ?? true;
   const supportsThinkingToggle =
     currentProviderInfo?.supportsThinkingToggle ?? true;
-  const generallySupportsSteering =
-    currentProviderInfo?.supportsSteering === true ||
-    session?.provider === "codex";
-  const supportsSteeringNow = currentProviderInfo?.supportsSteering === true;
+  const { generallySupportsSteering, supportsSteeringNow } =
+    providerCapabilities;
   const currentOwnedProcessId =
     status.owner === "self" ? status.processId : undefined;
   const activityRenderItems = useMemo(
@@ -972,18 +991,26 @@ function SessionPageContent({
     if (!latestCodexConfigAck) return;
 
     setLiveModelConfig((prev) => {
-      if (currentOwnedProcessId && prev) {
-        return {
-          model: prev.model ?? latestCodexConfigAck.model,
-          thinking: prev.thinking ?? latestCodexConfigAck.thinking,
-          effort: prev.effort ?? latestCodexConfigAck.effort,
-        };
+      const next: LiveModelConfig =
+        currentOwnedProcessId && prev
+          ? {
+              ...prev,
+              model: prev.model ?? latestCodexConfigAck.model,
+              thinking: prev.thinking ?? latestCodexConfigAck.thinking,
+              effort: prev.effort ?? latestCodexConfigAck.effort,
+            }
+          : {
+              ...prev,
+              model: latestCodexConfigAck.model ?? prev?.model,
+              thinking: latestCodexConfigAck.thinking ?? prev?.thinking,
+              effort: latestCodexConfigAck.effort ?? prev?.effort,
+            };
+
+      if (isSameLiveModelConfig(prev, next)) {
+        return prev;
       }
-      return {
-        model: latestCodexConfigAck.model ?? prev?.model,
-        thinking: latestCodexConfigAck.thinking ?? prev?.thinking,
-        effort: latestCodexConfigAck.effort ?? prev?.effort,
-      };
+
+      return next;
     });
   }, [currentOwnedProcessId, latestCodexConfigAck]);
 
@@ -3649,7 +3676,7 @@ function SessionPageContent({
               return;
             }
             navigate(handoffUrl, {
-              state: {
+              state: createSessionNavigationState({
                 initialStatus: {
                   owner: "self",
                   processId: result.processId,
@@ -3657,7 +3684,7 @@ function SessionPageContent({
                 initialTitle: result.title,
                 initialModel: result.model ?? liveBadgeModel,
                 initialProvider: result.provider ?? effectiveProvider,
-              },
+              }),
             });
           }}
           onClose={() => setShowHandoffModal(false)}

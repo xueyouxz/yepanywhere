@@ -817,6 +817,14 @@ describe("Sessions metadata route", () => {
 
     const json = await response.json();
     expect(json.session.provider).toBe("codex");
+    expect(json.ownership).toEqual({
+      owner: "self",
+      processId: "proc-1",
+      permissionMode: "default",
+      modeVersion: 0,
+    });
+    expect(json.ownership).not.toHaveProperty("state");
+    expect(json.processState).toBe("idle");
   });
 
   it("prefers persisted provider over conflicting client resume provider", async () => {

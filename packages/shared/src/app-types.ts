@@ -16,7 +16,7 @@ import type {
   UserEntry,
 } from "./claude-sdk-schema/types.js";
 import type { UrlProjectId } from "./projectId.js";
-import type { PermissionMode, ProviderName } from "./types.js";
+import type { PermissionMode, ProviderName, SlashCommand } from "./types.js";
 
 // =============================================================================
 // App Message Extensions
@@ -378,6 +378,29 @@ export interface AppSessionSummary {
  */
 export interface AppSession extends AppSessionSummary {
   messages: AppMessage[];
+}
+
+export interface SessionMetadataPayload
+  extends Omit<AppSessionSummary, "ownership"> {
+  /** Whether this session is opted in to heartbeat turns */
+  heartbeatTurnsEnabled?: boolean;
+  /** Optional per-session idle threshold override in minutes */
+  heartbeatTurnsAfterMinutes?: number;
+  /** Optional per-session heartbeat text override */
+  heartbeatTurnText?: string;
+  /** Optional hard cap before forcing a heartbeat turn */
+  heartbeatForceAfterMinutes?: number;
+}
+
+/**
+ * Lightweight session metadata response used for title/status refreshes.
+ */
+export interface SessionMetadataResponse {
+  session: SessionMetadataPayload;
+  ownership: SessionOwnership;
+  processState: AgentActivity | null;
+  pendingInputRequest?: InputRequest | null;
+  slashCommands?: SlashCommand[] | null;
 }
 
 // =============================================================================

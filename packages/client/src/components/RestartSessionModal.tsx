@@ -197,7 +197,7 @@ function getRestartDefaultPromptSuggestionMode(params: {
   ) {
     return params.defaults.promptSuggestionMode;
   }
-  return params.provider?.supportsNativePromptSuggestions ? "native" : "off";
+  return "off";
 }
 
 function getRestartDefaultHelperSideModel(params: {
