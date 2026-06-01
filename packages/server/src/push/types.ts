@@ -33,11 +33,11 @@ export interface NotificationSettings {
   sessionHalted: boolean;
 }
 
-/** Default notification settings (all enabled) */
+/** Default notification settings for new or missing preference files. */
 export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   toolApproval: true,
   userQuestion: true,
-  sessionHalted: true,
+  sessionHalted: false,
 };
 
 /** Subscription storage state */

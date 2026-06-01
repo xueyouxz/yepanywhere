@@ -8,6 +8,8 @@ import type {
   BusEvent,
   EventBus,
   ProcessStateEvent,
+  ProcessTerminatedEvent,
+  SessionAbortedEvent,
 } from "../../src/watcher/EventBus.js";
 
 describe("PushNotifier", () => {
@@ -203,6 +205,201 @@ describe("PushNotifier", () => {
       eventHandler?.(event);
 
       // Give async processing a chance
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(mockPushService.sendToAll).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("session halted notifications", () => {
+    it("should send session-halted push when a live process becomes idle", async () => {
+      const startedAt = new Date("2026-01-01T00:00:00.000Z");
+      const timestamp = "2026-01-01T00:00:05.000Z";
+      const mockProcess = {
+        state: {
+          type: "idle",
+          since: new Date(timestamp),
+        } as ProcessState,
+        startedAt,
+      };
+
+      vi.mocked(mockSupervisor.getProcessForSession).mockReturnValue(
+        mockProcess as unknown as ReturnType<
+          Supervisor["getProcessForSession"]
+        >,
+      );
+
+      new PushNotifier({
+        eventBus: mockEventBus,
+        pushService: mockPushService,
+        supervisor: mockSupervisor,
+      });
+
+      const event: ProcessStateEvent = {
+        type: "process-state-changed",
+        sessionId: "session-1",
+        projectId: testProjectId,
+        activity: "idle",
+        timestamp,
+      };
+
+      eventHandler?.(event);
+
+      await vi.waitFor(() => {
+        expect(mockPushService.sendToAll).toHaveBeenCalled();
+      });
+
+      const payload = vi.mocked(mockPushService.sendToAll).mock.calls[0][0];
+      expect(payload).toMatchObject({
+        type: "session-halted",
+        sessionId: "session-1",
+        projectId: testProjectId,
+        projectName: "test-project",
+        reason: "completed",
+        duration: 5000,
+        timestamp,
+      });
+    });
+
+    it("should ignore synthetic idle events from process cleanup", async () => {
+      vi.mocked(mockSupervisor.getProcessForSession).mockReturnValue(undefined);
+
+      new PushNotifier({
+        eventBus: mockEventBus,
+        pushService: mockPushService,
+        supervisor: mockSupervisor,
+      });
+
+      const event: ProcessStateEvent = {
+        type: "process-state-changed",
+        sessionId: "session-1",
+        projectId: testProjectId,
+        activity: "idle",
+        timestamp: new Date().toISOString(),
+      };
+
+      eventHandler?.(event);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(mockPushService.sendToAll).not.toHaveBeenCalled();
+    });
+
+    it("should not send session-halted when the setting is disabled", async () => {
+      vi.mocked(mockPushService.isNotificationTypeEnabled).mockImplementation(
+        (type) => type !== "sessionHalted",
+      );
+
+      const mockProcess = {
+        state: {
+          type: "idle",
+          since: new Date(),
+        } as ProcessState,
+        startedAt: new Date(),
+      };
+
+      vi.mocked(mockSupervisor.getProcessForSession).mockReturnValue(
+        mockProcess as unknown as ReturnType<
+          Supervisor["getProcessForSession"]
+        >,
+      );
+
+      new PushNotifier({
+        eventBus: mockEventBus,
+        pushService: mockPushService,
+        supervisor: mockSupervisor,
+      });
+
+      const event: ProcessStateEvent = {
+        type: "process-state-changed",
+        sessionId: "session-1",
+        projectId: testProjectId,
+        activity: "idle",
+        timestamp: new Date().toISOString(),
+      };
+
+      eventHandler?.(event);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(mockPushService.sendToAll).not.toHaveBeenCalled();
+    });
+
+    it("should send session-halted push when a process terminates", async () => {
+      const startedAt = new Date("2026-01-01T00:00:00.000Z");
+      const timestamp = "2026-01-01T00:00:08.000Z";
+      const mockProcess = {
+        state: {
+          type: "terminated",
+          reason: "stale",
+        } as ProcessState,
+        startedAt,
+      };
+
+      vi.mocked(mockSupervisor.getProcessForSession).mockReturnValue(
+        mockProcess as unknown as ReturnType<
+          Supervisor["getProcessForSession"]
+        >,
+      );
+
+      new PushNotifier({
+        eventBus: mockEventBus,
+        pushService: mockPushService,
+        supervisor: mockSupervisor,
+      });
+
+      const event: ProcessTerminatedEvent = {
+        type: "process-terminated",
+        sessionId: "session-1",
+        projectId: testProjectId,
+        processId: "process-1",
+        provider: "claude",
+        reason: "stale: no SDK messages for 60s",
+        timestamp,
+      };
+
+      eventHandler?.(event);
+
+      await vi.waitFor(() => {
+        expect(mockPushService.sendToAll).toHaveBeenCalled();
+      });
+
+      const payload = vi.mocked(mockPushService.sendToAll).mock.calls[0][0];
+      expect(payload).toMatchObject({
+        type: "session-halted",
+        sessionId: "session-1",
+        reason: "error",
+        duration: 8000,
+        timestamp,
+      });
+    });
+
+    it("should suppress session-halted after a user abort", async () => {
+      new PushNotifier({
+        eventBus: mockEventBus,
+        pushService: mockPushService,
+        supervisor: mockSupervisor,
+      });
+
+      const abortedEvent: SessionAbortedEvent = {
+        type: "session-aborted",
+        sessionId: "session-1",
+        projectId: testProjectId,
+        timestamp: new Date().toISOString(),
+      };
+      const terminatedEvent: ProcessTerminatedEvent = {
+        type: "process-terminated",
+        sessionId: "session-1",
+        projectId: testProjectId,
+        processId: "process-1",
+        provider: "claude",
+        reason: "interrupt fallback abort",
+        timestamp: new Date().toISOString(),
+      };
+
+      eventHandler?.(abortedEvent);
+      eventHandler?.(terminatedEvent);
+
       await new Promise((resolve) => setTimeout(resolve, 10));
 
       expect(mockPushService.sendToAll).not.toHaveBeenCalled();
