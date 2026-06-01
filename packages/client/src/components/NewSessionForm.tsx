@@ -491,27 +491,37 @@ export function NewSessionForm({
     [sortedProjects],
   );
   const normalizedProjectInput = normalizeProjectInput(projectInput);
+  const normalizedSelectedProjectPath = normalizeProjectInput(
+    selectedProject?.path ?? "",
+  );
+  const isProjectInputCommittedSelection =
+    Boolean(normalizedProjectInput) &&
+    Boolean(normalizedSelectedProjectPath) &&
+    normalizedProjectInput === normalizedSelectedProjectPath;
+  const activeProjectSearchQuery = isProjectInputCommittedSelection
+    ? ""
+    : normalizedProjectInput;
   const exactProjectMatch = useMemo(
-    () => findProjectByInput(projects, normalizedProjectInput),
-    [normalizedProjectInput, projects],
+    () => findProjectByInput(projects, activeProjectSearchQuery),
+    [activeProjectSearchQuery, projects],
   );
   const projectMatches = useMemo(() => {
-    if (!normalizedProjectInput) {
+    if (!activeProjectSearchQuery) {
       return sortedProjects;
     }
 
-    const query = normalizedProjectInput.toLowerCase();
+    const query = activeProjectSearchQuery.toLowerCase();
     return sortedProjects.filter((project) => {
       return (
         project.name.toLowerCase().includes(query) ||
         project.path.toLowerCase().includes(query)
       );
     });
-  }, [normalizedProjectInput, sortedProjects]);
+  }, [activeProjectSearchQuery, sortedProjects]);
   const projectSuggestions = useMemo(() => {
-    const source = normalizedProjectInput ? projectMatches : quickProjects;
+    const source = activeProjectSearchQuery ? projectMatches : quickProjects;
     return source.slice(0, PROJECT_SUGGESTION_COUNT);
-  }, [normalizedProjectInput, projectMatches, quickProjects]);
+  }, [activeProjectSearchQuery, projectMatches, quickProjects]);
   const projectSuggestionOptions = useMemo(
     () =>
       projectSuggestions.map((project) => (
@@ -522,7 +532,7 @@ export function NewSessionForm({
     [projectSuggestions],
   );
   const hasCustomProjectPath =
-    Boolean(normalizedProjectInput) && exactProjectMatch === null;
+    Boolean(activeProjectSearchQuery) && exactProjectMatch === null;
   const currentProjectSelection = exactProjectMatch ?? selectedProject ?? null;
   const isDetachedProject =
     !hasCustomProjectPath && currentProjectSelection === null;
@@ -560,7 +570,7 @@ export function NewSessionForm({
       <button
         key="detached"
         type="button"
-        className={`new-session-project-option ${!normalizedProjectInput ? "selected" : ""}`}
+        className={`new-session-project-option ${isDetachedProject ? "selected" : ""}`}
         onClick={handleDetachedProject}
       >
         <span className="new-session-project-option-name">
@@ -584,7 +594,7 @@ export function NewSessionForm({
             {t("newSessionProjectUseTypedPath")}
           </span>
           <span className="new-session-project-option-path">
-            {normalizedProjectInput}
+            {activeProjectSearchQuery}
           </span>
         </button>,
       );
@@ -633,8 +643,9 @@ export function NewSessionForm({
     handleDetachedProject,
     handleProjectOptionSelect,
     hasCustomProjectPath,
+    isDetachedProject,
     isProjectChooserExpanded,
-    normalizedProjectInput,
+    activeProjectSearchQuery,
     projectSuggestions,
     projectsLoading,
     setIsProjectChooserExpanded,

@@ -549,6 +549,49 @@ describe("NewSessionForm", () => {
     expect(screen.getAllByText("Beta").length).toBeGreaterThan(0);
   });
 
+  it("shows recent projects when opening a selected project chooser", () => {
+    const { container } = render(
+      <NewSessionForm
+        projectId="project-1"
+        selectedProject={chooserProjects[0]}
+        projects={[...chooserProjects]}
+      />,
+    );
+
+    const projectInput = screen.getByPlaceholderText(
+      "newSessionProjectPathPlaceholder",
+    ) as HTMLInputElement;
+    expect(projectInput.value).toBe("/tmp/alpha");
+
+    fireEvent.click(
+      container.querySelector(".new-session-project-summary") as HTMLElement,
+    );
+
+    const shortcutNames = () =>
+      Array.from(
+        container.querySelectorAll(
+          ".new-session-project-suggestions .new-session-project-option-name",
+        ),
+        (element) => element.textContent,
+      );
+
+    expect(shortcutNames()).toEqual([
+      "newSessionProjectDetached",
+      "Alpha",
+      "Beta",
+    ]);
+
+    const projectOptions = container.querySelectorAll(
+      ".new-session-project-suggestions .new-session-project-option",
+    );
+    expect(projectOptions[0]?.className).not.toContain("selected");
+    expect(projectOptions[1]?.className).toContain("selected");
+
+    fireEvent.change(projectInput, { target: { value: "Beta" } });
+
+    expect(shortcutNames()).toEqual(["newSessionProjectDetached", "Beta"]);
+  });
+
   it("uses visit recency and shows more than four project shortcuts", () => {
     const manyProjects = [
       ...chooserProjects,
