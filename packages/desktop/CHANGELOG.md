@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.2] - 2026-06-01
+
+### Added
+- Windows local installer script for testing the desktop app from a normal per-user installation.
+- Claude child-process diagnostics for Windows session startup failures.
+
+### Fixed
+- Desktop startup health probe and allowed-host handling for Windows Tauri origins.
+
 ## [0.0.1] - 2026-06-01
 
 ### Added
