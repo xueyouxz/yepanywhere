@@ -949,6 +949,11 @@ export class CodexProvider implements AgentProvider {
     this.config = config;
   }
 
+  setCodexPath(codexPath: string | undefined): void {
+    this.config.codexPath = codexPath;
+    this.modelCache = null;
+  }
+
   /**
    * Check if the Codex CLI is installed.
    */
@@ -960,10 +965,7 @@ export class CodexProvider implements AgentProvider {
    * Check if Codex CLI is installed by looking in PATH and common locations.
    */
   private async isCodexCliInstalled(): Promise<boolean> {
-    if (this.config.codexPath) {
-      return true;
-    }
-    return (await findCodexCliPath()) !== null;
+    return (await findCodexCliPath(this.config.codexPath)) !== null;
   }
 
   /**

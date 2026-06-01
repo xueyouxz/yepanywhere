@@ -38,6 +38,28 @@ describe("loadConfig codex paths", () => {
     );
   });
 
+  it("parses desktop runtime Codex CLI path", async () => {
+    vi.stubEnv("YEP_DESKTOP", "1");
+    vi.stubEnv("YEP_DESKTOP_CODEX_CLI_PATH", "/tmp/yep-desktop/bin/codex");
+
+    const { loadConfig } = await import("../src/config.js");
+    const config = loadConfig();
+
+    expect(config.desktopRuntime).toBe(true);
+    expect(config.codexCliPath).toBe("/tmp/yep-desktop/bin/codex");
+  });
+
+  it("ignores blank desktop Codex CLI path", async () => {
+    vi.stubEnv("YEP_DESKTOP", "true");
+    vi.stubEnv("YEP_DESKTOP_CODEX_CLI_PATH", "  ");
+
+    const { loadConfig } = await import("../src/config.js");
+    const config = loadConfig();
+
+    expect(config.desktopRuntime).toBe(true);
+    expect(config.codexCliPath).toBeUndefined();
+  });
+
   it("includes Windows temp directories in default local-image paths", async () => {
     const { getDefaultAllowedImagePaths } = await import("../src/config.js");
 

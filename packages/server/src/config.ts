@@ -32,6 +32,10 @@ export function getDataDir(): string {
 export interface Config {
   /** Data directory for yep-anywhere state files (indexes, metadata, uploads, etc.) */
   dataDir: string;
+  /** Whether this server was launched by the Tauri desktop app. */
+  desktopRuntime: boolean;
+  /** Desktop-provided Codex CLI path. When set, it is authoritative. */
+  codexCliPath?: string;
   /** Directory where Claude projects are stored */
   claudeProjectsDir: string;
   /** Claude sessions directory (~/.claude/projects) */
@@ -161,6 +165,10 @@ export function loadConfig(): Config {
 
   // Get data directory (supports profiles for multiple instances)
   const dataDir = getDataDir();
+  const desktopRuntime = parseBooleanOrDefault(process.env.YEP_DESKTOP, false);
+  const codexCliPath = parseOptionalPath(
+    process.env.YEP_DESKTOP_CODEX_CLI_PATH,
+  );
 
   // Session directories can be overridden via env vars for test isolation
   const claudeSessionsDir =
@@ -213,6 +221,8 @@ export function loadConfig(): Config {
 
   return {
     dataDir,
+    desktopRuntime,
+    codexCliPath,
     claudeProjectsDir: process.env.CLAUDE_PROJECTS_DIR ?? claudeSessionsDir,
     claudeSessionsDir,
     geminiSessionsDir,
@@ -313,6 +323,11 @@ export function loadConfig(): Config {
     httpsSelfSigned: process.env.HTTPS_SELF_SIGNED === "true",
     desktopAuthToken: process.env.DESKTOP_AUTH_TOKEN || undefined,
   };
+}
+
+function parseOptionalPath(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
 }
 
 function parseCommaSeparatedList(value: string | undefined): string[] {

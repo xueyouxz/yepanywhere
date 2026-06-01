@@ -74,6 +74,16 @@ export {
   type OpenCodeProviderConfig,
 } from "./opencode.js";
 
+export interface ProviderRuntimeConfig {
+  /** Explicit Codex CLI path supplied by an embedding runtime such as desktop. */
+  codexCliPath?: string;
+}
+
+export function configureProviderRuntime(config: ProviderRuntimeConfig): void {
+  codexProvider.setCodexPath(config.codexCliPath);
+  codexOSSProvider.setCodexPath(config.codexCliPath);
+}
+
 /**
  * Get all available provider instances.
  * Useful for provider detection UI.

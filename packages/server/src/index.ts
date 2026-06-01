@@ -192,6 +192,12 @@ console.log(`[Config] Data dir: ${config.dataDir}`);
 console.log(
   `[Config] Log file: ${getLogFilePath({ logDir: config.logDir, logFile: config.logFile })}`,
 );
+if (config.desktopRuntime) {
+  console.log("[Config] Desktop runtime enabled");
+}
+if (config.codexCliPath) {
+  console.log(`[Config] Codex CLI path: ${config.codexCliPath}`);
+}
 
 // Check for Claude CLI (optional - warn if not found)
 const cliInfo = detectClaudeCli();
@@ -257,7 +263,7 @@ async function warnIfCodexVersionMismatch(): Promise<void> {
   }
 
   const expected = parseCodexVersion(expectedRaw) ?? expectedRaw;
-  const codexInfo = await detectCodexCli();
+  const codexInfo = await detectCodexCli(config.codexCliPath);
   if (!codexInfo.found || !codexInfo.version) {
     return;
   }
@@ -602,6 +608,7 @@ async function startServer() {
     deviceBridgeService,
     modelInfoService,
     enabledProviders: config.enabledProviders,
+    codexCliPath: config.codexCliPath,
     voiceInputEnabled: config.voiceInputEnabled,
     speechBackendRegistry,
     allowedImagePaths: config.allowedImagePaths,

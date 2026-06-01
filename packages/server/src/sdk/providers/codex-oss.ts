@@ -12,7 +12,6 @@
  */
 
 import { type ChildProcess, exec, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import type { ModelInfo } from "@yep-anywhere/shared";
@@ -173,7 +172,7 @@ export class CodexOSSProvider implements AgentProvider {
   readonly supportsSlashCommands = false;
   readonly supportsSteering = false;
 
-  private readonly codexPath?: string;
+  private codexPath?: string;
   private readonly localProvider: "ollama" | "lmstudio";
   private readonly timeout: number;
 
@@ -181,6 +180,10 @@ export class CodexOSSProvider implements AgentProvider {
     this.codexPath = config.codexPath;
     this.localProvider = config.localProvider ?? "ollama";
     this.timeout = config.timeout ?? 300000;
+  }
+
+  setCodexPath(codexPath: string | undefined): void {
+    this.codexPath = codexPath;
   }
 
   /**
@@ -1021,10 +1024,7 @@ export class CodexOSSProvider implements AgentProvider {
    * Find codex binary path.
    */
   private async findCodexPath(): Promise<string | null> {
-    if (this.codexPath && existsSync(this.codexPath)) {
-      return this.codexPath;
-    }
-    return findCodexCliPath();
+    return findCodexCliPath(this.codexPath);
   }
 }
 

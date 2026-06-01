@@ -66,8 +66,10 @@ export interface CodexCliInfo {
  *
  * @returns Information about the CLI installation
  */
-export async function detectCodexCli(): Promise<CodexCliInfo> {
-  const codexPath = await findCodexCliPath();
+export async function detectCodexCli(
+  explicitPath?: string,
+): Promise<CodexCliInfo> {
+  const codexPath = await findCodexCliPath(explicitPath);
   if (codexPath) {
     const version = await getCodexVersion(codexPath);
     if (version) {
@@ -106,10 +108,19 @@ export function getCodexCommonPaths(): string[] {
 }
 
 /**
- * Find the Codex CLI path by checking PATH first, then common locations.
+ * Find the Codex CLI path by checking an explicit path first, then PATH, then
+ * common locations. If an explicit path is provided but missing, return null:
+ * explicit provider configuration is authoritative and should not silently
+ * drift to a different install.
  * Returns the path if found, null otherwise.
  */
-export async function findCodexCliPath(): Promise<string | null> {
+export async function findCodexCliPath(
+  explicitPath?: string,
+): Promise<string | null> {
+  if (explicitPath) {
+    return existsSync(explicitPath) ? explicitPath : null;
+  }
+
   try {
     const { stdout } = await execAsync(whichCommand("codex"), {
       encoding: "utf-8",

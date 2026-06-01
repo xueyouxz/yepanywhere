@@ -39,14 +39,24 @@ describe("CodexProvider", () => {
     });
 
     it("should use custom codexPath if provided and exists", async () => {
-      // Custom path is used IF it exists, otherwise falls back to PATH detection
+      const tempDir = mkdtempSync(join(tmpdir(), "codex-path-"));
+      const codexPath = join(tempDir, "codex");
+      writeFileSync(codexPath, "#!/bin/sh\necho codex-cli 0.0.0\n", "utf-8");
+      const customProvider = new CodexProvider({
+        codexPath,
+      });
+      try {
+        expect(await customProvider.isInstalled()).toBe(true);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("should treat missing custom codexPath as not installed", async () => {
       const customProvider = new CodexProvider({
         codexPath: "/nonexistent/path/to/codex",
       });
-      // isInstalled will still check PATH if custom path doesn't exist
-      const isInstalled = await customProvider.isInstalled();
-      // We just verify it returns a boolean - actual value depends on system
-      expect(typeof isInstalled).toBe("boolean");
+      expect(await customProvider.isInstalled()).toBe(false);
     });
   });
 
@@ -138,9 +148,7 @@ describe("CodexProvider app-server lifecycle", () => {
     writeFileSync(codexPath, buildFakeCodexAppServer(logPath), "utf-8");
     chmodSync(codexPath, 0o755);
 
-    let session:
-      | Awaited<ReturnType<CodexProvider["startSession"]>>
-      | undefined;
+    let session: Awaited<ReturnType<CodexProvider["startSession"]>> | undefined;
     let consume: Promise<void> | undefined;
 
     try {
@@ -214,9 +222,7 @@ describe("CodexProvider app-server lifecycle", () => {
     );
     chmodSync(codexPath, 0o755);
 
-    let session:
-      | Awaited<ReturnType<CodexProvider["startSession"]>>
-      | undefined;
+    let session: Awaited<ReturnType<CodexProvider["startSession"]>> | undefined;
     let consume: Promise<void> | undefined;
 
     try {
@@ -256,9 +262,8 @@ describe("CodexProvider app-server lifecycle", () => {
         turnId: "turn-active",
       });
       expect(
-        messages.some(
-          (message) =>
-            JSON.stringify(message).includes("aborted by user after 1.0s"),
+        messages.some((message) =>
+          JSON.stringify(message).includes("aborted by user after 1.0s"),
         ),
       ).toBe(true);
     } finally {
@@ -279,9 +284,7 @@ describe("CodexProvider app-server lifecycle", () => {
     );
     chmodSync(codexPath, 0o755);
 
-    let session:
-      | Awaited<ReturnType<CodexProvider["startSession"]>>
-      | undefined;
+    let session: Awaited<ReturnType<CodexProvider["startSession"]>> | undefined;
     let consume: Promise<void> | undefined;
 
     try {
@@ -333,9 +336,7 @@ describe("CodexProvider app-server lifecycle", () => {
     );
     chmodSync(codexPath, 0o755);
 
-    let session:
-      | Awaited<ReturnType<CodexProvider["startSession"]>>
-      | undefined;
+    let session: Awaited<ReturnType<CodexProvider["startSession"]>> | undefined;
     let consume: Promise<void> | undefined;
 
     try {
@@ -367,9 +368,9 @@ describe("CodexProvider app-server lifecycle", () => {
       await consume;
 
       const requests = readFakeCodexRequests(logPath);
-      expect(
-        requests.some((request) => request.method === "thread/read"),
-      ).toBe(true);
+      expect(requests.some((request) => request.method === "thread/read")).toBe(
+        true,
+      );
       expect(
         messages.some(
           (message) =>
@@ -392,9 +393,7 @@ describe("CodexProvider app-server lifecycle", () => {
     writeFileSync(codexPath, buildFakeCodexAppServer(logPath), "utf-8");
     chmodSync(codexPath, 0o755);
 
-    let session:
-      | Awaited<ReturnType<CodexProvider["startSession"]>>
-      | undefined;
+    let session: Awaited<ReturnType<CodexProvider["startSession"]>> | undefined;
 
     try {
       const testProvider = new CodexProvider({ codexPath });
@@ -450,9 +449,9 @@ describe("CodexProvider app-server lifecycle", () => {
         (request) => request.method === "turn/start",
       );
 
-      expect(
-        requests.some((request) => request.method === "model/list"),
-      ).toBe(true);
+      expect(requests.some((request) => request.method === "model/list")).toBe(
+        true,
+      );
       expect(threadStart?.params).toMatchObject({
         ephemeral: true,
         approvalPolicy: "untrusted",
@@ -476,41 +475,37 @@ const describeRealCodexContract =
   process.env.YA_CODEX_REAL_CONTRACT_TEST === "true" ? describe : describe.skip;
 
 describeRealCodexContract("Codex app-server real contract", () => {
-  it(
-    "verifies steer and interrupt against the installed Codex app-server",
-    async () => {
-      const repoRoot = join(
-        dirname(fileURLToPath(import.meta.url)),
-        "..",
-        "..",
-        "..",
-        "..",
-        "..",
-      );
-      const probePath = join(
-        repoRoot,
-        "scripts",
-        "probe-codex-app-server-turns.mjs",
-      );
-      const result = await runNodeProbe(probePath, repoRoot);
+  it("verifies steer and interrupt against the installed Codex app-server", async () => {
+    const repoRoot = join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "..",
+      "..",
+      "..",
+    );
+    const probePath = join(
+      repoRoot,
+      "scripts",
+      "probe-codex-app-server-turns.mjs",
+    );
+    const result = await runNodeProbe(probePath, repoRoot);
 
-      if (result.code !== 0) {
-        throw new Error(
-          [
-            `Codex app-server probe exited with code ${result.code}`,
-            "stdout:",
-            result.stdout.trim() || "(empty)",
-            "stderr:",
-            result.stderr.trim() || "(empty)",
-          ].join("\n"),
-        );
-      }
-      expect(result.stdout).toContain("turn/steer");
-      expect(result.stdout).toContain("turn/interrupt");
-      expect(result.stdout).toContain('"status": "interrupted"');
-    },
-    70_000,
-  );
+    if (result.code !== 0) {
+      throw new Error(
+        [
+          `Codex app-server probe exited with code ${result.code}`,
+          "stdout:",
+          result.stdout.trim() || "(empty)",
+          "stderr:",
+          result.stderr.trim() || "(empty)",
+        ].join("\n"),
+      );
+    }
+    expect(result.stdout).toContain("turn/steer");
+    expect(result.stdout).toContain("turn/interrupt");
+    expect(result.stdout).toContain('"status": "interrupted"');
+  }, 70_000);
 });
 
 function runNodeProbe(
@@ -1050,7 +1045,9 @@ async function waitForFakeCodexRequest(
 ): Promise<void> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < 2000) {
-    if (readFakeCodexRequests(logPath).some((entry) => entry.method === method)) {
+    if (
+      readFakeCodexRequests(logPath).some((entry) => entry.method === method)
+    ) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1440,7 +1437,11 @@ describe("CodexProvider Event Normalization", () => {
       ) => Record<string, unknown>;
     };
 
-    const params = provider.createTurnStartParams("thread-1", "test prompt", {});
+    const params = provider.createTurnStartParams(
+      "thread-1",
+      "test prompt",
+      {},
+    );
 
     expect(params).toMatchObject({
       threadId: "thread-1",

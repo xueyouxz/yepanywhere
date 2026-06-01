@@ -47,8 +47,13 @@ export interface CodexUpdateStatus {
 }
 
 export interface CodexUpdateCheckerOptions {
+  /** Explicit Codex CLI path supplied by an embedding runtime such as desktop. */
+  codexCliPath?: string;
   /** Override the remote fetch (for tests). */
-  fetchLatest?: () => Promise<{ tagName: string | null; htmlUrl: string | null }>;
+  fetchLatest?: () => Promise<{
+    tagName: string | null;
+    htmlUrl: string | null;
+  }>;
   /** Override the local CLI detection (for tests). */
   detectInstalled?: () => Promise<{
     version: string | null;
@@ -102,7 +107,9 @@ export class CodexUpdateChecker {
 
   constructor(options: CodexUpdateCheckerOptions = {}) {
     this.fetchLatest = options.fetchLatest ?? fetchLatestFromGitHub;
-    this.detectInstalled = options.detectInstalled ?? detectInstalledFromCli;
+    this.detectInstalled =
+      options.detectInstalled ??
+      (() => detectInstalledFromCli(options.codexCliPath));
     this.detectInstallMetadata =
       options.detectInstallMetadata ?? detectInstallMetadataFromPath;
     this.runInstall = options.runInstall ?? runNpmGlobalInstall;
@@ -219,11 +226,11 @@ export class CodexUpdateChecker {
   }
 }
 
-async function detectInstalledFromCli(): Promise<{
+async function detectInstalledFromCli(codexCliPath?: string): Promise<{
   version: string | null;
   path: string | null;
 }> {
-  const info = await detectCodexCli();
+  const info = await detectCodexCli(codexCliPath);
   return {
     version: info.version ?? null,
     path: info.path ?? null,
@@ -275,7 +282,9 @@ export function inferManualInstallCommand(
   if (resolvedInstalledPath.includes(`${path.sep}Cellar${path.sep}`)) {
     return "brew upgrade codex";
   }
-  if (resolvedInstalledPath.includes(`${path.sep}.cargo${path.sep}bin${path.sep}`)) {
+  if (
+    resolvedInstalledPath.includes(`${path.sep}.cargo${path.sep}bin${path.sep}`)
+  ) {
     return "cargo install --locked codex";
   }
   return null;
@@ -360,7 +369,9 @@ function normalizeVersion(raw: string | null | undefined): string | null {
   const match = raw.match(/(\d+)\.(\d+)\.(\d+)(?:-([\w.]+))?/);
   if (!match) return null;
   const [, major, minor, patch, pre] = match;
-  return pre ? `${major}.${minor}.${patch}-${pre}` : `${major}.${minor}.${patch}`;
+  return pre
+    ? `${major}.${minor}.${patch}-${pre}`
+    : `${major}.${minor}.${patch}`;
 }
 
 function compareVersions(a: string, b: string): number {

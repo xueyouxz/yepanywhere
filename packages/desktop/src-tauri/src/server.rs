@@ -80,6 +80,24 @@ fn server_entry() -> Result<std::path::PathBuf, String> {
     Err("Yep Anywhere server not found. Run setup first.".to_string())
 }
 
+/// Resolve the Codex CLI installed by the desktop setup flow, if present.
+fn desktop_codex_path() -> Option<std::path::PathBuf> {
+    let bin_name = if cfg!(windows) { "codex.exe" } else { "codex" };
+    let path = config::bin_dir().join(bin_name);
+    path.exists().then_some(path)
+}
+
+/// Mark the child server as desktop-launched and pass desktop-owned tool paths.
+fn apply_desktop_server_env(cmd: &mut Command) {
+    cmd.env("YEP_DESKTOP", "1");
+    if let Some(path) = desktop_codex_path() {
+        cmd.env(
+            "YEP_DESKTOP_CODEX_CLI_PATH",
+            path.to_string_lossy().as_ref(),
+        );
+    }
+}
+
 /// Set up child process for clean shutdown: kill-on-drop and own process group.
 fn setup_child_process(cmd: &mut Command) {
     cmd.kill_on_drop(true);
@@ -127,6 +145,7 @@ pub async fn start_server(app: AppHandle) -> Result<(), String> {
             .env("PORT", port.to_string())
             .env("YEP_ANYWHERE_DATA_DIR", data_dir.to_string_lossy().as_ref())
             .env("DESKTOP_AUTH_TOKEN", &token);
+        apply_desktop_server_env(&mut cmd);
         setup_child_process(&mut cmd);
         cmd.spawn()
             .map_err(|e| format!("Failed to start dev server in {}: {e}", dev_dir.display()))?
@@ -141,6 +160,7 @@ pub async fn start_server(app: AppHandle) -> Result<(), String> {
             .env("PORT", port.to_string())
             .env("YEP_ANYWHERE_DATA_DIR", data_dir.to_string_lossy().as_ref())
             .env("DESKTOP_AUTH_TOKEN", &token);
+        apply_desktop_server_env(&mut cmd);
         setup_child_process(&mut cmd);
         cmd.spawn()
             .map_err(|e| format!("Failed to start server: {e}"))?

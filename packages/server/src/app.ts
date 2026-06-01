@@ -79,6 +79,7 @@ import { type UploadDeps, createUploadRoutes } from "./routes/upload.js";
 import { createSpeechRoutes } from "./routes/speech.js";
 import { createVersionRoutes } from "./routes/version.js";
 import { WS_INTERNAL_AUTHENTICATED } from "./middleware/internal-auth.js";
+import { configureProviderRuntime } from "./sdk/providers/index.js";
 import type {
   ClaudeSDK,
   PermissionMode,
@@ -204,6 +205,8 @@ export interface AppOptions {
   deviceBridgeService?: DeviceBridgeService;
   /** If non-empty, only these provider names are exposed via the API. */
   enabledProviders?: string[];
+  /** Explicit Codex CLI path supplied by an embedding runtime such as desktop. */
+  codexCliPath?: string;
   /** Whether voice input is enabled. Default: true */
   voiceInputEnabled?: boolean;
   /** Validated server-routed speech backends for capability advertisement. */
@@ -247,6 +250,8 @@ function hasPendingToolCall(messages: Message[]): boolean {
 }
 
 export function createApp(options: AppOptions): AppResult {
+  configureProviderRuntime({ codexCliPath: options.codexCliPath });
+
   const app = new Hono<{ Bindings: HttpBindings }>();
 
   // Security middleware: host validation, CORS, custom header requirement
@@ -900,7 +905,9 @@ export function createApp(options: AppOptions): AppResult {
   }
 
   // Codex CLI update checker
-  const codexUpdateChecker = new CodexUpdateChecker();
+  const codexUpdateChecker = new CodexUpdateChecker({
+    codexCliPath: options.codexCliPath,
+  });
   app.route(
     "/api/codex/updates",
     createCodexUpdateRoutes({ codexUpdateChecker }),
