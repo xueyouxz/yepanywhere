@@ -103,6 +103,10 @@ import {
   measureServerLatencyMs,
   recordServerClockSample,
 } from "../lib/serverClock";
+import {
+  createSessionNavigationState,
+  parseSessionNavigationState,
+} from "../lib/sessionNavigationState";
 import { getSessionActivityUiState } from "../lib/sessionActivityUi";
 import {
   CLIENT_SLASH_COMMANDS,
@@ -594,12 +598,7 @@ function SessionPageContent({
   // Get initial status and title from navigation state (passed by NewSessionPage)
   // This allows SSE to connect immediately and show optimistic title without waiting for getSession
   // Also get model/provider so ProviderBadge can render immediately
-  const navState = location.state as {
-    initialStatus?: { owner: "self"; processId: string };
-    initialTitle?: string;
-    initialModel?: string;
-    initialProvider?: ProviderName;
-  } | null;
+  const navState = parseSessionNavigationState(location.state);
   const initialStatus = navState?.initialStatus;
   const initialTitle = navState?.initialTitle;
   const initialModel = navState?.initialModel;
@@ -3653,7 +3652,7 @@ function SessionPageContent({
               return;
             }
             navigate(handoffUrl, {
-              state: {
+              state: createSessionNavigationState({
                 initialStatus: {
                   owner: "self",
                   processId: result.processId,
@@ -3661,7 +3660,7 @@ function SessionPageContent({
                 initialTitle: result.title,
                 initialModel: result.model ?? liveBadgeModel,
                 initialProvider: result.provider ?? effectiveProvider,
-              },
+              }),
             });
           }}
           onClose={() => setShowHandoffModal(false)}

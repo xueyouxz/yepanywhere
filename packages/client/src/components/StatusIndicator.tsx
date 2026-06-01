@@ -8,6 +8,16 @@ interface Props {
   processState?: ProcessState;
 }
 
+function getStatusClass(status: SessionStatus): "idle" | "owned" | "external" {
+  if (status.owner === "self") return "owned";
+  if (status.owner === "external") return "external";
+  return "idle";
+}
+
+function getProcessClass(processState: ProcessState): string {
+  return processState === "in-turn" ? "running" : processState;
+}
+
 export function StatusIndicator({
   status,
   connected,
@@ -45,7 +55,9 @@ export function StatusIndicator({
       aria-label={statusText}
     >
       <span
-        className={`status-dot status-${status.owner} process-${processState}${!connected ? " disconnected" : ""}`}
+        className={`status-dot status-${getStatusClass(status)} process-${getProcessClass(
+          processState,
+        )}${!connected ? " disconnected" : ""}`}
       />
     </div>
   );

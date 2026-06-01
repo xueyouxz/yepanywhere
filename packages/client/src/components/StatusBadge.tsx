@@ -31,6 +31,14 @@ interface NotificationBadgeProps {
   label?: string;
 }
 
+function getCountBadgeStatusClass(
+  variant: BadgeVariant,
+): "idle" | "owned" | "external" {
+  if (variant === "self") return "owned";
+  if (variant === "external") return "external";
+  return "idle";
+}
+
 /**
  * Notification badge indicating action needed or unread content.
  * - "needs-input" (blue): Tool approval or user question pending
@@ -98,5 +106,9 @@ export function ActiveCountBadge({ variant, count }: CountBadgeProps) {
 
   if (!label) return null;
 
-  return <span className={`status-badge status-${variant}`}>{label}</span>;
+  return (
+    <span className={`status-badge status-${getCountBadgeStatusClass(variant)}`}>
+      {label}
+    </span>
+  );
 }

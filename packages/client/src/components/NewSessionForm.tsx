@@ -62,6 +62,7 @@ import {
   measureServerLatencyMs,
   recordServerClockSample,
 } from "../lib/serverClock";
+import { createSessionNavigationState } from "../lib/sessionNavigationState";
 import {
   getSpeechMethods,
   isSpeechMethodId,
@@ -1180,12 +1181,12 @@ export function NewSessionForm({
       navigate(
         `${basePath}/projects/${resolvedProjectId}/sessions/${sessionId}`,
         {
-          state: {
+          state: createSessionNavigationState({
             initialStatus: { owner: "self", processId },
             initialTitle: trimmedMessage,
-            initialModel: selectedModel,
-            initialProvider: selectedProvider,
-          },
+            initialModel: selectedModel ?? undefined,
+            initialProvider: selectedProvider ?? undefined,
+          }),
         },
       );
     } catch (err) {
