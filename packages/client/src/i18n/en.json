@@ -67,7 +67,7 @@
   "appearanceStreamingTitle": "Response Streaming",
   "appearanceStreamingDescription": "Show responses as they are generated, token by token. Disable for better performance on slower devices.",
   "appearanceStableToolPreviewTitle": "Stable Tool Preview Scrolling",
-  "appearanceStableToolPreviewDescription": "Pre-render completed tool previews so long sessions do not jump while scrolling. Uses more browser CPU and memory.",
+  "appearanceStableToolPreviewDescription": "Keep completed tool previews pre-rendered so long sessions do not jump while scrolling. Disable if large sessions feel slower.",
   "appearanceFunPhrasesTitle": "Fun Phrases",
   "appearanceFunPhrasesDescription": "Show playful status messages while waiting for responses. Disable to show only \"Thinking...\"",
   "appearanceFloatingActionButtonTitle": "Floating New Session Button",

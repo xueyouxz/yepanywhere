@@ -1,6 +1,6 @@
 # Stable Tool Preview Rendering
 
-Status: First slice implemented 2026-06-01
+Status: Stable preview rendering defaulted on 2026-06-01
 
 Progress:
 
@@ -12,6 +12,8 @@ Progress:
   hydrate immediately when enabled.
 - [x] Verify focused renderer coverage and update this note with the shipped
   behavior.
+- [x] 2026-06-01: After desktop/mobile validation, made stable preview
+  rendering the default and kept deferred hydration as the explicit opt-out.
 
 ## Context
 
@@ -54,12 +56,14 @@ features change.
 
 Prefer an explicit user choice over per-renderer height estimators.
 
-Add a browser-local Appearance setting that lets users opt into stable tool
+Add a browser-local Appearance setting that lets users control stable tool
 preview scrolling. When enabled, completed/error tool rows render their rich
 collapsed previews immediately instead of entering deferred hydration mode.
 
-This deliberately spends more client CPU, DOM nodes, and memory on initial load
-to avoid scroll jumps and late content insertion.
+Stable rendering is the default after desktop and mobile validation. This
+deliberately spends more client CPU, DOM nodes, and memory on initial load to
+avoid scroll jumps and late content insertion. Users can still disable the
+setting if very large sessions feel slower.
 
 ## First Slice
 
@@ -85,12 +89,16 @@ Verification for the first slice:
 - `pnpm --filter @yep-anywhere/client exec tsc --noEmit`
 - `pnpm exec biome check docs/tactical/008-stable-tool-preview-rendering.md topics.md packages/client/src/lib/storageKeys.ts packages/client/src/hooks/useStableToolPreviewRendering.ts packages/client/src/pages/settings/AppearanceSettings.tsx packages/client/src/i18n/en.json packages/client/src/components/blocks/ToolCallRow.tsx packages/client/src/components/blocks/__tests__/ToolCallRow.test.tsx`
 
+Verification after making stable rendering the default:
+
+- `pnpm --filter @yep-anywhere/client test -- src/components/blocks/__tests__/ToolCallRow.test.tsx`
+- `pnpm --filter @yep-anywhere/client exec tsc --noEmit`
+- `pnpm exec biome check docs/tactical/008-stable-tool-preview-rendering.md packages/client/src/hooks/useStableToolPreviewRendering.ts packages/client/src/components/blocks/__tests__/ToolCallRow.test.tsx packages/client/src/i18n/en.json`
+
 ## Follow-Up Options
 
-- Consider whether stable tool preview rendering should become the default on
-  mobile, all clients, or only long sessions after collecting user feedback.
-- If the default remains deferred, consider surfacing the setting near session
-  controls in addition to Appearance.
+- Consider surfacing the setting near session controls in addition to
+  Appearance if users need a faster way to opt out for extremely large sessions.
 - Keep any future optimization below the layout-bearing row boundary: defer
   secondary decoration where possible, but avoid inserting or removing large row
   content while the user scrolls.

@@ -1,7 +1,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { UI_KEYS } from "../lib/storageKeys";
 
-const DEFAULT_STABLE_TOOL_PREVIEW_RENDERING = false;
+const DEFAULT_STABLE_TOOL_PREVIEW_RENDERING = true;
 
 const listeners = new Set<() => void>();
 
