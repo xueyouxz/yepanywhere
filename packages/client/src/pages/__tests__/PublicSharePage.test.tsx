@@ -2,7 +2,11 @@
 
 import { describe, expect, it } from "vitest";
 import { toUrlProjectId } from "@yep-anywhere/shared";
-import { rewritePublicShareLocalAppHref } from "../../contexts/PublicShareContext";
+import {
+  buildPublicShareRawFileApiPath,
+  rewritePublicShareLocalAppHref,
+  rewritePublicShareLocalAppLinks,
+} from "../../contexts/PublicShareContext";
 import { isPublicShareLocalAppHref } from "../PublicSharePage";
 
 describe("isPublicShareLocalAppHref", () => {
@@ -68,6 +72,29 @@ describe("rewritePublicShareLocalAppHref", () => {
 
     expect(rewritten).toBe(
       `/share/share-secret/file?path=ui-report%2FREADME.md&h=ygraehl&r=wss%3A%2F%2Frelay.graehl.org%2Fws&projectId=${projectId}&line=8`,
+    );
+  });
+
+  it("marks local image sources for public share media hydration", () => {
+    const root = document.createElement("div");
+    root.innerHTML =
+      '<img src="/api/local-image?path=%2Flocal%2Fgraehl%2Fyepanywhere%2Fui-report%2Fplot.png">';
+
+    rewritePublicShareLocalAppLinks(root, context, shareUrl);
+
+    expect(
+      root.querySelector("img")?.getAttribute("data-public-share-src-path"),
+    ).toBe("ui-report/plot.png");
+  });
+
+  it("builds share-scoped raw file API paths", () => {
+    expect(
+      buildPublicShareRawFileApiPath(
+        context,
+        "/local/graehl/yepanywhere/ui-report/plot.png",
+      ),
+    ).toBe(
+      "/public-api/shares/share-secret/files/raw?path=ui-report%2Fplot.png",
     );
   });
 });

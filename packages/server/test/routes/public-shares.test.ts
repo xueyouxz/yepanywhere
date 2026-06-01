@@ -223,6 +223,62 @@ describe("public share public routes", () => {
     );
   });
 
+  it("serves render assets referenced by a mentioned markdown file", async () => {
+    const projectRoot = path.join(testDir, "project");
+    const publicProjectId = toUrlProjectId(projectRoot);
+    const readmePath = path.join(projectRoot, "ui-report", "README.md");
+    await fs.mkdir(path.dirname(readmePath), { recursive: true });
+    await fs.writeFile(readmePath, "![plot](plot.png)\n", "utf-8");
+    const { secret } = await service.createShare({
+      mode: "frozen",
+      title: "Snapshot",
+      source: {
+        projectId: publicProjectId,
+        sessionId: "session-1",
+        projectName: "project",
+        provider: "codex",
+      },
+      snapshot: makeSession({
+        projectId: publicProjectId,
+        messages: [
+          {
+            type: "assistant",
+            uuid: "message-1",
+            message: {
+              role: "assistant",
+              content: `See /api/local-file?path=${encodeURIComponent(readmePath)}&render=1`,
+            },
+            timestamp: "2026-05-01T00:00:00.000Z",
+          },
+        ],
+      }),
+    });
+    const fetchProjectFile = vi.fn(
+      async () =>
+        new Response("image-bytes", {
+          headers: { "Content-Type": "image/png" },
+        }),
+    );
+    const app = createPublicSharePublicRoutes({
+      publicShareService: service,
+      loadSession: vi.fn(async () => makeSession({ projectId: publicProjectId })),
+      getPublicSharesEnabled: () => true,
+      fetchProjectFile,
+    });
+
+    const response = await app.request(
+      `/${secret}/files/raw?path=ui-report%2Fplot.png`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchProjectFile).toHaveBeenCalledWith(
+      publicProjectId,
+      "ui-report/plot.png",
+      { download: false, highlight: false, raw: true },
+    );
+    expect(await response.text()).toBe("image-bytes");
+  });
+
   it("does not serve unmentioned project files through a share", async () => {
     const projectRoot = path.join(testDir, "project");
     const publicProjectId = toUrlProjectId(projectRoot);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useScrollPreservingToggle } from "../../../lib/scrollAnchor";
 import {
   FixedFontMathToggle,
@@ -12,8 +12,6 @@ import { makeDisplayPath } from "../../../lib/text";
 import { validateToolResult } from "../../../lib/validateToolResult";
 import { SchemaWarning } from "../../SchemaWarning";
 import { SessionFilePathLink } from "../../SessionFilePathLink";
-import { FilePathDisplay } from "../../ui/FilePathDisplay";
-import { Modal } from "../../ui/Modal";
 import { RenderModeGlyph } from "../../ui/RenderModeGlyph";
 import type {
   ImageFile,
@@ -78,6 +76,29 @@ function renderReadMathPanel(html: string) {
         dangerouslySetInnerHTML={{ __html: html }}
       />
     </div>
+  );
+}
+
+function ReadFilePathSummary({
+  children,
+  displayPath,
+  filePath,
+  lineNumber,
+}: {
+  children?: ReactNode;
+  displayPath: string;
+  filePath: string;
+  lineNumber?: number;
+}) {
+  return (
+    <span className="file-link-inline">
+      <SessionFilePathLink
+        displayPath={displayPath}
+        filePath={filePath}
+        lineNumber={lineNumber}
+      />
+      {children && <> {children}</>}
+    </span>
   );
 }
 
@@ -284,6 +305,13 @@ function TextFileResult({
 
   return (
     <div className="read-text-result read-text-inline">
+      <div className="file-range-inline">
+        <SessionFilePathLink
+          displayPath={displayPath}
+          filePath={file.filePath}
+          lineNumber={file.startLine > 1 ? file.startLine : undefined}
+        />
+      </div>
       {showRange && (
         <div className="file-range-inline">
           lines {file.startLine}–{file.startLine + file.numLines - 1} of{" "}
@@ -303,14 +331,29 @@ function TextFileResult({
 /**
  * Image file result - renders as img tag
  */
-function ImageFileResult({ file }: { file: ImageFile }) {
+function ImageFileResult({
+  file,
+  filePath,
+}: {
+  file: ImageFile;
+  filePath?: string;
+}) {
   const sizeKB = file.originalSize ? Math.round(file.originalSize / 1024) : 0;
   const { dimensions } = file;
+  const meta = useOptionalSessionMetadata();
+  const displayPath = filePath
+    ? makeDisplayPath(filePath, meta?.projectPath)
+    : null;
   const hasDimensions =
     dimensions?.originalWidth != null && dimensions?.originalHeight != null;
 
   return (
     <div className="read-image-result">
+      {filePath && displayPath && (
+        <div className="file-range-inline">
+          <SessionFilePathLink displayPath={displayPath} filePath={filePath} />
+        </div>
+      )}
       {(hasDimensions || sizeKB > 0) && (
         <div className="image-info">
           {hasDimensions && (
@@ -359,6 +402,23 @@ function PdfFileResult({
 }) {
   const sizeKB = file.originalSize ? Math.round(file.originalSize / 1024) : 0;
   const fileName = filePath ? getFileName(filePath) : "document.pdf";
+  const meta = useOptionalSessionMetadata();
+  const displayPath = filePath
+    ? makeDisplayPath(filePath, meta?.projectPath)
+    : null;
+
+  if (filePath && displayPath) {
+    return (
+      <div className="read-pdf-result">
+        <ReadFilePathSummary displayPath={displayPath} filePath={filePath}>
+          {sizeKB > 0 && (
+            <span className="file-line-count-inline">({sizeKB}\u202fkb)</span>
+          )}
+          <span className="file-line-count-inline">PDF</span>
+        </ReadFilePathSummary>
+      </div>
+    );
+  }
 
   return (
     <div className="read-pdf-result">
@@ -381,9 +441,11 @@ function PdfFileResult({
  * Read tool result - dispatches to text or image handler
  */
 function ReadToolResult({
+  input,
   result,
   isError,
 }: {
+  input?: ReadInput;
   result: ReadResultWithAugment;
   isError: boolean;
 }) {
@@ -428,7 +490,10 @@ function ReadToolResult({
         {showValidationWarning && validationErrors && (
           <SchemaWarning toolName="Read" errors={validationErrors} />
         )}
-        <PdfFileResult file={result.file as PdfFile} />
+        <PdfFileResult
+          file={result.file as PdfFile}
+          filePath={input?.file_path}
+        />
       </>
     );
   }
@@ -439,7 +504,10 @@ function ReadToolResult({
         {showValidationWarning && validationErrors && (
           <SchemaWarning toolName="Read" errors={validationErrors} />
         )}
-        <ImageFileResult file={result.file as ImageFile} />
+        <ImageFileResult
+          file={result.file as ImageFile}
+          filePath={input?.file_path}
+        />
       </>
     );
   }
@@ -472,7 +540,6 @@ function ReadInteractiveSummary({
   result: ReadResultWithAugment | undefined;
   isError: boolean;
 }) {
-  const [showModal, setShowModal] = useState(false);
   const { enabled, reportValidationError, isToolIgnored } =
     useSchemaValidationContext();
   const [validationErrors, setValidationErrors] = useState<ZodError | null>(
@@ -496,7 +563,6 @@ function ReadInteractiveSummary({
 
   const meta = useOptionalSessionMetadata();
   const displayPath = makeDisplayPath(input.file_path, meta?.projectPath);
-  const fileName = getFileName(input.file_path);
 
   if (isError) {
     return (
@@ -524,49 +590,30 @@ function ReadInteractiveSummary({
   }
 
   if (result.type === "pdf") {
-    const pdfFile = result.file as PdfFile;
     return (
-      <button
-        type="button"
-        className="file-link-inline"
-        onClick={(e) => {
-          e.stopPropagation();
-          openPdfInNewTab(pdfFile.base64);
-        }}
+      <ReadFilePathSummary
+        displayPath={displayPath}
+        filePath={input.file_path}
       >
-        <FilePathDisplay displayPath={displayPath} />
         <span className="file-line-count-inline">(PDF)</span>
         {showValidationWarning && validationErrors && (
           <SchemaWarning toolName="Read" errors={validationErrors} />
         )}
-      </button>
+      </ReadFilePathSummary>
     );
   }
 
   if (result.type === "image") {
-    const imageFile = result.file as ImageFile;
     return (
-      <>
-        <button
-          type="button"
-          className="file-link-inline"
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowModal(true);
-          }}
-        >
-          <FilePathDisplay displayPath={displayPath} />
-          <span className="file-line-count-inline">(image)</span>
-          {showValidationWarning && validationErrors && (
-            <SchemaWarning toolName="Read" errors={validationErrors} />
-          )}
-        </button>
-        {showModal && (
-          <Modal title={fileName} onClose={() => setShowModal(false)}>
-            <ImageFileResult file={imageFile} />
-          </Modal>
+      <ReadFilePathSummary
+        displayPath={displayPath}
+        filePath={input.file_path}
+      >
+        <span className="file-line-count-inline">(image)</span>
+        {showValidationWarning && validationErrors && (
+          <SchemaWarning toolName="Read" errors={validationErrors} />
         )}
-      </>
+      </ReadFilePathSummary>
     );
   }
 
@@ -587,32 +634,16 @@ function ReadInteractiveSummary({
   }
 
   return (
-    <>
-      <button
-        type="button"
-        className="file-link-inline"
-        onClick={(e) => {
-          e.stopPropagation();
-          setShowModal(true);
-        }}
-      >
-        <FilePathDisplay displayPath={displayPath} />{" "}
-        <span className="file-line-count-inline">{file.numLines} lines</span>
-        {showValidationWarning && validationErrors && (
-          <SchemaWarning toolName="Read" errors={validationErrors} />
-        )}
-      </button>
-      {showModal && (
-        <Modal title={fileName} onClose={() => setShowModal(false)}>
-          <TextFileResult
-            file={file}
-            highlightedHtml={result._highlightedContentHtml}
-            highlightedTruncated={result._highlightedTruncated}
-            renderedMarkdownHtml={result._renderedMarkdownHtml}
-          />
-        </Modal>
+    <ReadFilePathSummary
+      displayPath={displayPath}
+      filePath={file.filePath}
+      lineNumber={file.startLine > 1 ? file.startLine : undefined}
+    >
+      <span className="file-line-count-inline">{file.numLines} lines</span>
+      {showValidationWarning && validationErrors && (
+        <SchemaWarning toolName="Read" errors={validationErrors} />
       )}
-    </>
+    </ReadFilePathSummary>
   );
 }
 
@@ -623,9 +654,10 @@ export const readRenderer: ToolRenderer<ReadInput, ReadResult> = {
     return <ReadToolUse input={input as ReadInput} />;
   },
 
-  renderToolResult(result, isError, _context) {
+  renderToolResult(result, isError, _context, input) {
     return (
       <ReadToolResult
+        input={input as ReadInput | undefined}
         result={result as ReadResultWithAugment}
         isError={isError}
       />

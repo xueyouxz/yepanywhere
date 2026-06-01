@@ -26,11 +26,14 @@ viewer must not navigate into `/api/local-file`, `/api/local-image`, or
 `/projects/.../file` directly, because those routes are authenticated/local app
 surfaces and cause public viewers to fall into Remote Access login.
 
-The current lightweight route serves only project files whose relative or
+The current lightweight route serves project files whose relative or
 project-root-absolute path is present in the shared transcript. Public clients
 rewrite rendered local/project file links to `/share/:secret/file`, which fetches
 `/public-api/shares/:secret/files` through the same relay and secret used for
-the public session body.
+the public session body. For rendered Markdown/HTML documents that are already
+visible from the transcript, the route may also serve bounded local media assets
+referenced by that document so public preview images do not fall through to
+login-gated local routes.
 
 A stronger public-share file viewer should eventually expose only manifest
 entries and render assets captured from shared content:
@@ -42,8 +45,9 @@ entries and render assets captured from shared content:
 - A live share may refresh its manifest only from transcript-visible links or
   other deliberate share content, not from arbitrary project paths supplied by
   the public viewer.
-- Markdown or HTML images needed to render an allowed linked document may be
-  included as a bounded transitive closure of that document's local references.
+- The current transitive render-asset allowance is still computed live from the
+  referenced Markdown/HTML source. A frozen manifest should eventually capture
+  those image references at share creation time.
 - Public endpoints should use opaque share asset identifiers or manifest
   entries, not raw absolute paths, project-relative paths, `..` traversal, or
   symlink-sensitive filesystem resolution requested by the browser.

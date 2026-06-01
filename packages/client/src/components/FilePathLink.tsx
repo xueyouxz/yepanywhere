@@ -101,6 +101,7 @@ export const FilePathLink = memo(function FilePathLink({
     getProjectFileViewUrl(projectId, viewerFilePath, lineNumber);
 
   const handleClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
     if (publicShareFileViewUrl) {
       return;
     }
@@ -108,7 +109,6 @@ export const FilePathLink = memo(function FilePathLink({
       return;
     }
     e.preventDefault();
-    e.stopPropagation();
     setShowModal(true);
   }, [publicShareFileViewUrl]);
 

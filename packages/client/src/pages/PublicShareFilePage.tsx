@@ -1,8 +1,16 @@
 import type { FileContentResponse } from "@yep-anywhere/shared";
 import { DEFAULT_RELAY_URL, normalizeRelayUrl } from "@yep-anywhere/shared";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
+  buildPublicShareRawFileApiPath,
   PublicShareProvider,
   rewritePublicShareLocalAppLinks,
   type PublicShareContextValue,
@@ -38,6 +46,41 @@ function parsePositiveInteger(value: string | null): number | undefined {
   }
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function setPublicMediaError(target: HTMLElement, error: unknown): void {
+  const message = error instanceof Error ? error.message : "Failed to load";
+  const element = document.createElement("span");
+  element.className = "local-media-inline-error";
+  element.textContent = message;
+  target.replaceChildren(element);
+}
+
+function renderPublicInlineMedia(
+  target: HTMLElement,
+  filePath: string,
+  mediaType: "image" | "video",
+  objectUrl: string,
+): void {
+  const frame = document.createElement("span");
+  frame.className = "local-media-inline-frame";
+
+  if (mediaType === "video") {
+    const video = document.createElement("video");
+    video.controls = true;
+    video.muted = true;
+    video.className = "local-media-inline-player";
+    video.src = objectUrl;
+    frame.append(video);
+  } else {
+    const image = document.createElement("img");
+    image.className = "local-media-inline-image";
+    image.src = objectUrl;
+    image.alt = getFileName(filePath);
+    frame.append(image);
+  }
+
+  target.replaceChildren(frame);
 }
 
 export function PublicShareFilePage() {
@@ -172,11 +215,118 @@ export function PublicShareFilePage() {
     if (!publicShareContext || !markdownPreviewRef.current) {
       return;
     }
-    rewritePublicShareLocalAppLinks(
-      markdownPreviewRef.current,
-      publicShareContext,
-    );
+    const root = markdownPreviewRef.current;
+    rewritePublicShareLocalAppLinks(root, publicShareContext);
+
+    let cancelled = false;
+    const objectUrls = new Set<string>();
+    const fetchPublicMedia = async (filePath: string): Promise<string> => {
+      const path = buildPublicShareRawFileApiPath(publicShareContext, filePath);
+      if (!path) {
+        throw new Error("File is outside this public share");
+      }
+      const blob = await fetchPublicShareBlobViaRelay({
+        relayUrl: publicShareContext.relayUrl,
+        relayUsername: publicShareContext.relayUsername,
+        path,
+      });
+      const objectUrl = URL.createObjectURL(blob);
+      objectUrls.add(objectUrl);
+      return objectUrl;
+    };
+
+    for (const preview of Array.from(
+      root.querySelectorAll<HTMLElement>(
+        ".local-media-inline-preview[data-public-share-src-path]",
+      ),
+    )) {
+      if (preview.dataset.publicShareInlineMounted === "true") {
+        continue;
+      }
+      const mediaPath = preview.getAttribute("data-public-share-src-path");
+      if (!mediaPath) {
+        continue;
+      }
+      preview.dataset.publicShareInlineMounted = "true";
+      const loading = document.createElement("span");
+      loading.className = "local-media-inline-loading";
+      loading.textContent = "Loading...";
+      preview.replaceChildren(loading);
+      const mediaType =
+        (preview.getAttribute("data-media-type") as "image" | "video") ??
+        "image";
+      void fetchPublicMedia(mediaPath)
+        .then((objectUrl) => {
+          if (cancelled) return;
+          renderPublicInlineMedia(preview, mediaPath, mediaType, objectUrl);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setPublicMediaError(preview, err);
+        });
+    }
+
+    for (const image of Array.from(
+      root.querySelectorAll<HTMLImageElement>("img[data-public-share-src-path]"),
+    )) {
+      if (image.dataset.publicShareInlineMounted === "true") {
+        continue;
+      }
+      const mediaPath = image.getAttribute("data-public-share-src-path");
+      if (!mediaPath) {
+        continue;
+      }
+      image.dataset.publicShareInlineMounted = "true";
+      void fetchPublicMedia(mediaPath)
+        .then((objectUrl) => {
+          if (cancelled) return;
+          image.src = objectUrl;
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          image.alt = err instanceof Error ? err.message : "Failed to load";
+        });
+    }
+
+    return () => {
+      cancelled = true;
+      for (const objectUrl of objectUrls) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
   }, [fileData?.renderedMarkdownHtml, publicShareContext, showPreview]);
+
+  const handlePublicMarkdownClick = useCallback((event: ReactMouseEvent) => {
+    const toggle = (event.target as HTMLElement).closest?.(
+      "button.local-media-inline-toggle",
+    ) as HTMLButtonElement | null;
+    if (!toggle) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const mediaType =
+      (toggle.getAttribute("data-media-type") as "image" | "video") ?? "image";
+    const expanded = toggle.getAttribute("data-expanded") !== "false";
+    const nextExpanded = !expanded;
+    const preview =
+      toggle.closest(".local-media-link-group")?.nextElementSibling ?? null;
+
+    toggle.dataset.expanded = String(nextExpanded);
+    toggle.setAttribute("aria-expanded", String(nextExpanded));
+    toggle.setAttribute(
+      "aria-label",
+      `${nextExpanded ? "Collapse" : "Expand"} ${mediaType}`,
+    );
+    toggle.title = nextExpanded
+      ? "Collapse inline preview"
+      : "Expand inline preview";
+    toggle.textContent = nextExpanded ? "-" : "+";
+    if (preview?.classList.contains("local-media-inline-preview")) {
+      preview.setAttribute("data-expanded", String(nextExpanded));
+    }
+  }, []);
 
   useEffect(
     () => () => {
@@ -270,7 +420,11 @@ export function PublicShareFilePage() {
       return (
         <>
           {toggleButton}
-          <div className="markdown-preview" ref={markdownPreviewRef}>
+          <div
+            className="markdown-preview"
+            onClick={handlePublicMarkdownClick}
+            ref={markdownPreviewRef}
+          >
             <div
               className="markdown-rendered"
               // biome-ignore lint/security/noDangerouslySetInnerHtml: server-rendered HTML

@@ -142,11 +142,18 @@ export function buildPublicShareFileHref(
   return `${url.pathname}${url.search}`;
 }
 
-export function rewritePublicShareLocalAppHref(
+export interface PublicShareFileReference {
+  columnNumber?: number;
+  lineEnd?: number;
+  lineNumber?: number;
+  path: string;
+}
+
+export function getPublicShareFileReferenceFromLocalAppHref(
   href: string,
   context: PublicShareContextValue,
   currentHref = window.location.href,
-): string | null {
+): PublicShareFileReference | null {
   let url: URL;
   try {
     url = new URL(href, currentHref);
@@ -178,28 +185,16 @@ export function rewritePublicShareLocalAppHref(
     if (!filePath) {
       return null;
     }
-    return buildPublicShareFileHref(context, {
-      currentHref,
-      filePath,
-      lineEnd: parsePositiveInteger(url.searchParams.get("lineEnd")),
-      lineNumber: parsePositiveInteger(url.searchParams.get("line")),
-    });
-  }
-
-  if (
-    url.pathname === "/api/local-file" ||
-    url.pathname === "/api/local-image"
-  ) {
-    const filePath = url.searchParams.get("path");
-    if (!filePath) {
-      return null;
-    }
-    return buildPublicShareFileHref(context, {
-      columnNumber: parsePositiveInteger(url.searchParams.get("column")),
-      currentHref,
-      filePath,
-      lineNumber: parsePositiveInteger(url.searchParams.get("line")),
-    });
+    const normalized = normalizePublicShareFilePath(filePath, context.projectId);
+    return normalized
+      ? {
+          path: normalized.path,
+          lineEnd: parsePositiveInteger(url.searchParams.get("lineEnd")),
+          lineNumber:
+            parsePositiveInteger(url.searchParams.get("line")) ??
+            normalized.lineNumber,
+        }
+      : null;
   }
 
   const rawProjectFileMatch = /^\/api\/projects\/([^/]+)\/files\/raw$/.exec(
@@ -217,10 +212,65 @@ export function rewritePublicShareLocalAppHref(
     if (!filePath) {
       return null;
     }
-    return buildPublicShareFileHref(context, { currentHref, filePath });
+    const normalized = normalizePublicShareFilePath(filePath, context.projectId);
+    return normalized ? { path: normalized.path } : null;
+  }
+
+  if (
+    url.pathname === "/api/local-file" ||
+    url.pathname === "/api/local-image"
+  ) {
+    const filePath = url.searchParams.get("path");
+    if (!filePath) {
+      return null;
+    }
+    const normalized = normalizePublicShareFilePath(filePath, context.projectId);
+    return normalized
+      ? {
+          path: normalized.path,
+          columnNumber: parsePositiveInteger(url.searchParams.get("column")),
+          lineNumber:
+            parsePositiveInteger(url.searchParams.get("line")) ??
+            normalized.lineNumber,
+        }
+      : null;
   }
 
   return null;
+}
+
+export function rewritePublicShareLocalAppHref(
+  href: string,
+  context: PublicShareContextValue,
+  currentHref = window.location.href,
+): string | null {
+  const reference = getPublicShareFileReferenceFromLocalAppHref(
+    href,
+    context,
+    currentHref,
+  );
+  if (!reference) {
+    return null;
+  }
+  return buildPublicShareFileHref(context, {
+    currentHref,
+    filePath: reference.path,
+    columnNumber: reference.columnNumber,
+    lineEnd: reference.lineEnd,
+    lineNumber: reference.lineNumber,
+  });
+}
+
+export function buildPublicShareRawFileApiPath(
+  context: PublicShareContextValue,
+  filePath: string,
+): string | null {
+  const normalized = normalizePublicShareFilePath(filePath, context.projectId);
+  if (!normalized) {
+    return null;
+  }
+  const params = new URLSearchParams({ path: normalized.path });
+  return `/public-api/shares/${encodeURIComponent(context.secret)}/files/raw?${params}`;
 }
 
 export function rewritePublicShareLocalAppLinks(
@@ -241,6 +291,34 @@ export function rewritePublicShareLocalAppLinks(
     if (rewritten && href !== rewritten) {
       anchor.setAttribute("href", rewritten);
       anchor.setAttribute("data-public-share-file-link", "true");
+    }
+  }
+
+  for (const image of Array.from(root.querySelectorAll("img[src]"))) {
+    const src = image.getAttribute("src");
+    if (!src) {
+      continue;
+    }
+    const reference = getPublicShareFileReferenceFromLocalAppHref(
+      src,
+      context,
+      currentHref,
+    );
+    if (reference) {
+      image.setAttribute("data-public-share-src-path", reference.path);
+    }
+  }
+
+  for (const preview of Array.from(
+    root.querySelectorAll<HTMLElement>(".local-media-inline-preview"),
+  )) {
+    const filePath = preview.getAttribute("data-media-path");
+    if (!filePath) {
+      continue;
+    }
+    const normalized = normalizePublicShareFilePath(filePath, context.projectId);
+    if (normalized) {
+      preview.setAttribute("data-public-share-src-path", normalized.path);
     }
   }
 }

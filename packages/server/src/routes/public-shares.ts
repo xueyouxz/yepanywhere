@@ -14,7 +14,15 @@ import {
   normalizeRelayUrl,
   parseLineColumn,
 } from "@yep-anywhere/shared";
-import { isAbsolute, normalize, relative, resolve } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import {
+  dirname,
+  extname,
+  isAbsolute,
+  normalize,
+  relative,
+  resolve,
+} from "node:path";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { decodeProjectId, getProjectName } from "../projects/paths.js";
@@ -64,6 +72,29 @@ export interface PublicShareRoutesDeps {
     options: { download?: boolean; highlight?: boolean; raw?: boolean },
   ) => Promise<Response>;
 }
+
+const PUBLIC_SHARE_RENDER_SOURCE_EXTENSIONS = new Set([
+  ".htm",
+  ".html",
+  ".markdown",
+  ".md",
+  ".mdx",
+]);
+const PUBLIC_SHARE_RENDER_ASSET_EXTENSIONS = new Set([
+  ".apng",
+  ".avif",
+  ".bmp",
+  ".gif",
+  ".jpeg",
+  ".jpg",
+  ".mov",
+  ".mp4",
+  ".png",
+  ".svg",
+  ".webm",
+  ".webp",
+]);
+const MAX_PUBLIC_SHARE_TRANSITIVE_SOURCE_BYTES = 1024 * 1024;
 
 function getPublicShareReadiness(deps: PublicShareRoutesDeps): {
   enabled: boolean;
@@ -325,6 +356,246 @@ function publicShareSessionMentionsFile(
   return false;
 }
 
+function hasPublicShareExtension(
+  relativePath: string,
+  extensions: ReadonlySet<string>,
+): boolean {
+  return extensions.has(extname(relativePath).toLowerCase());
+}
+
+function sanitizePathToken(value: string): string {
+  return value
+    .trim()
+    .replace(/^<|>$/g, "")
+    .replace(/[),.;!?]+$/g, "");
+}
+
+function normalizeMentionedProjectFilePath(
+  rawPath: string,
+  projectRoot: string,
+): string | null {
+  const sanitized = sanitizePathToken(rawPath);
+  return sanitized
+    ? normalizePublicShareProjectFilePath(sanitized, projectRoot)
+    : null;
+}
+
+function collectPublicShareMentionedProjectFiles(
+  session: AppSession,
+  projectRoot: string,
+  projectId: UrlProjectId,
+): Set<string> {
+  const files = new Set<string>();
+  const normalizedRoot = resolve(projectRoot).replace(/\/+$/, "");
+  const rootPattern = new RegExp(
+    `${escapeRegExp(normalizedRoot)}/[^\\s"'<>)]*\\.[A-Za-z0-9]+(?::\\d+)?`,
+    "g",
+  );
+  const localApiPattern =
+    /(?:https?:\/\/[^\s"'<>)]*)?\/api\/local-(?:file|image)\?[^\s"'<>)]*/g;
+  const projectFilePattern =
+    /(?:https?:\/\/[^\s"'<>)]*)?\/projects\/([^/\s"'<>]+)\/file\?[^\s"'<>)]*/g;
+  const relativePathPattern =
+    /(?:^|[\s([`])([A-Za-z0-9_.@/-]+\.(?:htm|html|markdown|md|mdx))(?::\d+)?/gi;
+
+  const addPath = (rawPath: string | null) => {
+    if (!rawPath) {
+      return;
+    }
+    const normalized = normalizeMentionedProjectFilePath(rawPath, projectRoot);
+    if (normalized) {
+      files.add(normalized);
+    }
+  };
+
+  for (const value of collectStringValues(session)) {
+    const decoded = decodeURIComponentSafe(value);
+    const textVariants =
+      decoded && decoded !== value ? [value, decoded] : [value];
+    for (const text of textVariants) {
+      for (const match of text.matchAll(rootPattern)) {
+        addPath(match[0] ?? null);
+      }
+      for (const match of text
+        .replaceAll("&amp;", "&")
+        .matchAll(localApiPattern)) {
+        try {
+          const url = new URL(match[0] ?? "", "http://share.local");
+          addPath(url.searchParams.get("path"));
+        } catch {
+          // Ignore malformed URL-looking substrings.
+        }
+      }
+      for (const match of text
+        .replaceAll("&amp;", "&")
+        .matchAll(projectFilePattern)) {
+        const rawProjectId = match[1];
+        const matchedProjectId = rawProjectId
+          ? decodeURIComponentSafe(rawProjectId)
+          : null;
+        if (matchedProjectId !== projectId) {
+          continue;
+        }
+        try {
+          const url = new URL(match[0] ?? "", "http://share.local");
+          addPath(url.searchParams.get("path"));
+        } catch {
+          // Ignore malformed URL-looking substrings.
+        }
+      }
+      for (const match of text.matchAll(relativePathPattern)) {
+        addPath(match[1] ?? null);
+      }
+    }
+  }
+
+  return files;
+}
+
+function extractLocalRenderReferences(content: string): string[] {
+  const references = new Set<string>();
+  const markdownLinkPattern =
+    /!?\[[^\]]*]\(\s*<?([^)\s>]+)>?(?:\s+["'][^"']*["'])?\s*\)/g;
+  const htmlReferencePattern = /\b(?:href|src)\s*=\s*["']([^"']+)["']/gi;
+  const cssUrlPattern = /\burl\(\s*["']?([^"')]+)["']?\s*\)/gi;
+
+  for (const pattern of [
+    markdownLinkPattern,
+    htmlReferencePattern,
+    cssUrlPattern,
+  ]) {
+    for (const match of content.matchAll(pattern)) {
+      if (match[1]) {
+        references.add(match[1]);
+      }
+    }
+  }
+
+  return Array.from(references);
+}
+
+function normalizeRenderReferencePath(
+  rawReference: string,
+  sourceRelativePath: string,
+  projectRoot: string,
+  projectId: UrlProjectId,
+): string | null {
+  const reference = sanitizePathToken(rawReference).replaceAll("&amp;", "&");
+  if (!reference || reference.startsWith("#")) {
+    return null;
+  }
+
+  try {
+    const url = new URL(reference, "http://share.local");
+    if (url.origin !== "http://share.local") {
+      return null;
+    }
+    if (
+      url.pathname === "/api/local-file" ||
+      url.pathname === "/api/local-image"
+    ) {
+      return normalizeMentionedProjectFilePath(
+        url.searchParams.get("path") ?? "",
+        projectRoot,
+      );
+    }
+    const projectFileMatch = /^\/projects\/([^/]+)\/file$/.exec(url.pathname);
+    if (projectFileMatch?.[1]) {
+      const matchedProjectId = decodeURIComponentSafe(projectFileMatch[1]);
+      if (matchedProjectId !== projectId) {
+        return null;
+      }
+      return normalizeMentionedProjectFilePath(
+        url.searchParams.get("path") ?? "",
+        projectRoot,
+      );
+    }
+    if (/^[a-z][a-z0-9+.-]*:/i.test(reference)) {
+      return null;
+    }
+  } catch {
+    if (/^[a-z][a-z0-9+.-]*:/i.test(reference)) {
+      return null;
+    }
+  }
+
+  const pathOnly = reference.split(/[?#]/, 1)[0] ?? "";
+  if (!pathOnly) {
+    return null;
+  }
+  if (pathOnly.startsWith("/")) {
+    return normalizeMentionedProjectFilePath(pathOnly, projectRoot);
+  }
+
+  const sourceDir = dirname(resolve(projectRoot, sourceRelativePath));
+  return normalizeMentionedProjectFilePath(
+    resolve(sourceDir, pathOnly),
+    projectRoot,
+  );
+}
+
+async function publicShareSessionMentionsRenderAsset(
+  session: AppSession,
+  relativePath: string,
+  projectRoot: string,
+  projectId: UrlProjectId,
+): Promise<boolean> {
+  if (
+    !hasPublicShareExtension(
+      relativePath,
+      PUBLIC_SHARE_RENDER_ASSET_EXTENSIONS,
+    )
+  ) {
+    return false;
+  }
+
+  const sourcePaths = Array.from(
+    collectPublicShareMentionedProjectFiles(session, projectRoot, projectId),
+  ).filter((sourcePath) =>
+    hasPublicShareExtension(
+      sourcePath,
+      PUBLIC_SHARE_RENDER_SOURCE_EXTENSIONS,
+    ),
+  );
+
+  for (const sourcePath of sourcePaths.slice(0, 50)) {
+    const absoluteSourcePath = resolve(projectRoot, sourcePath);
+    if (!isPathInsideDirectory(absoluteSourcePath, projectRoot)) {
+      continue;
+    }
+    try {
+      const stats = await stat(absoluteSourcePath);
+      if (
+        !stats.isFile() ||
+        stats.size > MAX_PUBLIC_SHARE_TRANSITIVE_SOURCE_BYTES
+      ) {
+        continue;
+      }
+      const content = await readFile(absoluteSourcePath, "utf-8");
+      for (const reference of extractLocalRenderReferences(content)) {
+        if (
+          normalizeRenderReferencePath(
+            reference,
+            sourcePath,
+            projectRoot,
+            projectId,
+          ) === relativePath
+        ) {
+          return true;
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return false;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function publicShareFileRawUrl(secret: string, relativePath: string): string {
   const params = new URLSearchParams({ path: relativePath });
   return `/public-api/shares/${encodeURIComponent(secret)}/files/raw?${params}`;
@@ -374,12 +645,18 @@ async function servePublicShareProjectFile(
   );
   if (
     !shareResponse ||
-    !publicShareSessionMentionsFile(
+    (!publicShareSessionMentionsFile(
       shareResponse.session,
       relativePath,
       projectRoot,
       record.source.projectId,
-    )
+    ) &&
+      !(await publicShareSessionMentionsRenderAsset(
+        shareResponse.session,
+        relativePath,
+        projectRoot,
+        record.source.projectId,
+      )))
   ) {
     return notFound(c);
   }
