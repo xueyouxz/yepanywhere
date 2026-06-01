@@ -1,6 +1,13 @@
 import type { Stats } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
-import { extname, isAbsolute, normalize, relative, resolve } from "node:path";
+import {
+  dirname,
+  extname,
+  isAbsolute,
+  normalize,
+  relative,
+  resolve,
+} from "node:path";
 import {
   type FileContentResponse,
   type FileMetadata,
@@ -422,8 +429,10 @@ export function createFilesRoutes(deps: FilesDeps): Hono {
           const ext = extname(relativePath).toLowerCase();
           if (ext === ".md" || ext === ".markdown") {
             try {
-              response.renderedMarkdownHtml =
-                await renderMarkdownToHtml(content);
+              response.renderedMarkdownHtml = await renderMarkdownToHtml(
+                content,
+                { localFileBasePath: dirname(filePath) },
+              );
             } catch {
               // Ignore markdown rendering errors
             }

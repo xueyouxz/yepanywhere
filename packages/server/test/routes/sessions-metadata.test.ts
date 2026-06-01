@@ -1008,6 +1008,7 @@ describe("Sessions metadata route", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message: "continue",
+        serviceTier: "priority",
         thinking: "max",
       }),
     });
@@ -1020,6 +1021,7 @@ describe("Sessions metadata route", () => {
       undefined,
       expect.objectContaining({
         model: "gpt-5.4",
+        serviceTier: "priority",
         providerName: "codex",
       }),
     );

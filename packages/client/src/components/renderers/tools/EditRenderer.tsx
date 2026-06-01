@@ -19,6 +19,7 @@ import {
 import { makeDisplayPath } from "../../../lib/text";
 import { validateToolResult } from "../../../lib/validateToolResult";
 import { SchemaWarning } from "../../SchemaWarning";
+import { FilePathLink } from "../../FilePathLink";
 import { FilePathDisplay } from "../../ui/FilePathDisplay";
 import { FixedFontMathToggle } from "../../ui/FixedFontMathToggle";
 import { Modal } from "../../ui/Modal";
@@ -570,7 +571,8 @@ function DiffModalContent({
   /** Complete file content from SDK Edit result (never truncated). Null for file creation. */
   originalFile?: string | null;
 }) {
-  const projectPath = useOptionalSessionMetadata()?.projectPath ?? null;
+  const sessionMetadata = useOptionalSessionMetadata();
+  const projectPath = sessionMetadata?.projectPath ?? null;
   const [showFullContext, setShowFullContext] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -621,7 +623,15 @@ function DiffModalContent({
   return (
     <div className="diff-modal-content" ref={contentRef}>
       <div className="diff-context-controls">
-        <span className="diff-context-path">{displayPath}</span>
+        {sessionMetadata?.projectId ? (
+          <FilePathLink
+            projectId={sessionMetadata.projectId}
+            filePath={filePath}
+            displayText={displayPath}
+          />
+        ) : (
+          <span className="diff-context-path">{displayPath}</span>
+        )}
         {canExpandContext && (
           <button
             type="button"
@@ -651,6 +661,33 @@ function DiffModalContent({
         }
       />
     </div>
+  );
+}
+
+function EditModalTitle({
+  filePath,
+  displayText,
+}: {
+  filePath: string;
+  displayText?: string;
+}) {
+  const sessionMetadata = useOptionalSessionMetadata();
+  const text = displayText ?? getFileName(filePath);
+
+  if (sessionMetadata?.projectId && filePath) {
+    return (
+      <FilePathLink
+        projectId={sessionMetadata.projectId}
+        filePath={filePath}
+        displayText={text}
+      />
+    );
+  }
+
+  return (
+    <span className="file-path" title={filePath}>
+      {text}
+    </span>
   );
 }
 
@@ -806,7 +843,7 @@ function EditCollapsedPreview({
         </div>
         {isModalOpen && hasProposedDiff && (
           <Modal
-            title={<span className="file-path">{fileName}</span>}
+            title={<EditModalTitle filePath={filePath} displayText={fileName} />}
             onClose={handleClose}
           >
             <DiffModalContent
@@ -860,7 +897,9 @@ function EditCollapsedPreview({
           </div>
           {isModalOpen && (
             <Modal
-              title={<span className="file-path">{fileName}</span>}
+              title={
+                <EditModalTitle filePath={filePath} displayText={fileName} />
+              }
               onClose={handleClose}
             >
               <RawPatchModalContent
@@ -919,7 +958,7 @@ function EditCollapsedPreview({
       </div>
       {isModalOpen && (
         <Modal
-          title={<span className="file-path">{fileName}</span>}
+          title={<EditModalTitle filePath={filePath} displayText={fileName} />}
           onClose={handleClose}
         >
           <DiffModalContent
@@ -1018,9 +1057,7 @@ function EditInteractiveSummary({
         {showModal && (
           <Modal
             title={
-              <span className="file-path" title={fileTitle}>
-                {fileName}
-              </span>
+              <EditModalTitle filePath={filePath} displayText={fileName} />
             }
             onClose={() => setShowModal(false)}
           >
@@ -1072,9 +1109,7 @@ function EditInteractiveSummary({
       {showModal && (
         <Modal
           title={
-            <span className="file-path" title={fileTitle}>
-              {fileName}
-            </span>
+            <EditModalTitle filePath={filePath} displayText={fileName} />
           }
           onClose={() => setShowModal(false)}
         >
@@ -1252,7 +1287,7 @@ function EditToolResult({
         </div>
         {showModal && hasProposedDiff && inputWithAugment && (
           <Modal
-            title={<span className="file-path">{fileName}</span>}
+            title={<EditModalTitle filePath={filePath} displayText={fileName} />}
             onClose={() => setShowModal(false)}
           >
             <DiffModalContent
@@ -1346,7 +1381,10 @@ function EditToolResult({
       {showModal && (
         <Modal
           title={
-            <span className="file-path">{getFileName(result.filePath)}</span>
+            <EditModalTitle
+              filePath={result.filePath}
+              displayText={getFileName(result.filePath)}
+            />
           }
           onClose={() => setShowModal(false)}
         >

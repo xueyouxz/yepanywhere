@@ -1,4 +1,10 @@
-import type { AppSession, UrlProjectId } from "@yep-anywhere/shared";
+import {
+  DEFAULT_RELAY_URL,
+  type AppSession,
+  type FileContentResponse,
+  type UrlProjectId,
+  toUrlProjectId,
+} from "@yep-anywhere/shared";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -148,6 +154,102 @@ describe("public share public routes", () => {
 
     expect(response.status).toBe(404);
   });
+
+  it("serves files mentioned in the public share transcript", async () => {
+    const projectRoot = path.join(testDir, "project");
+    const publicProjectId = toUrlProjectId(projectRoot);
+    const linkedPath = path.join(projectRoot, "ui-report", "README.md");
+    const { secret } = await service.createShare({
+      mode: "frozen",
+      title: "Snapshot",
+      source: {
+        projectId: publicProjectId,
+        sessionId: "session-1",
+        projectName: "project",
+        provider: "codex",
+      },
+      snapshot: makeSession({
+        projectId: publicProjectId,
+        messages: [
+          {
+            type: "assistant",
+            uuid: "message-1",
+            message: {
+              role: "assistant",
+              content: `See /api/local-file?path=${encodeURIComponent(linkedPath)}&render=1`,
+            },
+            timestamp: "2026-05-01T00:00:00.000Z",
+          },
+        ],
+      }),
+    });
+    const fileResponse: FileContentResponse = {
+      metadata: {
+        isText: true,
+        mimeType: "text/markdown",
+        path: "ui-report/README.md",
+        size: 12,
+      },
+      content: "# Report",
+      rawUrl: "/api/projects/project/files/raw?path=ui-report%2FREADME.md",
+    };
+    const fetchProjectFile = vi.fn(
+      async () =>
+        new Response(JSON.stringify(fileResponse), {
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    const app = createPublicSharePublicRoutes({
+      publicShareService: service,
+      loadSession: vi.fn(async () => makeSession({ projectId: publicProjectId })),
+      getPublicSharesEnabled: () => true,
+      fetchProjectFile,
+    });
+
+    const response = await app.request(
+      `/${secret}/files?path=ui-report%2FREADME.md&highlight=true`,
+    );
+    const body = (await response.json()) as FileContentResponse;
+
+    expect(response.status).toBe(200);
+    expect(fetchProjectFile).toHaveBeenCalledWith(
+      publicProjectId,
+      "ui-report/README.md",
+      { download: false, highlight: true, raw: false },
+    );
+    expect(body.content).toBe("# Report");
+    expect(body.rawUrl).toBe(
+      `/public-api/shares/${secret}/files/raw?path=ui-report%2FREADME.md`,
+    );
+  });
+
+  it("does not serve unmentioned project files through a share", async () => {
+    const projectRoot = path.join(testDir, "project");
+    const publicProjectId = toUrlProjectId(projectRoot);
+    const { secret } = await service.createShare({
+      mode: "frozen",
+      title: "Snapshot",
+      source: {
+        projectId: publicProjectId,
+        sessionId: "session-1",
+        projectName: "project",
+        provider: "codex",
+      },
+      snapshot: makeSession({ projectId: publicProjectId }),
+    });
+    const fetchProjectFile = vi.fn();
+    const app = createPublicSharePublicRoutes({
+      publicShareService: service,
+      loadSession: vi.fn(async () => makeSession({ projectId: publicProjectId })),
+      getPublicSharesEnabled: () => true,
+      fetchProjectFile,
+    });
+
+    const response = await app.request(`/${secret}/files?path=.env`);
+
+    expect(response.status).toBe(404);
+    expect(fetchProjectFile).not.toHaveBeenCalled();
+  });
 });
 
 describe("public share owner routes", () => {
@@ -216,7 +318,11 @@ describe("public share owner routes", () => {
       configured: true,
       remoteAccessEnabled: true,
       relayStatus: "connecting",
+      relayUrl: "wss://relay.example/ws",
+      relayUsername: "host-one",
       canCreate: true,
+      yaClientBaseUrl: "https://yepanywhere.com/remote",
+      viewerBaseUrl: "https://yepanywhere.com/remote/share",
     });
   });
 
@@ -225,7 +331,7 @@ describe("public share owner routes", () => {
       publicShareService: service,
       loadSession: vi.fn(async () => makeSession()),
       getRelayConfig: () => ({
-        url: "wss://relay.example/ws",
+        url: DEFAULT_RELAY_URL,
         username: "host-one",
       }),
       getPublicSharesEnabled: () => true,
@@ -247,12 +353,13 @@ describe("public share owner routes", () => {
     expect(response.status).toBe(200);
     expect(body.url).toContain("https://yepanywhere.com/remote/share/");
     expect(body.url).toContain("?h=host-one");
+    expect(new URL(body.url).searchParams.get("r")).toBeNull();
     expect(
       service.getSessionShareStatus(projectId, "session-1").activeCount,
     ).toBe(1);
   });
 
-  it("creates new shares with a configured custom viewer base URL", async () => {
+  it("creates new shares with a configured custom YA client URL", async () => {
     const app = createPublicShareRoutes({
       publicShareService: service,
       loadSession: vi.fn(async () => makeSession()),
@@ -263,7 +370,7 @@ describe("public share owner routes", () => {
       getPublicSharesEnabled: () => true,
       getRemoteAccessEnabled: () => true,
       getRelayStatus: () => "waiting",
-      getPublicShareViewerBaseUrl: () => "https://shares.example/ya/share",
+      getYaClientBaseUrl: () => "shares.example/ya",
     });
 
     const response = await app.request("/", {
@@ -280,6 +387,40 @@ describe("public share owner routes", () => {
     expect(response.status).toBe(200);
     expect(body.url).toContain("https://shares.example/ya/share/");
     expect(body.url).toContain("?h=host-one");
+  });
+
+  it("includes the configured custom relay in new share links", async () => {
+    const app = createPublicShareRoutes({
+      publicShareService: service,
+      loadSession: vi.fn(async () => makeSession()),
+      getRelayConfig: () => ({
+        url: "relay.graehl.org",
+        username: "host-one",
+      }),
+      getPublicSharesEnabled: () => true,
+      getRemoteAccessEnabled: () => true,
+      getRelayStatus: () => "waiting",
+      getYaClientBaseUrl: () => "ya.graehl.org",
+    });
+
+    const response = await app.request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId,
+        sessionId: "session-1",
+        mode: "frozen",
+      }),
+    });
+    const body = await response.json();
+    const url = new URL(body.url);
+
+    expect(response.status).toBe(200);
+    expect(`${url.origin}${url.pathname}`).toContain(
+      "https://ya.graehl.org/share/",
+    );
+    expect(url.searchParams.get("h")).toBe("host-one");
+    expect(url.searchParams.get("r")).toBe("wss://relay.graehl.org/ws");
   });
 
   it("keeps legacy public share origin env compatibility", async () => {

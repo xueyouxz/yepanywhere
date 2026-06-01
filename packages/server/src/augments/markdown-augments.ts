@@ -12,6 +12,7 @@ import {
   createAugmentGenerator,
 } from "./augment-generator.js";
 import { BlockDetector } from "./block-detector.js";
+import type { SafeMarkdownRenderOptions } from "./safe-markdown.js";
 
 /**
  * Default configuration for the AugmentGenerator.
@@ -60,7 +61,10 @@ async function getGenerator(): Promise<AugmentGenerator> {
  * @param markdown - The markdown text to render
  * @returns The rendered HTML string
  */
-export async function renderMarkdownToHtml(markdown: string): Promise<string> {
+export async function renderMarkdownToHtml(
+  markdown: string,
+  safeMarkdownOptions?: SafeMarkdownRenderOptions,
+): Promise<string> {
   if (!markdown.trim()) {
     return "";
   }
@@ -82,7 +86,7 @@ export async function renderMarkdownToHtml(markdown: string): Promise<string> {
   for (let i = 0; i < allBlocks.length; i++) {
     const block = allBlocks[i];
     if (!block) continue;
-    const augment = await generator.processBlock(block, i);
+    const augment = await generator.processBlock(block, i, safeMarkdownOptions);
     htmlParts.push(augment.html);
   }
 

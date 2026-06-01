@@ -33,6 +33,18 @@ describe("RemoteAccessService file permissions", () => {
     expect(stat.mode & 0o777).toBe(0o600);
   });
 
+  it("normalizes bare relay hosts to the websocket endpoint", async () => {
+    await service.setRelayConfig({
+      url: "relay.graehl.org",
+      username: "test-user",
+    });
+
+    expect(service.getRelayConfig()).toEqual({
+      url: "wss://relay.graehl.org/ws",
+      username: "test-user",
+    });
+  });
+
   it("tightens permissions on existing remote-access.json files at startup", async () => {
     if (process.platform === "win32") {
       return;

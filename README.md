@@ -94,9 +94,18 @@ export YA_stt__DEEPGRAM_API_KEY="deepgram-..."
 Providing `YA_stt__XAI_API_KEY` auto-enables the `ya-grok` backend; providing
 `YA_stt__DEEPGRAM_API_KEY` auto-enables the `ya-deepgram` backend. These
 `YA_<module>__<NAME>` secrets are consumed by Yep Anywhere and stripped from
-child agent environments. For backend behavior and retention details, see the
+child agent environments. The STT-specific xAI key is preferred over a general
+`XAI_API_KEY`, which lets speech transcription use different billing from any
+Grok model or CLI usage.
+
+If you already exported xAI's standard `XAI_API_KEY`, Yep Anywhere will also use
+it for Grok STT and scrub it from child agent environments. Grok Build does not
+receive `XAI_API_KEY` by default, avoiding accidental pay-as-you-go provider
+billing; Settings > Providers has an explicit opt-in to pass that key to Grok
+Build. For backend behavior and retention details, see the
 [server-mediated STT topic](topics/pluggable-speech-recognition.md); for the
-broader environment variable table, see [topics/ya-env-vars.md](topics/ya-env-vars.md).
+broader environment variable table, see
+[topics/ya-env-vars.md](topics/ya-env-vars.md).
 
 ## Remote Access
 

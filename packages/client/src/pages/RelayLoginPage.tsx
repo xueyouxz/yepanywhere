@@ -5,6 +5,7 @@
  * server by username. After pairing, SRP authentication proceeds through the relay.
  */
 
+import { DEFAULT_RELAY_URL, normalizeRelayUrl } from "@yep-anywhere/shared";
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { YepAnywhereLogo } from "../components/YepAnywhereLogo";
@@ -46,9 +47,6 @@ function parseHashCredentials(): {
   return null;
 }
 
-/** Default relay URL */
-const DEFAULT_RELAY_URL = "wss://relay.yepanywhere.com/ws";
-
 type ConnectionStatus =
   | "idle"
   | "connecting_relay"
@@ -87,7 +85,19 @@ export function RelayLoginPage() {
     if (!hashCreds) return;
 
     const { username, password, relayUrl } = hashCreds;
-    const effectiveRelayUrl = relayUrl || DEFAULT_RELAY_URL;
+    let effectiveRelayUrl: string;
+    try {
+      effectiveRelayUrl = normalizeRelayUrl(relayUrl || DEFAULT_RELAY_URL);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setStatus("error");
+      setRelayUsername(username);
+      if (relayUrl) {
+        setCustomRelayUrl(relayUrl);
+        setShowAdvanced(true);
+      }
+      return;
+    }
 
     // Get or create host BEFORE connecting so handleSessionEstablished can sync session
     let host = getHostByRelayUsername(username);
@@ -162,7 +172,13 @@ export function RelayLoginPage() {
       return;
     }
 
-    const relayUrl = customRelayUrl.trim() || DEFAULT_RELAY_URL;
+    let relayUrl: string;
+    try {
+      relayUrl = normalizeRelayUrl(customRelayUrl.trim() || DEFAULT_RELAY_URL);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return;
+    }
     const username = relayUsername.trim().toLowerCase();
 
     // Get or create host BEFORE connecting so handleSessionEstablished can sync session

@@ -20,10 +20,12 @@ import {
   resolveSpeechMethod,
   type SpeechMethodId,
 } from "../lib/speechProviders/methods";
-import type {
-  SpeechSmartTurnSettings,
-  SpeechTranscriptionContext,
-  SpeechTranscriptionResultMetadata,
+import {
+  DEFAULT_GROK_SPEECH_AUDIO_SETTINGS,
+  type GrokSpeechAudioSettings,
+  type SpeechSmartTurnSettings,
+  type SpeechTranscriptionContext,
+  type SpeechTranscriptionResultMetadata,
 } from "../lib/speechProviders/SpeechProvider";
 
 export interface VoiceInputButtonRef {
@@ -55,8 +57,10 @@ interface VoiceInputButtonProps {
   speechMethod?: SpeechMethodId;
   /** Context attached to YA-server transcription requests. */
   getTranscriptionContext?: () => SpeechTranscriptionContext | undefined;
-  /** Smart Turn settings for streaming STT providers that support it. */
+  /** Smart Turn settings for streaming STT backends that support it. */
   smartTurn?: SpeechSmartTurnSettings;
+  /** Grok STT browser-to-YA audio format preference. */
+  grokSpeechAudioSettings?: GrokSpeechAudioSettings;
 }
 
 /**
@@ -75,6 +79,7 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
     speechMethod: selectedSpeechMethod,
     getTranscriptionContext,
     smartTurn,
+    grokSpeechAudioSettings: selectedGrokSpeechAudioSettings,
   }: VoiceInputButtonProps,
   ref: ForwardedRef<VoiceInputButtonRef>,
 ) {
@@ -83,6 +88,7 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
     voiceInputEnabled,
     speechMethod: storedSpeechMethod,
     hasStoredSpeechMethod,
+    grokSpeechAudioSettings: storedGrokSpeechAudioSettings,
   } = useModelSettings();
   const { version: versionInfo } = useVersion();
   const basePath = useRemoteBasePath();
@@ -103,8 +109,16 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
       hasStoredSpeechMethod,
     ],
   );
+  const grokSpeechAudioSettings =
+    selectedGrokSpeechAudioSettings ??
+    storedGrokSpeechAudioSettings ??
+    DEFAULT_GROK_SPEECH_AUDIO_SETTINGS;
+  const grokPcmUplink =
+    speechMethod !== "ya-grok" ||
+    grokSpeechAudioSettings.uplinkMode === "pcm16";
   const serverStreaming =
     speechMethod !== "browser-native" &&
+    grokPcmUplink &&
     versionInfo?.voiceBackendCapabilities?.[speechMethod]?.streaming === true;
   const viewportWidth = useViewportWidth();
 

@@ -1,7 +1,12 @@
 import type { FileContentResponse } from "@yep-anywhere/shared";
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useI18n } from "../i18n";
+import {
+  LocalMediaModal,
+  useLocalMediaClick,
+  useLocalMediaInlinePreviews,
+} from "./LocalMediaModal";
 
 interface FileViewerProps {
   projectId: string;
@@ -107,6 +112,16 @@ export const FileViewer = memo(function FileViewer({
   const [showPreview, setShowPreview] = useState(false);
   const [highlightedLineRef, setHighlightedLineRef] =
     useState<HTMLElement | null>(null);
+  const markdownPreviewRef = useRef<HTMLDivElement>(null);
+  const {
+    modal: localMediaModal,
+    handleClick: handleLocalMediaClick,
+    closeModal: closeLocalMediaModal,
+  } = useLocalMediaClick();
+  useLocalMediaInlinePreviews(
+    markdownPreviewRef,
+    showPreview ? fileData?.renderedMarkdownHtml : null,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -119,6 +134,11 @@ export const FileViewer = memo(function FileViewer({
       .then((data) => {
         if (!cancelled) {
           setFileData(data);
+          setShowPreview(
+            lineNumber === undefined &&
+              isMarkdownFile(filePath) &&
+              Boolean(data.renderedMarkdownHtml),
+          );
           setLoading(false);
         }
       })
@@ -132,7 +152,7 @@ export const FileViewer = memo(function FileViewer({
     return () => {
       cancelled = true;
     };
-  }, [projectId, filePath, t]);
+  }, [projectId, filePath, lineNumber, t]);
 
   // Handle Escape key to exit fullscreen
   useEffect(() => {
@@ -176,9 +196,16 @@ export const FileViewer = memo(function FileViewer({
   }, [projectId, filePath]);
 
   const handleOpenInNewTab = useCallback(() => {
-    const url = `/projects/${projectId}/file?path=${encodeURIComponent(filePath)}`;
+    const searchParams = new URLSearchParams({ path: filePath });
+    if (lineNumber !== undefined) {
+      searchParams.set("line", String(lineNumber));
+    }
+    if (lineEnd !== undefined) {
+      searchParams.set("lineEnd", String(lineEnd));
+    }
+    const url = `/projects/${projectId}/file?${searchParams}`;
     window.open(url, "_blank");
-  }, [projectId, filePath]);
+  }, [projectId, filePath, lineNumber, lineEnd]);
 
   const fileName = getFileName(filePath);
   const language = getLanguageFromPath(filePath);
@@ -249,7 +276,11 @@ export const FileViewer = memo(function FileViewer({
         return (
           <>
             {toggleButton}
-            <div className="markdown-preview">
+            <div
+              className="markdown-preview"
+              onClick={handleLocalMediaClick}
+              ref={markdownPreviewRef}
+            >
               <div
                 className="markdown-rendered"
                 // biome-ignore lint/security/noDangerouslySetInnerHtml: server-rendered HTML
@@ -453,6 +484,13 @@ export const FileViewer = memo(function FileViewer({
     <div className={viewerClass}>
       {header}
       <div className="file-viewer-body">{renderContent()}</div>
+      {localMediaModal ? (
+        <LocalMediaModal
+          path={localMediaModal.path}
+          mediaType={localMediaModal.mediaType}
+          onClose={closeLocalMediaModal}
+        />
+      ) : null}
     </div>
   );
 });

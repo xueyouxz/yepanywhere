@@ -54,6 +54,7 @@ import { createAcceptRelayConnection } from "./routes/ws-relay.js";
 import { detectClaudeCli, detectCodexCli } from "./sdk/cli-detection.js";
 import { initMessageLogger } from "./sdk/messageLogger.js";
 import { ClaudeOllamaProvider } from "./sdk/providers/claude-ollama.js";
+import { grokACPProvider } from "./sdk/providers/grok-acp.js";
 import { RealClaudeSDK } from "./sdk/real.js";
 import {
   BrowserProfileService,
@@ -464,6 +465,10 @@ async function startServer() {
   );
   ClaudeOllamaProvider.setUseFullSystemPrompt(
     serverSettingsService.getSetting("ollamaUseFullSystemPrompt") ?? false,
+  );
+  grokACPProvider.setAmbientXaiApiKey(config.ambientXaiApiKey);
+  grokACPProvider.setUseAmbientXaiApiKey(
+    serverSettingsService.getSetting("grokBuildUseXaiApiKey") ?? false,
   );
 
   // Warm model info cache (non-blocking, best-effort)

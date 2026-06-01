@@ -16,4 +16,7 @@
 - i18n-sparse-locale-cleanup - Sparse non-English locale overlays and translation key health checks.
 - session-activity-tab-title - Browser-local tab title activity indicator.
 - client-session-lifecycle-store - Shared client lifecycle reducer/store for session activity indicators.
+- relative-filenames - Shortest-unambiguous file path display and link targets.
+- rich-text-rendering - Rendered file/message/diff previews and local-link handling.
+- security - YA trust-boundary contracts for local, authenticated, relay, and public surfaces.
 - message-control-steer-queue-btw-later-interrupt - Steer/queue control state, ownership normalization, and metadata contract cleanup.

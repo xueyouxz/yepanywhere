@@ -5,6 +5,7 @@ import { useSchemaValidationContext } from "../../../contexts/SchemaValidationCo
 import { makeDisplayPath } from "../../../lib/text";
 import { validateToolResult } from "../../../lib/validateToolResult";
 import { SchemaWarning } from "../../SchemaWarning";
+import { SessionFilePathLink } from "../../SessionFilePathLink";
 import { FilePathDisplay } from "../../ui/FilePathDisplay";
 import { Modal } from "../../ui/Modal";
 import type { ToolRenderer, WriteInput, WriteResult } from "./types";
@@ -58,7 +59,12 @@ function WriteToolUse({ input }: { input: WriteInput }) {
   const lineCount = input.content.split("\n").length;
   return (
     <div className="write-tool-use">
-      <span className="file-path"><FilePathDisplay displayPath={displayPath} /></span>
+      <span className="file-path">
+        <SessionFilePathLink
+          displayPath={displayPath}
+          filePath={input.file_path}
+        />
+      </span>
       <span className="write-info">{lineCount} lines</span>
     </div>
   );
@@ -222,7 +228,13 @@ function WriteToolResult({
     return (
       <div className="write-result">
         <div className="file-header">
-          <span className="file-path"><FilePathDisplay displayPath={displayPath} /></span>
+          <span className="file-path">
+            <SessionFilePathLink
+              displayPath={displayPath}
+              filePath={file.filePath}
+              lineNumber={file.startLine}
+            />
+          </span>
           <span className="file-range">{file.numLines} lines written</span>
           {showValidationWarning && validationErrors && (
             <SchemaWarning toolName="Write" errors={validationErrors} />
@@ -251,7 +263,13 @@ function WriteToolResult({
   return (
     <div className="write-result">
       <div className="file-header">
-        <span className="file-path"><FilePathDisplay displayPath={displayPath} /></span>
+        <span className="file-path">
+          <SessionFilePathLink
+            displayPath={displayPath}
+            filePath={file.filePath}
+            lineNumber={file.startLine}
+          />
+        </span>
         <span className="file-range">{file.numLines} lines written</span>
         {showValidationWarning && validationErrors && (
           <SchemaWarning toolName="Write" errors={validationErrors} />
@@ -405,7 +423,11 @@ function WriteCollapsedPreview({
       </button>
       {isModalOpen && (
         <Modal
-          title={<span className="file-path"><FilePathDisplay displayPath={displayPath} /></span>}
+          title={
+            <span className="file-path">
+              <SessionFilePathLink displayPath={displayPath} filePath={filePath} />
+            </span>
+          }
           onClose={handleClose}
         >
           <WriteModalContent

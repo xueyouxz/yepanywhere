@@ -65,6 +65,8 @@ export interface StartSessionOptions {
   permissionMode?: PermissionMode;
   /** Model to use (e.g., "sonnet", "opus", "haiku") */
   model?: string;
+  /** Provider-visible service tier. undefined means provider/default behavior. */
+  serviceTier?: string;
   /** Thinking configuration (undefined = thinking disabled) */
   thinking?: import("@yep-anywhere/shared").ThinkingConfig;
   /** Effort level for response quality (undefined = SDK default) */

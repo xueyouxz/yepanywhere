@@ -180,6 +180,8 @@ function getActiveHeartbeatAction(params: {
 export interface ModelSettings {
   /** Model to use (e.g., "sonnet", "opus", "haiku"). undefined = use CLI default */
   model?: string;
+  /** Provider-visible service tier. undefined means provider/default behavior. */
+  serviceTier?: string;
   /** Thinking configuration. undefined = thinking disabled */
   thinking?: ThinkingConfig;
   /** Effort level for response quality. undefined = SDK default */
@@ -599,6 +601,7 @@ export class Supervisor {
       permissionMode: effectiveMode,
       provider: "claude", // Real SDK is always Claude
       model: modelSettings?.model,
+      serviceTier: modelSettings?.serviceTier,
       thinking: modelSettings?.thinking,
       effort: modelSettings?.effort,
       executor: modelSettings?.executor,
@@ -718,6 +721,7 @@ export class Supervisor {
       permissionMode: effectiveMode,
       provider: "claude", // Real SDK is always Claude
       model: modelSettings?.model,
+      serviceTier: modelSettings?.serviceTier,
       thinking: modelSettings?.thinking,
       effort: modelSettings?.effort,
       executor: modelSettings?.executor,
@@ -781,6 +785,7 @@ export class Supervisor {
       resumeSessionId,
       permissionMode: effectiveMode,
       model: modelSettings?.model,
+      serviceTier: modelSettings?.serviceTier,
       thinking: modelSettings?.thinking,
       effort: modelSettings?.effort,
       clientName: modelSettings?.clientName,
@@ -835,6 +840,7 @@ export class Supervisor {
       permissionMode: effectiveMode,
       provider: activeProvider.name,
       model: modelSettings?.model,
+      serviceTier: modelSettings?.serviceTier,
       thinking: modelSettings?.thinking,
       effort: modelSettings?.effort,
       executor: modelSettings?.executor,
@@ -891,6 +897,7 @@ export class Supervisor {
       resumeSessionId,
       permissionMode: effectiveMode,
       model: modelSettings?.model,
+      serviceTier: modelSettings?.serviceTier,
       thinking: modelSettings?.thinking,
       effort: modelSettings?.effort,
       executor: modelSettings?.executor,
@@ -944,6 +951,7 @@ export class Supervisor {
       permissionMode: effectiveMode,
       provider: activeProvider.name,
       model: modelSettings?.model,
+      serviceTier: modelSettings?.serviceTier,
       thinking: modelSettings?.thinking,
       effort: modelSettings?.effort,
       executor: modelSettings?.executor,
@@ -1203,24 +1211,39 @@ export class Supervisor {
     }
 
     const hasModelUpdate = Object.hasOwn(updates, "model");
+    const hasServiceTierUpdate = Object.hasOwn(updates, "serviceTier");
     const hasThinkingUpdate = Object.hasOwn(updates, "thinking");
     const hasEffortUpdate = Object.hasOwn(updates, "effort");
 
     const nextModel = hasModelUpdate ? updates.model : process.resolvedModel;
+    const nextServiceTier = hasServiceTierUpdate
+      ? updates.serviceTier
+      : process.serviceTier;
     const nextThinking = hasThinkingUpdate
       ? updates.thinking
       : process.thinking;
     const nextEffort = hasEffortUpdate ? updates.effort : process.effort;
 
     const modelChanged = nextModel !== process.resolvedModel;
+    const serviceTierChanged = nextServiceTier !== process.serviceTier;
     const thinkingChanged = nextThinking?.type !== process.thinking?.type;
     const effortChanged = nextEffort !== process.effort;
 
-    if (!modelChanged && !thinkingChanged && !effortChanged) {
+    if (
+      !modelChanged &&
+      !serviceTierChanged &&
+      !thinkingChanged &&
+      !effortChanged
+    ) {
       return process;
     }
 
-    if (!thinkingChanged && !effortChanged && process.supportsSetModel) {
+    if (
+      !serviceTierChanged &&
+      !thinkingChanged &&
+      !effortChanged &&
+      process.supportsSetModel
+    ) {
       const changed = await process.setModel(nextModel);
       return changed ? process : null;
     }
@@ -1234,6 +1257,7 @@ export class Supervisor {
 
     const mergedSettings: ModelSettings = {
       model: nextModel,
+      serviceTier: nextServiceTier,
       thinking: nextThinking,
       effort: nextEffort,
       providerName: process.provider,
@@ -1311,14 +1335,21 @@ export class Supervisor {
     const requestedEffort = isActiveSteeringMessage
       ? process.effort
       : modelSettings?.effort;
+    const requestedServiceTier = isActiveSteeringMessage
+      ? process.serviceTier
+      : (modelSettings?.serviceTier ?? process.serviceTier);
 
-    // Check if thinking/effort settings changed
+    // Check if service tier/thinking/effort settings changed.
+    // Service tier is cost-affecting, so changes require an explicit restart
+    // rather than being inferred from a normal prompt.
+    const serviceTierChanged = process.serviceTier !== requestedServiceTier;
     const thinkingChanged =
       process.thinking?.type !== (requestedThinking?.type ?? undefined);
     const effortChanged = process.effort !== requestedEffort;
 
-    if (thinkingChanged || effortChanged) {
+    if (serviceTierChanged || thinkingChanged || effortChanged) {
       if (
+        !serviceTierChanged &&
         thinkingChanged &&
         !effortChanged &&
         process.supportsThinkingModeChange
@@ -1351,10 +1382,12 @@ export class Supervisor {
             processId: process.id,
             oldThinking: process.thinking?.type,
             oldEffort: process.effort,
+            oldServiceTier: process.serviceTier,
             newThinking: requestedThinking?.type,
             newEffort: requestedEffort,
+            newServiceTier: requestedServiceTier,
           },
-          "Thinking/effort changed on queue, restarting process",
+          "Service tier/thinking/effort changed on queue, restarting process",
         );
 
         await process.abort();
@@ -1362,6 +1395,7 @@ export class Supervisor {
 
         const restartModelSettings: ModelSettings = {
           ...modelSettings,
+          serviceTier: requestedServiceTier,
           recapMode: modelSettings?.recapMode ?? process.recapMode,
           promptSuggestionMode:
             modelSettings?.promptSuggestionMode ?? process.promptSuggestionMode,

@@ -546,6 +546,24 @@ describe("GrokACPProvider — ACP integration (mocked)", () => {
     expect(connectCalls[0].excludeEnv).toContain("GROK_CODE_XAI_API_KEY");
   });
 
+  it("passes XAI_API_KEY to Grok only after explicit opt-in", async () => {
+    const provider = await loadFreshGrokProvider({ grokPath: "/fake/grok" });
+    provider.setAmbientXaiApiKey("ambient-xai-key");
+    provider.setUseAmbientXaiApiKey(true);
+
+    await startAndReadInit(provider, {
+      cwd: "/tmp",
+      initialMessage: { text: "hi" },
+    });
+
+    expect(connectCalls.length).toBeGreaterThan(0);
+    expect(connectCalls[0].env).toMatchObject({
+      XAI_API_KEY: "ambient-xai-key",
+    });
+    expect(connectCalls[0].excludeEnv).not.toContain("XAI_API_KEY");
+    expect(connectCalls[0].excludeEnv).toContain("GROK_CODE_XAI_API_KEY");
+  });
+
   it("passes -m model flag only for non-default models", async () => {
     const provider = await loadFreshGrokProvider({ grokPath: "/fake/grok" });
 

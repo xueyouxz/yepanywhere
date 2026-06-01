@@ -149,12 +149,22 @@ export class GrokACPProvider implements AgentProvider {
   private readonly grokPath?: string;
   private readonly createClient: () => ACPClient;
   private readonly pathExists: (path: string) => boolean;
+  private ambientXaiApiKey: string | undefined;
+  private useAmbientXaiApiKey = false;
   private log = getLogger();
 
   constructor(config: GrokACPProviderConfig = {}) {
     this.grokPath = config.grokPath;
     this.createClient = config.createClient ?? (() => new ACPClient());
     this.pathExists = config.pathExists ?? existsSync;
+  }
+
+  setAmbientXaiApiKey(apiKey: string | undefined): void {
+    this.ambientXaiApiKey = apiKey || undefined;
+  }
+
+  setUseAmbientXaiApiKey(enabled: boolean): void {
+    this.useAmbientXaiApiKey = enabled;
   }
 
   /**
@@ -338,11 +348,17 @@ export class GrokACPProvider implements AgentProvider {
 
     try {
       const connectStart = Date.now();
+      const xaiApiKey = this.ambientXaiApiKey;
+      const passXaiApiKey =
+        this.useAmbientXaiApiKey && xaiApiKey !== undefined;
       await client.connect({
         command: grokPath,
         args,
         cwd: options.cwd,
-        excludeEnv: GROK_BILLING_ENV_DENYLIST,
+        env: passXaiApiKey ? { XAI_API_KEY: xaiApiKey } : undefined,
+        excludeEnv: passXaiApiKey
+          ? GROK_BILLING_ENV_DENYLIST.filter((key) => key !== "XAI_API_KEY")
+          : GROK_BILLING_ENV_DENYLIST,
       });
       this.log.info(
         { durationMs: Date.now() - connectStart, args },

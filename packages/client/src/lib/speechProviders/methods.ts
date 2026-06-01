@@ -158,7 +158,7 @@ export function resolveSpeechMethod(
 }
 
 /**
- * Build the speech method list from what the server advertises plus
+ * Build the STT backend list from what the server advertises plus
  * the local browser-native option. Only advertised server backends
  * appear in the selector — no phantom options for unconfigured backends.
  */

@@ -28,6 +28,7 @@ import type {
   SpeechTranscriptionResultMetadata,
 } from "../lib/speechProviders/SpeechProvider";
 import { appendSpeechTranscript } from "../lib/speechRecognition";
+import { isVoiceInputShortcut } from "../lib/voiceInputShortcut";
 import type { ContextUsage, PermissionMode } from "../types";
 import { AttachmentChip } from "./AttachmentChip";
 import { MessageInputToolbar } from "./MessageInputToolbar";
@@ -421,12 +422,17 @@ export function MessageInput({
     [draftKey],
   );
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback((messageOverride?: unknown) => {
+    const override =
+      typeof messageOverride === "string" ? messageOverride : undefined;
     // Stop voice recording and get any pending interim text
-    const pendingVoice = voiceButtonRef.current?.stopAndFinalize() ?? "";
+    const pendingVoice =
+      override === undefined
+        ? (voiceButtonRef.current?.stopAndFinalize() ?? "")
+        : "";
 
     // Combine committed text with any pending voice text
-    let finalText = controls.getDraft().trimEnd();
+    let finalText = (override ?? controls.getDraft()).trimEnd();
     if (pendingVoice) {
       finalText = finalText ? `${finalText} ${pendingVoice}` : pendingVoice;
     }
@@ -557,15 +563,6 @@ export function MessageInput({
       e.preventDefault();
       e.stopPropagation();
       onStop();
-      return;
-    }
-
-    // Ctrl+Space toggles voice input
-    if (e.key === " " && e.ctrlKey && !e.shiftKey && !e.altKey) {
-      e.preventDefault();
-      if (voiceButtonRef.current?.isAvailable) {
-        voiceButtonRef.current.toggle();
-      }
       return;
     }
 
@@ -761,7 +758,7 @@ export function MessageInput({
       }
       setInterimTranscript("");
       if (metadata?.smartTurnCommand === "send") {
-        handleSubmit();
+        handleSubmit(nextText);
       }
       // Scroll to bottom after committing voice transcript
       // Use setTimeout to ensure state update has rendered
@@ -778,6 +775,22 @@ export function MessageInput({
   const handleInterimTranscript = useCallback((transcript: string) => {
     setInterimTranscript(transcript);
   }, []);
+
+  const handleComposerKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (!isVoiceInputShortcut(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const voice = voiceButtonRef.current;
+      if (!voice?.isAvailable) return;
+      const wasActive = voice.isListening;
+      voice.toggle();
+      if (!wasActive) {
+        textareaRef.current?.focus();
+      }
+    },
+    [],
+  );
 
   // Handle slash command selection - insert command into text
   const handleSlashCommand = useCallback(
@@ -806,7 +819,10 @@ export function MessageInput({
   );
 
   return (
-    <div className="message-input-wrapper">
+    <div
+      className="message-input-wrapper"
+      onKeyDownCapture={handleComposerKeyDown}
+    >
       {/* Floating toggle button - only show when user can control collapse (not externally collapsed) */}
       {!externalCollapsed && (
         <button

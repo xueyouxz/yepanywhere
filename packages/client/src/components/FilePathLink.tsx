@@ -1,5 +1,10 @@
-import { memo, useCallback, useEffect, useState } from "react";
+import { fromUrlProjectId, isUrlProjectId } from "@yep-anywhere/shared";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import {
+  buildPublicShareFileHref,
+  usePublicShareContext,
+} from "../contexts/PublicShareContext";
 import { FileViewer } from "./FileViewer";
 
 interface FilePathLinkProps {
@@ -15,6 +20,48 @@ interface FilePathLinkProps {
   displayText?: string;
   /** Whether to show full path or just filename */
   showFullPath?: boolean;
+}
+
+function getProjectFileViewUrl(
+  projectId: string,
+  filePath: string,
+  lineNumber?: number,
+): string {
+  const params = new URLSearchParams({ path: filePath });
+  if (lineNumber !== undefined) {
+    params.set("line", String(lineNumber));
+  }
+  return `/projects/${projectId}/file?${params.toString()}`;
+}
+
+function getProjectPath(projectId: string): string | null {
+  if (!isUrlProjectId(projectId)) {
+    return null;
+  }
+  try {
+    const projectPath = fromUrlProjectId(projectId);
+    return projectPath.startsWith("/") ? projectPath.replace(/\/+$/, "") : null;
+  } catch {
+    return null;
+  }
+}
+
+function getProjectViewerFilePath(projectId: string, filePath: string): string {
+  if (!filePath.startsWith("/")) {
+    return filePath;
+  }
+
+  const projectPath = getProjectPath(projectId);
+  if (!projectPath) {
+    return filePath;
+  }
+
+  if (filePath === projectPath) {
+    return ".";
+  }
+
+  const prefix = `${projectPath}/`;
+  return filePath.startsWith(prefix) ? filePath.slice(prefix.length) : filePath;
 }
 
 /**
@@ -36,27 +83,38 @@ export const FilePathLink = memo(function FilePathLink({
   displayText,
   showFullPath = false,
 }: FilePathLinkProps) {
+  const publicShareContext = usePublicShareContext();
   const [showModal, setShowModal] = useState(false);
+  const viewerFilePath = useMemo(
+    () => getProjectViewerFilePath(projectId, filePath),
+    [projectId, filePath],
+  );
+  const publicShareFileViewUrl = publicShareContext
+    ? buildPublicShareFileHref(publicShareContext, {
+        columnNumber,
+        filePath: viewerFilePath,
+        lineNumber,
+      })
+    : null;
+  const fileViewUrl =
+    publicShareFileViewUrl ??
+    getProjectFileViewUrl(projectId, viewerFilePath, lineNumber);
 
   const handleClick = useCallback((e: React.MouseEvent) => {
+    if (publicShareFileViewUrl) {
+      return;
+    }
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     setShowModal(true);
-  }, []);
+  }, [publicShareFileViewUrl]);
 
   const handleClose = useCallback(() => {
     setShowModal(false);
   }, []);
-
-  const handleOpenInNewTab = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const url = `/projects/${projectId}/file?path=${encodeURIComponent(filePath)}`;
-      window.open(url, "_blank");
-    },
-    [projectId, filePath],
-  );
 
   // Format the display text
   const fileName = showFullPath ? filePath : getFileName(filePath);
@@ -73,21 +131,20 @@ export const FilePathLink = memo(function FilePathLink({
 
   return (
     <>
-      <button
-        type="button"
+      <a
+        href={fileViewUrl}
         className="file-path-link"
         onClick={handleClick}
-        onAuxClick={handleOpenInNewTab}
-        title={`${filePath}${suffix}\nClick to view, middle-click to open in new tab`}
+        title={`${filePath}${suffix}\nClick to view, or use a browser link gesture to open this file`}
       >
         <span className="file-path-link-name">{text}</span>
         {suffix && <span className="file-path-link-line">{suffix}</span>}
-      </button>
+      </a>
       {showModal &&
         createPortal(
           <FileViewerModal
             projectId={projectId}
-            filePath={filePath}
+            filePath={viewerFilePath}
             lineNumber={lineNumber}
             onClose={handleClose}
           />,

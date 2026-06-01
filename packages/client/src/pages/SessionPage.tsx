@@ -1000,7 +1000,7 @@ function SessionPageContent({
               effort: prev.effort ?? latestCodexConfigAck.effort,
             }
           : {
-              ...(prev ?? {}),
+              ...prev,
               model: latestCodexConfigAck.model ?? prev?.model,
               thinking: latestCodexConfigAck.thinking ?? prev?.thinking,
               effort: latestCodexConfigAck.effort ?? prev?.effort,

@@ -16,6 +16,8 @@ import {
   type PromptSuggestionMode,
   type ProviderName,
   type RecapMode,
+  normalizeYaClientBaseUrl,
+  normalizeYaClientBaseUrlFromShareViewerUrl,
 } from "@yep-anywhere/shared";
 import { Hono } from "hono";
 import { testSSHConnection } from "../sdk/remote-spawn.js";
@@ -32,7 +34,6 @@ import {
   DEFAULT_SPEECH_AUDIO_RETENTION_MAX_BYTES,
 } from "../services/ServerSettingsService.js";
 import type { PublicShareService } from "../services/PublicShareService.js";
-import { normalizePublicShareViewerBaseUrl } from "../utils/publicShareViewerUrl.js";
 import {
   isValidSshHostAlias,
   normalizeSshHostAlias,
@@ -56,6 +57,8 @@ export interface SettingsRoutesDeps {
   onOllamaSystemPromptChanged?: (prompt: string | undefined) => void;
   /** Callback to apply Ollama full system prompt toggle at runtime */
   onOllamaUseFullSystemPromptChanged?: (enabled: boolean) => void;
+  /** Callback to apply Grok Build XAI_API_KEY opt-in at runtime */
+  onGrokBuildUseXaiApiKeyChanged?: (enabled: boolean) => void;
   /** Public share storage, used to revoke existing shares when disabled */
   publicShareService?: PublicShareService;
 }
@@ -381,6 +384,7 @@ export function createSettingsRoutes(deps: SettingsRoutesDeps): Hono {
     onOllamaUrlChanged,
     onOllamaSystemPromptChanged,
     onOllamaUseFullSystemPromptChanged,
+    onGrokBuildUseXaiApiKeyChanged,
     publicShareService,
   } = deps;
 
@@ -416,18 +420,46 @@ export function createSettingsRoutes(deps: SettingsRoutesDeps): Hono {
       updates.publicSharesEnabled = body.publicSharesEnabled;
     }
 
-    if ("publicShareViewerBaseUrl" in body) {
+    if ("yaClientBaseUrl" in body) {
+      if (
+        body.yaClientBaseUrl === undefined ||
+        body.yaClientBaseUrl === null ||
+        body.yaClientBaseUrl === ""
+      ) {
+        updates.yaClientBaseUrl = undefined;
+        updates.publicShareViewerBaseUrl = undefined;
+      } else if (typeof body.yaClientBaseUrl === "string") {
+        try {
+          updates.yaClientBaseUrl = normalizeYaClientBaseUrl(
+            body.yaClientBaseUrl,
+          );
+          updates.publicShareViewerBaseUrl = undefined;
+        } catch (error) {
+          return c.json(
+            {
+              error:
+                error instanceof Error ? error.message : "Invalid YA URL",
+            },
+            400,
+          );
+        }
+      } else {
+        return c.json({ error: "yaClientBaseUrl must be a string URL" }, 400);
+      }
+    } else if ("publicShareViewerBaseUrl" in body) {
       if (
         body.publicShareViewerBaseUrl === undefined ||
         body.publicShareViewerBaseUrl === null ||
         body.publicShareViewerBaseUrl === ""
       ) {
+        updates.yaClientBaseUrl = undefined;
         updates.publicShareViewerBaseUrl = undefined;
       } else if (typeof body.publicShareViewerBaseUrl === "string") {
         try {
-          updates.publicShareViewerBaseUrl = normalizePublicShareViewerBaseUrl(
+          updates.yaClientBaseUrl = normalizeYaClientBaseUrlFromShareViewerUrl(
             body.publicShareViewerBaseUrl,
           );
+          updates.publicShareViewerBaseUrl = undefined;
         } catch (error) {
           return c.json(
             {
@@ -565,6 +597,10 @@ export function createSettingsRoutes(deps: SettingsRoutesDeps): Hono {
       updates.ollamaUseFullSystemPrompt = body.ollamaUseFullSystemPrompt;
     }
 
+    if (typeof body.grokBuildUseXaiApiKey === "boolean") {
+      updates.grokBuildUseXaiApiKey = body.grokBuildUseXaiApiKey;
+    }
+
     // Handle deviceBridgeEnabled boolean
     if (typeof body.deviceBridgeEnabled === "boolean") {
       updates.deviceBridgeEnabled = body.deviceBridgeEnabled;
@@ -680,6 +716,12 @@ export function createSettingsRoutes(deps: SettingsRoutesDeps): Hono {
       onOllamaUseFullSystemPromptChanged(
         settings.ollamaUseFullSystemPrompt ?? false,
       );
+    }
+    if (
+      "grokBuildUseXaiApiKey" in updates &&
+      onGrokBuildUseXaiApiKeyChanged
+    ) {
+      onGrokBuildUseXaiApiKeyChanged(settings.grokBuildUseXaiApiKey ?? false);
     }
     if (updates.publicSharesEnabled === false && publicShareService) {
       await publicShareService.revokeAllShares();

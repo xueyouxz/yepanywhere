@@ -50,6 +50,7 @@ import {
   type SpeechMethodId,
 } from "../lib/speechProviders/methods";
 import type {
+  GrokSpeechAudioSettings,
   SpeechSmartTurnSettings,
   SpeechTranscriptionContext,
   SpeechTranscriptionResultMetadata,
@@ -61,6 +62,7 @@ import { MessageAge } from "./MessageAge";
 import { RenderModeGlyph } from "./ui/RenderModeGlyph";
 import { ContextUsageIndicator } from "./ContextUsageIndicator";
 import { ModeSelector } from "./ModeSelector";
+import { SpeechGrokAudioControls } from "./SpeechGrokAudioControls";
 import { SpeechSmartTurnControls } from "./SpeechSmartTurnControls";
 import { SlashCommandButton } from "./SlashCommandButton";
 import { VoiceInputButton, type VoiceInputButtonRef } from "./VoiceInputButton";
@@ -351,6 +353,7 @@ type ToolbarVoiceButtonControl =
       speechMethod: SpeechMethodId;
       getTranscriptionContext?: () => SpeechTranscriptionContext | undefined;
       smartTurn?: SpeechSmartTurnSettings;
+      grokSpeechAudioSettings?: GrokSpeechAudioSettings;
     }
   | {
       kind: "preview";
@@ -365,6 +368,8 @@ interface ToolbarSpeechControl {
   smartTurnSettings?: SpeechSmartTurnSettings;
   onSmartTurnSettingsChange?: (settings: SpeechSmartTurnSettings) => void;
   smartTurnDisabled?: boolean;
+  grokAudioSettings?: GrokSpeechAudioSettings;
+  onGrokAudioSettingsChange?: (settings: GrokSpeechAudioSettings) => void;
   voiceButton?: ToolbarVoiceButtonControl;
 }
 
@@ -692,6 +697,17 @@ export function MessageInputToolbarView({
           />
         )}
         {visibility.microphone &&
+          selectedSpeechMethod === "ya-grok" &&
+          speechControl?.grokAudioSettings &&
+          speechControl.onGrokAudioSettingsChange && (
+            <SpeechGrokAudioControls
+              compact
+              settings={speechControl.grokAudioSettings}
+              onChange={speechControl.onGrokAudioSettingsChange}
+              disabled={speechControl.smartTurnDisabled}
+            />
+          )}
+        {visibility.microphone &&
           speechControl?.smartTurnSettings &&
           speechControl.onSmartTurnSettingsChange && (
             <SpeechSmartTurnControls
@@ -729,6 +745,9 @@ export function MessageInputToolbarView({
                 speechControl.voiceButton.getTranscriptionContext
               }
               smartTurn={speechControl.voiceButton.smartTurn}
+              grokSpeechAudioSettings={
+                speechControl.voiceButton.grokSpeechAudioSettings
+              }
             />
           )}
         {showModelIndicator && (
@@ -1170,6 +1189,8 @@ export function MessageInputToolbar({
     setSpeechMethod,
     speechSmartTurnSettings,
     setSpeechSmartTurnSettings,
+    grokSpeechAudioSettings,
+    setGrokSpeechAudioSettings,
   } = useModelSettings();
   const { version: versionInfo } = useVersion();
   const { visibility: toolbarVisibility } = useSessionToolbarVisibility();
@@ -1349,6 +1370,8 @@ export function MessageInputToolbar({
     speechMethodOptions.length > 1;
   const supportsSelectedSpeechSmartTurn =
     selectedSpeechMethod !== "browser-native" &&
+    (selectedSpeechMethod !== "ya-grok" ||
+      grokSpeechAudioSettings.uplinkMode === "pcm16") &&
     versionInfo?.voiceBackendCapabilities?.[selectedSpeechMethod]?.smartTurn ===
       true;
   const activeSpeechSmartTurnSettings: SpeechSmartTurnSettings | undefined =
@@ -1677,6 +1700,14 @@ export function MessageInputToolbar({
           ? setSpeechSmartTurnSettings
           : undefined,
         smartTurnDisabled: voiceDisabled,
+        grokAudioSettings:
+          selectedSpeechMethod === "ya-grok"
+            ? grokSpeechAudioSettings
+            : undefined,
+        onGrokAudioSettingsChange:
+          selectedSpeechMethod === "ya-grok"
+            ? setGrokSpeechAudioSettings
+            : undefined,
         voiceButton:
           toolbarVisibility.microphone &&
           voiceButtonRef &&
@@ -1692,6 +1723,7 @@ export function MessageInputToolbar({
                 speechMethod: selectedSpeechMethod,
                 getTranscriptionContext,
                 smartTurn: activeSpeechSmartTurnSettings,
+                grokSpeechAudioSettings,
               }
             : undefined,
       }}

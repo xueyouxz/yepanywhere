@@ -82,11 +82,25 @@ describe("loadConfig codex paths", () => {
 
   it("reads the xAI STT key from YA-private module env", async () => {
     vi.stubEnv("YA_stt__XAI_API_KEY", "xai-key");
+    vi.stubEnv("XAI_API_KEY", "ambient-xai-key");
 
     const { loadConfig } = await import("../src/config.js");
     const config = loadConfig();
 
     expect(config.xaiSttApiKey).toBe("xai-key");
+    expect(config.ambientXaiApiKey).toBe("ambient-xai-key");
     expect(process.env.YA_stt__XAI_API_KEY).toBeUndefined();
+    expect(process.env.XAI_API_KEY).toBeUndefined();
+  });
+
+  it("uses and scrubs ambient XAI_API_KEY as an STT fallback", async () => {
+    vi.stubEnv("XAI_API_KEY", "ambient-xai-key");
+
+    const { loadConfig } = await import("../src/config.js");
+    const config = loadConfig();
+
+    expect(config.xaiSttApiKey).toBe("ambient-xai-key");
+    expect(config.ambientXaiApiKey).toBe("ambient-xai-key");
+    expect(process.env.XAI_API_KEY).toBeUndefined();
   });
 });

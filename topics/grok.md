@@ -58,6 +58,20 @@ No special casing or UI changes are required in `NewSessionForm` or the model se
 
 API note: the underlying model is also exposed as `grok-build-0.1` on the public xAI API, but the CLI / local agent surface uses the `grok-build` slug.
 
+## API Key Billing Boundary
+
+Grok Build should use the user's CLI/browser-login subscription by default, not
+an xAI API key inherited from YA's launch environment. YA therefore scrubs
+ambient `XAI_API_KEY` during config load and strips xAI API-key names from the
+spawned `grok` child by default. This is especially important because Grok STT
+can use xAI API billing while Grok Build provider sessions should not
+accidentally switch to pay-as-you-go model billing.
+
+If the user intentionally wants Grok Build to use xAI API-key billing, the
+Providers settings page exposes a default-off opt-in. That opt-in reinjects
+only the ambient `XAI_API_KEY` captured at YA startup; it does not reuse
+`YA_stt__XAI_API_KEY`, so STT can remain on different billing from Grok Build.
+
 ## Integration Plan (Explicitly Isolated — Zero Risk to Other Providers)
 
 The mandate from local rules and architecture docs is to prototype Grok-specific concerns without touching load-bearing shared paths.

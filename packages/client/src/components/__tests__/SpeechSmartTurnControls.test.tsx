@@ -13,7 +13,7 @@ afterEach(() => {
 function SmartTurnHarness() {
   const [settings, setSettings] = useState<SpeechSmartTurnSettings>({
     enabled: false,
-    threshold: 0.7,
+    threshold: 0.95,
     timeoutMs: 3000,
   });
 

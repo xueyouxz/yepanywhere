@@ -4,14 +4,19 @@
  * Reusable in both Settings and Onboarding flows.
  */
 
+import {
+  DEFAULT_RELAY_URL,
+  DEFAULT_YA_CLIENT_BASE_URL,
+  buildYaClientRelayLoginUrl,
+  normalizeRelayUrl,
+  normalizeYaClientBaseUrl,
+} from "@yep-anywhere/shared";
 import { useEffect, useState } from "react";
+import { useServerSettings } from "../hooks/useServerSettings";
 import { type RelayStatus, useRemoteAccess } from "../hooks/useRemoteAccess";
 import { useI18n } from "../i18n";
 import { parseUserAgent } from "../lib/deviceDetection";
 import { QRCode } from "./QRCode";
-
-const DEFAULT_RELAY_URL = "wss://relay.yepanywhere.com/ws";
-const CONNECT_URL = "https://yepanywhere.com/remote/login/relay";
 
 export interface RemoteAccessSetupProps {
   /** Custom title (default: "Remote Access") */
@@ -115,6 +120,23 @@ function getStatusDisplay(
 }
 
 type RelayOption = "default" | "custom";
+type YaClientOption = "default" | "custom";
+
+function normalizeRelayUrlForComparison(raw: string): string {
+  try {
+    return normalizeRelayUrl(raw);
+  } catch {
+    return raw.trim();
+  }
+}
+
+function normalizeYaClientUrlForComparison(raw: string): string {
+  try {
+    return normalizeYaClientBaseUrl(raw);
+  } catch {
+    return raw.trim();
+  }
+}
 
 export function RemoteAccessSetup({
   title = "Remote Access",
@@ -137,6 +159,11 @@ export function RemoteAccessSetup({
     revokeAllSessions,
     refresh,
   } = useRemoteAccess();
+  const {
+    settings: serverSettings,
+    isLoading: serverSettingsLoading,
+    updateSetting,
+  } = useServerSettings();
 
   // Form state
   const [username, setUsername] = useState("");
@@ -144,6 +171,9 @@ export function RemoteAccessSetup({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [relayOption, setRelayOption] = useState<RelayOption>("default");
   const [customRelayUrl, setCustomRelayUrl] = useState("");
+  const [yaClientOption, setYaClientOption] =
+    useState<YaClientOption>("default");
+  const [customYaClientUrl, setCustomYaClientUrl] = useState("");
 
   // UI state
   const [isSaving, setIsSaving] = useState(false);
@@ -168,18 +198,54 @@ export function RemoteAccessSetup({
     }
   }, [relayConfig]);
 
+  useEffect(() => {
+    if (!serverSettings) return;
+    const savedYaClientBaseUrl = serverSettings.yaClientBaseUrl ?? "";
+    if (savedYaClientBaseUrl) {
+      setYaClientOption("custom");
+      setCustomYaClientUrl(savedYaClientBaseUrl);
+    } else {
+      setYaClientOption("default");
+      setCustomYaClientUrl("");
+    }
+  }, [serverSettings]);
+
   // Track changes
   useEffect(() => {
     const usernameChanged = username !== (relayConfig?.username ?? "");
     const passwordChanged = password.length > 0;
 
-    const currentRelayUrl =
-      relayOption === "default" ? DEFAULT_RELAY_URL : customRelayUrl;
+    const currentRelayUrl = normalizeRelayUrlForComparison(
+      relayOption === "default" ? DEFAULT_RELAY_URL : customRelayUrl,
+    );
     const savedRelayUrl = relayConfig?.url ?? DEFAULT_RELAY_URL;
     const relayUrlChanged = currentRelayUrl !== savedRelayUrl;
+    const currentYaClientBaseUrl = normalizeYaClientUrlForComparison(
+      yaClientOption === "default"
+        ? DEFAULT_YA_CLIENT_BASE_URL
+        : customYaClientUrl,
+    );
+    const savedYaClientBaseUrl =
+      serverSettings?.yaClientBaseUrl ?? DEFAULT_YA_CLIENT_BASE_URL;
+    const yaClientBaseUrlChanged =
+      currentYaClientBaseUrl !== savedYaClientBaseUrl;
 
-    setHasChanges(usernameChanged || passwordChanged || relayUrlChanged);
-  }, [username, password, relayOption, customRelayUrl, relayConfig]);
+    setHasChanges(
+      usernameChanged ||
+        passwordChanged ||
+        relayUrlChanged ||
+        yaClientBaseUrlChanged,
+    );
+  }, [
+    username,
+    password,
+    relayOption,
+    customRelayUrl,
+    relayConfig,
+    yaClientOption,
+    customYaClientUrl,
+    serverSettings?.yaClientBaseUrl,
+  ]);
 
   // Poll for status updates when connecting
   useEffect(() => {
@@ -196,8 +262,27 @@ export function RemoteAccessSetup({
   const hasCredentials = !!config?.username;
 
   // Get the relay URL based on current selection
-  const getRelayUrl = () =>
+  const getRelayUrlInput = () =>
     relayOption === "default" ? DEFAULT_RELAY_URL : customRelayUrl;
+
+  const getDisplayRelayUrl = () =>
+    normalizeRelayUrlForComparison(getRelayUrlInput());
+
+  const getYaClientUrlInput = () =>
+    yaClientOption === "default"
+      ? DEFAULT_YA_CLIENT_BASE_URL
+      : customYaClientUrl;
+
+  const getDisplayYaClientBaseUrl = () =>
+    normalizeYaClientUrlForComparison(getYaClientUrlInput());
+
+  const getUsableYaClientBaseUrl = () => {
+    try {
+      return normalizeYaClientBaseUrl(getYaClientUrlInput());
+    } catch {
+      return DEFAULT_YA_CLIENT_BASE_URL;
+    }
+  };
 
   // Save changes (relay config + password)
   const saveChanges = async () => {
@@ -228,14 +313,48 @@ export function RemoteAccessSetup({
       setError(t("remoteSetupErrorCustomRelayRequired" as never));
       return false;
     }
+    if (yaClientOption === "custom" && !customYaClientUrl.trim()) {
+      setError(t("remoteSetupErrorCustomYaRequired" as never));
+      return false;
+    }
 
     try {
       // Update relay config if changed
-      const relayUrl = getRelayUrl();
+      let relayUrl: string;
+      try {
+        relayUrl = normalizeRelayUrl(getRelayUrlInput());
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : t("remoteSetupErrorSaveFailed" as never),
+        );
+        return false;
+      }
       const relayChanged =
         username !== relayConfig?.username || relayUrl !== relayConfig?.url;
       if (relayChanged) {
         await updateRelayConfig({ url: relayUrl, username });
+      }
+
+      let yaClientBaseUrl: string;
+      try {
+        yaClientBaseUrl = normalizeYaClientBaseUrl(getYaClientUrlInput());
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : t("remoteSetupErrorSaveFailed" as never),
+        );
+        return false;
+      }
+      const savedYaClientBaseUrl =
+        serverSettings?.yaClientBaseUrl ?? DEFAULT_YA_CLIENT_BASE_URL;
+      if (yaClientBaseUrl !== savedYaClientBaseUrl) {
+        await updateSetting(
+          "yaClientBaseUrl",
+          yaClientOption === "default" ? null : yaClientBaseUrl,
+        );
       }
 
       // Configure with password if provided
@@ -314,7 +433,7 @@ export function RemoteAccessSetup({
     setTimeout(() => setCopied(false), 3000);
   };
 
-  if (loading) {
+  if (loading || serverSettingsLoading) {
     return (
       <div className="remote-access-setup">
         <div className="remote-access-header">
@@ -339,16 +458,17 @@ export function RemoteAccessSetup({
 
   // Build connect URL with query params (for manual entry - no password)
   const connectUrl = (() => {
+    const connectBaseUrl = buildYaClientRelayLoginUrl(getUsableYaClientBaseUrl());
     const params = new URLSearchParams();
     if (username) {
       params.set("u", username);
     }
-    const relayUrl = getRelayUrl();
+    const relayUrl = getDisplayRelayUrl();
     if (relayUrl !== DEFAULT_RELAY_URL) {
       params.set("r", relayUrl);
     }
     const queryString = params.toString();
-    return queryString ? `${CONNECT_URL}?${queryString}` : CONNECT_URL;
+    return queryString ? `${connectBaseUrl}?${queryString}` : connectBaseUrl;
   })();
 
   // Build QR code URL with credentials in hash (for auto-login)
@@ -357,11 +477,11 @@ export function RemoteAccessSetup({
     const hashParams = new URLSearchParams();
     hashParams.set("u", username);
     hashParams.set("p", savedPassword);
-    const relayUrl = getRelayUrl();
+    const relayUrl = getDisplayRelayUrl();
     if (relayUrl !== DEFAULT_RELAY_URL) {
       hashParams.set("r", relayUrl);
     }
-    return `${CONNECT_URL}#${hashParams.toString()}`;
+    return `${buildYaClientRelayLoginUrl(getUsableYaClientBaseUrl())}#${hashParams.toString()}`;
   })();
 
   // Can show QR code when connected and we have the password in memory
@@ -475,6 +595,44 @@ export function RemoteAccessSetup({
               value={customRelayUrl}
               onChange={(e) => setCustomRelayUrl(e.target.value)}
               placeholder={t("remoteSetupCustomRelayPlaceholder" as never)}
+              disabled={isSaving}
+            />
+          </div>
+        )}
+
+        <div className="form-field">
+          <label htmlFor="ya-client-select">
+            {t("remoteSetupYaClient" as never)}
+          </label>
+          <select
+            id="ya-client-select"
+            value={yaClientOption}
+            onChange={(e) =>
+              setYaClientOption(e.target.value as YaClientOption)
+            }
+            disabled={isSaving}
+            className="form-select"
+          >
+            <option value="default">
+              {t("remoteSetupYaClientDefault" as never)}
+            </option>
+            <option value="custom">
+              {t("remoteSetupYaClientCustom" as never)}
+            </option>
+          </select>
+        </div>
+
+        {yaClientOption === "custom" && (
+          <div className="form-field">
+            <label htmlFor="custom-ya-client-url">
+              {t("remoteSetupCustomYaClientUrl" as never)}
+            </label>
+            <input
+              id="custom-ya-client-url"
+              type="text"
+              value={customYaClientUrl}
+              onChange={(e) => setCustomYaClientUrl(e.target.value)}
+              placeholder={t("remoteSetupCustomYaClientPlaceholder" as never)}
               disabled={isSaving}
             />
           </div>

@@ -200,6 +200,7 @@ export class Process {
   readonly startedAt: Date;
   readonly provider: ProviderName;
   readonly model: string | undefined;
+  readonly serviceTier: string | undefined;
   /** SSH host for remote execution (undefined = local) */
   readonly executor: string | undefined;
 
@@ -355,6 +356,7 @@ export class Process {
     this._permissions = options.permissions;
     this.provider = options.provider;
     this.model = options.model;
+    this.serviceTier = options.serviceTier;
     this.executor = options.executor;
     this._thinking = options.thinking;
     this._effort = options.effort;
@@ -1053,6 +1055,7 @@ export class Process {
       queueDepth: this.queueDepth,
       provider: this.provider,
       model: this._resolvedModel ?? this.model,
+      serviceTier: this.serviceTier,
       thinking: this._thinking,
       effort: this._effort,
       executor: this.executor,

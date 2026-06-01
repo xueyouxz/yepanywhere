@@ -21,6 +21,7 @@ const {
   mockSetEffortLevel,
   mockSetSpeechMethod,
   mockSetSpeechSmartTurnSettings,
+  mockSetGrokSpeechAudioSettings,
   mockVoiceToggle,
   draftKeys,
   modelSettingsState,
@@ -38,6 +39,7 @@ const {
   mockSetEffortLevel: vi.fn(),
   mockSetSpeechMethod: vi.fn(),
   mockSetSpeechSmartTurnSettings: vi.fn(),
+  mockSetGrokSpeechAudioSettings: vi.fn(),
   mockVoiceToggle: vi.fn(),
   draftKeys: [] as string[],
   modelSettingsState: {
@@ -48,8 +50,11 @@ const {
     hasStoredSpeechMethod: false,
     speechSmartTurnSettings: {
       enabled: false,
-      threshold: 0.7,
+      threshold: 0.95,
       timeoutMs: 3000,
+    },
+    grokSpeechAudioSettings: {
+      uplinkMode: "pcm16" as "pcm16" | "browser-compressed",
     },
   },
   providersState: {
@@ -177,6 +182,8 @@ vi.mock("../../hooks/useModelSettings", () => ({
     setSpeechMethod: mockSetSpeechMethod,
     speechSmartTurnSettings: modelSettingsState.speechSmartTurnSettings,
     setSpeechSmartTurnSettings: mockSetSpeechSmartTurnSettings,
+    grokSpeechAudioSettings: modelSettingsState.grokSpeechAudioSettings,
+    setGrokSpeechAudioSettings: mockSetGrokSpeechAudioSettings,
   }),
   getThinkingSetting: () =>
     modelSettingsState.thinkingMode === "off"
@@ -362,6 +369,7 @@ describe("NewSessionForm", () => {
     mockSetEffortLevel.mockReset();
     mockSetSpeechMethod.mockReset();
     mockSetSpeechSmartTurnSettings.mockReset();
+    mockSetGrokSpeechAudioSettings.mockReset();
     mockVoiceToggle.mockReset();
     draftKeys.length = 0;
     versionState.version = null;
@@ -370,8 +378,11 @@ describe("NewSessionForm", () => {
     modelSettingsState.hasStoredSpeechMethod = false;
     modelSettingsState.speechSmartTurnSettings = {
       enabled: false,
-      threshold: 0.7,
+      threshold: 0.95,
       timeoutMs: 3000,
+    };
+    modelSettingsState.grokSpeechAudioSettings = {
+      uplinkMode: "pcm16",
     };
     mockStartSession.mockResolvedValue({
       sessionId: "session-1",
@@ -805,6 +816,44 @@ describe("NewSessionForm", () => {
     });
 
     expect(mockVoiceToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers Grok audio uplink choice before Smart Turn controls", () => {
+    versionState.version = {
+      voiceBackends: ["ya-grok"],
+      voiceBackendCapabilities: {
+        "ya-grok": { streaming: true, smartTurn: true },
+      },
+    };
+    modelSettingsState.speechMethod = "browser-native";
+    modelSettingsState.hasStoredSpeechMethod = false;
+    modelSettingsState.speechSmartTurnSettings = {
+      enabled: true,
+      threshold: 0.95,
+      timeoutMs: 3000,
+    };
+    modelSettingsState.grokSpeechAudioSettings = {
+      uplinkMode: "browser-compressed",
+    };
+
+    render(
+      <NewSessionForm
+        projectId="project-1"
+        selectedProject={chooserProjects[0]}
+        projects={[...chooserProjects]}
+      />,
+    );
+
+    expect(screen.getByText("Grok STT audio")).toBeDefined();
+    expect(
+      (screen.getByLabelText("Compressed") as HTMLInputElement).checked,
+    ).toBe(true);
+    expect(screen.queryByText("Smart Turn")).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("PCM16"));
+    expect(mockSetGrokSpeechAudioSettings).toHaveBeenCalledWith({
+      uplinkMode: "pcm16",
+    });
   });
 
   it("defaults prompt suggestions off when the provider lacks native support", async () => {

@@ -24,6 +24,19 @@ Progress:
   Access configuration: the feature must be enabled, relay credentials must be
   configured, and Remote Access must be enabled. The relay's transient
   connection status is exposed for warnings but does not block creating links.
+- [x] 2026-06-01: Normalized Remote Access relay URLs so operators can enter a
+  relay host such as `relay.graehl.org` or `https://relay.graehl.org` and have
+  it saved as `wss://relay.graehl.org/ws`. Public-share link generation now
+  uses that normalized relay and exposes it in the public-share readiness
+  status so the Advanced UI shows which relay new links will use.
+- [x] 2026-06-01: Made the remote client treat both `/share/:secret` and
+  `/remote/share/:secret` as public-share routes before the authenticated
+  RemoteApp catch-all, so the current hosted default path does not fall into
+  the relay login flow when the build basename is `/`.
+- [x] 2026-06-01: Split operator configuration into two URL knobs: Remote
+  Access relay URL, normalized to `ws(s)://.../ws`, and YA hosted-client URL,
+  normalized to `http(s)://...`. Public shares append `/share/:secret` to the
+  YA URL and relay login links append `/login/relay`.
 
 ## Context
 
@@ -63,6 +76,11 @@ long-term contract for production routing.
 - Gate Public Read-Only Share behind a persisted user setting that defaults off.
 - Default Public Read-Only Share to the same relay configuration the user
   already configured for Remote Access.
+- Keep the upstream default relay as `wss://relay.yepanywhere.com/ws`, but treat
+  an explicitly configured relay as authoritative. Custom relay input may be a
+  bare host, an HTTP(S) origin, or an explicit WS(S) URL; YA normalizes it to
+  the relay websocket endpoint before saving or placing it in public-share
+  URLs.
 - Require Remote Access to be enabled before new public share links can be
   created. Do not require the relay client to currently be connected; temporary
   network reconnects should not disable share creation.
@@ -70,9 +88,15 @@ long-term contract for production routing.
   hosted via `ya.graehl.org`, but the expected steady state is under
   `yepanywhere.com` / `staging.yepanywhere.com`, likely either
   `/share/:secret` or `/remote/share/:secret`.
-- Treat the share viewer setting as a URL prefix that already includes the
-  share route. The server appends the secret path segment, then adds relay
-  routing query params such as `h=<relayUsername>` and optional `r=<relayUrl>`.
+- Treat the YA hosted-client setting as the frontend app base URL, not a
+  share-only route. The server appends `/share/:secret` for public links and
+  the Remote Access UI appends `/login/relay` for phone/remote login links.
+- Keep the YA hosted-client URL separate from the relay server URL. For
+  example, `https://ya.graehl.org` can host the viewer/login app while
+  `wss://relay.graehl.org/ws` is the relay transport.
+- The remote client must route public-share URLs before authenticated remote-app
+  login gates. Support both `/share/:secret` and `/remote/share/:secret` during
+  the hosted-route transition.
 - Default new public share links to
   `https://yepanywhere.com/remote/share/:secret`. Custom hosts may use their
   own equivalent route prefix.
@@ -118,17 +142,19 @@ long-term contract for production routing.
 
 - Add persisted server settings:
   - `publicSharesEnabled`, default `false`;
-  - `publicShareViewerBaseUrl`, optional override for the viewer app base URL;
+  - `yaClientBaseUrl`, optional override for the hosted YA app base URL;
   - optional `publicShareAllowLive`, default `false` if live shares should be a
     second opt-in.
-- Validate `publicShareViewerBaseUrl` as an HTTP(S) base URL. Allow a path
-  prefix such as `/remote`, but reject query/hash components.
+- Validate `yaClientBaseUrl` as an HTTP(S) base URL. Allow a path prefix such
+  as `/remote`, but reject query/hash components. Bare hosts such as
+  `ya.graehl.org` normalize to `https://ya.graehl.org`.
 - Continue honoring `YEP_PUBLIC_SHARE_ORIGIN` as an environment override or
   bootstrap fallback for compatibility, but make the precedence explicit and
   consider renaming it to a base-URL variable.
-  Implementation now treats saved `publicShareViewerBaseUrl` first, then
-  `YEP_PUBLIC_SHARE_VIEWER_BASE_URL`, then legacy `YEP_PUBLIC_SHARE_ORIGIN`,
-  then the hosted default.
+  Implementation now treats saved `yaClientBaseUrl` first, then
+  `YEP_YA_CLIENT_BASE_URL`, then legacy saved `publicShareViewerBaseUrl`,
+  then `YEP_PUBLIC_SHARE_VIEWER_BASE_URL`, then legacy
+  `YEP_PUBLIC_SHARE_ORIGIN`, then the hosted default.
 - Enforce `publicSharesEnabled` server-side:
   - block `POST /api/public-shares`;
   - return not found for public reads when the setting is off;
@@ -161,8 +187,8 @@ long-term contract for production routing.
   invalidate existing links instead of keeping disabled-feature management UI
   around.
 - Show the effective share frontend origin in settings and in the share modal.
-- Show a default/custom dropdown for the effective share viewer base URL in
-  Advanced settings. Selecting default clears the saved override.
+- Show a default/custom dropdown for the effective YA hosted-client base URL
+  in Remote Access settings. Selecting default clears the saved override.
 - Avoid relying on GH Pages root `404.html` as the long-term direct-navigation
   mechanism for share links. The production route should return a normal 200
   response for the share viewer entry point once it is hosted under
@@ -239,9 +265,15 @@ long-term contract for production routing.
 - Share controls are hidden until the user enables the feature.
 - Enabling Public Read-Only Share uses the existing Remote Access relay config
   by default.
+- Entering `relay.graehl.org` in Remote Access saves and uses
+  `wss://relay.graehl.org/ws`.
+- A public share created with a non-default Remote Access relay includes
+  `r=<normalized relay URL>` in the generated share link.
 - Public share creation remains available while the configured relay is
   temporarily reconnecting.
 - Share viewer setting defaults to `https://yepanywhere.com/remote/share` and
   a custom base URL produces links under that custom prefix.
+- Opening `/remote/share/:secret` in the hosted remote client renders the public
+  share viewer, not the normal Remote Access login flow.
 - Existing active shares remain manageable and revocable while share controls
   are available.

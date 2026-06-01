@@ -355,6 +355,7 @@ export async function handleRequest(
       contentType.startsWith("image/") ||
       contentType.startsWith("audio/") ||
       contentType.startsWith("video/") ||
+      contentType === "application/pdf" ||
       contentType === "application/octet-stream"
     ) {
       // Binary content: read as ArrayBuffer and encode as base64

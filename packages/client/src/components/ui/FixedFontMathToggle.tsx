@@ -3,6 +3,11 @@ import { useScrollPreservingToggle } from "../../lib/scrollAnchor";
 import katex from "katex";
 import { useRenderModeToggle } from "../../contexts/RenderModeContext";
 import { useOptionalSessionMetadata } from "../../contexts/SessionMetadataContext";
+import {
+  buildPublicShareFileHref,
+  type PublicShareContextValue,
+  usePublicShareContext,
+} from "../../contexts/PublicShareContext";
 import { profileRenderWork } from "../../lib/diagnostics/renderProfiler";
 import { makeDisplayPath } from "../../lib/text";
 import { FileViewerModal } from "../FilePathLink";
@@ -32,6 +37,7 @@ interface RenderOptions {
   projectId?: string;
   baseFilePath?: string;
   projectPath?: string;
+  publicShare?: PublicShareContextValue | null;
 }
 
 // biome-ignore lint/complexity/useRegexLiterals: constructor form avoids noControlCharactersInRegex noise for deliberate ANSI control escapes
@@ -156,13 +162,18 @@ function renderMarkdownFileLink(
     };
   }
 
-  const rawUrl = `/projects/${encodeURIComponent(options.projectId)}/file?path=${encodeURIComponent(filePath)}`;
+  const rawUrl =
+    options.publicShare &&
+    buildPublicShareFileHref(options.publicShare, { filePath });
+  const fileUrl =
+    rawUrl ??
+    `/projects/${encodeURIComponent(options.projectId)}/file?path=${encodeURIComponent(filePath)}`;
   // normalizeProjectPath strips the leading / from absolute paths; restore it
   // so makeDisplayPath can apply project-relative or ~/… shortening.
   const absoluteFilePath = `/${filePath}`;
   const titlePath = makeDisplayPath(absoluteFilePath, options.projectPath);
   return {
-    html: `<a class="fixed-font-file-link" href="${escapeHtmlAttribute(rawUrl)}" data-fixed-font-file-path="${escapeHtmlAttribute(filePath)}" title="${escapeHtmlAttribute(`${titlePath}\nClick to view, middle-click to open in new tab`)}">${labelHtml}</a>`,
+    html: `<a class="fixed-font-file-link" href="${escapeHtmlAttribute(fileUrl)}" data-fixed-font-file-path="${escapeHtmlAttribute(filePath)}" title="${escapeHtmlAttribute(`${titlePath}\nClick to view, middle-click to open in new tab`)}">${labelHtml}</a>`,
     changed: true,
   };
 }
@@ -740,6 +751,7 @@ export function FixedFontMathToggle({
   precomputedRendered,
 }: FixedFontMathToggleProps) {
   const sessionMetadata = useOptionalSessionMetadata();
+  const publicShare = usePublicShareContext();
   const [viewerFilePath, setViewerFilePath] = useState<string | null>(null);
   const rendered = useMemo(
     () =>
@@ -749,6 +761,7 @@ export function FixedFontMathToggle({
         projectId: sessionMetadata?.projectId,
         projectPath: sessionMetadata?.projectPath ?? undefined,
         baseFilePath,
+        publicShare,
       }),
     [
       precomputedRendered,
@@ -757,6 +770,7 @@ export function FixedFontMathToggle({
       sessionMetadata?.projectId,
       sessionMetadata?.projectPath,
       baseFilePath,
+      publicShare,
     ],
   );
   const { showRendered, toggleLocalMode } = useRenderModeToggle(
@@ -777,6 +791,9 @@ export function FixedFontMathToggle({
       if (!link) {
         return;
       }
+      if (publicShare) {
+        return;
+      }
       if (
         event.button !== 0 ||
         event.metaKey ||
@@ -789,7 +806,7 @@ export function FixedFontMathToggle({
       event.stopPropagation();
       setViewerFilePath(link.dataset.fixedFontFilePath ?? null);
     },
-    [],
+    [publicShare],
   );
 
   return (

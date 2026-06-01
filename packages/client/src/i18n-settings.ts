@@ -119,6 +119,12 @@ export function getSettingsCategories(
       description: t("settingsProvidersDescription"),
     },
     {
+      id: "speech",
+      label: t("settingsSpeechTitle"),
+      icon: "🎙️",
+      description: t("settingsSpeechDescription"),
+    },
+    {
       id: "remote-executors",
       label: t("settingsRemoteExecutorsTitle"),
       icon: "🖥️",

@@ -47,6 +47,20 @@ project-relative or `~/…` form. `projectPath` is threaded from
 links (`[label](./path)`) get `title` set to the href (absolute path)
 when the markdown does not supply an explicit title.
 
+When a Markdown document is rendered with a known local base, ordinary
+relative links are resolved against that document's directory for preview
+purposes. Markdown targets route through `/api/local-file?path=...&render=1`
+so browser link gestures open a rendered, content-only document. Local media
+targets route through `/api/local-image`.
+
+### File path anchors
+
+`packages/client/src/components/FilePathLink.tsx` renders path mentions as
+native anchors to `/projects/:projectId/file?path=...`. Plain left click
+opens the in-app file modal. Browser link gestures fall through, so middle
+click, command/control click, and similar browser gestures open the
+standalone file viewer.
+
 ### `transformFilePathsToHtml` — dead code
 
 `packages/shared/src/filePathDetection.ts` exports this function and

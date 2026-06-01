@@ -1,7 +1,9 @@
 import {
+  DEFAULT_RELAY_URL,
   type AppSession,
   type CreatePublicSessionShareRequest,
   type CreatePublicSessionShareResponse,
+  type FileContentResponse,
   type FreezePublicSessionLiveSharesResponse,
   type PublicSessionShareResponse,
   type PublicSessionShareSessionStatusResponse,
@@ -9,7 +11,10 @@ import {
   type RevokePublicSessionSharesResponse,
   type UrlProjectId,
   isUrlProjectId,
+  normalizeRelayUrl,
+  parseLineColumn,
 } from "@yep-anywhere/shared";
+import { isAbsolute, normalize, relative, resolve } from "node:path";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { decodeProjectId, getProjectName } from "../projects/paths.js";
@@ -18,10 +23,10 @@ import type { PublicShareService } from "../services/PublicShareService.js";
 import {
   buildPublicShareViewerUrl,
   getDefaultPublicShareViewerBaseUrl,
+  getDefaultYaClientBaseUrl,
   resolvePublicShareViewerBaseUrl,
+  resolveYaClientBaseUrl,
 } from "../utils/publicShareViewerUrl.js";
-
-const DEFAULT_RELAY_URL = "wss://relay.yepanywhere.com/ws";
 
 export interface RelayConfigForPublicShare {
   url: string;
@@ -50,7 +55,14 @@ export interface PublicShareRoutesDeps {
   getPublicSharesEnabled?: () => boolean;
   getRemoteAccessEnabled?: () => boolean;
   getRelayStatus?: () => RelayClientStatus | null;
+  getYaClientBaseUrl?: () => string | null | undefined;
+  /** @deprecated Use getYaClientBaseUrl. */
   getPublicShareViewerBaseUrl?: () => string | null | undefined;
+  fetchProjectFile?: (
+    projectId: UrlProjectId,
+    path: string,
+    options: { download?: boolean; highlight?: boolean; raw?: boolean },
+  ) => Promise<Response>;
 }
 
 function getPublicShareReadiness(deps: PublicShareRoutesDeps): {
@@ -86,12 +98,13 @@ function buildPublicShareUrl(
     projectName: string;
     title: string | null;
   },
-  viewerBaseUrl: string,
+  yaClientBaseUrl: string,
 ): string {
-  const url = new URL(buildPublicShareViewerUrl(secret, viewerBaseUrl));
+  const url = new URL(buildPublicShareViewerUrl(secret, yaClientBaseUrl));
+  const relayUrl = normalizeRelayUrl(relayConfig.url);
   url.searchParams.set("h", relayConfig.username);
-  if (relayConfig.url !== DEFAULT_RELAY_URL) {
-    url.searchParams.set("r", relayConfig.url);
+  if (relayUrl !== DEFAULT_RELAY_URL) {
+    url.searchParams.set("r", relayUrl);
   }
   const displayParams = new URLSearchParams();
   displayParams.set("m", display.mode);
@@ -186,6 +199,221 @@ function needsFrozenShareRepair(response: PublicSessionShareResponse): boolean {
   );
 }
 
+function isPathInsideDirectory(filePath: string, directory: string): boolean {
+  const relativePath = relative(resolve(directory), resolve(filePath));
+  return (
+    relativePath === "" ||
+    (relativePath !== "" &&
+      !relativePath.startsWith("..") &&
+      !isAbsolute(relativePath))
+  );
+}
+
+function normalizePublicShareProjectFilePath(
+  rawPath: string,
+  projectRoot: string,
+): string | null {
+  const { path: parsedPath } = parseLineColumn(rawPath);
+  const normalizedRoot = resolve(projectRoot);
+
+  if (parsedPath.startsWith("/")) {
+    const absolutePath = resolve(parsedPath);
+    if (!isPathInsideDirectory(absolutePath, normalizedRoot)) {
+      return null;
+    }
+    return relative(normalizedRoot, absolutePath).replaceAll("\\", "/");
+  }
+
+  const normalized = normalize(parsedPath);
+  if (
+    !normalized ||
+    normalized === "." ||
+    normalized.startsWith("..") ||
+    isAbsolute(normalized)
+  ) {
+    return null;
+  }
+  return normalized.replaceAll("\\", "/");
+}
+
+async function loadPublicShareResponseForRecord(
+  deps: PublicShareRoutesDeps,
+  secret: string,
+  record: NonNullable<ReturnType<PublicShareService["getRecordBySecret"]>>,
+): Promise<PublicSessionShareResponse | null> {
+  if (record.mode === "frozen") {
+    let response = deps.publicShareService.getFrozenShareBySecret(secret);
+    if (response && needsFrozenShareRepair(response)) {
+      const session = await deps.loadSession(
+        record.source.projectId,
+        record.source.sessionId,
+      );
+      response = session
+        ? deps.publicShareService.buildFrozenRepairResponse(record, session)
+        : null;
+    }
+    return response;
+  }
+
+  const session = await deps.loadSession(
+    record.source.projectId,
+    record.source.sessionId,
+  );
+  return session
+    ? deps.publicShareService.buildLiveResponse(record, session)
+    : null;
+}
+
+function collectStringValues(value: unknown): string[] {
+  const strings: string[] = [];
+  const stack: unknown[] = [value];
+  const seen = new WeakSet<object>();
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (typeof current === "string") {
+      strings.push(current);
+      continue;
+    }
+    if (!current || typeof current !== "object" || seen.has(current)) {
+      continue;
+    }
+    seen.add(current);
+    if (Array.isArray(current)) {
+      stack.push(...current);
+      continue;
+    }
+    stack.push(...Object.values(current));
+  }
+
+  return strings;
+}
+
+function decodeURIComponentSafe(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
+}
+
+function publicShareSessionMentionsFile(
+  session: AppSession,
+  relativePath: string,
+  projectRoot: string,
+  projectId: UrlProjectId,
+): boolean {
+  const absolutePath = resolve(projectRoot, relativePath);
+  const candidates = new Set([
+    relativePath,
+    absolutePath,
+    encodeURIComponent(relativePath),
+    encodeURIComponent(absolutePath),
+    `/projects/${projectId}/file?path=${encodeURIComponent(relativePath)}`,
+    `/api/local-file?path=${encodeURIComponent(absolutePath)}`,
+    `/api/local-image?path=${encodeURIComponent(absolutePath)}`,
+  ]);
+
+  for (const value of collectStringValues(session)) {
+    const decoded = decodeURIComponentSafe(value);
+    for (const candidate of candidates) {
+      if (value.includes(candidate) || decoded?.includes(candidate)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function publicShareFileRawUrl(secret: string, relativePath: string): string {
+  const params = new URLSearchParams({ path: relativePath });
+  return `/public-api/shares/${encodeURIComponent(secret)}/files/raw?${params}`;
+}
+
+async function servePublicShareProjectFile(
+  c: Context,
+  deps: PublicShareRoutesDeps,
+  options: { raw: boolean },
+): Promise<Response> {
+  if (!(deps.getPublicSharesEnabled?.() ?? false)) {
+    return notFound(c);
+  }
+  if (!deps.fetchProjectFile) {
+    return notFound(c);
+  }
+
+  const secret = c.req.param("secret");
+  if (!secret) {
+    return notFound(c);
+  }
+  const record = deps.publicShareService.getRecordBySecret(secret);
+  if (!record) {
+    return notFound(c);
+  }
+
+  let projectRoot: string;
+  try {
+    projectRoot = decodeProjectId(record.source.projectId);
+  } catch {
+    return notFound(c);
+  }
+
+  const rawPath = c.req.query("path");
+  if (!rawPath) {
+    return c.json({ error: "Missing path parameter" }, 400);
+  }
+  const relativePath = normalizePublicShareProjectFilePath(rawPath, projectRoot);
+  if (!relativePath) {
+    return c.json({ error: "Invalid file path" }, 400);
+  }
+
+  const shareResponse = await loadPublicShareResponseForRecord(
+    deps,
+    secret,
+    record,
+  );
+  if (
+    !shareResponse ||
+    !publicShareSessionMentionsFile(
+      shareResponse.session,
+      relativePath,
+      projectRoot,
+      record.source.projectId,
+    )
+  ) {
+    return notFound(c);
+  }
+
+  const response = await deps.fetchProjectFile(
+    record.source.projectId,
+    relativePath,
+    {
+      download: c.req.query("download") === "true",
+      highlight: c.req.query("highlight") === "true",
+      raw: options.raw,
+    },
+  );
+
+  if (options.raw) {
+    const headers = new Headers(response.headers);
+    headers.set("Cache-Control", "no-store");
+    return new Response(response.body, {
+      headers,
+      status: response.status,
+      statusText: response.statusText,
+    });
+  }
+
+  if (!response.ok) {
+    return response;
+  }
+
+  const body = (await response.json()) as FileContentResponse;
+  body.rawUrl = publicShareFileRawUrl(secret, relativePath);
+  c.header("Cache-Control", "no-store");
+  return c.json(body);
+}
+
 function getSessionParams(
   c: Context,
 ): { projectId: UrlProjectId; sessionId: string } | { error: Response } {
@@ -205,15 +433,18 @@ export function createPublicShareRoutes(deps: PublicShareRoutesDeps): Hono {
 
   app.get("/status", (c) => {
     const readiness = getPublicShareReadiness(deps);
+    let yaClientBaseUrl: string | null = null;
     let viewerBaseUrl: string | null = null;
-    let viewerBaseUrlError: string | undefined;
+    let yaClientBaseUrlError: string | undefined;
     try {
-      viewerBaseUrl = resolvePublicShareViewerBaseUrl(
+      yaClientBaseUrl = resolveYaClientBaseUrl(
+        deps.getYaClientBaseUrl?.(),
         deps.getPublicShareViewerBaseUrl?.(),
       );
+      viewerBaseUrl = resolvePublicShareViewerBaseUrl(yaClientBaseUrl);
     } catch (error) {
-      viewerBaseUrlError =
-        error instanceof Error ? error.message : "Invalid viewer URL";
+      yaClientBaseUrlError =
+        error instanceof Error ? error.message : "Invalid YA URL";
     }
     return c.json({
       enabled: readiness.enabled,
@@ -221,10 +452,19 @@ export function createPublicShareRoutes(deps: PublicShareRoutesDeps): Hono {
       requiresRelay: true,
       remoteAccessEnabled: readiness.remoteAccessEnabled,
       relayStatus: readiness.relayStatus,
+      relayUrl: readiness.relayConfig?.url ?? null,
+      relayUsername: readiness.relayConfig?.username ?? null,
       canCreate: readiness.canCreate,
+      yaClientBaseUrl,
+      defaultYaClientBaseUrl: getDefaultYaClientBaseUrl(),
       viewerBaseUrl,
       defaultViewerBaseUrl: getDefaultPublicShareViewerBaseUrl(),
-      ...(viewerBaseUrlError ? { viewerBaseUrlError } : {}),
+      ...(yaClientBaseUrlError
+        ? {
+            yaClientBaseUrlError,
+            viewerBaseUrlError: yaClientBaseUrlError,
+          }
+        : {}),
     });
   });
 
@@ -355,18 +595,17 @@ export function createPublicShareRoutes(deps: PublicShareRoutesDeps): Hono {
       );
     }
 
-    let viewerBaseUrl: string;
+    let yaClientBaseUrl: string;
     try {
-      viewerBaseUrl = resolvePublicShareViewerBaseUrl(
+      yaClientBaseUrl = resolveYaClientBaseUrl(
+        deps.getYaClientBaseUrl?.(),
         deps.getPublicShareViewerBaseUrl?.(),
       );
     } catch (error) {
       return c.json(
         {
           error:
-            error instanceof Error
-              ? error.message
-              : "Invalid public share viewer URL",
+            error instanceof Error ? error.message : "Invalid YA URL",
         },
         400,
       );
@@ -420,7 +659,7 @@ export function createPublicShareRoutes(deps: PublicShareRoutesDeps): Hono {
           projectName,
           title,
         },
-        viewerBaseUrl,
+        yaClientBaseUrl,
       ),
       mode: record.mode,
       createdAt: record.createdAt,
@@ -436,6 +675,14 @@ export function createPublicSharePublicRoutes(
   deps: PublicShareRoutesDeps,
 ): Hono {
   const app = new Hono();
+
+  app.get("/:secret/files/raw", (c) =>
+    servePublicShareProjectFile(c, deps, { raw: true }),
+  );
+
+  app.get("/:secret/files", (c) =>
+    servePublicShareProjectFile(c, deps, { raw: false }),
+  );
 
   app.get("/:secret", async (c) => {
     if (!(deps.getPublicSharesEnabled?.() ?? false)) {

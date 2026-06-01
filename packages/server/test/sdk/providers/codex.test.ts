@@ -1461,6 +1461,11 @@ describe("CodexProvider Event Normalization", () => {
         }>;
         inputModalities?: string[];
         supportsPersonality?: boolean;
+        serviceTiers?: Array<{
+          id: string;
+          name: string;
+          description?: string;
+        }>;
       }>;
     };
 
@@ -1484,6 +1489,13 @@ describe("CodexProvider Event Normalization", () => {
         ],
         inputModalities: ["text", "image"],
         supportsPersonality: true,
+        serviceTiers: [
+          {
+            id: "priority",
+            name: "Fast",
+            description: "1.5x speed, increased usage",
+          },
+        ],
       },
       {
         id: "gpt-5.5",
@@ -1500,6 +1512,13 @@ describe("CodexProvider Event Normalization", () => {
         ],
         inputModalities: ["text", "image"],
         supportsPersonality: true,
+        serviceTiers: [
+          {
+            id: "priority",
+            name: "Fast",
+            description: "1.5x speed, increased usage",
+          },
+        ],
       },
       {
         id: "gpt-5.3-codex",
@@ -1530,6 +1549,13 @@ describe("CodexProvider Event Normalization", () => {
       ],
       inputModalities: ["text", "image"],
       supportsPersonality: true,
+      serviceTiers: [
+        {
+          id: "priority",
+          name: "Fast",
+          description: "1.5x speed, increased usage",
+        },
+      ],
     });
     expect(models[1]).toMatchObject({
       isDefault: true,
@@ -1743,6 +1769,85 @@ describe("CodexProvider Event Normalization", () => {
     });
     expect(turn).toMatchObject({ effort: "low" });
     expect(disabledTurn).toMatchObject({ effort: "none" });
+  });
+
+  it("passes service tier only when explicitly requested", () => {
+    const provider = createTestProvider() as unknown as {
+      createThreadStartParams: (
+        options: {
+          model?: string;
+          cwd: string;
+          serviceTier?: string;
+        },
+        policy: {
+          approvalPolicy: string;
+          sandbox: string;
+        },
+      ) => Record<string, unknown>;
+      createThreadResumeParams: (
+        options: {
+          resumeSessionId?: string;
+          model?: string;
+          cwd: string;
+          serviceTier?: string;
+        },
+        sessionId: string,
+        policy: {
+          approvalPolicy: string;
+          sandbox: string;
+        },
+      ) => Record<string, unknown>;
+      createTurnStartParams: (
+        threadId: string,
+        userPrompt: string,
+        options: {
+          model?: string;
+          cwd: string;
+          serviceTier?: string;
+        },
+      ) => Record<string, unknown>;
+    };
+
+    const policy = { approvalPolicy: "on-request", sandbox: "workspace-write" };
+    const defaultStart = provider.createThreadStartParams(
+      { model: "gpt-5.5", cwd: "/tmp" },
+      policy,
+    );
+    const priorityStart = provider.createThreadStartParams(
+      { model: "gpt-5.5", cwd: "/tmp", serviceTier: "priority" },
+      policy,
+    );
+    const defaultResume = provider.createThreadResumeParams(
+      { resumeSessionId: "thread-1", model: "gpt-5.5", cwd: "/tmp" },
+      "thread-1",
+      policy,
+    );
+    const priorityResume = provider.createThreadResumeParams(
+      {
+        resumeSessionId: "thread-1",
+        model: "gpt-5.5",
+        cwd: "/tmp",
+        serviceTier: "priority",
+      },
+      "thread-1",
+      policy,
+    );
+    const defaultTurn = provider.createTurnStartParams("thread-1", "hello", {
+      model: "gpt-5.5",
+      cwd: "/tmp",
+    });
+    const priorityTurn = provider.createTurnStartParams("thread-1", "hello", {
+      model: "gpt-5.5",
+      cwd: "/tmp",
+      serviceTier: "priority",
+    });
+
+    expect(defaultStart.serviceTier).toBeUndefined();
+    expect(defaultResume.serviceTier).toBeUndefined();
+    expect(defaultTurn.serviceTier).toBeUndefined();
+    expect(priorityStart).toMatchObject({ serviceTier: "priority" });
+    expect(priorityResume).toMatchObject({ serviceTier: "priority" });
+    expect(priorityTurn).toMatchObject({ serviceTier: "priority" });
   });
 
   it("accumulates agent message deltas into a stable streaming assistant message", () => {

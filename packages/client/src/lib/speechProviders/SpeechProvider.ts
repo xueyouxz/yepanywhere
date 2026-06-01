@@ -47,8 +47,18 @@ export interface SpeechSmartTurnSettings {
 
 export const DEFAULT_SPEECH_SMART_TURN_SETTINGS: SpeechSmartTurnSettings = {
   enabled: false,
-  threshold: 0.7,
+  threshold: 0.95,
   timeoutMs: 3000,
+};
+
+export type GrokSpeechAudioUplinkMode = "pcm16" | "browser-compressed";
+
+export interface GrokSpeechAudioSettings {
+  uplinkMode: GrokSpeechAudioUplinkMode;
+}
+
+export const DEFAULT_GROK_SPEECH_AUDIO_SETTINGS: GrokSpeechAudioSettings = {
+  uplinkMode: "pcm16",
 };
 
 export interface SpeechWordTimestamp {

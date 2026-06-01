@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useId, useState } from "react";
 import {
-  HELPER_SIDE_MODEL_CHEAPEST,
-  HELPER_SIDE_MODEL_SAME_AS_MAIN,
   type HelperTargetConfig,
   type ModelInfo,
-  type PromptSuggestionMode,
-  type RecapMode,
 } from "@yep-anywhere/shared";
 import { api, type ServerSettings } from "../../api/client";
 import { useToastContext } from "../../contexts/ToastContext";
@@ -15,7 +11,6 @@ import { useServerSettings } from "../../hooks/useServerSettings";
 import { useI18n } from "../../i18n";
 import {
   helperTargetDescription,
-  helperTargetsToModelOptions,
   helperTargetValue,
 } from "../../lib/helperTargets";
 import { getAllProviders } from "../../providers/registry";
@@ -510,6 +505,39 @@ function OllamaSystemPromptInput() {
   );
 }
 
+function GrokBuildApiKeySettings() {
+  const { t } = useI18n();
+  const { settings, updateSetting } = useServerSettings();
+  const enabled = settings?.grokBuildUseXaiApiKey ?? false;
+
+  return (
+    <label
+      style={{
+        display: "flex",
+        gap: "var(--space-2)",
+        alignItems: "flex-start",
+        marginTop: "var(--space-2)",
+        cursor: "pointer",
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={enabled}
+        onChange={(event) =>
+          updateSetting("grokBuildUseXaiApiKey", event.target.checked)
+        }
+        style={{ marginTop: "0.2rem" }}
+      />
+      <span>
+        <span>{t("providersGrokUseXaiApiKey")}</span>
+        <span className="settings-hint" style={{ display: "block" }}>
+          {t("providersGrokUseXaiApiKeyHint")}
+        </span>
+      </span>
+    </label>
+  );
+}
+
 function CodexUpdatePanel() {
   const { showToast } = useToastContext();
   const { settings, updateSetting } = useServerSettings();
@@ -720,8 +748,7 @@ function OllamaSettings() {
 export function ProvidersSettings() {
   const { t } = useI18n();
   const { showToast } = useToastContext();
-  const { providers: serverProviders, loading: providersLoading } =
-    useProviders();
+  const { providers: serverProviders } = useProviders();
   const { settings, updateSetting } = useServerSettings();
 
   const handleCopyClaudeLoginCommand = useCallback(async () => {
@@ -745,54 +772,6 @@ export function ProvidersSettings() {
       authenticated: serverInfo?.authenticated ?? false,
     };
   });
-  const newSessionDefaults = settings?.newSessionDefaults;
-  const defaultProviderInfo =
-    serverProviders.find((p) => p.name === newSessionDefaults?.provider) ??
-    serverProviders.find((p) => p.installed && (p.authenticated || p.enabled));
-  const defaultRecapMode =
-    newSessionDefaults?.recapMode ??
-    (defaultProviderInfo?.supportsNativeRecaps ? "native" : "off");
-  const storedPromptSuggestionMode = newSessionDefaults?.promptSuggestionMode;
-  const defaultPromptSuggestionMode =
-    storedPromptSuggestionMode === "off" ||
-    (storedPromptSuggestionMode === "native" &&
-      defaultProviderInfo?.supportsNativePromptSuggestions)
-      ? storedPromptSuggestionMode
-      : defaultProviderInfo?.supportsNativePromptSuggestions
-        ? "native"
-        : "off";
-  const defaultHelperSideModel =
-    newSessionDefaults?.helperSideModel ?? HELPER_SIDE_MODEL_CHEAPEST;
-  const helperTargetModelOptions = helperTargetsToModelOptions(
-    settings?.helperTargets,
-  );
-  const recapModeLabels: Record<RecapMode, string> = {
-    off: t("recapModeOff"),
-    native: t("recapModeNative"),
-    "side-session": t("recapModeSideSession"),
-  };
-  const promptSuggestionModeLabels: Record<PromptSuggestionMode, string> = {
-    off: t("promptSuggestionModeOff"),
-    native: t("promptSuggestionModeNative"),
-  };
-  const isRecapModeAvailable = (mode: RecapMode) => {
-    if (mode === "off") return true;
-    if (mode === "native")
-      return defaultProviderInfo?.supportsNativeRecaps === true;
-    return defaultProviderInfo?.supportsRecaps === true;
-  };
-  const isPromptSuggestionModeAvailable = (mode: PromptSuggestionMode) => {
-    if (mode === "off") return true;
-    return defaultProviderInfo?.supportsNativePromptSuggestions === true;
-  };
-  const updateNewSessionDefaults = async (
-    updates: NonNullable<typeof newSessionDefaults>,
-  ) => {
-    await updateSetting("newSessionDefaults", {
-      ...newSessionDefaults,
-      ...updates,
-    });
-  };
 
   return (
     <section className="settings-section">
@@ -805,89 +784,6 @@ export function ProvidersSettings() {
           settings={settings}
           updateSetting={updateSetting}
         />
-      </div>
-      <div className="settings-group">
-        <div className="settings-item model-settings-item">
-          <div className="settings-item-info">
-            <strong>{t("providersRecapDefaultsTitle")}</strong>
-            <p>{t("providersRecapDefaultsDescription")}</p>
-          </div>
-          <div className="font-size-selector model-settings-chip-group">
-            {(["off", "native", "side-session"] as RecapMode[]).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                className={`font-size-option ${defaultRecapMode === mode ? "active" : ""}`}
-                disabled={providersLoading || !isRecapModeAvailable(mode)}
-                onClick={() =>
-                  void updateNewSessionDefaults({ recapMode: mode })
-                }
-              >
-                {recapModeLabels[mode]}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="settings-item model-settings-item">
-          <div className="settings-item-info">
-            <strong>{t("providersPromptSuggestionDefaultsTitle")}</strong>
-            <p>{t("providersPromptSuggestionDefaultsDescription")}</p>
-          </div>
-          <div className="font-size-selector model-settings-chip-group">
-            {(["off", "native"] as PromptSuggestionMode[]).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                className={`font-size-option ${defaultPromptSuggestionMode === mode ? "active" : ""}`}
-                disabled={
-                  providersLoading || !isPromptSuggestionModeAvailable(mode)
-                }
-                onClick={() =>
-                  void updateNewSessionDefaults({
-                    promptSuggestionMode: mode,
-                  })
-                }
-              >
-                {promptSuggestionModeLabels[mode]}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <label className="settings-item model-settings-item">
-          <div className="settings-item-info">
-            <strong>{t("helperSideModelTitle")}</strong>
-            <p>{t("helperSideModelDescription")}</p>
-          </div>
-          <select
-            className="settings-select"
-            value={defaultHelperSideModel}
-            onChange={(event) =>
-              void updateNewSessionDefaults({
-                helperSideModel: event.target.value,
-              })
-            }
-            disabled={providersLoading}
-          >
-            <option value={HELPER_SIDE_MODEL_CHEAPEST}>
-              {t("helperSideModelCheapest")}
-            </option>
-            <option value={HELPER_SIDE_MODEL_SAME_AS_MAIN}>
-              {t("helperSideModelSameAsMain")}
-            </option>
-            {helperTargetModelOptions.map((model) => (
-              <option key={model.id} value={model.id}>
-                {model.name}
-              </option>
-            ))}
-            {(defaultProviderInfo?.models ?? []).map((model) => (
-              <option key={model.id} value={model.id}>
-                {model.name}
-              </option>
-            ))}
-          </select>
-        </label>
       </div>
       <div className="settings-group">
         {providerDisplayList.map((provider) => (
@@ -931,6 +827,7 @@ export function ProvidersSettings() {
                   </div>
                 )}
               {provider.id === "claude-ollama" && <OllamaSettings />}
+              {provider.id === "grok" && <GrokBuildApiKeySettings />}
               {provider.id === "codex" && provider.installed && (
                 <CodexUpdatePanel />
               )}

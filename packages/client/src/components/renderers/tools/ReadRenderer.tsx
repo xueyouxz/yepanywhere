@@ -11,6 +11,7 @@ import { useSchemaValidationContext } from "../../../contexts/SchemaValidationCo
 import { makeDisplayPath } from "../../../lib/text";
 import { validateToolResult } from "../../../lib/validateToolResult";
 import { SchemaWarning } from "../../SchemaWarning";
+import { SessionFilePathLink } from "../../SessionFilePathLink";
 import { FilePathDisplay } from "../../ui/FilePathDisplay";
 import { Modal } from "../../ui/Modal";
 import { RenderModeGlyph } from "../../ui/RenderModeGlyph";
@@ -89,7 +90,11 @@ function ReadToolUse({ input }: { input: ReadInput }) {
   return (
     <div className="read-tool-use">
       <span className="file-path">
-        <FilePathDisplay displayPath={displayPath} />
+        <SessionFilePathLink
+          displayPath={displayPath}
+          filePath={input.file_path}
+          lineNumber={input.offset}
+        />
       </span>
       {(input.offset !== undefined || input.limit !== undefined) && (
         <span
@@ -266,7 +271,11 @@ function TextFileResult({
     return (
       <div className="read-text-result">
         <span className="file-path">
-          <FilePathDisplay displayPath={displayPath} />
+          <SessionFilePathLink
+            displayPath={displayPath}
+            filePath={file.filePath}
+            lineNumber={file.startLine}
+          />
         </span>{" "}
         <span className="file-line-count">continues in Shell</span>
       </div>
@@ -492,7 +501,10 @@ function ReadInteractiveSummary({
   if (isError) {
     return (
       <span>
-        <FilePathDisplay displayPath={displayPath} />
+        <SessionFilePathLink
+          displayPath={displayPath}
+          filePath={input.file_path}
+        />
         {showValidationWarning && validationErrors && (
           <SchemaWarning toolName="Read" errors={validationErrors} />
         )}
@@ -503,7 +515,10 @@ function ReadInteractiveSummary({
   if (!result?.file) {
     return (
       <span>
-        <FilePathDisplay displayPath={displayPath} />
+        <SessionFilePathLink
+          displayPath={displayPath}
+          filePath={input.file_path}
+        />
       </span>
     );
   }
@@ -561,7 +576,11 @@ function ReadInteractiveSummary({
   if (isPtyHandoff) {
     return (
       <span>
-        <FilePathDisplay displayPath={displayPath} />{" "}
+        <SessionFilePathLink
+          displayPath={displayPath}
+          filePath={file.filePath}
+          lineNumber={file.startLine}
+        />{" "}
         <span className="file-line-count-inline">continues in Shell</span>
       </span>
     );

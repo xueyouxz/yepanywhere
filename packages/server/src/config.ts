@@ -110,8 +110,10 @@ export interface Config {
   voiceBackends: string[];
   /** Deepgram API key for the ya-deepgram backend (from YA_stt__DEEPGRAM_API_KEY). */
   deepgramApiKey?: string;
-  /** xAI key for the ya-grok backend (from YA_stt__XAI_API_KEY). */
+  /** xAI key for the ya-grok backend (from YA_stt__XAI_API_KEY, or scrubbed XAI_API_KEY fallback). */
   xaiSttApiKey?: string;
+  /** General xAI API key from XAI_API_KEY, scrubbed from process.env after load. */
+  ambientXaiApiKey?: string;
   /** Whisper model name for ya-whisper backend (default: distil-large-v3). */
   whisperModel?: string;
   /** Whisper device for ya-whisper backend (default: cpu). */
@@ -147,6 +149,11 @@ export function loadConfig(): Config {
   // process.env before anything can spawn a child that would inherit them.
   harvestYaModuleEnv();
   const sttEnv = getModuleEnv("stt");
+  const ambientXaiApiKey = process.env.XAI_API_KEY || undefined;
+  // xAI documents XAI_API_KEY as the general API key name. YA accepts it as an
+  // STT convenience fallback, then deletes it so provider CLIs such as Grok
+  // Build cannot inherit it and silently switch to metered API billing.
+  delete process.env.XAI_API_KEY;
 
   // SERVE_FRONTEND defaults to true (unified server mode)
   // Set SERVE_FRONTEND=false to disable frontend serving (API-only mode)
@@ -277,7 +284,8 @@ export function loadConfig(): Config {
     // presence). Example: YA_VOICE_BACKENDS=ya-whisper
     voiceBackends: parseCommaSeparatedList(process.env.YA_VOICE_BACKENDS),
     deepgramApiKey: sttEnv.DEEPGRAM_API_KEY || undefined,
-    xaiSttApiKey: sttEnv.XAI_API_KEY || undefined,
+    xaiSttApiKey: sttEnv.XAI_API_KEY || ambientXaiApiKey,
+    ambientXaiApiKey,
     whisperModel: process.env.WHISPER_MODEL || undefined,
     whisperDevice: process.env.WHISPER_DEVICE || undefined,
     whisperComputeType: process.env.WHISPER_COMPUTE_TYPE || undefined,

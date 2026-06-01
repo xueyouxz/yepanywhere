@@ -41,14 +41,19 @@ required. The subsystem reads it via `getModuleEnv("stt")[NAME]`, never
 `process.env`. The `YA_` prefix means "consume and strip"; module and name
 split on the **first** `__`, so the name half may itself contain `__`.
 
-**Layer 2 — per-provider `excludeEnv` (for vendor-named keys).** A literal
-`XAI_API_KEY` could still be in the env from some *other* tool or by
-mistake. `ACPClient.connect` builds the child env as
+**Layer 2 — startup scrub plus per-provider `excludeEnv` for vendor-named
+keys.** A literal `XAI_API_KEY` may be set because xAI's public docs use that
+standard name. YA accepts it as an STT fallback, records it in config, then
+deletes it from `process.env` during `loadConfig` so children do not inherit it
+ambiently. `ACPClient.connect` builds the child env as
 `{ ...process.env, ...config.env }`, and an overlay cannot delete an
 inherited key, so the config carries an optional `excludeEnv?: string[]`
 whose names are removed from the merged env just before `spawn`. The Grok
 provider passes `GROK_BILLING_ENV_DENYLIST =
-["XAI_API_KEY", "GROK_CODE_XAI_API_KEY"]` (local to `grok-acp.ts`). It is
+["XAI_API_KEY", "GROK_CODE_XAI_API_KEY"]` (local to `grok-acp.ts`) unless the
+user has enabled the Grok Build provider option to pass the scrubbed
+`XAI_API_KEY`; that opt-in injects only the ambient `XAI_API_KEY`, not
+`YA_stt__XAI_API_KEY`. It is
 scoped to that one provider on purpose: the shared
 `filterEnvForChildProcess` allowlist is **not** widened to drop vendor API
 keys, because that would change the child env of established providers that

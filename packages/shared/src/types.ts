@@ -84,6 +84,17 @@ export interface ModelInfo {
   inputModalities?: string[];
   /** Provider-reported personality support. */
   supportsPersonality?: boolean;
+  /** Provider-reported opt-in service tiers, e.g. faster paid processing. */
+  serviceTiers?: ModelServiceTier[];
+}
+
+export interface ModelServiceTier {
+  /** Provider-visible service tier id to send for this model. */
+  id: string;
+  /** Human-readable tier name. */
+  name: string;
+  /** Provider-reported description, often including speed/cost trade-off. */
+  description?: string;
 }
 
 /**
@@ -221,6 +232,8 @@ export const ALL_PERMISSION_MODES: readonly PermissionMode[] = [
 export interface NewSessionDefaults {
   provider?: ProviderName;
   model?: string;
+  /** Provider-visible service tier. undefined means provider/default behavior. */
+  serviceTier?: string;
   permissionMode?: PermissionMode;
   recapMode?: RecapMode;
   promptSuggestionMode?: PromptSuggestionMode;

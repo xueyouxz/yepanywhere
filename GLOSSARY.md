@@ -26,14 +26,17 @@ regeneration rules.
 | `pluggable-speech-recognition` | User-selected speech recognition methods where browser-native remains local fallback and configured YA backends receive browser-captured audio. | [pluggable-speech-recognition](topics/pluggable-speech-recognition.md) |
 | `predictive-scroll` | On-demand hydration and placeholder sizing for expensive session rows so long transcripts avoid unnecessary upfront render work. | [predictive-scroll](topics/predictive-scroll.md) |
 | `prompt-suggestions` | Predicted next-user-turn affordances surfaced in the composer without becoming provider transcript turns unless the user accepts one. | [prompt-suggestions](topics/prompt-suggestions.md) |
+| provider | Shorthand for an LLM/agent provider such as Claude, Codex, Gemini, Grok, or OpenCode; do not use it for speech recognition. | |
 | `provider-model-glyphs` | Compact provider and model identity glyphs for status surfaces where full provider/model text is too wide. | [provider-model-glyphs](topics/provider-model-glyphs.md) |
 | `provider-state-machine` | Provider and process state contract that determines what YA renders and which actions are valid in each state. | [provider-state-machine](topics/provider-state-machine.md) |
 | `recaps` | Short on-return summaries of what the agent did or is doing while the user was away, shown without polluting provider transcript state. | [recaps](topics/recaps.md) |
 | `relative-filenames` | Shortest-unambiguous file path display policy: project-relative, home-relative, then absolute as fallback. | [relative-filenames](topics/relative-filenames.md) |
 | `rich-text-rendering` | Rendering pipeline for agent action panels, including command output, file reads, diffs, edits, and their always-on or toggleable transforms. | [rich-text-rendering](topics/rich-text-rendering.md) |
+| `security` | YA's trust-boundary contract: local authenticated controls may expose privileged host state, while public and relay surfaces must stay explicit, scoped, and revocable. | [security](topics/security.md) |
 | `session-liveness` | Provider/session liveness contract and dependent behaviors such as heartbeat turns, deferred queue promotion, and experimental patient queue intent. | [session-liveness](topics/session-liveness.md) |
 | `session-ui-customization` | User control over which session controls are visible or enabled while keyboard access to advanced actions is preserved. | [session-ui-customization](topics/session-ui-customization.md) |
 | `side-session-config` | Shared opt-in, model-selection, and lifecycle contract for YA-simulated helper features that run outside the parent provider turn. | [side-session-config](topics/side-session-config.md) |
+| STT backend | A speech-to-text backend used by YA speech recognition, such as browser-native, Grok STT, Deepgram STT, or Whisper; prefer this wording over "speech provider" in UI and project docs. | [pluggable-speech-recognition](topics/pluggable-speech-recognition.md) |
 | `ui-control-alignment` | Shared baseline and metric policy for aligning compact control rows without per-control visual nudges. | [ui-control-alignment](topics/ui-control-alignment.md) |
 | `ui-testing` | Browser-first visual QA protocol for layout-sensitive client control changes. | [ui-testing](topics/ui-testing.md) |
 | YA | Shorthand for Yep Anywhere, the mobile-first supervisor for local provider sessions and remote/mobile session UI. | |

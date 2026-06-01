@@ -91,6 +91,13 @@ Backends should implement a common `SpeechBackend` contract:
   ML end-of-turn detection. Grok STT exposes this through the xAI
   `smart_turn` threshold and `smart_turn_timeout` parameters. The client shows
   Smart Turn controls only when the selected backend advertises that capability.
+- Grok STT has an explicit browser-to-YA audio uplink setting. The default
+  PCM16 mode captures Web Audio in the browser and sends raw 24 kHz PCM16
+  frames to YA for streaming recognition. The comparative browser-compressed
+  mode uses the browser's MediaRecorder output and the batch transcription
+  route; compressed MediaRecorder audio may be equivalent in practice, but YA
+  treats that as unverified until compared. Smart Turn depends on Grok
+  streaming and is therefore only active when the Grok uplink mode is PCM16.
 - `useSpeechRecognition` selects browser-native when the method is
   `browser-native`; any other method constructs `YaServerProvider` with the
   advertised backend id unchanged.
@@ -106,8 +113,10 @@ Backends should implement a common `SpeechBackend` contract:
   server-routed STT over browser-native, with `ya-grok` ranked before
   `ya-deepgram`; browser-native remains the explicit local escape hatch.
 - Server config parses `VOICE_INPUT`, `YA_VOICE_BACKENDS`,
-  `YA_stt__DEEPGRAM_API_KEY`, `YA_stt__XAI_API_KEY`, `WHISPER_MODEL`,
-  `WHISPER_DEVICE`, and `WHISPER_COMPUTE_TYPE`.
+  `YA_stt__DEEPGRAM_API_KEY`, `YA_stt__XAI_API_KEY`, `XAI_API_KEY`,
+  `WHISPER_MODEL`, `WHISPER_DEVICE`, and `WHISPER_COMPUTE_TYPE`.
+  `YA_stt__XAI_API_KEY` takes precedence for `ya-grok`; `XAI_API_KEY` is a
+  convenience fallback that is scrubbed from `process.env` after config load.
 - `SpeechBackendRegistry` supports `ya-dummy`, `ya-deepgram`,
   `ya-grok`, and `ya-whisper`; it validates configured backends and
   exposes enabled ids plus capability metadata to `/api/version`.
@@ -115,10 +124,11 @@ Backends should implement a common `SpeechBackend` contract:
   endpoint and implements xAI's `wss://api.x.ai/v1/stt` streaming endpoint.
   In streaming mode it can enable Smart Turn and pass through xAI word
   timestamps so the client can recognize optional paused end commands.
-  Both cloud backends auto-enable when their YA-scoped key is present
-  (`YA_stt__XAI_API_KEY` for `ya-grok`, `YA_stt__DEEPGRAM_API_KEY` for
-  `ya-deepgram`) because providing a metered key is the operator's explicit
-  opt-in. `ya-grok` is currently the only backend advertising streaming.
+  Both cloud backends auto-enable when their key is present
+  (`YA_stt__XAI_API_KEY` or scrubbed `XAI_API_KEY` for `ya-grok`,
+  `YA_stt__DEEPGRAM_API_KEY` for `ya-deepgram`) because providing a metered key
+  is the operator's explicit opt-in. `ya-grok` is currently the only backend
+  advertising streaming.
 - Deepgram and local faster-whisper backend implementations exist. The local
   Whisper path uses a warm Python worker subprocess around `faster_whisper`.
 - The normal `index.ts` runtime mounts `/api/speech` after
@@ -235,6 +245,12 @@ client through `fetchJSON("/speech/transcribe", ...)`.
   `send` submits, `cancel` discards the speech turn, and `wait` leaves the
   draft for keyboard editing or thought. No recognized command defaults to
   `send`.
+- With Grok STT selected, the audio uplink setting defaults to PCM16 and the
+  WebSocket start frame advertises `mimeType:
+  "audio/pcm;rate=24000;encoding=s16le"`, `sampleRate: 24000`, and
+  `encoding: "pcm"`. Switching to browser-compressed mode uses the
+  MediaRecorder batch path and hides Smart Turn because that path has no
+  streaming `speech_final` events.
 - With both `ya-grok` and `ya-deepgram` advertised and no explicit stored
   speech method, the client selects `ya-grok` as the effective mic backend.
 - A successful server-routed transcription emits positive-path logs naming the

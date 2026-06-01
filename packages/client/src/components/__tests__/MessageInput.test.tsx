@@ -18,7 +18,10 @@ const {
   modelSettingsState,
   developerModeState,
   mockSetSpeechMethod,
+  mockSetSpeechSmartTurnSettings,
+  mockSetGrokSpeechAudioSettings,
   mockSetExperimentalFeaturesEnabled,
+  mockVoiceToggle,
 } = vi.hoisted(
   () => ({
     versionState: {
@@ -28,11 +31,23 @@ const {
         updateAvailable: false,
         capabilities: ["voiceInput"],
         voiceBackends: [] as string[],
+        voiceBackendCapabilities: {} as Record<
+          string,
+          { streaming?: boolean; smartTurn?: boolean }
+        >,
       },
     },
     modelSettingsState: {
       speechMethod: "browser-native",
       hasStoredSpeechMethod: false,
+      speechSmartTurnSettings: {
+        enabled: false,
+        threshold: 0.95,
+        timeoutMs: 3000,
+      },
+      grokSpeechAudioSettings: {
+        uplinkMode: "pcm16" as "pcm16" | "browser-compressed",
+      },
     },
     developerModeState: {
       experimentalFeaturesEnabled: false,
@@ -41,7 +56,10 @@ const {
       },
     },
     mockSetSpeechMethod: vi.fn(),
+    mockSetSpeechSmartTurnSettings: vi.fn(),
+    mockSetGrokSpeechAudioSettings: vi.fn(),
     mockSetExperimentalFeaturesEnabled: vi.fn(),
+    mockVoiceToggle: vi.fn(),
   }),
 );
 
@@ -87,6 +105,10 @@ vi.mock("../../hooks/useModelSettings", () => ({
     speechMethod: modelSettingsState.speechMethod,
     hasStoredSpeechMethod: modelSettingsState.hasStoredSpeechMethod,
     setSpeechMethod: mockSetSpeechMethod,
+    speechSmartTurnSettings: modelSettingsState.speechSmartTurnSettings,
+    setSpeechSmartTurnSettings: mockSetSpeechSmartTurnSettings,
+    grokSpeechAudioSettings: modelSettingsState.grokSpeechAudioSettings,
+    setGrokSpeechAudioSettings: mockSetGrokSpeechAudioSettings,
   }),
 }));
 
@@ -145,7 +167,7 @@ vi.mock("../VoiceInputButton", async () => {
       (props: { speechMethod?: string }, ref) => {
         React.useImperativeHandle(ref, () => ({
           stopAndFinalize: () => "",
-          toggle: vi.fn(),
+          toggle: mockVoiceToggle,
           isAvailable: true,
           isListening: false,
         }));
@@ -234,13 +256,25 @@ describe("MessageInput", () => {
       updateAvailable: false,
       capabilities: ["voiceInput"],
       voiceBackends: [],
+      voiceBackendCapabilities: {},
     };
     modelSettingsState.speechMethod = "browser-native";
     modelSettingsState.hasStoredSpeechMethod = false;
+    modelSettingsState.speechSmartTurnSettings = {
+      enabled: false,
+      threshold: 0.95,
+      timeoutMs: 3000,
+    };
+    modelSettingsState.grokSpeechAudioSettings = {
+      uplinkMode: "pcm16",
+    };
     developerModeState.experimentalFeaturesEnabled = false;
     developerModeState.experimentalFeatures.patientQueueMode = true;
     mockSetSpeechMethod.mockReset();
+    mockSetSpeechSmartTurnSettings.mockReset();
+    mockSetGrokSpeechAudioSettings.mockReset();
     mockSetExperimentalFeaturesEnabled.mockReset();
+    mockVoiceToggle.mockReset();
     window.localStorage.clear();
   });
 
@@ -277,6 +311,51 @@ describe("MessageInput", () => {
     fireEvent.click(screen.getByText("Deepgram STT").closest("button")!);
 
     expect(mockSetSpeechMethod).toHaveBeenCalledWith("ya-deepgram");
+  });
+
+  it("toggles session voice input on Ctrl+Space from the composer", () => {
+    const textarea = renderMessageInput();
+
+    fireEvent.keyDown(textarea, {
+      key: " ",
+      code: "Space",
+      ctrlKey: true,
+    });
+
+    expect(mockVoiceToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows Grok audio format controls and hides Smart Turn on compressed uplink", () => {
+    versionState.version = {
+      ...versionState.version,
+      voiceBackends: ["ya-grok"],
+      voiceBackendCapabilities: {
+        "ya-grok": { streaming: true, smartTurn: true },
+      },
+    };
+    modelSettingsState.speechMethod = "ya-grok";
+    modelSettingsState.hasStoredSpeechMethod = true;
+    modelSettingsState.speechSmartTurnSettings = {
+      enabled: true,
+      threshold: 0.95,
+      timeoutMs: 3000,
+    };
+    modelSettingsState.grokSpeechAudioSettings = {
+      uplinkMode: "browser-compressed",
+    };
+
+    renderMessageInput();
+
+    expect(screen.getByText("Audio")).toBeDefined();
+    expect(
+      (screen.getByLabelText("Compressed") as HTMLInputElement).checked,
+    ).toBe(true);
+    expect(screen.queryByText("Smart Turn")).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("PCM16"));
+    expect(mockSetGrokSpeechAudioSettings).toHaveBeenCalledWith({
+      uplinkMode: "pcm16",
+    });
   });
 
   it("keeps Up as native navigation when the composer has text", () => {

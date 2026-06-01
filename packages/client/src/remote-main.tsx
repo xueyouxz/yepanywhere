@@ -43,6 +43,7 @@ import { HostPickerPage } from "./pages/HostPickerPage";
 import { InboxPage } from "./pages/InboxPage";
 import { NewSessionPage } from "./pages/NewSessionPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
+import { PublicShareFilePage } from "./pages/PublicShareFilePage";
 import { PublicSharePage } from "./pages/PublicSharePage";
 import { RelayConnectionGate } from "./pages/RelayConnectionGate";
 import { RelayLoginPage } from "./pages/RelayLoginPage";
@@ -106,7 +107,13 @@ createRoot(rootElement).render(
     <BrowserRouter basename={basename}>
       <I18nProvider>
         <Routes>
+          <Route path="/share/:secret/file" element={<PublicShareFilePage />} />
           <Route path="/share/:secret" element={<PublicSharePage />} />
+          <Route
+            path="/remote/share/:secret/file"
+            element={<PublicShareFilePage />}
+          />
+          <Route path="/remote/share/:secret" element={<PublicSharePage />} />
           <Route
             path="*"
             element={

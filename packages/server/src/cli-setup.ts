@@ -6,6 +6,7 @@
  */
 
 import {
+  DEFAULT_RELAY_URL,
   type RelayServerRejected,
   isRelayServerRegistered,
   isRelayServerRejected,
@@ -15,8 +16,6 @@ import { AuthService } from "./auth/AuthService.js";
 import { getDataDir } from "./config.js";
 import { RemoteAccessService } from "./remote-access/RemoteAccessService.js";
 import { InstallService } from "./services/InstallService.js";
-
-const DEFAULT_RELAY_URL = "wss://relay.yepanywhere.com/ws";
 
 /** Timeout for relay registration check (ms) */
 const RELAY_TIMEOUT_MS = 10_000;

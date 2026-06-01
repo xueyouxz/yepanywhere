@@ -239,6 +239,13 @@ const FALLBACK_CODEX_MODELS: ModelInfo[] = [
     ],
     inputModalities: ["text", "image"],
     supportsPersonality: true,
+    serviceTiers: [
+      {
+        id: "priority",
+        name: "Fast",
+        description: "1.5x speed, increased usage",
+      },
+    ],
   },
   {
     id: "gpt-5.4",
@@ -266,6 +273,13 @@ const FALLBACK_CODEX_MODELS: ModelInfo[] = [
     ],
     inputModalities: ["text", "image"],
     supportsPersonality: true,
+    serviceTiers: [
+      {
+        id: "priority",
+        name: "Fast",
+        description: "1.5x speed, increased usage",
+      },
+    ],
   },
   {
     id: "gpt-5.4-mini",
@@ -346,6 +360,11 @@ interface AppServerModel {
   }> | null;
   inputModalities?: string[] | null;
   supportsPersonality?: boolean | null;
+  serviceTiers?: Array<{
+    id?: string | null;
+    name?: string | null;
+    description?: string | null;
+  }> | null;
 }
 
 interface TokenUsageSnapshot {
@@ -1212,6 +1231,7 @@ export class CodexProvider implements AgentProvider {
           ...(typeof model.supportsPersonality === "boolean"
             ? { supportsPersonality: model.supportsPersonality }
             : {}),
+          ...this.normalizeModelServiceTierMetadata(model),
         },
         serverIndex,
       });
@@ -1280,6 +1300,30 @@ export class CodexProvider implements AgentProvider {
       }
     }
     return metadata;
+  }
+
+  private normalizeModelServiceTierMetadata(
+    model: AppServerModel,
+  ): Pick<ModelInfo, "serviceTiers"> {
+    if (!Array.isArray(model.serviceTiers)) {
+      return {};
+    }
+    const serviceTiers = model.serviceTiers
+      .map((tier) => {
+        const id = typeof tier.id === "string" ? tier.id.trim() : "";
+        const name = typeof tier.name === "string" ? tier.name.trim() : "";
+        if (!id || !name) return null;
+        return {
+          id,
+          name,
+          ...(typeof tier.description === "string"
+            ? { description: tier.description }
+            : {}),
+        };
+      })
+      .filter((tier): tier is NonNullable<typeof tier> => tier !== null);
+
+    return serviceTiers.length > 0 ? { serviceTiers } : {};
   }
 
   private getModelSortRank(
@@ -2030,6 +2074,7 @@ export class CodexProvider implements AgentProvider {
   ): ThreadStartParams {
     return {
       model: options.model ?? null,
+      ...(options.serviceTier ? { serviceTier: options.serviceTier } : {}),
       cwd: options.cwd,
       ...this.buildThreadPermissionParams(policy),
       config: this.buildThreadConfigOverrides(options),
@@ -2047,6 +2092,7 @@ export class CodexProvider implements AgentProvider {
     const params: CodexThreadResumeParamsForRequest = {
       threadId: options.resumeSessionId ?? sessionId,
       model: options.model ?? null,
+      ...(options.serviceTier ? { serviceTier: options.serviceTier } : {}),
       cwd: options.cwd,
       ...this.buildThreadPermissionParams(policy),
       config: this.buildThreadConfigOverrides(options),
@@ -2090,6 +2136,7 @@ export class CodexProvider implements AgentProvider {
     return {
       threadId,
       model: options.model ?? null,
+      ...(options.serviceTier ? { serviceTier: options.serviceTier } : {}),
       input: [{ type: "text", text: userPrompt, text_elements: [] }],
       effort: this.mapEffortToReasoningEffort(
         options.effort,

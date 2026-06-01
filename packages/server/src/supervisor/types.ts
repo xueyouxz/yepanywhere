@@ -209,6 +209,8 @@ export interface ProcessInfo {
   thinking?: ThinkingConfig;
   /** Effort level for response quality (undefined = SDK default) */
   effort?: EffortLevel;
+  /** Provider-visible service tier. undefined means provider/default behavior. */
+  serviceTier?: string;
   /** Model used for this session (e.g., "claude-opus-4-5-20251101") */
   model?: string;
   /** Context window usage from the last assistant message */
@@ -262,6 +264,8 @@ export interface ProcessOptions {
   thinking?: ThinkingConfig;
   /** Effort level for response quality (undefined = SDK default) */
   effort?: EffortLevel;
+  /** Provider-visible service tier. undefined means provider/default behavior. */
+  serviceTier?: string;
   /** Model used for this session (e.g., "claude-opus-4-5-20251101") */
   model?: string;
   /** SSH host for remote execution (undefined = local) */

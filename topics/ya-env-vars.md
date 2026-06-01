@@ -20,6 +20,11 @@ timings, codex rescan intervals, cache TTLs) live only in `config.ts`.
   Module and name split on the **first** `__`. This protects credentials
   whose bare names another vendor's CLI would honor — see the billing
   footgun in [cost-efficiency.md](cost-efficiency.md).
+- **Vendor-named fallback secrets** — accepted only where explicitly
+  documented. `XAI_API_KEY` is accepted as a convenience fallback for Grok STT,
+  then deleted from `process.env` during config load. `YA_stt__XAI_API_KEY`
+  takes precedence and is preferred because it isolates STT billing from Grok
+  Build provider billing.
 - **`YA_<NAME>` — YA-specific config toggle (non-secret).** Meaningful only
   inside YA; not a credential, so it is read normally (not stripped) and
   has no `__`. New YA-only toggles should take this prefix;
@@ -53,6 +58,7 @@ timings, codex rescan intervals, cache TTLs) live only in `config.ts`.
 | Var | Meaning |
 |-----|---------|
 | `YA_stt__XAI_API_KEY` | xAI key → `ya-grok` backend; auto-enables when set. |
+| `XAI_API_KEY` | xAI standard key accepted as a `ya-grok` STT fallback, then scrubbed from child env. Grok Build receives it only when its provider setting explicitly opts in. |
 | `YA_stt__DEEPGRAM_API_KEY` | Deepgram key → `ya-deepgram` backend; auto-enables when set. |
 | `WHISPER_MODEL` / `WHISPER_DEVICE` / `WHISPER_COMPUTE_TYPE` | Local Whisper tuning. |
 

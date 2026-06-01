@@ -751,6 +751,7 @@ describe("Supervisor", () => {
         undefined,
         {
           model: "gpt-5.4",
+          serviceTier: "priority",
           thinking: { type: "adaptive" },
           effort: "high",
         },
@@ -766,6 +767,7 @@ describe("Supervisor", () => {
 
       expect(startSession.mock.calls[1]?.[0]).toMatchObject({
         model: "gpt-5.4",
+        serviceTier: "priority",
         thinking: { type: "adaptive" },
         effort: "high",
       });

@@ -152,6 +152,8 @@ export interface SessionOptions {
   mode?: PermissionMode;
   /** Model ID (e.g., "sonnet", "opus", "qwen2.5-coder:0.5b") */
   model?: string;
+  /** Provider-visible service tier. Omit for provider/default behavior. */
+  serviceTier?: string;
   thinking?: ThinkingOption;
   provider?: ProviderName;
   /** SSH host alias for remote execution (undefined = local) */
@@ -508,6 +510,7 @@ export const api = {
         message,
         mode: options?.mode,
         model: options?.model,
+        serviceTier: options?.serviceTier,
         thinking: options?.thinking,
         provider: options?.provider,
         executor: options?.executor,
@@ -537,6 +540,7 @@ export const api = {
       body: JSON.stringify({
         mode: options?.mode,
         model: options?.model,
+        serviceTier: options?.serviceTier,
         thinking: options?.thinking,
         provider: options?.provider,
         executor: options?.executor,
@@ -566,6 +570,7 @@ export const api = {
         message,
         mode: options?.mode,
         model: options?.model,
+        serviceTier: options?.serviceTier,
         thinking: options?.thinking,
         provider: options?.provider,
         executor: options?.executor,
@@ -591,6 +596,7 @@ export const api = {
       body: JSON.stringify({
         mode: options?.mode,
         model: options?.model,
+        serviceTier: options?.serviceTier,
         thinking: options?.thinking,
         provider: options?.provider,
         executor: options?.executor,
@@ -621,6 +627,7 @@ export const api = {
         message,
         mode: options?.mode,
         model: options?.model,
+        serviceTier: options?.serviceTier,
         thinking: options?.thinking,
         provider: options?.provider,
         executor: options?.executor,
@@ -657,6 +664,7 @@ export const api = {
       body: JSON.stringify({
         mode: options?.mode,
         model: options?.model,
+        serviceTier: options?.serviceTier,
         thinking: options?.thinking,
         provider: options?.provider,
         executor: options?.executor,
@@ -678,6 +686,7 @@ export const api = {
     placement?: DeferredMessagePlacement,
     clientTimestamp?: number,
     messageMetadata?: UserMessageMetadata,
+    serviceTier?: string,
   ) =>
     fetchJSON<{
       queued: boolean;
@@ -697,6 +706,7 @@ export const api = {
         attachments,
         tempId,
         thinking,
+        serviceTier,
         deferred,
         insertBeforeTempId: placement?.beforeTempId,
         insertAfterTempId: placement?.afterTempId,
@@ -1364,8 +1374,10 @@ export interface ServerSettings {
   clientLogCollectionRequested?: boolean;
   /** Whether users may create public read-only share links */
   publicSharesEnabled?: boolean;
-  /** Base URL for the hosted public share viewer */
-  publicShareViewerBaseUrl?: string;
+  /** Base URL for the hosted YA client */
+  yaClientBaseUrl?: string | null;
+  /** @deprecated Use yaClientBaseUrl. */
+  publicShareViewerBaseUrl?: string | null;
   /** SSH host aliases for remote executors */
   remoteExecutors?: string[];
   /** SSH host aliases for ChromeOS device bridge targets */
@@ -1384,6 +1396,8 @@ export interface ServerSettings {
   ollamaSystemPrompt?: string;
   /** Whether to use the full Claude system prompt for Ollama */
   ollamaUseFullSystemPrompt?: boolean;
+  /** Whether Grok Build may receive the server's XAI_API_KEY */
+  grokBuildUseXaiApiKey?: boolean;
   /** Whether the device bridge (emulator/device streaming) feature is enabled */
   deviceBridgeEnabled?: boolean;
   /** Defaults applied when opening the new session form */
@@ -1421,7 +1435,12 @@ export interface PublicShareStatusResponse {
   requiresRelay: boolean;
   remoteAccessEnabled: boolean;
   relayStatus: RelayClientStatus | null;
+  relayUrl?: string | null;
+  relayUsername?: string | null;
   canCreate: boolean;
+  yaClientBaseUrl: string | null;
+  defaultYaClientBaseUrl: string;
+  yaClientBaseUrlError?: string;
   viewerBaseUrl: string | null;
   defaultViewerBaseUrl: string;
   viewerBaseUrlError?: string;
