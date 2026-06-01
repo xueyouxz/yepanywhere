@@ -1,11 +1,11 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { VersionInfo } from "../api/client";
 import { useRemoteCompatibilityNoticeDismissals } from "../hooks/useRemoteCompatibilityNoticeDismissals";
-import { writeClipboardText } from "../lib/clipboard";
 import {
   type RemoteCompatibilityNotice,
   getRemoteCompatibilityNotices,
 } from "../lib/remoteCompatibilityNotices";
+import { CopyTextButton } from "./ui/CopyTextButton";
 
 interface RemoteCompatibilityNoticesProps {
   versionInfo: VersionInfo | null;
@@ -34,28 +34,47 @@ export function RemoteCompatibilityNotices({
   );
   const { dismissNotice, visibleNotices } =
     useRemoteCompatibilityNoticeDismissals(notices);
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const notice = visibleNotices[0];
   if (!notice) return null;
 
-  const handleAction = async (activeNotice: RemoteCompatibilityNotice) => {
-    const command = activeNotice.action?.command;
-    if (!command) return;
-    const copied = await writeClipboardText(command);
-    if (copied) {
-      setCopiedKey(activeNotice.dismissKey);
-      window.setTimeout(() => {
-        setCopiedKey((current) =>
-          current === activeNotice.dismissKey ? null : current,
-        );
-      }, 1600);
-    }
-  };
+  return (
+    <RemoteCompatibilityNoticeCard
+      notice={notice}
+      noticeCount={visibleNotices.length}
+      placement="floating"
+      onDismiss={() => dismissNotice(notice)}
+    />
+  );
+}
+
+interface RemoteCompatibilityNoticeCardProps {
+  notice: RemoteCompatibilityNotice;
+  noticeCount?: number;
+  placement: "floating" | "inline";
+  onDismiss?: () => void;
+  onRestore?: () => void;
+}
+
+export function RemoteCompatibilityNoticeCard({
+  notice,
+  noticeCount = 1,
+  placement,
+  onDismiss,
+  onRestore,
+}: RemoteCompatibilityNoticeCardProps) {
+  const action = notice.action;
+  const commandField = action?.command
+    ? {
+        command: action.command,
+        label: action.label,
+        lines: action.command.split("\n").length,
+      }
+    : null;
 
   return (
-    <div
-      className={`remote-compatibility-notice remote-compatibility-notice--${notice.severity}`}
+    <section
+      className={`remote-compatibility-notice remote-compatibility-notice--${placement} remote-compatibility-notice--${notice.severity}`}
       role={notice.severity === "security" ? "alert" : "status"}
       data-testid="remote-compatibility-notice"
     >
@@ -69,9 +88,9 @@ export function RemoteCompatibilityNotices({
               {notice.versionSummary}
             </span>
           )}
-          {visibleNotices.length > 1 && (
+          {noticeCount > 1 && (
             <span className="remote-compatibility-notice__count">
-              {visibleNotices.length} notices
+              {noticeCount} notices
             </span>
           )}
         </div>
@@ -81,22 +100,37 @@ export function RemoteCompatibilityNotices({
             {notice.guidance}
           </span>
         )}
-        {notice.action?.commandPreview && (
-          <code className="remote-compatibility-notice__command">
-            {notice.action.commandPreview}
-          </code>
+        {commandField && (
+          <div className="remote-compatibility-notice__command-field">
+            {commandField.lines > 1 ? (
+              <textarea
+                className="remote-compatibility-notice__command-input remote-compatibility-notice__command-input--multi"
+                value={commandField.command}
+                readOnly
+                rows={Math.min(commandField.lines, 4)}
+                aria-label={`${commandField.label} text`}
+                onFocus={(event) => event.currentTarget.select()}
+              />
+            ) : (
+              <input
+                className="remote-compatibility-notice__command-input"
+                value={commandField.command}
+                readOnly
+                aria-label={`${commandField.label} text`}
+                onFocus={(event) => event.currentTarget.select()}
+              />
+            )}
+            <CopyTextButton
+              text={commandField.command}
+              label={commandField.label}
+              copiedLabel="Copied"
+              className="remote-compatibility-notice__copy-button"
+              copiedClassName="is-copied"
+            />
+          </div>
         )}
       </div>
       <div className="remote-compatibility-notice__actions">
-        {notice.action?.command && (
-          <button
-            type="button"
-            className="remote-compatibility-notice__button remote-compatibility-notice__button-primary"
-            onClick={() => void handleAction(notice)}
-          >
-            {copiedKey === notice.dismissKey ? "Copied" : notice.action.label}
-          </button>
-        )}
         {notice.action?.href && (
           <a
             className="remote-compatibility-notice__button remote-compatibility-notice__button-primary"
@@ -105,14 +139,25 @@ export function RemoteCompatibilityNotices({
             {notice.action.label}
           </a>
         )}
-        <button
-          type="button"
-          className="remote-compatibility-notice__button"
-          onClick={() => dismissNotice(notice)}
-        >
-          Dismiss
-        </button>
+        {onRestore && (
+          <button
+            type="button"
+            className="remote-compatibility-notice__button remote-compatibility-notice__button-primary"
+            onClick={onRestore}
+          >
+            Show banner
+          </button>
+        )}
+        {onDismiss && (
+          <button
+            type="button"
+            className="remote-compatibility-notice__button"
+            onClick={onDismiss}
+          >
+            Dismiss
+          </button>
+        )}
       </div>
-    </div>
+    </section>
   );
 }

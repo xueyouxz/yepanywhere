@@ -84,7 +84,10 @@ describe("RemoteCompatibilityNotices", () => {
     expect(
       screen.getByText("Server v0.4.28; recommended v0.4.29"),
     ).toBeTruthy();
-    expect(screen.getByText("npm update -g yepanywhere")).toBeTruthy();
+    expect(
+      (screen.getByLabelText("Copy npm command text") as HTMLInputElement)
+        .value,
+    ).toBe("npm update -g yepanywhere");
 
     fireEvent.click(screen.getByRole("button", { name: "Copy npm command" }));
 
@@ -109,10 +112,9 @@ describe("RemoteCompatibilityNotices", () => {
     expect(screen.getByText("Update recommended")).toBeTruthy();
     expect(screen.getByText(/Source checkout detected/i)).toBeTruthy();
     expect(
-      screen.getByText(
-        "git fetch origin && git merge origin/main && pnpm install && pnpm build",
-      ),
-    ).toBeTruthy();
+      (screen.getByLabelText("Copy source steps text") as HTMLTextAreaElement)
+        .value,
+    ).toBe("git fetch origin\ngit merge origin/main\npnpm install\npnpm build");
 
     fireEvent.click(screen.getByRole("button", { name: "Copy source steps" }));
 

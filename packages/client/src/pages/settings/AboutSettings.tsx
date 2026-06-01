@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, fetchJSON, type VersionInfo } from "../../api/client";
+import { RemoteCompatibilityNoticeCard } from "../../components/RemoteCompatibilityNotices";
 import { useOptionalRemoteConnection } from "../../contexts/RemoteConnectionContext";
 import { useRemoteCompatibilityNoticeDismissals } from "../../hooks/useRemoteCompatibilityNoticeDismissals";
 import { useOnboarding } from "../../hooks/useOnboarding";
@@ -42,9 +43,12 @@ export function AboutSettings() {
   const {
     dismissedNotices: dismissedRemoteCompatibilityNotices,
     restoreNotices: restoreRemoteCompatibilityNotices,
+    visibleNotices: visibleRemoteCompatibilityNotices,
   } = useRemoteCompatibilityNoticeDismissals(remoteCompatibilityNotices);
-  const hasDismissedRemoteCompatibilityNotice =
-    dismissedRemoteCompatibilityNotices.length > 0;
+  const inlineRemoteCompatibilityNotice =
+    visibleRemoteCompatibilityNotices.length === 0
+      ? dismissedRemoteCompatibilityNotices[0]
+      : null;
 
   // Server restart state
   const [restarting, setRestarting] = useState(false);
@@ -122,93 +126,62 @@ export function AboutSettings() {
             )}
           </div>
         )}
-        <div className="settings-item">
-          <div className="settings-item-info">
-            <strong>{t("aboutVersionTitle")}</strong>
-            <p>
-              {t("aboutServerVersion")}{" "}
-              {versionInfo ? (
-                <>
-                  v{versionInfo.current}
-                  {versionInfo.updateAvailable && versionInfo.latest ? (
-                    <span className="settings-update-available">
-                      {" "}
-                      {t("aboutVersionAvailable", {
-                        version: versionInfo.latest,
-                      })}
-                    </span>
-                  ) : versionInfo.latest ? (
-                    <span className="settings-up-to-date">
-                      {" "}
-                      {t("aboutUpToDate")}
-                    </span>
-                  ) : null}
-                </>
-              ) : (
-                t("loginLoading")
+        <div className="settings-item settings-version-item">
+          <div className="settings-version-item__row">
+            <div className="settings-item-info">
+              <strong>{t("aboutVersionTitle")}</strong>
+              <p>
+                {t("aboutServerVersion")}{" "}
+                {versionInfo ? (
+                  <>
+                    v{versionInfo.current}
+                    {versionInfo.updateAvailable && versionInfo.latest ? (
+                      <span className="settings-update-available">
+                        {" "}
+                        {t("aboutVersionAvailable", {
+                          version: versionInfo.latest,
+                        })}
+                      </span>
+                    ) : versionInfo.latest ? (
+                      <span className="settings-up-to-date">
+                        {" "}
+                        {t("aboutUpToDate")}
+                      </span>
+                    ) : null}
+                  </>
+                ) : (
+                  t("loginLoading")
+                )}
+              </p>
+              <p>
+                {t("aboutClientVersion")} v{__APP_VERSION__}
+              </p>
+              {versionError && (
+                <p className="settings-warning">{t("aboutUnableRefresh")}</p>
               )}
-            </p>
-            <p>
-              {t("aboutClientVersion")} v{__APP_VERSION__}
-            </p>
-            {versionError && (
-              <p className="settings-warning">{t("aboutUnableRefresh")}</p>
-            )}
-            {remoteCompatibilityNotice && (
-              <div
-                className={`settings-warning-box settings-remote-compatibility-notice settings-remote-compatibility-notice--${remoteCompatibilityNotice.severity}`}
-              >
-                <strong>{remoteCompatibilityNotice.title}</strong>
-                {remoteCompatibilityNotice.versionSummary && (
-                  <p className="settings-remote-compatibility-notice__meta">
-                    {remoteCompatibilityNotice.versionSummary}
-                  </p>
-                )}
-                <p>{remoteCompatibilityNotice.body}</p>
-                {remoteCompatibilityNotice.guidance && (
-                  <p>{remoteCompatibilityNotice.guidance}</p>
-                )}
-                {remoteCompatibilityNotice.action?.commandPreview && (
-                  <p>
-                    <code className="settings-remote-compatibility-notice__command">
-                      {remoteCompatibilityNotice.action.commandPreview}
-                    </code>
-                  </p>
-                )}
-                {remoteCompatibilityNotices.length > 1 && (
-                  <p className="settings-remote-compatibility-notice__meta">
-                    {remoteCompatibilityNotices.length} compatibility notices
-                    apply. The banner shows them by priority.
-                  </p>
-                )}
-              </div>
-            )}
-            {versionInfo?.updateAvailable && !remoteCompatibilityNotice && (
-              <p className="settings-update-hint">{t("aboutUpdateHint")}</p>
-            )}
-          </div>
-          <div className="settings-item-actions">
-            {remoteCompatibilityNotice && (
+              {versionInfo?.updateAvailable && !remoteCompatibilityNotice && (
+                <p className="settings-update-hint">{t("aboutUpdateHint")}</p>
+              )}
+            </div>
+            <div className="settings-item-actions">
               <button
                 type="button"
                 className="settings-button"
-                onClick={handleShowRemoteCompatibilityBanner}
-                disabled={!hasDismissedRemoteCompatibilityNotice}
+                onClick={() => void handleCheckUpdates()}
+                disabled={versionLoading}
               >
-                {hasDismissedRemoteCompatibilityNotice
-                  ? "Show banner"
-                  : "Banner visible"}
+                {versionLoading ? t("aboutChecking") : t("aboutCheckUpdates")}
               </button>
-            )}
-            <button
-              type="button"
-              className="settings-button"
-              onClick={() => void handleCheckUpdates()}
-              disabled={versionLoading}
-            >
-              {versionLoading ? t("aboutChecking") : t("aboutCheckUpdates")}
-            </button>
+            </div>
           </div>
+          {inlineRemoteCompatibilityNotice && (
+            <RemoteCompatibilityNoticeCard
+              notice={inlineRemoteCompatibilityNotice}
+              noticeCount={remoteCompatibilityNotices.length}
+              placement="inline"
+              onRestore={handleShowRemoteCompatibilityBanner}
+            />
+          )}
         </div>
         <div className="settings-item">
           <div className="settings-item-info">
