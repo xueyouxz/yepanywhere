@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-01
+
+### Added
+- Public read-only session sharing with share controls, viewer counts, relay URL
+  handling, and origin-aware share gating.
+- Server-routed speech input backends, including browser-native, Deepgram,
+  local Whisper, and xAI STT options with per-session controls.
+- Grok Build ACP provider support, prompt suggestions, session recaps, heartbeat
+  turns, Codex `/btw` asides, and provider effort controls.
+- Attachment previews, image sizing hints, local media/file previews, generated
+  media rendering, and project-local attachment storage.
+- Rich transcript rendering for KaTeX math, ANSI SGR output, expandable tool
+  rows, transcript follow controls, reverse search, and markdown copy.
+- Session UI customization for toolbar buttons, tab title activity, content
+  width, sidebar sections, floating session actions, and provider/model labels.
+- Remote compatibility notices and Codex CLI update checks in provider settings.
+
+### Changed
+- Upgrade claude-agent-sdk to 0.3.158.
+- Refresh Codex protocol compatibility through the 0.135.0 CLI target.
+- Move the client session lifecycle, replay, and catch-up paths onto more
+  explicit stores to reduce stale sidebar and transcript state.
+- Reduce streaming, replay, upload, and long-session render churn.
+- Update the Biome toolchain and GitHub Actions workflows for current Node
+  runtimes.
+
+### Fixed
+- Stabilize Codex steering, interrupts, queued messages, reconnect merging,
+  session discovery, and long-session refresh behavior.
+- Improve mixed-provider session resolution, handoff, cloning, project scoping,
+  and provider catalog cache behavior.
+- Fix Windows path handling, temp path media links, spawn/reload behavior, and
+  local secret ACL checks.
+- Fix mobile and narrow-layout issues across the composer, session toolbar,
+  sidebar, filters, slash menu, and model selection UI.
+- Fix notification, lifecycle, webhook, settings save, and public share status
+  edge cases.
+
+### Security
+- Harden local file, local image, upload, static asset, and public share path
+  containment.
+- Add relay origin allowlist enforcement, safer relay admission checks, approval
+  audit logging, and unsafe Unicode visibility in approval prompts.
+
 ## [0.4.28] - 2026-04-16
 
 ### Changed
