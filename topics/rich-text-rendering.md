@@ -141,6 +141,10 @@ formulas as literal text, matching the experience in their editor.
 
 ## Known gaps / future work
 
+- Local resource links need a shared context-aware routing layer so rendered
+  `/api/local-file`, `/api/local-image`, and project-file links do not bypass
+  the secure relay path in hosted remote mode. See
+  [`docs/tactical/009-local-resource-link-routing.md`](../docs/tactical/009-local-resource-link-routing.md).
 - C/C++ UTF-8 escape sequences in string literals (e.g. `"\xc3\xa9"` → `é`) are
   not decoded. This would require detecting string literal boundaries and only
   applying UTF-8 decoding there, with the same Σ toggle UI.
