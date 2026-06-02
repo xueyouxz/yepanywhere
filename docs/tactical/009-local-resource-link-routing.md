@@ -1,6 +1,6 @@
 # Local Resource Link Routing
 
-Status: Proposed
+Status: In progress
 
 Progress:
 
@@ -8,6 +8,11 @@ Progress:
   the preferred organization direction.
 - [x] 2026-06-02: Added the shared local-resource parser for legacy hrefs and
   semantic `data-ya-resource` attributes, with focused shared tests.
+- [x] 2026-06-02: Added a generic delegated client handler for rendered local
+  resources in normal message/file preview surfaces. The handler preserves the
+  existing local-media modal branch and blocks raw local-file/project-raw API
+  navigation in remote mode with an explicit notice until the file viewer branch
+  is wired.
 
 ## Context
 
@@ -312,6 +317,21 @@ path semantics.
   folders" is visible as an authorization/configuration result rather than a
   broken hosted-client link.
 
+Current implementation state:
+
+- `packages/client/src/components/LocalMediaModal.tsx` now owns the generic
+  delegated handler and keeps `useLocalMediaClick()` as a compatibility wrapper.
+- Normal rendered message blocks, legacy text renderers, and Markdown previews
+  in `FileViewer` use that handler.
+- `local-media` references still open `LocalMediaModal`, including references
+  described only by `data-ya-resource` attributes.
+- In remote mode, recognized raw local-file and project-raw API links are
+  intercepted before the browser can navigate to the hosted client's `/api`
+  route. They currently show an explicit in-app notice.
+- The next implementation branch should replace that temporary notice for
+  `local-file` with a modal/fetch path that reaches the user's YA server
+  through the active connection and shows server-side approved-folder errors.
+
 ### 4. Server Route Cleanup
 
 - Extract shared local path helpers used by both local-file and local-image.
@@ -329,21 +349,24 @@ path semantics.
 - Public viewers should continue to see a clear notice rather than being sent
   to Remote Access login for local/authenticated-only file links.
 
-## First Slice
+## First Implementation Series
 
-The first implementation slice should be small:
+The first implementation series should stay small and staged:
 
-1. Add a shared parser for legacy local resource hrefs.
-2. Add a generic delegated click handler in normal rendered message/file
+1. [x] Add a shared parser for legacy local resource hrefs and semantic
+   attributes.
+2. [x] Add a generic delegated click handler in normal rendered message/file
    previews that blocks raw `/api/local-file` navigation in remote mode.
-3. For local media, route to the existing media modal unchanged.
-4. For local text-like files, open a simple modal populated through the current
-   connection.
-5. Add tests for direct mode, remote mode, and Windows `C:/...` local-file
-   references.
+3. [x] For local media, route to the existing media modal unchanged.
+4. [ ] For local text-like files, open a simple modal populated through the
+   current connection.
+5. [ ] Add server renderer tests that prove agent-authored Markdown links become
+   YA-authored semantic metadata while preserving fallback hrefs.
+6. [ ] Add route tests for direct mode, remote mode, and Windows `C:/...`
+   local-file serving.
 
 Leave broader file viewer download/open-new-tab cleanup for a follow-up unless
-the first slice naturally touches those buttons.
+the series naturally touches those buttons.
 
 The semantic attribute emission can follow immediately after this first slice:
 once the generic handler can parse both legacy hrefs and `data-ya-resource`

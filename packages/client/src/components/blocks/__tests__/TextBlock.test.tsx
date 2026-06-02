@@ -1,10 +1,21 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { I18nProvider } from "../../../i18n";
+import { type Connection, setGlobalConnection } from "../../../lib/connection";
 import { TextBlock } from "../TextBlock";
+
+function mockRemoteConnection(): Connection {
+  return {
+    mode: "secure",
+    fetch: vi.fn(),
+    fetchBlob: vi.fn(async () => new Blob(["png"], { type: "image/png" })),
+  } as unknown as Connection;
+}
 
 describe("TextBlock", () => {
   afterEach(() => {
     cleanup();
+    setGlobalConnection(null);
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -36,7 +47,10 @@ describe("TextBlock", () => {
 
   it("shows render toggle for completed server markdown", () => {
     const { container } = render(
-      <TextBlock text="- **win**" augmentHtml="<ul><li><strong>win</strong></li></ul>" />,
+      <TextBlock
+        text="- **win**"
+        augmentHtml="<ul><li><strong>win</strong></li></ul>"
+      />,
     );
 
     expect(container.querySelector(".text-block-toggle")).toBeTruthy();
@@ -68,5 +82,84 @@ describe("TextBlock", () => {
     expect(
       container.querySelector(".local-media-inline-image-button"),
     ).toBeTruthy();
+  });
+
+  it("opens semantic local media links through the existing modal", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(new Blob(["png"], { type: "image/png" }))),
+    );
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: vi.fn(() => "blob:preview"),
+      revokeObjectURL: vi.fn(),
+    });
+
+    render(
+      <I18nProvider>
+        <TextBlock
+          text="![trajectory](C:/tmp/trajectory.png)"
+          augmentHtml={
+            '<p><a href="/api/local-image?path=C%3A%2Ftmp%2Ftrajectory.png" data-ya-resource="local-media" data-ya-path="C:/tmp/trajectory.png" data-ya-media-type="image">trajectory</a></p>'
+          }
+        />
+      </I18nProvider>,
+    );
+
+    const clickAllowed = fireEvent.click(
+      screen.getByRole("link", { name: "trajectory" }),
+    );
+
+    expect(clickAllowed).toBe(false);
+    expect(screen.getByRole("dialog").textContent).toContain("trajectory.png");
+    expect(
+      await screen.findByRole("img", { name: "trajectory.png" }),
+    ).toBeTruthy();
+  });
+
+  it("allows direct local-file links to keep their fallback href behavior", () => {
+    render(
+      <TextBlock
+        text="[probe json](C:/tmp/probe.json)"
+        augmentHtml={
+          '<p><a href="/api/local-file?path=C%3A%2Ftmp%2Fprobe.json">probe json</a></p>'
+        }
+      />,
+    );
+
+    let defaultPreventedBeforeDocument = true;
+    document.addEventListener(
+      "click",
+      (event) => {
+        defaultPreventedBeforeDocument = event.defaultPrevented;
+        event.preventDefault();
+      },
+      { once: true },
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "probe json" }));
+
+    expect(defaultPreventedBeforeDocument).toBe(false);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("blocks raw local-file navigation while connected through remote access", () => {
+    setGlobalConnection(mockRemoteConnection());
+
+    render(
+      <TextBlock
+        text="[probe json](C:/tmp/probe.json)"
+        augmentHtml={
+          '<p><a href="/api/local-file?path=C%3A%2Ftmp%2Fprobe.json">probe json</a></p>'
+        }
+      />,
+    );
+
+    const clickAllowed = fireEvent.click(
+      screen.getByRole("link", { name: "probe json" }),
+    );
+
+    expect(clickAllowed).toBe(false);
+    expect(screen.getByRole("status").textContent).toContain("in-app viewer");
   });
 });

@@ -14,8 +14,9 @@ import { useI18n } from "../i18n";
 import { toBrowserAppHref } from "../lib/appHref";
 import {
   LocalMediaModal,
-  useLocalMediaClick,
+  LocalResourceNotice,
   useLocalMediaInlinePreviews,
+  useLocalResourceClick,
 } from "./LocalMediaModal";
 
 interface FileViewerProps {
@@ -127,14 +128,16 @@ export const FileViewer = memo(function FileViewer({
   const markdownPreviewRef = useRef<HTMLDivElement>(null);
   const {
     modal: localMediaModal,
-    handleClick: handleLocalMediaClick,
+    resourceNotice: localResourceNotice,
+    handleClick: handleLocalResourceClick,
     closeModal: closeLocalMediaModal,
-  } = useLocalMediaClick();
-  const handleLocalMediaKeyDown = useCallback(
+    clearResourceNotice: clearLocalResourceNotice,
+  } = useLocalResourceClick();
+  const handleLocalResourceKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
       if (event.key !== " ") return;
       const target = (event.target as HTMLElement).closest?.(
-        "a.local-media-link",
+        "a[href]",
       ) as HTMLAnchorElement | null;
       if (!target) return;
 
@@ -322,8 +325,8 @@ export const FileViewer = memo(function FileViewer({
               className="markdown-preview"
               role="region"
               aria-label={t("fileViewerPreview" as never)}
-              onClick={handleLocalMediaClick}
-              onKeyDown={handleLocalMediaKeyDown}
+              onClick={handleLocalResourceClick}
+              onKeyDown={handleLocalResourceKeyDown}
               ref={markdownPreviewRef}
             >
               <div
@@ -334,6 +337,12 @@ export const FileViewer = memo(function FileViewer({
                 }}
               />
             </div>
+            {localResourceNotice && (
+              <LocalResourceNotice
+                message={localResourceNotice}
+                onDismiss={clearLocalResourceNotice}
+              />
+            )}
           </>
         );
       }

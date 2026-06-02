@@ -1,13 +1,22 @@
-import { type RefObject, useEffect, useState } from "react";
+import {
+  type LocalResourceAttributes,
+  type LocalResourceMediaType,
+  type LocalResourceRef,
+  parseLocalResourceLink,
+} from "@yep-anywhere/shared";
+import { type MouseEvent, type RefObject, useEffect, useState } from "react";
 import { useFetchedImage } from "../hooks/useRemoteImage";
 import { getGlobalConnection, isRemoteMode } from "../lib/connection";
 import { Modal } from "./ui/Modal";
 
 interface LocalMediaModalProps {
   path: string;
-  mediaType: "image" | "video";
+  mediaType: LocalResourceMediaType;
   onClose: () => void;
 }
+
+const REMOTE_LOCAL_FILE_BLOCKED_MESSAGE =
+  "This local file link needs an in-app viewer before it can open through Remote Access.";
 
 function getFileName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
@@ -17,14 +26,23 @@ function localMediaApiPath(path: string): string {
   return `/api/local-image?path=${encodeURIComponent(path)}`;
 }
 
+function isLocalMediaType(
+  value: string | null,
+): value is LocalResourceMediaType {
+  return value === "image" || value === "video";
+}
+
 async function copyImageBlobToClipboard(blob: Blob): Promise<void> {
   const ClipboardItemCtor = globalThis.ClipboardItem;
   if (!navigator.clipboard?.write || !ClipboardItemCtor) {
     throw new Error("Image clipboard is not available");
   }
-  const clipboardBlob = blob.type === "image/png" ? blob : await toPngBlob(blob);
+  const clipboardBlob =
+    blob.type === "image/png" ? blob : await toPngBlob(blob);
   await navigator.clipboard.write([
-    new ClipboardItemCtor({ [clipboardBlob.type || "image/png"]: clipboardBlob }),
+    new ClipboardItemCtor({
+      [clipboardBlob.type || "image/png"]: clipboardBlob,
+    }),
   ]);
 }
 
@@ -81,7 +99,7 @@ async function fetchMediaBlob(apiPath: string): Promise<Blob> {
 function renderInlinePreview(
   target: HTMLElement,
   path: string,
-  mediaType: "image" | "video",
+  mediaType: LocalResourceMediaType,
   blob: Blob,
   objectUrl: string,
 ) {
@@ -166,40 +184,111 @@ export function LocalMediaModal({
   );
 }
 
-/**
- * Extract the original file path from a local-image API URL.
- */
-function extractPathFromApiUrl(href: string): string | null {
-  try {
-    // href is like "/api/local-image?path=%2Ftmp%2Ffoo.mp4"
-    const url = new URL(href, "http://localhost");
-    return url.searchParams.get("path");
-  } catch {
-    return null;
-  }
+export function LocalResourceNotice({
+  message,
+  onDismiss,
+}: {
+  message: string;
+  onDismiss?: () => void;
+}) {
+  return (
+    <div className="local-resource-notice" role="status">
+      <span>{message}</span>
+      {onDismiss ? (
+        <button
+          type="button"
+          className="local-resource-notice-dismiss"
+          onClick={onDismiss}
+          aria-label="Dismiss local resource notice"
+        >
+          Dismiss
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 /**
- * Hook that provides a click handler for server-rendered HTML containing
- * .local-media-link elements. Returns modal state and the click handler.
+ * Extract YA-owned semantic resource attributes from a rendered link.
+ *
+ * These attributes are routing hints. Authorization remains with the route
+ * that ultimately serves the resource.
  */
-export function useLocalMediaClick() {
+function getLocalResourceAttributes(
+  target: HTMLAnchorElement,
+): LocalResourceAttributes {
+  return {
+    "data-ya-resource": target.getAttribute("data-ya-resource"),
+    "data-ya-path": target.getAttribute("data-ya-path"),
+    "data-ya-project-id": target.getAttribute("data-ya-project-id"),
+    "data-ya-line": target.getAttribute("data-ya-line"),
+    "data-ya-line-end": target.getAttribute("data-ya-line-end"),
+    "data-ya-column": target.getAttribute("data-ya-column"),
+    "data-ya-render-markdown": target.getAttribute("data-ya-render-markdown"),
+    "data-ya-download": target.getAttribute("data-ya-download"),
+    "data-ya-media-type": target.getAttribute("data-ya-media-type"),
+  };
+}
+
+function getClickedAnchor(
+  target: EventTarget | null,
+): HTMLAnchorElement | null {
+  if (!(target instanceof Element)) {
+    return null;
+  }
+  return target.closest("a[href]");
+}
+
+function getCurrentHref(): string | undefined {
+  return typeof window === "undefined" ? undefined : window.location.href;
+}
+
+function shouldBlockRemoteRawNavigation(resource: LocalResourceRef): boolean {
+  return resource.kind === "local-file" || resource.kind === "project-raw-file";
+}
+
+function getLocalMediaType(
+  resource: LocalResourceRef,
+  target: HTMLAnchorElement,
+): LocalResourceMediaType {
+  const mediaTypeAttribute = target.getAttribute("data-media-type");
+  if (resource.mediaType) {
+    return resource.mediaType;
+  }
+  if (isLocalMediaType(mediaTypeAttribute)) {
+    return mediaTypeAttribute;
+  }
+  return "image";
+}
+
+/**
+ * Hook that provides a delegated click handler for rendered HTML containing
+ * local-resource links. Local media opens the existing modal. Raw local-file
+ * API links are blocked in remote mode until the file viewer branch is wired.
+ */
+export function useLocalResourceClick() {
   const [modal, setModal] = useState<{
     path: string;
-    mediaType: "image" | "video";
+    mediaType: LocalResourceMediaType;
   } | null>(null);
+  const [resourceNotice, setResourceNotice] = useState<string | null>(null);
 
-  const handleClick = (e: React.MouseEvent) => {
-    const toggle = (e.target as HTMLElement).closest?.(
+  const handleClick = (e: MouseEvent) => {
+    if (!(e.target instanceof Element)) {
+      return;
+    }
+
+    const toggle = e.target.closest(
       "button.local-media-inline-toggle",
     ) as HTMLButtonElement | null;
     if (toggle) {
       e.preventDefault();
       e.stopPropagation();
 
-      const mediaType =
-        (toggle.getAttribute("data-media-type") as "image" | "video") ??
-        "image";
+      const mediaTypeAttribute = toggle.getAttribute("data-media-type");
+      const mediaType = isLocalMediaType(mediaTypeAttribute)
+        ? mediaTypeAttribute
+        : "image";
       const expanded = toggle.getAttribute("data-expanded") !== "false";
       const nextExpanded = !expanded;
       const preview =
@@ -221,28 +310,54 @@ export function useLocalMediaClick() {
       return;
     }
 
-    const target = (e.target as HTMLElement).closest?.(
-      "a.local-media-link",
-    ) as HTMLAnchorElement | null;
+    const target = getClickedAnchor(e.target);
     if (!target) return;
 
     const href = target.getAttribute("href");
-    if (!href) return;
+    const resource = parseLocalResourceLink(
+      {
+        attributes: getLocalResourceAttributes(target),
+        href,
+      },
+      { currentHref: getCurrentHref() },
+    );
+    if (!resource) return;
 
-    const path = extractPathFromApiUrl(href);
-    if (!path) return;
+    if (resource.kind === "local-media") {
+      e.preventDefault();
+      e.stopPropagation();
+      setResourceNotice(null);
+      setModal({
+        path: resource.path,
+        mediaType: getLocalMediaType(resource, target),
+      });
+      return;
+    }
 
-    e.preventDefault();
-    e.stopPropagation();
-
-    const mediaType =
-      (target.getAttribute("data-media-type") as "image" | "video") ?? "image";
-    setModal({ path, mediaType });
+    if (isRemoteMode() && shouldBlockRemoteRawNavigation(resource)) {
+      e.preventDefault();
+      e.stopPropagation();
+      setResourceNotice(REMOTE_LOCAL_FILE_BLOCKED_MESSAGE);
+    }
   };
 
   const closeModal = () => setModal(null);
+  const clearResourceNotice = () => setResourceNotice(null);
 
-  return { modal, handleClick, closeModal };
+  return {
+    modal,
+    resourceNotice,
+    handleClick,
+    closeModal,
+    clearResourceNotice,
+  };
+}
+
+/**
+ * Compatibility alias for existing callers during the local-resource migration.
+ */
+export function useLocalMediaClick() {
+  return useLocalResourceClick();
 }
 
 export function useLocalMediaInlinePreviews(

@@ -5,8 +5,9 @@ import { useStreamingMarkdown } from "../../hooks/useStreamingMarkdown";
 import { registerMarkdownCopySource } from "../../lib/markdownSelectionCopy";
 import {
   LocalMediaModal,
-  useLocalMediaClick,
+  LocalResourceNotice,
   useLocalMediaInlinePreviews,
+  useLocalResourceClick,
 } from "../LocalMediaModal";
 import { renderFixedFontMath } from "../ui/FixedFontMathToggle";
 import { RenderModeGlyph } from "../ui/RenderModeGlyph";
@@ -106,7 +107,13 @@ export const TextBlock = memo(function TextBlock({
     return registerMarkdownCopySource(element, text);
   }, [text]);
 
-  const { modal, handleClick, closeModal } = useLocalMediaClick();
+  const {
+    modal,
+    resourceNotice,
+    handleClick,
+    closeModal,
+    clearResourceNotice,
+  } = useLocalResourceClick();
   useLocalMediaInlinePreviews(copySourceRef);
 
   const showStreamingContent = isStreaming && useStreamingContent;
@@ -198,6 +205,13 @@ export const TextBlock = memo(function TextBlock({
             </pre>
           ))}
       </div>
+
+      {resourceNotice && (
+        <LocalResourceNotice
+          message={resourceNotice}
+          onDismiss={clearResourceNotice}
+        />
+      )}
 
       {modal && (
         <LocalMediaModal
