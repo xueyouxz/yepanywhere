@@ -4,20 +4,50 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import { api } from "../api/client";
 import { useI18n } from "../i18n";
 import {
+  fetchMediaBlob,
+  type LocalMediaSource,
   LocalMediaModal,
   useLocalMediaClick,
   useLocalMediaInlinePreviews,
 } from "./LocalMediaModal";
+import { getEmbeddedFileMediaBlob } from "../lib/embeddedFileMedia";
+
+export interface FileViewerSource {
+  loadFile: (
+    projectId: string,
+    filePath: string,
+    highlight: boolean,
+  ) => Promise<FileContentResponse>;
+  getRawFileUrl?: (
+    projectId: string,
+    filePath: string,
+    download: boolean,
+  ) => string | null;
+  fetchRawFileBlob?: (
+    fileData: FileContentResponse,
+    filePath: string,
+    download: boolean,
+  ) => Promise<Blob>;
+  createMediaSource?: (
+    fileData: FileContentResponse | null,
+  ) => LocalMediaSource | undefined;
+  transformRenderedMarkdownHtml?: (
+    html: string,
+    fileData: FileContentResponse,
+  ) => string;
+}
 
 interface FileViewerProps {
   projectId: string;
   filePath: string;
+  source?: FileViewerSource;
   onClose?: () => void;
   /** If true, renders as standalone page layout instead of modal content */
   standalone?: boolean;
@@ -99,12 +129,40 @@ function getFileName(filePath: string): string {
   return filePath.split("/").pop() || filePath;
 }
 
+const DEFAULT_FILE_VIEWER_SOURCE: FileViewerSource = {
+  loadFile: (projectId, filePath, highlight) =>
+    api.getFile(projectId, filePath, highlight),
+  getRawFileUrl: (projectId, filePath, download) =>
+    api.getFileRawUrl(projectId, filePath, download),
+  createMediaSource: (fileData) =>
+    fileData
+      ? {
+          fetchBlob: async (_path, apiPath) => {
+            const embedded = getEmbeddedFileMediaBlob(fileData, _path);
+            return embedded ?? fetchMediaBlob(apiPath);
+          },
+        }
+      : undefined,
+};
+
+function downloadBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 /**
  * FileViewer component - displays file content with appropriate formatting.
  */
 export const FileViewer = memo(function FileViewer({
   projectId,
   filePath,
+  source = DEFAULT_FILE_VIEWER_SOURCE,
   onClose,
   standalone = false,
   lineNumber,
@@ -117,6 +175,7 @@ export const FileViewer = memo(function FileViewer({
   const [copied, setCopied] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [imageObjectUrl, setImageObjectUrl] = useState<string | null>(null);
   const [highlightedLineRef, setHighlightedLineRef] =
     useState<HTMLElement | null>(null);
   const markdownPreviewRef = useRef<HTMLDivElement>(null);
@@ -138,9 +197,25 @@ export const FileViewer = memo(function FileViewer({
     },
     [],
   );
+  const mediaSource = useMemo(
+    () => source.createMediaSource?.(fileData),
+    [fileData, source],
+  );
+  const renderedMarkdownHtml = useMemo(() => {
+    if (!fileData?.renderedMarkdownHtml) {
+      return null;
+    }
+    return source.transformRenderedMarkdownHtml
+      ? source.transformRenderedMarkdownHtml(
+          fileData.renderedMarkdownHtml,
+          fileData,
+        )
+      : fileData.renderedMarkdownHtml;
+  }, [fileData, source]);
   useLocalMediaInlinePreviews(
     markdownPreviewRef,
-    showPreview ? fileData?.renderedMarkdownHtml : null,
+    showPreview ? renderedMarkdownHtml : null,
+    mediaSource,
   );
 
   useEffect(() => {
@@ -149,8 +224,8 @@ export const FileViewer = memo(function FileViewer({
     setError(null);
 
     // Request highlighting for code files
-    api
-      .getFile(projectId, filePath, true)
+    source
+      .loadFile(projectId, filePath, true)
       .then((data) => {
         if (!cancelled) {
           setFileData(data);
@@ -172,7 +247,40 @@ export const FileViewer = memo(function FileViewer({
     return () => {
       cancelled = true;
     };
-  }, [projectId, filePath, lineNumber, t]);
+  }, [projectId, filePath, lineNumber, source, t]);
+
+  useEffect(() => {
+    if (!fileData || !isImageFile(fileData.metadata.mimeType)) {
+      setImageObjectUrl(null);
+      return;
+    }
+    if (!source.fetchRawFileBlob) {
+      setImageObjectUrl(null);
+      return;
+    }
+
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setImageObjectUrl(null);
+    void source
+      .fetchRawFileBlob(fileData, filePath, false)
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setImageObjectUrl(objectUrl);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : String(err));
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [fileData, filePath, source]);
 
   // Handle Escape key to exit fullscreen
   useEffect(() => {
@@ -210,10 +318,26 @@ export const FileViewer = memo(function FileViewer({
     }
   }, [fileData?.content]);
 
+  const fileName = getFileName(filePath);
+  const language = getLanguageFromPath(filePath);
+
   const handleDownload = useCallback(() => {
-    const url = api.getFileRawUrl(projectId, filePath, true);
-    window.open(url, "_blank");
-  }, [projectId, filePath]);
+    if (!fileData) return;
+    if (source.fetchRawFileBlob) {
+      void source
+        .fetchRawFileBlob(fileData, filePath, true)
+        .then((blob) => downloadBlob(blob, fileName))
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : String(err));
+        });
+      return;
+    }
+    const url =
+      source.getRawFileUrl?.(projectId, filePath, true) ?? fileData.rawUrl;
+    if (url) {
+      window.open(url, "_blank");
+    }
+  }, [fileData, fileName, filePath, projectId, source]);
 
   const handleOpenInNewTab = useCallback(() => {
     const searchParams = new URLSearchParams({ path: filePath });
@@ -226,9 +350,6 @@ export const FileViewer = memo(function FileViewer({
     const url = `/projects/${projectId}/file?${searchParams}`;
     window.open(url, "_blank");
   }, [projectId, filePath, lineNumber, lineEnd]);
-
-  const fileName = getFileName(filePath);
-  const language = getLanguageFromPath(filePath);
 
   // Render loading state
   if (loading) {
@@ -254,14 +375,24 @@ export const FileViewer = memo(function FileViewer({
 
   const { metadata, content, rawUrl } = fileData;
   const isImage = isImageFile(metadata.mimeType);
+  const rawFileUrl =
+    source.getRawFileUrl?.(projectId, filePath, false) ?? rawUrl;
+  const canDownload = Boolean(source.fetchRawFileBlob || rawFileUrl);
 
   // Render content based on file type
   const renderContent = () => {
     // Image files
     if (isImage) {
+      const imageUrl = source.fetchRawFileBlob ? imageObjectUrl : rawFileUrl;
       return (
         <div className="file-viewer-image">
-          <img src={rawUrl} alt={fileName} />
+          {imageUrl ? (
+            <img src={imageUrl} alt={fileName} />
+          ) : (
+            <div className="file-viewer-loading">
+              {t("fileViewerLoading" as never, { name: fileName })}
+            </div>
+          )}
         </div>
       );
     }
@@ -269,7 +400,7 @@ export const FileViewer = memo(function FileViewer({
     // Text files
     if (content !== undefined) {
       const isMarkdown = isMarkdownFile(filePath);
-      const hasMarkdownPreview = isMarkdown && !!fileData.renderedMarkdownHtml;
+      const hasMarkdownPreview = isMarkdown && !!renderedMarkdownHtml;
 
       // Toggle button for markdown files
       const toggleButton = hasMarkdownPreview && (
@@ -292,7 +423,7 @@ export const FileViewer = memo(function FileViewer({
       );
 
       // Show rendered markdown preview
-      if (showPreview && fileData.renderedMarkdownHtml) {
+      if (showPreview && renderedMarkdownHtml) {
         return (
           <>
             {toggleButton}
@@ -308,7 +439,7 @@ export const FileViewer = memo(function FileViewer({
                 className="markdown-rendered"
                 // biome-ignore lint/security/noDangerouslySetInnerHtml: server-rendered HTML
                 dangerouslySetInnerHTML={{
-                  __html: fileData.renderedMarkdownHtml,
+                  __html: renderedMarkdownHtml,
                 }}
               />
             </div>
@@ -409,13 +540,15 @@ export const FileViewer = memo(function FileViewer({
           <strong>{t("fileViewerSize" as never)}</strong>{" "}
           {formatFileSize(metadata.size)}
         </p>
-        <button
-          type="button"
-          className="file-viewer-download-btn"
-          onClick={handleDownload}
-        >
-          {t("fileViewerDownloadFile" as never)}
-        </button>
+        {canDownload && (
+          <button
+            type="button"
+            className="file-viewer-download-btn"
+            onClick={handleDownload}
+          >
+            {t("fileViewerDownloadFile" as never)}
+          </button>
+        )}
       </div>
     );
   };
@@ -461,14 +594,16 @@ export const FileViewer = memo(function FileViewer({
             <ExternalLinkIcon />
           </button>
         )}
-        <button
-          type="button"
-          className="file-viewer-action"
-          onClick={handleDownload}
-          title={t("fileViewerDownload" as never)}
-        >
-          <DownloadIcon />
-        </button>
+        {canDownload && (
+          <button
+            type="button"
+            className="file-viewer-action"
+            onClick={handleDownload}
+            title={t("fileViewerDownload" as never)}
+          >
+            <DownloadIcon />
+          </button>
+        )}
         <button
           type="button"
           className="file-viewer-action"
@@ -511,6 +646,7 @@ export const FileViewer = memo(function FileViewer({
         <LocalMediaModal
           path={localMediaModal.path}
           mediaType={localMediaModal.mediaType}
+          mediaSource={mediaSource}
           onClose={closeLocalMediaModal}
         />
       ) : null}

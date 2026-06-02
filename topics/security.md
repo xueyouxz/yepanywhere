@@ -63,6 +63,18 @@ with an explicit notice is preferable to falling through to Remote Access login,
 which incorrectly suggests the public viewer should authenticate to read a
 secret-link snapshot.
 
+## Public Share Relay Privacy
+
+Normal authenticated Remote Access is relay-mediated but end-to-end encrypted.
+Public shares are different: current public-share relay requests carry the
+share URL secret, request path, and response contents as plaintext relay
+payloads. The relay transport still uses WSS to protect the browser-to-relay hop
+from ordinary network observers, and the current relay forwards without logging
+share payloads, but a relay operator who inspects frames can see public-share
+contents. Public shares should therefore be described as unguessable
+bearer-link read-only views, not as relay-operator-private views. See
+[`topics/relay-origin-and-share-gating.md`](relay-origin-and-share-gating.md).
+
 ## Related Notes
 
 - [`docs/tactical/000-relay-origin-and-share-gating.md`](../docs/tactical/000-relay-origin-and-share-gating.md)

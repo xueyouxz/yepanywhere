@@ -114,6 +114,13 @@ describe("Files API", () => {
       expect(json.renderedMarkdownHtml).toContain(
         `data-media-path="${diagramPath}"`,
       );
+      expect(json.embeddedMedia?.[diagramPath]).toEqual({
+        data: Buffer.from("<svg></svg>").toString("base64"),
+        mimeType: "image/svg+xml",
+      });
+      expect(json.embeddedMedia?.["docs/assets/diagram.svg"]).toEqual(
+        json.embeddedMedia?.[diagramPath],
+      );
     });
 
     it("returns file metadata and content for TypeScript file", async () => {

@@ -1,11 +1,20 @@
 import { type RefObject, useEffect, useState } from "react";
-import { useFetchedImage } from "../hooks/useRemoteImage";
 import { getGlobalConnection, isRemoteMode } from "../lib/connection";
 import { Modal } from "./ui/Modal";
+
+export interface LocalMediaSource {
+  buildApiPath?: (path: string) => string | null;
+  fetchBlob?: (
+    path: string,
+    apiPath: string,
+    purpose: "inline" | "modal",
+  ) => Promise<Blob>;
+}
 
 interface LocalMediaModalProps {
   path: string;
   mediaType: "image" | "video";
+  mediaSource?: LocalMediaSource;
   onClose: () => void;
 }
 
@@ -62,7 +71,7 @@ async function toPngBlob(blob: Blob): Promise<Blob> {
   }
 }
 
-async function fetchMediaBlob(apiPath: string): Promise<Blob> {
+export async function fetchMediaBlob(apiPath: string): Promise<Blob> {
   if (isRemoteMode()) {
     const connection = getGlobalConnection();
     if (!connection) {
@@ -76,6 +85,27 @@ async function fetchMediaBlob(apiPath: string): Promise<Blob> {
     throw new Error(`${response.status} ${response.statusText}`);
   }
   return response.blob();
+}
+
+function buildMediaApiPath(
+  path: string,
+  mediaSource?: LocalMediaSource,
+): string | null {
+  return mediaSource?.buildApiPath?.(path) ?? localMediaApiPath(path);
+}
+
+async function fetchMediaBlobWithSource(
+  path: string,
+  mediaSource: LocalMediaSource | undefined,
+  purpose: "inline" | "modal",
+): Promise<Blob> {
+  const apiPath = buildMediaApiPath(path, mediaSource);
+  if (!apiPath) {
+    throw new Error("Media is outside this view");
+  }
+  return mediaSource?.fetchBlob
+    ? mediaSource.fetchBlob(path, apiPath, purpose)
+    : fetchMediaBlob(apiPath);
 }
 
 function renderInlinePreview(
@@ -143,11 +173,41 @@ function renderInlinePreview(
 export function LocalMediaModal({
   path,
   mediaType,
+  mediaSource,
   onClose,
 }: LocalMediaModalProps) {
-  const apiPath = localMediaApiPath(path);
-  const { url, loading, error } = useFetchedImage(apiPath);
+  const [url, setUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const fileName = getFileName(path);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setLoading(true);
+    setError(null);
+    setUrl(null);
+
+    void fetchMediaBlobWithSource(path, mediaSource, "modal")
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setUrl(objectUrl);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Failed to load media");
+        setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [mediaSource, path]);
 
   return (
     <Modal title={fileName} onClose={onClose}>
@@ -177,6 +237,20 @@ function extractPathFromApiUrl(href: string): string | null {
   } catch {
     return null;
   }
+}
+
+function extractPathFromLocalMediaLink(
+  target: HTMLAnchorElement,
+): string | null {
+  const groupedPath = target
+    .closest(".local-media-link-group")
+    ?.querySelector<HTMLElement>("[data-media-path]")
+    ?.getAttribute("data-media-path");
+  return (
+    target.getAttribute("data-media-path") ??
+    groupedPath ??
+    extractPathFromApiUrl(target.getAttribute("href") ?? "")
+  );
 }
 
 /**
@@ -229,7 +303,7 @@ export function useLocalMediaClick() {
     const href = target.getAttribute("href");
     if (!href) return;
 
-    const path = extractPathFromApiUrl(href);
+    const path = extractPathFromLocalMediaLink(target);
     if (!path) return;
 
     e.preventDefault();
@@ -248,6 +322,7 @@ export function useLocalMediaClick() {
 export function useLocalMediaInlinePreviews(
   rootRef: RefObject<HTMLElement | null>,
   refreshKey?: unknown,
+  mediaSource?: LocalMediaSource,
 ) {
   useEffect(() => {
     const root = rootRef.current;
@@ -273,7 +348,7 @@ export function useLocalMediaInlinePreviews(
         loading.textContent = "Loading...";
         element.append(loading);
 
-        fetchMediaBlob(localMediaApiPath(path))
+        fetchMediaBlobWithSource(path, mediaSource, "inline")
           .then((blob) => {
             const objectUrl = URL.createObjectURL(blob);
             objectUrls.add(objectUrl);
@@ -298,5 +373,5 @@ export function useLocalMediaInlinePreviews(
         URL.revokeObjectURL(url);
       }
     };
-  }, [rootRef, refreshKey]);
+  }, [rootRef, refreshKey, mediaSource]);
 }

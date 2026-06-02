@@ -372,6 +372,12 @@ export interface FileContentResponse {
   content?: string;
   /** URL to fetch raw file content */
   rawUrl: string;
+  /**
+   * Optional media blobs embedded with this response, keyed by renderer path
+   * and/or project-relative path. Markdown viewers use this to hydrate rendered
+   * images without opening a separate fetch/relay connection for each image.
+   */
+  embeddedMedia?: Record<string, { data: string; mimeType: string }>;
   /** Syntax-highlighted HTML (when highlight=true and language is supported) */
   highlightedHtml?: string;
   /** Language used for highlighting */

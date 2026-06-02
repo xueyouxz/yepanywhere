@@ -14,6 +14,9 @@ A mobile-first supervisor for Claude Code agents. Like the VS Code Claude extens
 
 **Architecture:** Hono server manages Claude SDK processes. React client connects via WebSocket for real-time streaming. Sessions persist to jsonl files (handled by SDK).
 
+For UI rendering-boundary and shared-view decisions, see
+[`topics/ui-architecture.md`](topics/ui-architecture.md).
+
 **Remote access:** Two connection modes:
 - **Direct (Tailscale/LAN)** — Client connects to server WebSocket directly
 - **Relay** — Client connects through a relay server (`packages/relay/`). SRP (Secure Remote Password) authenticates without exposing the password to the relay. All messages are end-to-end encrypted with NaCl (XSalsa20-Poly1305) so the relay sees only opaque ciphertext.

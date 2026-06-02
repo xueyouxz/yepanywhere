@@ -34,8 +34,9 @@ These run unconditionally and are not user-configurable:
   standalone file viewer on browser link gestures, and `.md` / `.markdown`
   local-file links can request a content-only rendered document. That document
   includes a raw link and expands local image links directly. Public-share file
-  previews hydrate those local image references through the share-scoped relay
-  route rather than navigating to authenticated local file APIs.
+  previews hydrate those local image references through embedded bounded media
+  blobs when present, falling back to the share-scoped relay route rather than
+  navigating to authenticated local file APIs.
 - **Line numbers** — shown in the plain-text fallback path (no Shiki highlight).
 
 ## Toggleable transforms (sigma Σ button)

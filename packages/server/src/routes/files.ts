@@ -26,6 +26,8 @@ export interface FilesDeps {
 
 /** Maximum file size to include content inline (1MB) */
 const MAX_INLINE_SIZE = 1024 * 1024;
+const MAX_EMBEDDED_MARKDOWN_MEDIA_BYTES = 8 * 1024 * 1024;
+const MAX_EMBEDDED_MARKDOWN_MEDIA_FILE_BYTES = 2 * 1024 * 1024;
 
 /** MIME type mappings by extension */
 const MIME_TYPES: Record<string, string> = {
@@ -247,6 +249,101 @@ function getMimeType(filePath: string): string {
   return MIME_TYPES[ext] || "application/octet-stream";
 }
 
+function decodeHtmlAttribute(value: string): string {
+  return value
+    .replaceAll("&amp;", "&")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&#039;", "'")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">");
+}
+
+function collectRenderedMarkdownMediaPaths(html: string): string[] {
+  const paths = new Set<string>();
+  const dataMediaPathPattern = /\bdata-media-path\s*=\s*(["'])(.*?)\1/gi;
+  const localImageSrcPattern = /\bsrc\s*=\s*(["'])(.*?)\1/gi;
+
+  for (const match of html.matchAll(dataMediaPathPattern)) {
+    const rawPath = match[2];
+    if (rawPath) {
+      paths.add(decodeHtmlAttribute(rawPath));
+    }
+  }
+
+  for (const match of html.matchAll(localImageSrcPattern)) {
+    const rawSrc = match[2];
+    if (!rawSrc) {
+      continue;
+    }
+    try {
+      const url = new URL(decodeHtmlAttribute(rawSrc), "http://local");
+      if (
+        url.origin === "http://local" &&
+        url.pathname === "/api/local-image"
+      ) {
+        const rawPath = url.searchParams.get("path");
+        if (rawPath) {
+          paths.add(rawPath);
+        }
+      }
+    } catch {
+      // Ignore malformed generated HTML references.
+    }
+  }
+
+  return Array.from(paths);
+}
+
+async function collectEmbeddedMarkdownMedia(
+  html: string,
+  projectRoot: string,
+): Promise<FileContentResponse["embeddedMedia"] | undefined> {
+  const mediaPaths = collectRenderedMarkdownMediaPaths(html);
+  if (mediaPaths.length === 0) {
+    return undefined;
+  }
+
+  const realRoot = await realpath(projectRoot).catch(() => null);
+  if (!realRoot) {
+    return undefined;
+  }
+
+  let totalBytes = 0;
+  const embeddedMedia: NonNullable<FileContentResponse["embeddedMedia"]> = {};
+  for (const rawPath of mediaPaths) {
+    if (!rawPath || !isAbsolute(rawPath)) {
+      continue;
+    }
+    const realPath = await realpath(rawPath).catch(() => null);
+    if (!realPath || !isPathInsideDirectory(realPath, realRoot)) {
+      continue;
+    }
+
+    const stats = await stat(realPath).catch(() => null);
+    if (
+      !stats?.isFile() ||
+      stats.size > MAX_EMBEDDED_MARKDOWN_MEDIA_FILE_BYTES ||
+      totalBytes + stats.size > MAX_EMBEDDED_MARKDOWN_MEDIA_BYTES
+    ) {
+      continue;
+    }
+
+    const mimeType = getMimeType(realPath);
+    if (!mimeType.startsWith("image/")) {
+      continue;
+    }
+
+    const data = (await readFile(realPath)).toString("base64");
+    const value = { data, mimeType };
+    totalBytes += stats.size;
+    embeddedMedia[rawPath] = value;
+    embeddedMedia[realPath] = value;
+    embeddedMedia[relative(realRoot, realPath).replaceAll("\\", "/")] = value;
+  }
+
+  return Object.keys(embeddedMedia).length > 0 ? embeddedMedia : undefined;
+}
+
 /** Dotfiles (files starting with .) that are text files */
 const TEXT_DOTFILES = new Set([
   ".env",
@@ -429,9 +526,13 @@ export function createFilesRoutes(deps: FilesDeps): Hono {
           const ext = extname(relativePath).toLowerCase();
           if (ext === ".md" || ext === ".markdown") {
             try {
-              response.renderedMarkdownHtml = await renderMarkdownToHtml(
-                content,
-                { localFileBasePath: dirname(filePath) },
+              const renderedMarkdownHtml = await renderMarkdownToHtml(content, {
+                localFileBasePath: dirname(filePath),
+              });
+              response.renderedMarkdownHtml = renderedMarkdownHtml;
+              response.embeddedMedia = await collectEmbeddedMarkdownMedia(
+                renderedMarkdownHtml,
+                projectRoot,
               );
             } catch {
               // Ignore markdown rendering errors
