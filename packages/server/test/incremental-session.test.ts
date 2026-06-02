@@ -302,6 +302,93 @@ describe("Incremental Session Loading", () => {
       expect(input?._diffHtml).toContain('class="line line-inserted"');
     });
 
+    it("keeps Edit previews available on public share session reads", async () => {
+      const userId = randomUUID();
+      const assistantId = randomUUID();
+      const resultId = randomUUID();
+
+      await writeFile(
+        join(projectDir, "session.jsonl"),
+        `${[
+          JSON.stringify({
+            type: "user",
+            uuid: userId,
+            parentUuid: null,
+            cwd: projectPath,
+            message: { content: "Apply patch" },
+          }),
+          JSON.stringify({
+            type: "assistant",
+            uuid: assistantId,
+            parentUuid: userId,
+            message: {
+              role: "assistant",
+              content: [
+                {
+                  type: "tool_use",
+                  id: "tool-apply-patch-public",
+                  name: "Edit",
+                  input: [
+                    "*** Begin Patch",
+                    "*** Update File: src/example.ts",
+                    "@@",
+                    "-const x = 1;",
+                    "+const x = 2;",
+                    "*** End Patch",
+                    "",
+                  ].join("\n"),
+                },
+              ],
+            },
+          }),
+          JSON.stringify({
+            type: "user",
+            uuid: resultId,
+            parentUuid: assistantId,
+            message: {
+              role: "user",
+              content: [
+                {
+                  type: "tool_result",
+                  tool_use_id: "tool-apply-patch-public",
+                  content: "ok",
+                },
+              ],
+            },
+            toolUseResult: { ok: true },
+          }),
+        ].join("\n")}\n`,
+      );
+
+      const { app } = createApp({ sdk: mockSdk, projectsDir: testDir });
+      const res = await app.request(
+        `/api/projects/${projectId}/sessions/session?publicShare=1`,
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      const assistantMessage = json.messages.find(
+        (message: Record<string, unknown>) => message.type === "assistant",
+      ) as Record<string, unknown> | undefined;
+      const content = assistantMessage?.message as
+        | { content?: Array<Record<string, unknown>> }
+        | undefined;
+      const toolUse = content?.content?.find(
+        (block) => block.type === "tool_use" && block.name === "Edit",
+      );
+      const input = toolUse?.input as
+        | {
+            _rawPatch?: string;
+            _structuredPatch?: unknown[];
+            _diffHtml?: string;
+          }
+        | undefined;
+
+      expect(input?._rawPatch).toContain("*** Begin Patch");
+      expect(input?._structuredPatch?.length).toBeGreaterThan(0);
+      expect(input?._diffHtml).toContain('class="line line-inserted"');
+    });
+
     it("keeps raw patch fallback when parsing malformed patch text", async () => {
       const userId = randomUUID();
       const assistantId = randomUUID();

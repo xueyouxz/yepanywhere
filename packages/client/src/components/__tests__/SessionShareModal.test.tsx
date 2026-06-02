@@ -147,11 +147,12 @@ describe("SessionShareModal", () => {
     });
   });
 
-  it("falls back without surfacing raw focus errors", async () => {
+  it("shows manual copy guidance without legacy copy fallbacks", async () => {
     writeText.mockRejectedValueOnce(new Error("Document is not focused"));
+    const execCommand = vi.fn();
     Object.defineProperty(document, "execCommand", {
       configurable: true,
-      value: vi.fn(() => false),
+      value: execCommand,
     });
 
     render(
@@ -170,8 +171,13 @@ describe("SessionShareModal", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("Read-only link copied to clipboard.")).toBeTruthy();
+      expect(
+        screen.getByText(
+          "Read-only link created. Clipboard access was blocked; select the link above to copy it manually.",
+        ),
+      ).toBeTruthy();
     });
+    expect(execCommand).not.toHaveBeenCalled();
     expect(screen.queryByText("Document is not focused")).toBeNull();
     expect(
       screen.getByDisplayValue("https://ya.graehl.org/share/secret?h=test-host"),

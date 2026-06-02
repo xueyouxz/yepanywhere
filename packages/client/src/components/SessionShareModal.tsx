@@ -7,6 +7,7 @@ import type {
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useI18n } from "../i18n";
+import { writeClipboardText } from "../lib/clipboard";
 import { Modal, type ModalAnchorRect } from "./ui/Modal";
 import { ViewerCountIndicator } from "./ViewerCountIndicator";
 
@@ -21,7 +22,6 @@ interface SessionShareModalProps {
   onClose: () => void;
 }
 
-const CLIPBOARD_WRITE_TIMEOUT_MS = 250;
 const STATUS_POLL_MS = 10_000;
 
 type ShareWorkingState =
@@ -30,73 +30,6 @@ type ShareWorkingState =
   | "revoke"
   | `disconnect:${string}`
   | `freeze:${string}`;
-
-function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-): Promise<T | null> {
-  return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(() => resolve(null), timeoutMs);
-    promise.then(
-      (value) => {
-        window.clearTimeout(timeout);
-        resolve(value);
-      },
-      (error) => {
-        window.clearTimeout(timeout);
-        reject(error);
-      },
-    );
-  });
-}
-
-async function writeClipboardText(text: string): Promise<boolean> {
-  if (navigator.clipboard?.writeText) {
-    try {
-      const copied = await withTimeout(
-        navigator.clipboard.writeText(text).then(() => true),
-        CLIPBOARD_WRITE_TIMEOUT_MS,
-      );
-      if (copied) {
-        return true;
-      }
-    } catch {
-      // Fall through to the legacy selection-based copy path.
-    }
-  }
-
-  const textArea = document.createElement("textarea");
-  textArea.value = text;
-  textArea.setAttribute("readonly", "true");
-  textArea.style.position = "fixed";
-  textArea.style.top = "0";
-  textArea.style.left = "-9999px";
-  textArea.style.opacity = "0";
-  const activeElement =
-    document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-
-  document.body.appendChild(textArea);
-  textArea.focus({ preventScroll: true });
-  textArea.select();
-  textArea.setSelectionRange(0, textArea.value.length);
-
-  let copied = false;
-  try {
-    if (typeof document.execCommand === "function") {
-      document.execCommand("copy");
-      copied = true;
-    }
-  } catch {
-    copied = false;
-  } finally {
-    document.body.removeChild(textArea);
-    activeElement?.focus({ preventScroll: true });
-  }
-
-  return copied;
-}
 
 export function SessionShareModal({
   anchorRect,

@@ -50,7 +50,10 @@ import {
   sliceAtCompactBoundaries,
   sliceAtUserTurnBoundary,
 } from "../sessions/pagination.js";
-import { augmentPersistedSessionMessages } from "../sessions/persisted-augments.js";
+import {
+  augmentEditToolUses,
+  augmentPersistedSessionMessages,
+} from "../sessions/persisted-augments.js";
 import { findSessionSummaryAcrossProviders } from "../sessions/provider-resolution.js";
 import type { ISessionReader } from "../sessions/types.js";
 import type { ExternalSessionTracker } from "../supervisor/ExternalSessionTracker.js";
@@ -2242,7 +2245,9 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     }
 
     // Keep persisted rendering in lockstep with stream augmentation behavior.
-    if (!publicShare) {
+    if (publicShare) {
+      await augmentEditToolUses(session.messages);
+    } else {
       await augmentPersistedSessionMessages(session.messages);
     }
     const augmentEndMs = performance.now();

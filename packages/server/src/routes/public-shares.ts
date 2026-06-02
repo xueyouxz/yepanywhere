@@ -28,6 +28,8 @@ import { Hono } from "hono";
 import { decodeProjectId, getProjectName } from "../projects/paths.js";
 import type { RelayClientStatus } from "../services/RelayClientService.js";
 import type { PublicShareService } from "../services/PublicShareService.js";
+import { augmentEditToolUses } from "../sessions/persisted-augments.js";
+import type { Message } from "../supervisor/types.js";
 import {
   buildPublicShareViewerUrl,
   getDefaultPublicShareViewerBaseUrl,
@@ -1015,6 +1017,7 @@ export function createPublicSharePublicRoutes(
       return notFound(c);
     }
 
+    await augmentEditToolUses(response.session.messages as Message[]);
     response.share.activeViewerCount = viewerId
       ? deps.publicShareService.recordViewerHeartbeat(record, viewerId)
       : deps.publicShareService.getActiveViewerCount(record);
