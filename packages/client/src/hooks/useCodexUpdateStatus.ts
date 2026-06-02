@@ -11,22 +11,37 @@ interface UseCodexUpdateStatusResult {
   install: () => Promise<boolean>;
 }
 
-export function useCodexUpdateStatus(): UseCodexUpdateStatusResult {
+interface UseCodexUpdateStatusOptions {
+  enabled?: boolean;
+}
+
+export function useCodexUpdateStatus(
+  options: UseCodexUpdateStatusOptions = {},
+): UseCodexUpdateStatusResult {
+  const enabled = options.enabled ?? true;
   const [status, setStatus] = useState<CodexUpdateStatus | null>(null);
   const [isChecking, setIsChecking] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [installOutput, setInstallOutput] = useState<string | null>(null);
   const mounted = useRef(true);
+  const enabledRef = useRef(enabled);
+
+  useEffect(() => {
+    enabledRef.current = enabled;
+  }, [enabled]);
 
   const refresh = useCallback(async (force?: boolean) => {
+    if (!enabledRef.current) {
+      return;
+    }
     try {
       setIsChecking(true);
       setError(null);
       const response = await api.getCodexUpdateStatus(force);
-      if (mounted.current) setStatus(response.status);
+      if (mounted.current && enabledRef.current) setStatus(response.status);
     } catch (err) {
-      if (mounted.current) {
+      if (mounted.current && enabledRef.current) {
         setError(err instanceof Error ? err.message : "Failed to check");
       }
     } finally {
@@ -60,6 +75,13 @@ export function useCodexUpdateStatus(): UseCodexUpdateStatusResult {
 
   useEffect(() => {
     mounted.current = true;
+    if (!enabled) {
+      setIsChecking(false);
+      return () => {
+        mounted.current = false;
+      };
+    }
+
     refresh();
     const onFocus = () => {
       refresh();
@@ -69,7 +91,7 @@ export function useCodexUpdateStatus(): UseCodexUpdateStatusResult {
       mounted.current = false;
       window.removeEventListener("focus", onFocus);
     };
-  }, [refresh]);
+  }, [enabled, refresh]);
 
   return {
     status,

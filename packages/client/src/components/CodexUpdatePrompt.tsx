@@ -22,9 +22,10 @@ function writeSeenTag(tag: string): void {
 }
 
 export function CodexUpdatePrompt() {
-  const { status, isInstalling, error, installOutput, install } =
-    useCodexUpdateStatus();
   const { settings, updateSetting } = useServerSettings();
+  const policy = settings?.codexUpdatePolicy;
+  const { status, isInstalling, error, installOutput, install } =
+    useCodexUpdateStatus({ enabled: policy === "notify" });
   const [seenTag, setSeenTag] = useState<string | null>(() => readSeenTag());
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [dismissedTag, setDismissedTag] = useState<string | null>(null);
@@ -34,8 +35,6 @@ export function CodexUpdatePrompt() {
     null,
   );
   const [policyError, setPolicyError] = useState<string | null>(null);
-
-  const policy = settings?.codexUpdatePolicy ?? "notify";
 
   useEffect(() => {
     setSeenTag(readSeenTag());
@@ -61,6 +60,15 @@ export function CodexUpdatePrompt() {
     setInstallSucceeded(null);
     setPolicyError(null);
   }, [activeTag, latestTag, shouldPrompt]);
+
+  useEffect(() => {
+    if (policy !== "notify" && activeTag) {
+      setActiveTag(null);
+      setInstallAttempted(false);
+      setInstallSucceeded(null);
+      setPolicyError(null);
+    }
+  }, [activeTag, policy]);
 
   if (!activeTag || !status || !latestTag) {
     return null;

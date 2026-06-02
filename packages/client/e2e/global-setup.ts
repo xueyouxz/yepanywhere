@@ -96,6 +96,19 @@ export default async function globalSetup() {
   mkdirSync(E2E_CODEX_SESSIONS_DIR, { recursive: true });
   mkdirSync(E2E_GEMINI_SESSIONS_DIR, { recursive: true });
   mkdirSync(E2E_DATA_DIR, { recursive: true });
+  writeFileSync(
+    join(E2E_DATA_DIR, "server-settings.json"),
+    JSON.stringify(
+      {
+        version: 1,
+        settings: {
+          codexUpdatePolicy: "off",
+        },
+      },
+      null,
+      2,
+    ),
+  );
 
   // Write paths file for tests to import
   const pathsFile = join(E2E_TEMP_DIR, "paths.json");

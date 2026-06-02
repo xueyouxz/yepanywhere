@@ -17,7 +17,8 @@ const {
 }));
 
 vi.mock("../../hooks/useCodexUpdateStatus", () => ({
-  useCodexUpdateStatus: () => mockUseCodexUpdateStatus(),
+  useCodexUpdateStatus: (...args: unknown[]) =>
+    mockUseCodexUpdateStatus(...args),
 }));
 
 vi.mock("../../hooks/useServerSettings", () => ({
@@ -168,6 +169,18 @@ describe("CodexUpdatePrompt", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
 
     expect(window.localStorage.getItem("codex-update-seen-tag")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("does not check or prompt when update policy is off", () => {
+    mockUseServerSettings.mockImplementation(() => ({
+      settings: { codexUpdatePolicy: "off" as const },
+      updateSetting: mockUpdateSetting,
+    }));
+
+    render(<CodexUpdatePrompt />);
+
+    expect(mockUseCodexUpdateStatus).toHaveBeenCalledWith({ enabled: false });
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

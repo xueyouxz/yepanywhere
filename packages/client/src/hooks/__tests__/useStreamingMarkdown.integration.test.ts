@@ -80,7 +80,7 @@ describe("useStreamingMarkdown integration", () => {
 
   function flushBufferedUpdates() {
     act(() => {
-      vi.advanceTimersByTime(100);
+      vi.runOnlyPendingTimers();
     });
   }
 
