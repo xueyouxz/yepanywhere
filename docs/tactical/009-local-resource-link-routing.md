@@ -6,6 +6,8 @@ Progress:
 
 - [x] 2026-06-02: Captured the remote relay local-file link failure mode and
   the preferred organization direction.
+- [x] 2026-06-02: Added the shared local-resource parser for legacy hrefs and
+  semantic `data-ya-resource` attributes, with focused shared tests.
 
 ## Context
 
@@ -30,6 +32,7 @@ That means a rendered link is not just a URL. It carries at least four pieces
 of context:
 
 - what kind of local resource it refers to;
+- who interpreted it as a local resource;
 - whether the current viewer is direct, authenticated remote, or public share;
 - whether the path is project-relative, project-root absolute, or arbitrary
   local absolute;
@@ -72,6 +75,73 @@ document links in remote mode, and project file links work better than raw
 `/api/local-file` links because they land on an SPA route that calls the API
 client.
 
+## Agent Text vs YA Metadata
+
+Agents do not create trusted YA resource metadata. They create ordinary text,
+Markdown links, image links, tool output, or file paths. YA then interprets
+local-looking references and decides whether to render them as local resources.
+
+The intended pipeline is:
+
+```text
+agent output
+  -> YA renderer recognizes a candidate local resource
+  -> renderer emits fallback href plus YA-owned semantic metadata
+  -> client chooses a direct, remote, public-share, or standalone open behavior
+  -> server route enforces auth, approved folders, path safety, and type policy
+```
+
+For example, an agent might write:
+
+```md
+![probe](C:/tmp/playbox-zero-g-compare.png)
+```
+
+or:
+
+```md
+[probe json](C:/tmp/playbox-zero-g-compare.json)
+```
+
+The server renderer may interpret those as candidate local resources and emit:
+
+```html
+<a
+  href="/api/local-image?path=C%3A%2Ftmp%2Fplaybox-zero-g-compare.png"
+  class="local-media-link"
+  data-ya-resource="local-media"
+  data-ya-path="C:/tmp/playbox-zero-g-compare.png"
+  data-ya-media-type="image"
+>
+  probe
+</a>
+```
+
+or:
+
+```html
+<a
+  href="/api/local-file?path=C%3A%2Ftmp%2Fplaybox-zero-g-compare.json"
+  data-ya-resource="local-file"
+  data-ya-path="C:/tmp/playbox-zero-g-compare.json"
+>
+  probe json
+</a>
+```
+
+Those attributes are YA's interpretation of agent output, not authorization.
+They are hints for the client UI so it can avoid raw browser navigation and
+choose the right modal/blob/SPA behavior. The actual read still goes through an
+authenticated route on the user's YA server, which must reject paths outside
+approved folders or unsupported file types.
+
+This matters for approved folders such as temp directories and project roots:
+the renderer can make a link interactive when it recognizes the shape, but the
+server remains the authority on whether the current install is configured to
+serve that path. A remote modal should show the server's rejection clearly
+instead of falling through to a hosted `/api/...` navigation or treating the
+agent's path as proof that access is allowed.
+
 ## Design Direction
 
 Do not add one-off interceptors for each new broken URL. Introduce a small
@@ -106,6 +176,10 @@ interface LocalResourceHref {
 The model should be owned by shared client/server-safe code where possible, with
 separate resolver adapters for contexts that cannot share implementation.
 
+The model represents YA's parsed interpretation of an agent-authored or
+server-authored link. It should never be treated as proof that the path is safe
+to read.
+
 ### Runtime Contexts
 
 The same `LocalResourceRef` should resolve differently depending on context:
@@ -139,6 +213,19 @@ new code should prefer the generic `data-ya-resource` contract so local media,
 local files, project files, and public-share rewrites share the same parsing
 path.
 
+The rendered HTML contract is intentionally redundant:
+
+- `href` preserves direct-mode behavior, copy/paste, browser status text, and
+  no-JS fallback behavior;
+- `data-ya-resource` and related attributes preserve YA's parsed meaning without
+  requiring every client context to reverse-engineer query strings;
+- existing class names such as `.local-media-link` remain migration shims until
+  the generic local-resource handler covers the same behavior.
+
+Because these attributes are rendered from agent-visible text, every value must
+be escaped for HTML attributes. The client parser should also tolerate missing
+or malformed attributes and fall back to parsing the legacy href shape.
+
 ### Client Handling
 
 The normal session UI should have one delegated local-resource handler, not
@@ -158,6 +245,11 @@ Responsibilities:
   is not practical;
 - show an explicit blocked/unavailable notice for references that cannot be
   safely resolved in the current context.
+
+The handler should treat semantic attributes as preferred input but not as a
+security boundary. It may choose "open image modal through relay" from
+`data-ya-resource="local-media"`, but the eventual `fetchBlob()` still goes to
+the server route that enforces the configured approved folders.
 
 ### Server Handling
 
@@ -182,6 +274,8 @@ path semantics.
   `/api/local-file` links.
 - Add tests for Windows drive local-file paths matching the Markdown renderer's
   recognized paths.
+- Add renderer tests that prove agent-authored Markdown links become
+  YA-authored semantic metadata while preserving fallback hrefs.
 - Identify every raw local resource URL source:
   - `safe-markdown.ts`;
   - `local-file.ts`;
@@ -195,6 +289,10 @@ path semantics.
 - Create a parser that converts hrefs and data attributes into
   `LocalResourceRef`.
 - Support legacy URL shapes first so existing rendered content keeps working.
+- Prefer `data-ya-resource` attributes when present, but keep href parsing as
+  fallback and migration support.
+- Keep parser output descriptive only; do not encode allowed-folder decisions in
+  the client parser.
 - Keep public-share path normalization separate from authenticated local file
   resolution; public shares have stricter policy.
 
@@ -210,6 +308,9 @@ path semantics.
     context is known.
 - In hosted remote mode, block raw `/api/...` navigation unless the handler has
   converted it to a blob URL or SPA route.
+- Surface server rejections in the modal/notice path so "outside approved
+  folders" is visible as an authorization/configuration result rather than a
+  broken hosted-client link.
 
 ### 4. Server Route Cleanup
 
@@ -217,6 +318,8 @@ path semantics.
 - Align Windows path support with the Markdown renderer's recognition rules.
 - Keep existing allowed-path checks and add regression tests before broadening
   any accepted path syntax.
+- Keep approved-folder checks server-side even when the renderer emitted
+  `data-ya-resource`; semantic metadata is never authorization.
 
 ### 5. Public Share Compatibility
 
@@ -242,6 +345,11 @@ The first implementation slice should be small:
 Leave broader file viewer download/open-new-tab cleanup for a follow-up unless
 the first slice naturally touches those buttons.
 
+The semantic attribute emission can follow immediately after this first slice:
+once the generic handler can parse both legacy hrefs and `data-ya-resource`
+attributes, server renderers can start emitting explicit metadata without
+breaking already-rendered or persisted content.
+
 ## Non-Goals
 
 - Do not make public-share viewers authenticated operators.
@@ -260,6 +368,11 @@ the first slice naturally touches those buttons.
   secure connection.
 - Media, text, Markdown, JSON, PDF, and unsupported file references have
   deliberate UI outcomes: modal, SPA route, blob URL, or explicit notice.
+- Agent-authored links are interpreted by YA renderers into semantic metadata,
+  and that metadata is treated as UI routing information rather than
+  authorization.
+- Paths outside approved folders produce clear server-driven errors in remote
+  modals/notices rather than raw hosted-client navigation.
 - Public-share behavior remains narrower than authenticated remote behavior.
 - POSIX and Windows absolute-path recognition is consistent between Markdown
   rendering and local resource serving.

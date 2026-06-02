@@ -16,6 +16,19 @@ export {
   transformFilePathsToHtml,
 } from "./filePathDetection.js";
 
+export type {
+  LocalResourceAttributes,
+  LocalResourceKind,
+  LocalResourceMediaType,
+  LocalResourceRef,
+  ParseLocalResourceOptions,
+} from "./local-resource.js";
+export {
+  parseLocalResourceAttributes,
+  parseLocalResourceHref,
+  parseLocalResourceLink,
+} from "./local-resource.js";
+
 // ANSI escape rendering (shared between server and client)
 export { hasAnsiEscapes, renderAnsiToHtml } from "./ansi-renderer.js";
 
