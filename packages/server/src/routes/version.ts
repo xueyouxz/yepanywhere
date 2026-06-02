@@ -199,8 +199,8 @@ export interface VersionInfo {
   latestDeviceBridgeVersion?: string | null;
 }
 
-/** Resume protocol version with nonce challenge + proof binding. */
-export const RESUME_PROTOCOL_VERSION = 2;
+/** Resume protocol version with mutual nonce challenge + server proof binding. */
+export const RESUME_PROTOCOL_VERSION = 3;
 
 /** Base capabilities always advertised. */
 const BASE_CAPABILITIES = ["git-status"];

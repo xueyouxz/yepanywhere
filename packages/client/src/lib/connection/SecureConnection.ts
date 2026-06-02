@@ -26,7 +26,6 @@ import {
   encodeUploadChunkPayload,
   isBinaryData,
   isCompressionSupported,
-  isEncryptedEnvelope,
   isRelayClientConnected,
   isRelayClientError,
   isSequencedEncryptedPayload,
@@ -48,6 +47,7 @@ import {
   encrypt,
   encryptBytesToBinaryEnvelope,
   encryptToBinaryEnvelope,
+  generateNonce,
 } from "./nacl-wrapper";
 import { SrpClientSession } from "./srp-client";
 import {
@@ -70,10 +70,11 @@ type ConnectionState =
   | "authenticated"
   | "failed";
 
-/** Timeout waiting for resume challenge/proof responses before assuming old server protocol. */
+/** Timeout waiting for resume challenge/proof responses before rejecting resume. */
 const RESUME_PHASE_TIMEOUT_MS = 5000;
 const RESUME_INCOMPATIBLE_ERROR =
   "resume_incompatible: session resume unsupported by server";
+const REQUIRED_RESUME_PROTOCOL_VERSION = 3;
 const UPLOAD_BUFFER_HIGH_WATER_BYTES = 512 * 1024;
 const UPLOAD_BUFFER_LOW_WATER_BYTES = 256 * 1024;
 const UPLOAD_BUFFER_POLL_MS = 16;
@@ -85,6 +86,11 @@ export interface StoredSession {
   sessionId: string;
   /** Base64-encoded session key (32 bytes) */
   sessionKey: string;
+  /**
+   * Highest authenticated resume protocol version observed for this session.
+   * Future resumes must prove at least this version.
+   */
+  resumeProtocolVersion?: number;
 }
 
 function uint8ToBase64(bytes: Uint8Array): string {
@@ -120,7 +126,9 @@ export class SecureConnection implements Connection {
   private protocol: RelayProtocol;
   private nextOutboundSeq = 0;
   private lastInboundSeq: number | null = null;
-  private useLegacyProtocolMode = false;
+  private pendingResumeClientNonce: string | null = null;
+  private pendingResumeServerNonce: string | null = null;
+  private minimumResumeProtocolVersion: number | null = null;
 
   // Credentials for authentication
   private username: string;
@@ -163,17 +171,6 @@ export class SecureConnection implements Connection {
       {
         sendMessage: (msg) => this.send(msg),
         sendUploadChunk: async (id, offset, chunk) => {
-          if (this.useLegacyProtocolMode) {
-            this.send({
-              type: "upload_chunk",
-              uploadId: id,
-              offset,
-              data: uint8ToBase64(chunk),
-            });
-            await this.waitForUploadBackpressure();
-            return;
-          }
-
           const payload = encodeUploadChunkPayload(id, offset, chunk);
           if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             throw new Error("WebSocket not connected");
@@ -219,6 +216,8 @@ export class SecureConnection implements Connection {
       onDisconnect,
     );
     conn.storedSession = storedSession;
+    conn.minimumResumeProtocolVersion =
+      storedSession.resumeProtocolVersion ?? null;
     return conn;
   }
 
@@ -241,6 +240,8 @@ export class SecureConnection implements Connection {
     );
     conn.storedSession = storedSession;
     conn.password = null; // Mark as resume-only
+    conn.minimumResumeProtocolVersion =
+      storedSession.resumeProtocolVersion ?? null;
     return conn;
   }
 
@@ -266,6 +267,8 @@ export class SecureConnection implements Connection {
     conn.ws = ws;
     conn.storedSession = storedSession;
     conn.password = null; // Mark as resume-only
+    conn.minimumResumeProtocolVersion =
+      storedSession.resumeProtocolVersion ?? null;
     conn.isRelayConnection = true;
     if (relayConfig) {
       conn.relayUrl = relayConfig.relayUrl;
@@ -290,6 +293,13 @@ export class SecureConnection implements Connection {
 
       if (!this.storedSession) {
         reject(new Error("No stored session for resume"));
+        return;
+      }
+
+      if (!this.storedSessionSupportsCurrentResume()) {
+        this.connectionState = "failed";
+        reject(new Error(RESUME_INCOMPATIBLE_ERROR));
+        this.ws.close();
         return;
       }
 
@@ -346,6 +356,7 @@ export class SecureConnection implements Connection {
         type: "srp_resume_init",
         identity: this.username,
         sessionId: this.storedSession.sessionId,
+        clientNonce: this.startResumeAttempt(),
       };
       ws.send(JSON.stringify(resumeInit));
       this.connectionState = "srp_resume_init_sent";
@@ -381,6 +392,152 @@ export class SecureConnection implements Connection {
     return JSON.stringify({ nonce, ciphertext });
   }
 
+  private startResumeAttempt(): string {
+    this.pendingResumeClientNonce = uint8ToBase64(generateNonce());
+    this.pendingResumeServerNonce = null;
+    return this.pendingResumeClientNonce;
+  }
+
+  private storedSessionSupportsCurrentResume(): boolean {
+    return (
+      typeof this.storedSession?.resumeProtocolVersion === "number" &&
+      this.storedSession.resumeProtocolVersion >=
+        REQUIRED_RESUME_PROTOCOL_VERSION
+    );
+  }
+
+  private decryptProofEnvelope(
+    proof: string,
+    key: Uint8Array,
+  ): string | null {
+    try {
+      const proofEnvelope = JSON.parse(proof) as {
+        nonce?: unknown;
+        ciphertext?: unknown;
+      };
+      if (
+        typeof proofEnvelope.nonce !== "string" ||
+        typeof proofEnvelope.ciphertext !== "string"
+      ) {
+        return null;
+      }
+      return decrypt(proofEnvelope.nonce, proofEnvelope.ciphertext, key);
+    } catch {
+      return null;
+    }
+  }
+
+  private acceptAuthenticatedResumeProtocolVersion(
+    resumeProtocolVersion: number,
+  ): boolean {
+    if (
+      !Number.isSafeInteger(resumeProtocolVersion) ||
+      resumeProtocolVersion < REQUIRED_RESUME_PROTOCOL_VERSION
+    ) {
+      return false;
+    }
+    if (
+      this.minimumResumeProtocolVersion !== null &&
+      resumeProtocolVersion < this.minimumResumeProtocolVersion
+    ) {
+      return false;
+    }
+    this.minimumResumeProtocolVersion = Math.max(
+      this.minimumResumeProtocolVersion ?? 0,
+      resumeProtocolVersion,
+    );
+    return true;
+  }
+
+  private verifyResumeServerProof(params: {
+    serverProof: string | undefined;
+    baseSessionKey: Uint8Array;
+    sessionId: string;
+    transportNonce: string | undefined;
+  }): number | null {
+    if (
+      !params.serverProof ||
+      !params.transportNonce ||
+      !this.pendingResumeClientNonce ||
+      !this.pendingResumeServerNonce ||
+      params.transportNonce !== this.pendingResumeServerNonce
+    ) {
+      return null;
+    }
+
+    try {
+      const decrypted = this.decryptProofEnvelope(
+        params.serverProof,
+        params.baseSessionKey,
+      );
+      if (!decrypted) {
+        return null;
+      }
+
+      const proofData = JSON.parse(decrypted) as {
+        type?: unknown;
+        sessionId?: unknown;
+        serverNonce?: unknown;
+        clientNonce?: unknown;
+        resumeProtocolVersion?: unknown;
+      };
+      if (
+        proofData.type === "srp_resume_server_proof" &&
+        proofData.sessionId === params.sessionId &&
+        proofData.serverNonce === this.pendingResumeServerNonce &&
+        proofData.clientNonce === this.pendingResumeClientNonce
+      ) {
+        return typeof proofData.resumeProtocolVersion === "number"
+          ? proofData.resumeProtocolVersion
+          : null;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  private readSrpVerifyServerInfoProof(params: {
+    serverInfoProof: string | undefined;
+    baseSessionKey: Uint8Array;
+    sessionId: string | undefined;
+    transportNonce: string | undefined;
+  }): number | null {
+    if (!params.serverInfoProof) {
+      return null;
+    }
+    if (!params.sessionId || !params.transportNonce) {
+      return null;
+    }
+
+    try {
+      const decrypted = this.decryptProofEnvelope(
+        params.serverInfoProof,
+        params.baseSessionKey,
+      );
+      if (!decrypted) {
+        return null;
+      }
+      const proofData = JSON.parse(decrypted) as {
+        type?: unknown;
+        sessionId?: unknown;
+        transportNonce?: unknown;
+        resumeProtocolVersion?: unknown;
+      };
+      if (
+        proofData.type !== "srp_verify_server_info" ||
+        proofData.sessionId !== params.sessionId ||
+        proofData.transportNonce !== params.transportNonce ||
+        typeof proofData.resumeProtocolVersion !== "number"
+      ) {
+        return null;
+      }
+      return proofData.resumeProtocolVersion;
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Start the full SRP handshake (when session resume fails or no stored session).
    */
@@ -391,6 +548,8 @@ export class SecureConnection implements Connection {
       throw new Error("Password required for SRP authentication");
     }
 
+    this.pendingResumeClientNonce = null;
+    this.pendingResumeServerNonce = null;
     console.log("[SecureConnection] Starting full SRP handshake");
     this.srpSession = new SrpClientSession();
     await this.srpSession.generateHello(this.username, this.password);
@@ -438,6 +597,7 @@ export class SecureConnection implements Connection {
           this.ws?.close();
           return;
         }
+        this.pendingResumeServerNonce = msg.nonce;
 
         const proof = this.generateResumeProof(
           this.storedSession.sessionKey,
@@ -462,27 +622,51 @@ export class SecureConnection implements Connection {
           reject(new Error("No stored session for resumption"));
           return;
         }
+        if (msg.sessionId !== this.storedSession.sessionId) {
+          reject(new Error("Resume response session mismatch"));
+          this.ws?.close();
+          return;
+        }
         const baseSessionKey = Uint8Array.from(
           atob(this.storedSession.sessionKey),
           (c) => c.charCodeAt(0),
         );
-        if (!msg.transportNonce) {
-          console.warn(
-            "[SecureConnection] Missing transport nonce on resume; using legacy traffic key",
-          );
+        const transportNonce = msg.transportNonce;
+        const resumeProtocolVersion = this.verifyResumeServerProof({
+          serverProof: msg.serverProof,
+          baseSessionKey,
+          sessionId: this.storedSession.sessionId,
+          transportNonce,
+        });
+        if (
+          resumeProtocolVersion === null ||
+          !transportNonce ||
+          !this.acceptAuthenticatedResumeProtocolVersion(
+            resumeProtocolVersion,
+          )
+        ) {
+          console.error("[SecureConnection] Resume server proof failed");
+          this.connectionState = "failed";
+          reject(new Error("Resume server verification failed"));
+          this.ws?.close();
+          return;
         }
-        this.useLegacyProtocolMode = !msg.transportNonce;
-        this.sessionKey = msg.transportNonce
-          ? deriveTransportKey(baseSessionKey, msg.transportNonce)
-          : baseSessionKey;
+        this.sessionKey = deriveTransportKey(baseSessionKey, transportNonce);
         this.sessionId = msg.sessionId;
         this.connectionState = "authenticated";
+        this.pendingResumeClientNonce = null;
+        this.pendingResumeServerNonce = null;
+        this.storedSession = {
+          ...this.storedSession,
+          resumeProtocolVersion: this.minimumResumeProtocolVersion ?? undefined,
+        };
         this.resetSequenceState();
 
         if (this.ws) {
           this.ws.onmessage = (event) => this.handleMessage(event.data);
         }
 
+        this.onSessionEstablished?.(this.storedSession);
         this.sendCapabilities();
         resolve();
         return;
@@ -570,7 +754,8 @@ export class SecureConnection implements Connection {
     this.ws = null;
     this.sessionKey = null;
     this.srpSession = null;
-    this.useLegacyProtocolMode = false;
+    this.pendingResumeClientNonce = null;
+    this.pendingResumeServerNonce = null;
     this.resetSequenceState();
 
     const closeError = new WebSocketCloseError(event.code, event.reason);
@@ -683,17 +868,32 @@ export class SecureConnection implements Connection {
 
         try {
           if (this.storedSession) {
-            console.log("[SecureConnection] Attempting session resumption");
-            const resumeInit: SrpSessionResumeInit = {
-              type: "srp_resume_init",
-              identity: this.username,
-              sessionId: this.storedSession.sessionId,
-            };
-            ws.send(JSON.stringify(resumeInit));
-            this.connectionState = "srp_resume_init_sent";
-            console.log("[SecureConnection] SRP resume init sent");
-            armResumeTimeout();
-            return;
+            if (this.storedSessionSupportsCurrentResume()) {
+              console.log("[SecureConnection] Attempting session resumption");
+              const resumeInit: SrpSessionResumeInit = {
+                type: "srp_resume_init",
+                identity: this.username,
+                sessionId: this.storedSession.sessionId,
+                clientNonce: this.startResumeAttempt(),
+              };
+              ws.send(JSON.stringify(resumeInit));
+              this.connectionState = "srp_resume_init_sent";
+              console.log("[SecureConnection] SRP resume init sent");
+              armResumeTimeout();
+              return;
+            }
+
+            if (!this.password) {
+              this.connectionState = "failed";
+              authRejectHandler(new Error(RESUME_INCOMPATIBLE_ERROR));
+              ws.close();
+              return;
+            }
+
+            console.log(
+              "[SecureConnection] Stored session uses an old resume protocol; starting full SRP",
+            );
+            this.storedSession = null;
           }
 
           await this.startFullSrpHandshake(authRejectHandler);
@@ -961,33 +1161,50 @@ export class SecureConnection implements Connection {
         return;
       }
       const baseSessionKey = deriveSecretboxKey(rawKey);
-      if (!msg.transportNonce) {
-        console.warn(
-          "[SecureConnection] Missing transport nonce on verify; using legacy traffic key",
+      if (!msg.sessionId || !msg.transportNonce || !msg.serverInfoProof) {
+        console.error(
+          "[SecureConnection] SRP verify missing current protocol metadata",
         );
+        this.connectionState = "failed";
+        reject(new Error("Server protocol verification failed"));
+        this.ws?.close();
+        return;
       }
-      this.useLegacyProtocolMode = !msg.transportNonce;
-      this.sessionKey = msg.transportNonce
-        ? deriveTransportKey(baseSessionKey, msg.transportNonce)
-        : baseSessionKey;
-      this.sessionId = msg.sessionId ?? null;
+      const proofProtocolVersion = this.readSrpVerifyServerInfoProof({
+        serverInfoProof: msg.serverInfoProof,
+        baseSessionKey,
+        sessionId: msg.sessionId,
+        transportNonce: msg.transportNonce,
+      });
+      if (
+        typeof proofProtocolVersion !== "number" ||
+        !this.acceptAuthenticatedResumeProtocolVersion(proofProtocolVersion)
+      ) {
+        console.error("[SecureConnection] SRP server info proof failed");
+        this.connectionState = "failed";
+        reject(new Error("Server protocol verification failed"));
+        this.ws?.close();
+        return;
+      }
+      this.sessionKey = deriveTransportKey(baseSessionKey, msg.transportNonce);
+      this.sessionId = msg.sessionId;
       this.connectionState = "authenticated";
       this.resetSequenceState();
 
-      if (this.sessionId) {
-        const sessionKeyBase64 = btoa(
-          Array.from(baseSessionKey)
-            .map((b) => String.fromCharCode(b))
-            .join(""),
-        );
-        this.storedSession = {
-          wsUrl: this.wsUrl,
-          username: this.username,
-          sessionId: this.sessionId,
-          sessionKey: sessionKeyBase64,
-        };
-        this.onSessionEstablished?.(this.storedSession);
-      }
+      const sessionKeyBase64 = btoa(
+        Array.from(baseSessionKey)
+          .map((b) => String.fromCharCode(b))
+          .join(""),
+      );
+      this.storedSession = {
+        wsUrl: this.wsUrl,
+        username: this.username,
+        sessionId: this.sessionId,
+        sessionKey: sessionKeyBase64,
+        resumeProtocolVersion:
+          this.minimumResumeProtocolVersion ?? undefined,
+      };
+      this.onSessionEstablished?.(this.storedSession);
 
       this.sendCapabilities();
 
@@ -1027,26 +1244,11 @@ export class SecureConnection implements Connection {
         return;
       }
     } else if (typeof data === "string") {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(data);
-      } catch {
-        console.warn("[SecureConnection] Failed to parse message:", data);
-        return;
-      }
-
-      if (!isEncryptedEnvelope(parsed)) {
-        console.warn(
-          "[SecureConnection] Received unencrypted message after auth",
-        );
-        return;
-      }
-
-      decrypted = decrypt(parsed.nonce, parsed.ciphertext, this.sessionKey);
-      if (!decrypted) {
-        console.warn("[SecureConnection] Failed to decrypt JSON envelope");
-        return;
-      }
+      console.warn(
+        "[SecureConnection] Received text message after auth; binary encrypted envelope required",
+      );
+      this.ws?.close(4005, "Binary encrypted message required");
+      return;
     } else {
       console.warn("[SecureConnection] Ignoring unknown message type");
       return;
@@ -1068,8 +1270,6 @@ export class SecureConnection implements Connection {
         }
         this.lastInboundSeq = payload.seq;
         msg = payload.msg as YepMessage;
-      } else if (this.useLegacyProtocolMode) {
-        msg = payload as YepMessage;
       } else {
         console.warn("[SecureConnection] Missing/invalid encrypted sequence");
         this.ws?.close(4004, "Invalid sequence");
@@ -1099,13 +1299,6 @@ export class SecureConnection implements Connection {
       throw new Error("Not authenticated");
     }
 
-    if (this.useLegacyProtocolMode) {
-      const plaintext = JSON.stringify(msg);
-      const { nonce, ciphertext } = encrypt(plaintext, this.sessionKey);
-      this.ws.send(JSON.stringify({ type: "encrypted", nonce, ciphertext }));
-      return;
-    }
-
     const plaintext = JSON.stringify({ seq: this.nextOutboundSeq, msg });
     this.nextOutboundSeq += 1;
     const envelope = encryptToBinaryEnvelope(plaintext, this.sessionKey);
@@ -1122,13 +1315,6 @@ export class SecureConnection implements Connection {
    * Called immediately after SRP authentication completes.
    */
   private sendCapabilities(): void {
-    if (this.useLegacyProtocolMode) {
-      console.log(
-        "[SecureConnection] Skipping capabilities for legacy server protocol",
-      );
-      return;
-    }
-
     const formats: number[] = [BinaryFormat.JSON, BinaryFormat.BINARY_UPLOAD];
 
     if (isCompressionSupported()) {
@@ -1238,7 +1424,6 @@ export class SecureConnection implements Connection {
 
     this.sessionKey = null;
     this.srpSession = null;
-    this.useLegacyProtocolMode = false;
     this.connectionState = "disconnected";
 
     if (this.ws) {
@@ -1273,7 +1458,6 @@ export class SecureConnection implements Connection {
     // Reset connection state but keep session info for resumption
     this.connectionState = "disconnected";
     this.connectionPromise = null;
-    this.useLegacyProtocolMode = false;
 
     await this.ensureConnected();
     console.log(

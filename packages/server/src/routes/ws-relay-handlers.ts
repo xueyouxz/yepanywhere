@@ -12,7 +12,6 @@
 import type { HttpBindings } from "@hono/node-server";
 import type {
   BinaryFormatValue,
-  EncryptedEnvelope,
   OriginMetadata,
   RelayRequest,
   RelaySubscribe,
@@ -35,10 +34,7 @@ import {
   isSrpSessionResumeInit,
 } from "@yep-anywhere/shared";
 import type { Hono } from "hono";
-import {
-  encrypt,
-  encryptToBinaryEnvelopeWithCompression,
-} from "../crypto/index.js";
+import { encryptToBinaryEnvelopeWithCompression } from "../crypto/index.js";
 import type { SrpServerSession } from "../crypto/index.js";
 import type { DeviceBridgeService } from "../device/DeviceBridgeService.js";
 import { getLogger } from "../logging/logger.js";
@@ -112,10 +108,8 @@ export interface ConnectionState {
   srpSession: SrpServerSession | null;
   /** Derived secretbox key (32 bytes) for encryption */
   sessionKey: Uint8Array | null;
-  /** Long-lived base key derived from SRP/session key (for compatibility fallback) */
+  /** Long-lived base key derived from SRP/session key for resume proofs. */
   baseSessionKey: Uint8Array | null;
-  /** Whether this connection has fallen back to legacy base-key traffic mode */
-  usingLegacyTrafficKey: boolean;
   /** Authentication state */
   authState: ConnectionAuthState;
   /** Admission policy for this connection (distinct from SRP transport key state). */
@@ -131,8 +125,6 @@ export interface ConnectionState {
   sessionId: string | null;
   /** Whether client sent binary frames (respond with binary if true) - Phase 0 */
   useBinaryFrames: boolean;
-  /** Whether client sent binary encrypted frames (respond with binary encrypted if true) - Phase 1 */
-  useBinaryEncrypted: boolean;
   /** Client's supported binary formats (Phase 3 capabilities) - defaults to [0x01] */
   supportedFormats: Set<BinaryFormatValue>;
   /** Browser profile ID from SRP hello (for session tracking) */
@@ -142,6 +134,7 @@ export interface ConnectionState {
   /** Pending one-time challenge for session resume (if any) */
   pendingResumeChallenge: {
     nonce: string;
+    clientNonce: string;
     sessionId: string;
     username: string;
     issuedAt: number;
@@ -222,14 +215,12 @@ export function createConnectionState(): ConnectionState {
     srpSession: null,
     sessionKey: null,
     baseSessionKey: null,
-    usingLegacyTrafficKey: false,
     authState: "unauthenticated",
     connectionPolicy: "srp_required",
     requiresEncryptedMessages: false,
     username: null,
     sessionId: null,
     useBinaryFrames: false,
-    useBinaryEncrypted: false,
     supportedFormats: new Set([BinaryFormat.JSON]),
     browserProfileId: null,
     originMetadata: null,
@@ -261,30 +252,15 @@ export function createSendFn(
         connState.nextOutboundSeq += 1;
         const plaintext = JSON.stringify({ seq, msg });
 
-        if (connState.useBinaryEncrypted) {
-          // Phase 1/3: Binary encrypted envelope with optional compression
-          const supportsCompression = connState.supportedFormats.has(
-            BinaryFormat.COMPRESSED_JSON,
-          );
-          const envelope = encryptToBinaryEnvelopeWithCompression(
-            plaintext,
-            connState.sessionKey,
-            supportsCompression,
-          );
-          ws.send(envelope);
-        } else {
-          // Legacy: JSON encrypted envelope
-          const { nonce, ciphertext } = encrypt(
-            plaintext,
-            connState.sessionKey,
-          );
-          const envelope: EncryptedEnvelope = {
-            type: "encrypted",
-            nonce,
-            ciphertext,
-          };
-          ws.send(JSON.stringify(envelope));
-        }
+        const supportsCompression = connState.supportedFormats.has(
+          BinaryFormat.COMPRESSED_JSON,
+        );
+        const envelope = encryptToBinaryEnvelopeWithCompression(
+          plaintext,
+          connState.sessionKey,
+          supportsCompression,
+        );
+        ws.send(envelope);
       } else if (connState.useBinaryFrames) {
         // Client sent binary frames, respond with binary
         ws.send(encodeJsonFrame(msg));

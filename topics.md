@@ -19,6 +19,7 @@
 - relative-filenames - Shortest-unambiguous file path display and link targets.
 - rich-text-rendering - Rendered file/message/diff previews and local-link handling.
 - security - YA trust-boundary contracts for local, authenticated, relay, and public surfaces.
+- trusted-client-packaging - Signed/local client packaging and relay-only transport trust roots.
 - message-control-steer-queue-btw-later-interrupt - Steer/queue control state, ownership normalization, and metadata contract cleanup.
 - ui-architecture - Shared rendering boundaries and anti-DOM-rewrite discipline.
 - opencode-backend - OpenCode provider capability and transcript-rendering parity.

@@ -220,7 +220,7 @@ describe("WebSocket Transport E2E", () => {
 
         expect(response.status).toBe(200);
         expect(response.body).toHaveProperty("current");
-        expect(response.body).toHaveProperty("resumeProtocolVersion", 2);
+        expect(response.body).toHaveProperty("resumeProtocolVersion", 3);
       } finally {
         ws.close();
       }

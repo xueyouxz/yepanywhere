@@ -6,6 +6,7 @@
 - Public read-only session shares
 - Approval and local access security hardening
 - Security trust boundaries
+- Trusted client packaging for signed/local app installs
 - Hard development rules for upstream-facing defaults
 - Kzahel-disabled feature decisions
 - Session UI customization

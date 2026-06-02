@@ -6074,7 +6074,8 @@ a.sidebar-nav-item {
   box-shadow: none;
 }
 
-.remote-compatibility-notice--security {
+.remote-compatibility-notice--security,
+.remote-compatibility-notice--blocking {
   border-color: var(--error-color);
   background: color-mix(in srgb, var(--error-color) 14%, var(--bg-surface));
 }

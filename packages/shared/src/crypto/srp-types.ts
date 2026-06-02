@@ -44,13 +44,18 @@ export interface SrpServerVerify {
   type: "srp_verify";
   /** Server proof value M2 (hex string) */
   M2: string;
-  /** Session ID for session resumption (optional, set if session service available) */
+  /** Session ID for session resumption; current relay clients require it. */
   sessionId?: string;
   /**
    * Server-issued per-connection nonce used to derive the traffic key from the
-   * SRP/session key. Present on modern servers.
+   * SRP/session key. Current relay clients require it.
    */
   transportNonce?: string;
+  /**
+   * Encrypted server-authenticated metadata for pinning protocol floors after
+   * full SRP login. Current relay clients require it.
+   */
+  serverInfoProof?: string;
 }
 
 /** SRP error codes */
@@ -70,6 +75,11 @@ export interface SrpSessionResumeInit {
   identity: string;
   /** Session ID from previous authentication */
   sessionId: string;
+  /**
+   * Client-issued nonce for mutual resume authentication. Current servers
+   * require it; it is echoed inside the encrypted server proof.
+   */
+  clientNonce?: string;
 }
 
 /** Server provides a nonce challenge for session resume proof */
@@ -99,9 +109,14 @@ export interface SrpSessionResumed {
   sessionId: string;
   /**
    * Server-issued per-connection nonce used to derive the traffic key from the
-   * persisted session key.
+   * persisted session key. Current relay clients require it.
    */
   transportNonce?: string;
+  /**
+   * Encrypted proof that the server possesses the stored resume key and is
+   * accepting this specific resume attempt. Current relay clients require it.
+   */
+  serverProof?: string;
 }
 
 /** Reasons a session cannot be resumed */

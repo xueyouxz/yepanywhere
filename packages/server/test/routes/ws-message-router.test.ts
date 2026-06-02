@@ -92,7 +92,6 @@ describe("WebSocket Message Router", () => {
     );
 
     expect(parsed).toBeNull();
-    expect(connState.useBinaryEncrypted).toBe(true);
     expect(deps.routeClientMessage).toHaveBeenCalledWith({
       type: "ping",
       id: "p3",
@@ -146,7 +145,7 @@ describe("WebSocket Message Router", () => {
     expect(ws.close).toHaveBeenCalledWith(4004, "Replay detected");
   });
 
-  it("accepts legacy base-key encrypted binary envelope and downgrades connection key mode", async () => {
+  it("rejects base-key encrypted binary envelopes", async () => {
     const connState = createConnectionState();
     connState.authState = "authenticated";
     connState.baseSessionKey = new Uint8Array(32).fill(6);
@@ -175,11 +174,9 @@ describe("WebSocket Message Router", () => {
     );
 
     expect(parsed).toBeNull();
-    expect(connState.usingLegacyTrafficKey).toBe(true);
-    expect(connState.sessionKey).toEqual(connState.baseSessionKey);
     expect(deps.routeClientMessage).not.toHaveBeenCalled();
-    expect(connState.supportedFormats).toEqual(new Set([1, 2, 3]));
-    expect(ws.close).not.toHaveBeenCalled();
+    expect(connState.supportedFormats).toEqual(new Set([BinaryFormat.JSON]));
+    expect(ws.close).toHaveBeenCalledWith(4004, "Decryption failed");
   });
 
   it("closes unknown plaintext binary formats with code 4002", async () => {

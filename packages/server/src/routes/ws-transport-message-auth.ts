@@ -4,7 +4,6 @@ import {
   isEncryptedEnvelope,
   isSequencedEncryptedPayload,
 } from "@yep-anywhere/shared";
-import { decrypt } from "../crypto/index.js";
 import type { ConnectionState, WSAdapter } from "./ws-relay-handlers.js";
 import { hasEstablishedSrpTransport } from "./ws-transport-auth.js";
 
@@ -13,10 +12,7 @@ import { hasEstablishedSrpTransport } from "./ws-transport-auth.js";
  * Binary envelope: [1 byte: version 0x01][24 bytes: nonce][ciphertext]
  * vs Phase 0 binary: [1 byte: format 0x01-0x03][payload]
  *
- * Once a connection has sent one encrypted envelope (useBinaryEncrypted=true),
- * all subsequent binary frames are encrypted — no ambiguity.
- *
- * For the first binary frame, the auth state is the primary discriminator:
+ * The auth state is the primary discriminator:
  * authenticated connections always use encrypted envelopes, while
  * unauthenticated connections use Phase 0 frames. These are mutually exclusive
  * because clients must complete SRP before sending application messages.
@@ -32,10 +28,6 @@ export function isBinaryEncryptedEnvelope(
       );
     }
     return false;
-  }
-
-  if (connState.useBinaryEncrypted) {
-    return true;
   }
 
   if (bytes.length < MIN_BINARY_ENVELOPE_LENGTH) {
@@ -103,16 +95,9 @@ export function unwrapSequencedClientMessage(
   parsed: unknown,
 ): RemoteClientMessage | null {
   if (!isSequencedEncryptedPayload(parsed)) {
-    // Backward compatibility: allow legacy encrypted payloads with no sequence
-    // only until this connection has established sequenced traffic.
-    if (connState.lastInboundSeq !== null) {
-      console.warn(
-        "[WS Relay] Missing encrypted sequence wrapper after sequenced traffic started",
-      );
-      ws.close(4004, "Invalid sequence");
-      return null;
-    }
-    return parsed as RemoteClientMessage;
+    console.warn("[WS Relay] Missing encrypted sequence wrapper");
+    ws.close(4004, "Invalid sequence");
+    return null;
   }
 
   if (!validateInboundSequence(ws, connState, parsed.seq)) {
@@ -120,47 +105,6 @@ export function unwrapSequencedClientMessage(
   }
 
   return parsed.msg as RemoteClientMessage;
-}
-
-function decryptJsonEnvelopeWithTrafficKeyFallback(
-  parsed: { nonce: string; ciphertext: string },
-  connState: ConnectionState,
-): string | null {
-  const activeSessionKey = connState.sessionKey;
-  if (!activeSessionKey) {
-    return null;
-  }
-
-  const decrypted = decrypt(parsed.nonce, parsed.ciphertext, activeSessionKey);
-  if (decrypted) {
-    return decrypted;
-  }
-
-  if (
-    !connState.baseSessionKey ||
-    connState.usingLegacyTrafficKey ||
-    connState.sessionKey === connState.baseSessionKey
-  ) {
-    return null;
-  }
-
-  const legacyDecrypted = decrypt(
-    parsed.nonce,
-    parsed.ciphertext,
-    connState.baseSessionKey,
-  );
-  if (!legacyDecrypted) {
-    return null;
-  }
-
-  console.warn(
-    "[WS Relay] Client is using legacy traffic key; consider refreshing/updating the remote client",
-  );
-  connState.sessionKey = connState.baseSessionKey;
-  connState.usingLegacyTrafficKey = true;
-  connState.nextOutboundSeq = 0;
-  connState.lastInboundSeq = null;
-  return legacyDecrypted;
 }
 
 function isPublicShareReadRequest(
@@ -186,7 +130,7 @@ function isPublicShareReadRequest(
 
 /**
  * Parse an application-level message after SRP control messages are ruled out.
- * Handles legacy JSON encrypted envelopes and plaintext policy checks.
+ * Handles plaintext policy checks and rejects obsolete encrypted text envelopes.
  * Returns null if the message was rejected/closed.
  */
 export function parseApplicationClientMessage(
@@ -204,24 +148,9 @@ export function parseApplicationClientMessage(
       return null;
     }
 
-    const decrypted = decryptJsonEnvelopeWithTrafficKeyFallback(
-      parsed,
-      connState,
-    );
-    if (!decrypted) {
-      console.warn("[WS Relay] Failed to decrypt message");
-      ws.close(4004, "Decryption failed");
-      return null;
-    }
-
-    try {
-      const parsedDecrypted = JSON.parse(decrypted);
-      return unwrapSequencedClientMessage(ws, connState, parsedDecrypted);
-    } catch {
-      console.warn("[WS Relay] Failed to parse decrypted message");
-      ws.close(4004, "Decryption failed");
-      return null;
-    }
+    console.warn("[WS Relay] Received obsolete encrypted text envelope");
+    ws.close(4005, "Binary encrypted message required");
+    return null;
   }
 
   if (srpRequiredPolicy && !hasEstablishedSrpTransport(connState)) {

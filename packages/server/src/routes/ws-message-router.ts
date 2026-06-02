@@ -22,46 +22,6 @@ import {
   unwrapSequencedClientMessage,
 } from "./ws-transport-message-auth.js";
 
-function decryptBinaryEnvelopeWithTrafficKeyFallback(
-  bytes: Uint8Array,
-  connState: ConnectionState,
-): ReturnType<typeof decryptBinaryEnvelopeRaw> {
-  const activeSessionKey = connState.sessionKey;
-  if (!activeSessionKey) {
-    return null;
-  }
-
-  const decrypted = decryptBinaryEnvelopeRaw(bytes, activeSessionKey);
-  if (decrypted) {
-    return decrypted;
-  }
-
-  if (
-    !connState.baseSessionKey ||
-    connState.usingLegacyTrafficKey ||
-    connState.sessionKey === connState.baseSessionKey
-  ) {
-    return null;
-  }
-
-  const legacyDecrypted = decryptBinaryEnvelopeRaw(
-    bytes,
-    connState.baseSessionKey,
-  );
-  if (!legacyDecrypted) {
-    return null;
-  }
-
-  console.warn(
-    "[WS Relay] Client is using legacy traffic key; consider refreshing/updating the remote client",
-  );
-  connState.sessionKey = connState.baseSessionKey;
-  connState.usingLegacyTrafficKey = true;
-  connState.nextOutboundSeq = 0;
-  connState.lastInboundSeq = null;
-  return legacyDecrypted;
-}
-
 interface DecodeFrameDeps {
   uploads: Map<string, RelayUploadState>;
   send: SendFn;
@@ -118,10 +78,9 @@ export async function decodeFrameToParsedMessage(
       isBinaryEncryptedEnvelope(bytes, connState)
     ) {
       try {
-        const result = decryptBinaryEnvelopeWithTrafficKeyFallback(
-          bytes,
-          connState,
-        );
+        const result = connState.sessionKey
+          ? decryptBinaryEnvelopeRaw(bytes, connState.sessionKey)
+          : null;
         if (!result) {
           console.warn("[WS Relay] Failed to decrypt binary envelope");
           ws.close(4004, "Decryption failed");
@@ -129,7 +88,6 @@ export async function decodeFrameToParsedMessage(
         }
 
         const { format, payload } = result;
-        connState.useBinaryEncrypted = true;
 
         if (format === BinaryFormat.BINARY_UPLOAD) {
           await handleBinaryUploadChunk(uploads, payload, send, uploadManager);

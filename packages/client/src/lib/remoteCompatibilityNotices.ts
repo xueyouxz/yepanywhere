@@ -41,7 +41,7 @@ export interface RemoteCompatibilityInput {
 }
 
 export const RELAY_RESUME_SECURITY_MIN_VERSION = "0.4.0";
-export const RELAY_RESUME_SECURITY_MIN_PROTOCOL = 2;
+export const RELAY_RESUME_SECURITY_MIN_PROTOCOL = 3;
 export const REMOTE_BACKEND_API_RECOMMENDED_VERSION = "0.4.29";
 
 const NPM_UPDATE_COMMAND = "npm update -g yepanywhere";
@@ -96,9 +96,9 @@ export function getRemoteCompatibilityNotices(
     const guidance = buildUpdateGuidance(input, target.label);
     notices.push({
       id: "relay-resume-security",
-      severity: "security",
-      title: "Server update recommended",
-      body: "This server predates relay session-resume hardening. New login still works, but refresh and reconnect behavior is less reliable until the server is updated.",
+      severity: "blocking",
+      title: "Server update required",
+      body: "This hosted client requires current relay session-resume server verification. Update the local server, or use localhost, a tunnel, or a VPN with the old server.",
       guidance: guidance.text,
       versionSummary: buildVersionSummary(input.currentVersion, target.label),
       action: guidance.action,

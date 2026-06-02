@@ -15,24 +15,24 @@ describe("remoteCompatibilityNotices", () => {
         currentVersion: "0.4.28",
         latestVersion: "0.4.29",
         updateAvailable: true,
-        resumeProtocolVersion: 2,
+        resumeProtocolVersion: 3,
       }),
     ).toEqual([]);
   });
 
-  it("emits a security notice for old relay resume protocol metadata", () => {
+  it("emits a blocking notice for old relay resume protocol metadata", () => {
     const notices = getRemoteCompatibilityNotices({
       currentVersion: "0.4.29",
       latestVersion: "0.4.29",
       updateAvailable: false,
-      resumeProtocolVersion: 1,
+      resumeProtocolVersion: 2,
       relayUsername: "dev-box",
     });
 
     expect(notices.map((notice) => notice.id)).toEqual([
       "relay-resume-security",
     ]);
-    expect(notices[0]?.severity).toBe("security");
+    expect(notices[0]?.severity).toBe("blocking");
   });
 
   it("falls back to version < 0.4.0 for relay resume security", () => {
@@ -92,7 +92,7 @@ describe("remoteCompatibilityNotices", () => {
       currentVersion: "0.4.28",
       latestVersion: "0.4.29",
       updateAvailable: true,
-      resumeProtocolVersion: 2,
+      resumeProtocolVersion: 3,
       relayUsername: "dev-box",
       recommendedBaselineVersion: "0.4.29",
     });
@@ -114,7 +114,7 @@ describe("remoteCompatibilityNotices", () => {
       currentVersion: "0.4.28-3-gabcdef",
       latestVersion: "0.4.29",
       updateAvailable: true,
-      resumeProtocolVersion: 2,
+      resumeProtocolVersion: 3,
       relayUsername: "dev-box",
       recommendedBaselineVersion: "0.4.29",
     });
@@ -133,7 +133,7 @@ describe("remoteCompatibilityNotices", () => {
       latestVersion: "0.4.29",
       updateAvailable: true,
       installSource: "source",
-      resumeProtocolVersion: 2,
+      resumeProtocolVersion: 3,
       relayUsername: "dev-box",
       recommendedBaselineVersion: "0.4.29",
     });
@@ -148,7 +148,7 @@ describe("remoteCompatibilityNotices", () => {
       latestVersion: "0.4.29",
       updateAvailable: true,
       installSource: "npm-global",
-      resumeProtocolVersion: 2,
+      resumeProtocolVersion: 3,
       relayUsername: "dev-box",
       recommendedBaselineVersion: "0.4.29",
     });
@@ -164,7 +164,7 @@ describe("remoteCompatibilityNotices", () => {
       currentVersion: "0.4.29",
       latestVersion: "0.4.30",
       updateAvailable: true,
-      resumeProtocolVersion: 2,
+      resumeProtocolVersion: 3,
       relayUsername: "dev-box",
       recommendedBaselineVersion: "0.4.29",
     });
@@ -180,7 +180,7 @@ describe("remoteCompatibilityNotices", () => {
       currentVersion: "0.4.28",
       latestVersion: "0.4.28",
       updateAvailable: false,
-      resumeProtocolVersion: 2,
+      resumeProtocolVersion: 3,
       relayUsername: "dev-box",
       recommendedBaselineVersion: "0.4.29",
     });

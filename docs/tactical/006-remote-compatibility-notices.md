@@ -5,7 +5,7 @@ Status: Initial client slice implemented
 Progress:
 
 - [x] 2026-06-01: Captured the design direction for durable hosted remote
-  compatibility notices, including the existing relay resume security warning
+  compatibility notices, including the existing relay resume protocol cutoff
   and the upcoming backend/API update-recommended banner.
 - [x] 2026-06-01: Added the pure notice engine, browser-local dismissal hook,
   remote notice banner, and replacement for the old relay resume modal.
@@ -18,14 +18,14 @@ Progress:
 The hosted remote client can move faster than servers installed on user
 machines. Most remote changes should remain backward compatible, but releases
 that change backend APIs, remote transport semantics, or relay security posture
-need a visible, dismissible warning so users understand that updating the local
-server is recommended.
+need a visible, dismissible notice so users understand when updating the local
+server is recommended or required.
 
 There are already several related user-facing prompts:
 
 - the onboarding modal in the local app;
 - the Codex CLI update prompt, which can update npm-global Codex installs;
-- the existing relay session-resume security warning in `RemoteApp`;
+- the existing relay session-resume protocol cutoff in `RemoteApp`;
 - dev reload banners;
 - Settings -> About version/update state.
 
@@ -57,16 +57,19 @@ observability:
 - `renderProtocolVersion`
 - `capabilities`
 
-The existing relay resume warning checks `resumeProtocolVersion < 2`. That
-warning corresponds to the security hardening released in `v0.4.0`, whose
-changelog includes:
+The relay resume cutoff now checks `resumeProtocolVersion < 3`. Protocol 2
+covered the security hardening released in `v0.4.0`, whose changelog includes:
 
 - "Harden session resume replay defenses for untrusted relays"
 - "Harden relay replay protection for SRP sessions"
 
-Compatibility reporting to the relay itself landed later in `v0.4.11`, but the
-user-facing security notice should treat `<0.4.0` as the durable version
-fallback for that warning when protocol metadata is absent.
+Protocol 3 adds mutual resume server proof so a compromised relay cannot pair a
+saved-session client with an impostor YA server that merely accepts the
+client's proof. The hosted client now requires this protocol for relay Remote
+Access; old YA servers can still be reached directly over localhost, a tunnel,
+or a VPN. Compatibility reporting to the relay itself landed later in `v0.4.11`,
+but the user-facing cutoff notice should still treat `<0.4.0` as the durable
+version fallback when protocol metadata is absent.
 
 ## Goals
 
@@ -137,25 +140,25 @@ Severity meanings:
   compatible.
 - `security`: security or authentication hardening is missing; usage may
   continue, but the user should update.
-- `blocking`: reserved for a future deliberate deprecation/cutoff where the
-  hosted client cannot safely continue.
+- `blocking`: deliberate deprecation/cutoff where the hosted client cannot
+  safely continue.
 
 ## Initial Notice Rules
 
-### 1. Relay Resume Security Notice
+### 1. Relay Resume Protocol Cutoff Notice
 
-Show a `security` notice when either condition is true:
+Show a `blocking` notice when either condition is true:
 
-- `resumeProtocolVersion` is known and is lower than `2`;
+- `resumeProtocolVersion` is known and is lower than `3`;
 - `resumeProtocolVersion` is absent and `currentVersion` is a comparable
   semver lower than `0.4.0`.
 
 Suggested copy:
 
-- Title: `Server update recommended`
-- Body: `This server predates relay session-resume hardening. New login still
-  works, but refresh/reconnect behavior is less reliable until the server is
-  updated.`
+- Title: `Server update required`
+- Body: `This hosted client requires current relay session-resume server
+  verification. Update the local server, or use localhost, a tunnel, or a VPN
+  with the old server.`
 - Action command: `npm update -g yepanywhere`
 
 This replaces the current `RemoteApp` modal check. It should be rendered as a
@@ -201,8 +204,8 @@ more specific notice when both match.
 Prefer semantic metadata over version checks when metadata directly expresses
 the compatibility concern:
 
-- `resumeProtocolVersion` is the primary signal for the relay resume security
-  notice.
+- `resumeProtocolVersion` is the primary signal for the relay resume protocol
+  cutoff notice.
 - version `<0.4.0` is the fallback for servers that do not report the protocol.
 - future render/client contract checks should prefer `renderProtocolVersion`
   once it exists.
@@ -251,7 +254,7 @@ remote-notice-dismissed:${installIdOrRelayUser}:${notice.id}:${versionOrState}
 
 Dismissal behavior:
 
-- dismissing the `security` notice for `0.3.9` should not dismiss it for a
+- dismissing the cutoff notice for `0.3.9` should not dismiss it for a
   different host;
 - upgrading to `0.4.0+` should naturally remove the notice;
 - a future notice with a different `id` should appear even if an older notice
@@ -292,13 +295,13 @@ and focus on remote compatibility notices.
 - Include semver comparison helpers or reuse an existing client-safe helper if
   one exists.
 - Encode the initial notice rules:
-  - relay resume security, protocol first and `<0.4.0` fallback;
+  - relay resume protocol cutoff, protocol first and `<0.4.0` fallback;
   - upcoming backend/API recommended update baseline;
   - optional generic update-available fallback.
 - Add focused unit tests for:
-  - `resumeProtocolVersion < 2`;
+  - `resumeProtocolVersion < 3`;
   - missing protocol plus version `<0.4.0`;
-  - version `0.4.0+` suppresses the security notice;
+  - version `0.4.0+` suppresses the cutoff notice;
   - unknown/dev versions avoid unsafe old-version claims;
   - release-specific recommended notice;
   - duplicate generic notice suppression.
@@ -314,10 +317,9 @@ and focus on remote compatibility notices.
 
 - Add `RemoteCompatibilityNotices`.
 - Render it from connected remote app content.
-- Replace the current `resumeProtocolVersion < 2` modal with the notice
+- Replace the current `resumeProtocolVersion < 3` modal with the notice
   engine.
-- Use existing banner/modal styling primitives where possible, but keep the
-  notice non-blocking.
+- Use existing banner/modal styling primitives where possible.
 - Ensure text fits on mobile and actions wrap cleanly.
 
 ### 4. About Settings Visibility
@@ -339,11 +341,11 @@ and focus on remote compatibility notices.
 
 ## Verification Checklist
 
-- A relay-connected server with `resumeProtocolVersion: 1` shows one
-  `security` notice and no blocking modal.
+- A relay-connected server with `resumeProtocolVersion: 2` shows one
+  `blocking` notice.
 - A relay-connected server with no `resumeProtocolVersion` and version
-  `0.3.9` shows the relay resume security notice.
-- A relay-connected server with version `0.4.0` does not show the security
+  `0.3.9` shows the relay resume protocol cutoff notice.
+- A relay-connected server with version `0.4.0` does not show the cutoff
   notice from version fallback alone.
 - A server below the release compatibility baseline shows the
   update-recommended notice.

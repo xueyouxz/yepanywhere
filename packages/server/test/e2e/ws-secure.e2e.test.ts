@@ -10,7 +10,6 @@ import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
 import type {
-  EncryptedEnvelope,
   RelayEvent,
   RelayRequest,
   RelayResponse,
@@ -34,7 +33,6 @@ import type {
 import {
   BinaryFormat,
   encodeUploadChunkPayload,
-  isEncryptedEnvelope,
   isSequencedEncryptedPayload,
   isSrpError,
   isSrpServerChallenge,
@@ -312,9 +310,13 @@ describe("Secure WebSocket Transport E2E", () => {
     const keyBuffer = bigIntToArrayBuffer(clientStep2.S);
     const rawKey = new Uint8Array(keyBuffer);
     const baseSessionKey = deriveSecretboxKey(rawKey);
-    const transportSessionKey = verify.transportNonce
-      ? deriveTransportKey(baseSessionKey, verify.transportNonce)
-      : baseSessionKey;
+    if (!verify.transportNonce) {
+      throw new Error("Expected transportNonce in SRP verify");
+    }
+    const transportSessionKey = deriveTransportKey(
+      baseSessionKey,
+      verify.transportNonce,
+    );
 
     // Wait to ensure server has fully processed the handshake before
     // subsequent encrypted messages. This prevents a race condition where
@@ -378,9 +380,29 @@ describe("Secure WebSocket Transport E2E", () => {
     const keyBuffer = bigIntToArrayBuffer(clientStep2.S);
     const rawKey = new Uint8Array(keyBuffer);
     const baseSessionKey = deriveSecretboxKey(rawKey);
-    const sessionKey = verify.transportNonce
-      ? deriveTransportKey(baseSessionKey, verify.transportNonce)
-      : baseSessionKey;
+    if (!verify.transportNonce) {
+      throw new Error("Expected transportNonce in SRP verify");
+    }
+    if (!verify.serverInfoProof) {
+      throw new Error("Expected serverInfoProof in SRP verify");
+    }
+    const proofEnvelope = JSON.parse(verify.serverInfoProof) as {
+      nonce: string;
+      ciphertext: string;
+    };
+    const proofPlaintext = decrypt(
+      proofEnvelope.nonce,
+      proofEnvelope.ciphertext,
+      baseSessionKey,
+    );
+    expect(proofPlaintext).not.toBeNull();
+    expect(JSON.parse(proofPlaintext ?? "{}")).toEqual({
+      type: "srp_verify_server_info",
+      sessionId: verify.sessionId,
+      transportNonce: verify.transportNonce,
+      resumeProtocolVersion: 3,
+    });
+    const sessionKey = deriveTransportKey(baseSessionKey, verify.transportNonce);
 
     await new Promise((resolve) => setTimeout(resolve, 10));
     return { sessionKey, baseSessionKey, sessionId: verify.sessionId };
@@ -441,15 +463,30 @@ describe("Secure WebSocket Transport E2E", () => {
       if (isSequencedEncryptedPayload(parsed)) {
         return parsed.msg as YepMessage;
       }
-      return parsed as YepMessage;
+      return null;
     } catch {
       return null;
     }
   }
 
+  const outboundSeqBySocket = new WeakMap<WebSocket, number>();
+
+  function encryptSequencedClientMessage(
+    ws: WebSocket,
+    sessionKey: Uint8Array,
+    msg: unknown,
+  ): ReturnType<typeof encryptToBinaryEnvelope> {
+    const seq = outboundSeqBySocket.get(ws) ?? 0;
+    outboundSeqBySocket.set(ws, seq + 1);
+    return encryptToBinaryEnvelope(JSON.stringify({ seq, msg }), sessionKey);
+  }
+
+  function fixedClientNonce(fill = 0x51): string {
+    return Buffer.from(new Uint8Array(24).fill(fill)).toString("base64");
+  }
+
   /**
    * Send an encrypted request and wait for encrypted response.
-   * Handles both JSON envelope (legacy) and binary envelope (Phase 1) responses.
    */
   async function sendEncryptedRequest(
     ws: WebSocket,
@@ -465,25 +502,7 @@ describe("Secure WebSocket Transport E2E", () => {
       const handler = (data: WebSocket.RawData) => {
         let decrypted: string | null = null;
 
-        // The ws library may send data as Buffer even for text frames
-        // Try JSON envelope first (text format), then binary envelope
-        const dataStr = data.toString();
-
-        // First try to parse as JSON envelope (legacy format)
-        try {
-          const msg = JSON.parse(dataStr);
-          if (isEncryptedEnvelope(msg)) {
-            decrypted = decrypt(msg.nonce, msg.ciphertext, sessionKey);
-          }
-        } catch {
-          // Not valid JSON, might be binary envelope
-        }
-
-        // If not JSON, try binary envelope (Phase 1)
-        if (
-          !decrypted &&
-          (Buffer.isBuffer(data) || data instanceof ArrayBuffer)
-        ) {
+        if (Buffer.isBuffer(data) || data instanceof ArrayBuffer) {
           const bytes =
             data instanceof ArrayBuffer ? new Uint8Array(data) : data;
           try {
@@ -515,15 +534,7 @@ describe("Secure WebSocket Transport E2E", () => {
 
       ws.on("message", handler);
 
-      // Send encrypted request (JSON envelope format)
-      const plaintext = JSON.stringify(request);
-      const { nonce, ciphertext } = encrypt(plaintext, sessionKey);
-      const envelope: EncryptedEnvelope = {
-        type: "encrypted",
-        nonce,
-        ciphertext,
-      };
-      ws.send(JSON.stringify(envelope));
+      ws.send(encryptSequencedClientMessage(ws, sessionKey, request));
     });
   }
 
@@ -544,21 +555,8 @@ describe("Secure WebSocket Transport E2E", () => {
 
       const handler = (data: WebSocket.RawData) => {
         let decrypted: string | null = null;
-        const dataStr = data.toString();
 
-        try {
-          const msg = JSON.parse(dataStr);
-          if (isEncryptedEnvelope(msg)) {
-            decrypted = decrypt(msg.nonce, msg.ciphertext, sessionKey);
-          }
-        } catch {
-          // Not a JSON envelope
-        }
-
-        if (
-          !decrypted &&
-          (Buffer.isBuffer(data) || data instanceof ArrayBuffer)
-        ) {
+        if (Buffer.isBuffer(data) || data instanceof ArrayBuffer) {
           const bytes =
             data instanceof ArrayBuffer ? new Uint8Array(data) : data;
           try {
@@ -743,10 +741,12 @@ describe("Secure WebSocket Transport E2E", () => {
 
       const ws2 = await connectWebSocket();
       try {
+        const clientNonce = fixedClientNonce();
         const resumeInit: SrpSessionResumeInit = {
           type: "srp_resume_init",
           identity: TEST_USERNAME,
           sessionId,
+          clientNonce,
         };
         ws2.send(JSON.stringify(resumeInit));
 
@@ -780,9 +780,33 @@ describe("Secure WebSocket Transport E2E", () => {
           5000,
         );
         expect(resumed.sessionId).toBe(sessionId);
-        const resumedSessionKey = resumed.transportNonce
-          ? deriveTransportKey(baseSessionKey, resumed.transportNonce)
-          : baseSessionKey;
+        if (!resumed.serverProof) {
+          throw new Error("Expected serverProof in SRP resume");
+        }
+        if (!resumed.transportNonce) {
+          throw new Error("Expected transportNonce in SRP resume");
+        }
+        const proofEnvelope = JSON.parse(resumed.serverProof) as {
+          nonce: string;
+          ciphertext: string;
+        };
+        const proofPlaintext = decrypt(
+          proofEnvelope.nonce,
+          proofEnvelope.ciphertext,
+          baseSessionKey,
+        );
+        expect(proofPlaintext).not.toBeNull();
+        expect(JSON.parse(proofPlaintext ?? "{}")).toEqual({
+          type: "srp_resume_server_proof",
+          sessionId,
+          serverNonce: challenge.nonce,
+          clientNonce,
+          resumeProtocolVersion: 3,
+        });
+        const resumedSessionKey = deriveTransportKey(
+          baseSessionKey,
+          resumed.transportNonce,
+        );
 
         const request: RelayRequest = {
           type: "request",
@@ -796,6 +820,37 @@ describe("Secure WebSocket Transport E2E", () => {
           request,
         );
         expect(response.status).toBe(200);
+      } finally {
+        await closeWebSocket(ws2);
+      }
+    }, 15000);
+
+    it("should reject resume init without client nonce", async () => {
+      const ws1 = await connectWebSocket();
+      const { sessionId } = await performSrpHandshakeWithSession(
+        ws1,
+        TEST_USERNAME,
+        TEST_PASSWORD,
+      );
+      await closeWebSocket(ws1);
+
+      const ws2 = await connectWebSocket();
+      try {
+        ws2.send(
+          JSON.stringify({
+            type: "srp_resume_init",
+            identity: TEST_USERNAME,
+            sessionId,
+          }),
+        );
+
+        const invalid = await waitForMessage<SrpSessionInvalid>(
+          ws2,
+          (msg): msg is SrpSessionInvalid => isSrpSessionInvalid(msg),
+          5000,
+          { allowSrpSessionInvalid: true },
+        );
+        expect(invalid.reason).toBe("invalid_proof");
       } finally {
         await closeWebSocket(ws2);
       }
@@ -815,6 +870,7 @@ describe("Secure WebSocket Transport E2E", () => {
           type: "srp_resume_init",
           identity: TEST_USERNAME,
           sessionId,
+          clientNonce: fixedClientNonce(0x52),
         };
         ws2.send(JSON.stringify(resumeInit));
 
@@ -859,6 +915,7 @@ describe("Secure WebSocket Transport E2E", () => {
           type: "srp_resume_init",
           identity: TEST_USERNAME,
           sessionId,
+          clientNonce: fixedClientNonce(0x53),
         };
         ws3.send(JSON.stringify(resumeInit));
 
@@ -903,6 +960,7 @@ describe("Secure WebSocket Transport E2E", () => {
           type: "srp_resume_init",
           identity: TEST_USERNAME,
           sessionId,
+          clientNonce: fixedClientNonce(0x54),
         };
         ws2.send(JSON.stringify(resumeInit));
 
@@ -945,9 +1003,13 @@ describe("Secure WebSocket Transport E2E", () => {
         );
         expect(invalid.reason).toBe("invalid_proof");
 
-        const resumedSessionKey = resumed.transportNonce
-          ? deriveTransportKey(baseSessionKey, resumed.transportNonce)
-          : baseSessionKey;
+        if (!resumed.transportNonce) {
+          throw new Error("Expected transportNonce in SRP resume");
+        }
+        const resumedSessionKey = deriveTransportKey(
+          baseSessionKey,
+          resumed.transportNonce,
+        );
         const request: RelayRequest = {
           type: "request",
           id: randomUUID(),
@@ -983,15 +1045,13 @@ describe("Secure WebSocket Transport E2E", () => {
         method: "GET",
         path: "/health",
       };
-      const replayPlaintext = JSON.stringify(replayedRequest);
-      const replayedPayload = encrypt(replayPlaintext, initialSessionKey);
-      const replayedEnvelope: EncryptedEnvelope = {
-        type: "encrypted",
-        nonce: replayedPayload.nonce,
-        ciphertext: replayedPayload.ciphertext,
-      };
+      const replayedEnvelope = encryptSequencedClientMessage(
+        ws1,
+        initialSessionKey,
+        replayedRequest,
+      );
 
-      ws1.send(JSON.stringify(replayedEnvelope));
+      ws1.send(replayedEnvelope);
       const firstResponse = await waitForEncryptedResponseById(
         ws1,
         initialSessionKey,
@@ -1008,6 +1068,7 @@ describe("Secure WebSocket Transport E2E", () => {
           type: "srp_resume_init",
           identity: TEST_USERNAME,
           sessionId,
+          clientNonce: fixedClientNonce(0x55),
         };
         ws2.send(JSON.stringify(resumeInit));
         const challenge = await waitForMessage<SrpSessionResumeChallenge>(
@@ -1048,7 +1109,7 @@ describe("Secure WebSocket Transport E2E", () => {
             });
           },
         );
-        ws2.send(JSON.stringify(replayedEnvelope));
+        ws2.send(replayedEnvelope);
         const closeResult = await closePromise;
         expect(closeResult.code).toBe(4004);
         expect(closeResult.reason).toBe("Decryption failed");
@@ -1063,6 +1124,7 @@ describe("Secure WebSocket Transport E2E", () => {
           type: "srp_resume_init",
           identity: TEST_USERNAME,
           sessionId,
+          clientNonce: fixedClientNonce(0x56),
         };
         ws3.send(JSON.stringify(resumeInit));
         const challenge = await waitForMessage<SrpSessionResumeChallenge>(
@@ -1093,9 +1155,13 @@ describe("Secure WebSocket Transport E2E", () => {
           (msg): msg is SrpSessionResumed => isSrpSessionResumed(msg),
           5000,
         );
-        const resumedSessionKey = resumed.transportNonce
-          ? deriveTransportKey(baseSessionKey, resumed.transportNonce)
-          : baseSessionKey;
+        if (!resumed.transportNonce) {
+          throw new Error("Expected transportNonce in SRP resume");
+        }
+        const resumedSessionKey = deriveTransportKey(
+          baseSessionKey,
+          resumed.transportNonce,
+        );
         const request: RelayRequest = {
           type: "request",
           id: randomUUID(),
@@ -1162,7 +1228,7 @@ describe("Secure WebSocket Transport E2E", () => {
 
         expect(response.status).toBe(200);
         expect(response.body).toHaveProperty("current");
-        expect(response.body).toHaveProperty("resumeProtocolVersion", 2);
+        expect(response.body).toHaveProperty("resumeProtocolVersion", 3);
       } finally {
         await closeWebSocket(ws);
       }
@@ -1239,27 +1305,12 @@ describe("Secure WebSocket Transport E2E", () => {
 
         const subscriptionId = randomUUID();
 
-        // Set up event collector - handle both binary and JSON responses
+        // Set up event collector for binary encrypted responses
         const events: RelayEvent[] = [];
         const eventHandler = (data: WebSocket.RawData) => {
           let decrypted: string | null = null;
-          const dataStr = data.toString();
 
-          // First try to parse as JSON envelope (legacy format)
-          try {
-            const msg = JSON.parse(dataStr);
-            if (isEncryptedEnvelope(msg)) {
-              decrypted = decrypt(msg.nonce, msg.ciphertext, sessionKey);
-            }
-          } catch {
-            // Not valid JSON, might be binary envelope
-          }
-
-          // If not JSON, try binary envelope (Phase 1)
-          if (
-            !decrypted &&
-            (Buffer.isBuffer(data) || data instanceof ArrayBuffer)
-          ) {
+          if (Buffer.isBuffer(data) || data instanceof ArrayBuffer) {
             const bytes =
               data instanceof ArrayBuffer ? new Uint8Array(data) : data;
             try {
@@ -1292,9 +1343,7 @@ describe("Secure WebSocket Transport E2E", () => {
           subscriptionId,
           channel: "activity",
         };
-        const plaintext = JSON.stringify(subscribe);
-        const { nonce, ciphertext } = encrypt(plaintext, sessionKey);
-        ws.send(JSON.stringify({ type: "encrypted", nonce, ciphertext }));
+        ws.send(encryptSequencedClientMessage(ws, sessionKey, subscribe));
 
         // Wait for connected event
         await new Promise((resolve) => setTimeout(resolve, 500));
@@ -1355,10 +1404,7 @@ describe("Secure WebSocket Transport E2E", () => {
 
         ws.on("message", handler);
 
-        // Send binary encrypted request
-        const plaintext = JSON.stringify(request);
-        const envelope = encryptToBinaryEnvelope(plaintext, sessionKey);
-        ws.send(envelope);
+        ws.send(encryptSequencedClientMessage(ws, sessionKey, request));
       });
     }
 
@@ -1417,7 +1463,7 @@ describe("Secure WebSocket Transport E2E", () => {
 
         expect(response.status).toBe(200);
         expect(response.body).toHaveProperty("current");
-        expect(response.body).toHaveProperty("resumeProtocolVersion", 2);
+        expect(response.body).toHaveProperty("resumeProtocolVersion", 3);
       } finally {
         await closeWebSocket(ws);
       }
@@ -1469,11 +1515,7 @@ describe("Secure WebSocket Transport E2E", () => {
           subscriptionId,
           channel: "activity",
         };
-        const envelope = encryptToBinaryEnvelope(
-          JSON.stringify(subscribe),
-          sessionKey,
-        );
-        ws.send(envelope);
+        ws.send(encryptSequencedClientMessage(ws, sessionKey, subscribe));
 
         // Wait for connected event
         await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -1485,7 +1527,7 @@ describe("Secure WebSocket Transport E2E", () => {
       }
     }, 15000);
 
-    it("should switch from JSON to binary envelope format correctly", async () => {
+    it("should reject JSON encrypted envelopes after authentication", async () => {
       const ws = await connectWebSocket();
 
       try {
@@ -1495,7 +1537,6 @@ describe("Secure WebSocket Transport E2E", () => {
           TEST_PASSWORD,
         );
 
-        // First, send a JSON encrypted request (legacy)
         const request1: RelayRequest = {
           type: "request",
           id: randomUUID(),
@@ -1503,90 +1544,54 @@ describe("Secure WebSocket Transport E2E", () => {
           path: "/health",
         };
 
-        // Wait for encrypted response (can be JSON or binary)
-        const response1Promise = new Promise<RelayResponse>(
+        const closedPromise = new Promise<{ code: number; reason: string }>(
           (resolve, reject) => {
             const timeout = setTimeout(
-              () => reject(new Error("Timeout waiting for response")),
+              () => reject(new Error("Timeout waiting for close")),
               5000,
             );
-
-            const handler = (data: WebSocket.RawData) => {
-              let decrypted: string | null = null;
-              const dataStr = data.toString();
-
-              // First try to parse as JSON envelope (legacy format)
-              try {
-                const msg = JSON.parse(dataStr);
-                if (isEncryptedEnvelope(msg)) {
-                  decrypted = decrypt(msg.nonce, msg.ciphertext, sessionKey);
-                }
-              } catch {
-                // Not valid JSON, might be binary envelope
-              }
-
-              // If not JSON, try binary envelope (Phase 1)
-              if (
-                !decrypted &&
-                (Buffer.isBuffer(data) || data instanceof ArrayBuffer)
-              ) {
-                const bytes =
-                  data instanceof ArrayBuffer ? new Uint8Array(data) : data;
-                try {
-                  decrypted = decryptBinaryEnvelope(bytes, sessionKey);
-                } catch {
-                  return;
-                }
-              }
-
-              if (!decrypted) return;
-
-              try {
-                const response = parseDecryptedTransportMessage(decrypted);
-                if (!response) return;
-                if (
-                  response.type === "response" &&
-                  response.id === request1.id
-                ) {
-                  clearTimeout(timeout);
-                  ws.off("message", handler);
-                  resolve(response);
-                }
-              } catch {
-                // Keep waiting
-              }
-            };
-
-            ws.on("message", handler);
+            ws.once("close", (code, reasonBuffer) => {
+              clearTimeout(timeout);
+              resolve({ code, reason: reasonBuffer.toString() });
+            });
           },
         );
 
-        // Send JSON encrypted request
         const { nonce, ciphertext } = encrypt(
-          JSON.stringify(request1),
+          JSON.stringify({ seq: 0, msg: request1 }),
           sessionKey,
         );
         ws.send(JSON.stringify({ type: "encrypted", nonce, ciphertext }));
 
-        const response1 = await response1Promise;
-        expect(response1.status).toBe(200);
+        const closed = await closedPromise;
+        expect(closed.code).toBe(4005);
+        expect(closed.reason).toBe("Binary encrypted message required");
+      } finally {
+        await closeWebSocket(ws);
+      }
 
-        // Now send a binary encrypted request
-        const request2: RelayRequest = {
+      const ws2 = await connectWebSocket();
+      try {
+        const sessionKey = await performSrpHandshakeV2(
+          ws2,
+          TEST_USERNAME,
+          TEST_PASSWORD,
+        );
+        const request: RelayRequest = {
           type: "request",
           id: randomUUID(),
           method: "GET",
           path: "/api/version",
         };
 
-        const response2 = await sendBinaryEncryptedRequest(
-          ws,
+        const response = await sendBinaryEncryptedRequest(
+          ws2,
           sessionKey,
-          request2,
+          request,
         );
-        expect(response2.status).toBe(200);
+        expect(response.status).toBe(200);
       } finally {
-        await closeWebSocket(ws);
+        await closeWebSocket(ws2);
       }
     }, 15000);
   });
@@ -1615,7 +1620,6 @@ describe("Secure WebSocket Transport E2E", () => {
         const handler = (data: WebSocket.RawData) => {
           let decrypted: string | null = null;
 
-          // Try binary envelope first (most common after auth)
           if (Buffer.isBuffer(data) || data instanceof ArrayBuffer) {
             const bytes =
               data instanceof ArrayBuffer ? new Uint8Array(data) : data;
@@ -1623,19 +1627,6 @@ describe("Secure WebSocket Transport E2E", () => {
               decrypted = decryptBinaryEnvelope(bytes, sessionKey);
             } catch {
               // Not a valid binary envelope
-            }
-          }
-
-          // Try JSON envelope as fallback
-          if (!decrypted) {
-            const dataStr = data.toString();
-            try {
-              const msg = JSON.parse(dataStr);
-              if (isEncryptedEnvelope(msg)) {
-                decrypted = decrypt(msg.nonce, msg.ciphertext, sessionKey);
-              }
-            } catch {
-              // Not valid JSON
             }
           }
 
@@ -1703,9 +1694,10 @@ describe("Secure WebSocket Transport E2E", () => {
           size: fileSize,
           mimeType: "text/plain",
         };
-        const startEnvelope = encryptToBinaryEnvelope(
-          JSON.stringify(startMsg),
+        const startEnvelope = encryptSequencedClientMessage(
+          ws,
           sessionKey,
+          startMsg,
         );
         ws.send(startEnvelope);
 
@@ -1728,9 +1720,10 @@ describe("Secure WebSocket Transport E2E", () => {
           type: "upload_end",
           uploadId,
         };
-        const endEnvelope = encryptToBinaryEnvelope(
-          JSON.stringify(endMsg),
+        const endEnvelope = encryptSequencedClientMessage(
+          ws,
           sessionKey,
+          endMsg,
         );
         ws.send(endEnvelope);
 
@@ -1786,7 +1779,7 @@ describe("Secure WebSocket Transport E2E", () => {
           size: fileSize,
           mimeType: "application/octet-stream",
         };
-        ws.send(encryptToBinaryEnvelope(JSON.stringify(startMsg), sessionKey));
+        ws.send(encryptSequencedClientMessage(ws, sessionKey, startMsg));
 
         await new Promise((resolve) => setTimeout(resolve, 100));
 
@@ -1814,7 +1807,7 @@ describe("Secure WebSocket Transport E2E", () => {
           type: "upload_end",
           uploadId,
         };
-        ws.send(encryptToBinaryEnvelope(JSON.stringify(endMsg), sessionKey));
+        ws.send(encryptSequencedClientMessage(ws, sessionKey, endMsg));
 
         // Wait for completion
         const messages = await messagesPromise;
@@ -1919,7 +1912,7 @@ describe("Secure WebSocket Transport E2E", () => {
           size: fileSize,
           mimeType: "application/octet-stream",
         };
-        ws.send(encryptToBinaryEnvelope(JSON.stringify(startMsg), sessionKey));
+        ws.send(encryptSequencedClientMessage(ws, sessionKey, startMsg));
 
         await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -1938,7 +1931,7 @@ describe("Secure WebSocket Transport E2E", () => {
           type: "upload_end",
           uploadId,
         };
-        ws.send(encryptToBinaryEnvelope(JSON.stringify(endMsg), sessionKey));
+        ws.send(encryptSequencedClientMessage(ws, sessionKey, endMsg));
 
         // Wait for completion
         const messages = await messagesPromise;

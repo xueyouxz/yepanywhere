@@ -19,7 +19,7 @@ function version(overrides: Partial<VersionInfo> = {}): VersionInfo {
     current: "0.4.29",
     latest: "0.4.29",
     updateAvailable: false,
-    resumeProtocolVersion: 2,
+    resumeProtocolVersion: 3,
     capabilities: [],
     ...overrides,
   };
@@ -43,18 +43,18 @@ describe("RemoteCompatibilityNotices", () => {
     window.localStorage.clear();
   });
 
-  it("renders and dismisses the relay resume security notice", () => {
+  it("renders and dismisses the relay resume protocol cutoff notice", () => {
     render(
       <RemoteCompatibilityNotices
         relayUsername="dev-box"
-        versionInfo={version({ resumeProtocolVersion: 1 })}
+        versionInfo={version({ resumeProtocolVersion: 2 })}
       />,
     );
 
     expect(screen.getByRole("alert").textContent).toContain(
-      "Server update recommended",
+      "Server update required",
     );
-    expect(screen.getByText(/session-resume hardening/i)).toBeTruthy();
+    expect(screen.getByText(/use localhost, a tunnel, or a VPN/i)).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
 

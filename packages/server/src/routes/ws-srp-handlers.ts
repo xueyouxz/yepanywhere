@@ -15,6 +15,7 @@ import {
   SrpServerSession,
   deriveSecretboxKey,
   deriveTransportKey,
+  encrypt,
 } from "../crypto/index.js";
 import type {
   RemoteAccessService,
@@ -25,6 +26,7 @@ import {
   hasEstablishedSrpTransport,
   isSrpProofPending,
 } from "./ws-transport-auth.js";
+import { RESUME_PROTOCOL_VERSION } from "./version.js";
 
 /** Maximum age for a resume challenge nonce (60s) */
 const RESUME_CHALLENGE_MAX_AGE_MS = 60 * 1000;
@@ -257,9 +259,40 @@ export function cleanupSrpConnectionState(connState: ConnectionState): void {
   cleanupSrpHandshakeState(connState);
   connState.sessionKey = null;
   connState.baseSessionKey = null;
-  connState.usingLegacyTrafficKey = false;
   connState.nextOutboundSeq = 0;
   connState.lastInboundSeq = null;
+}
+
+function createResumeServerProof(params: {
+  sessionId: string;
+  serverNonce: string;
+  clientNonce: string;
+  resumeProtocolVersion: number;
+  key: Uint8Array;
+}): string {
+  const proofData = JSON.stringify({
+    type: "srp_resume_server_proof",
+    sessionId: params.sessionId,
+    serverNonce: params.serverNonce,
+    clientNonce: params.clientNonce,
+    resumeProtocolVersion: params.resumeProtocolVersion,
+  });
+  return JSON.stringify(encrypt(proofData, params.key));
+}
+
+function createSrpVerifyServerInfoProof(params: {
+  sessionId: string;
+  transportNonce: string;
+  resumeProtocolVersion: number;
+  key: Uint8Array;
+}): string {
+  const proofData = JSON.stringify({
+    type: "srp_verify_server_info",
+    sessionId: params.sessionId,
+    transportNonce: params.transportNonce,
+    resumeProtocolVersion: params.resumeProtocolVersion,
+  });
+  return JSON.stringify(encrypt(proofData, params.key));
 }
 
 /**
@@ -305,6 +338,14 @@ export async function handleSrpResumeInit(
     return;
   }
 
+  if (!msg.clientNonce) {
+    sendSrpMessage(ws, {
+      type: "srp_invalid",
+      reason: "invalid_proof",
+    });
+    return;
+  }
+
   try {
     const session = remoteSessionService.getSession(msg.sessionId);
 
@@ -320,6 +361,7 @@ export async function handleSrpResumeInit(
     const nonce = randomBytes(24).toString("base64");
     connState.pendingResumeChallenge = {
       nonce,
+      clientNonce: msg.clientNonce,
       sessionId: msg.sessionId,
       username: msg.identity,
       issuedAt: Date.now(),
@@ -414,9 +456,15 @@ export async function handleSrpResume(
 
     const baseSessionKey = Buffer.from(session.sessionKey, "base64");
     const transportNonce = pendingChallenge.nonce;
+    const serverProof = createResumeServerProof({
+      sessionId: session.sessionId,
+      serverNonce: pendingChallenge.nonce,
+      clientNonce: pendingChallenge.clientNonce,
+      resumeProtocolVersion: RESUME_PROTOCOL_VERSION,
+      key: baseSessionKey,
+    });
     connState.baseSessionKey = baseSessionKey;
     connState.sessionKey = deriveTransportKey(baseSessionKey, transportNonce);
-    connState.usingLegacyTrafficKey = false;
     connState.authState = "authenticated";
     connState.requiresEncryptedMessages = true;
     connState.username = session.username;
@@ -431,6 +479,7 @@ export async function handleSrpResume(
       type: "srp_resumed",
       sessionId: session.sessionId,
       transportNonce,
+      serverProof,
     });
 
     console.log(
@@ -606,7 +655,6 @@ export async function handleSrpProof(
     const transportNonce = randomBytes(24).toString("base64");
     connState.baseSessionKey = baseSessionKey;
     connState.sessionKey = deriveTransportKey(baseSessionKey, transportNonce);
-    connState.usingLegacyTrafficKey = false;
     connState.authState = "authenticated";
     connState.requiresEncryptedMessages = true;
     connState.pendingResumeChallenge = null;
@@ -644,6 +692,14 @@ export async function handleSrpProof(
       M2: result.M2,
       sessionId,
       transportNonce,
+      serverInfoProof: sessionId
+        ? createSrpVerifyServerInfoProof({
+            sessionId,
+            transportNonce,
+            resumeProtocolVersion: RESUME_PROTOCOL_VERSION,
+            key: baseSessionKey,
+          })
+        : undefined,
     };
     sendSrpMessage(ws, verify);
 

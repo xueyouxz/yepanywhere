@@ -75,7 +75,11 @@ export function RemoteCompatibilityNoticeCard({
   return (
     <section
       className={`remote-compatibility-notice remote-compatibility-notice--${placement} remote-compatibility-notice--${notice.severity}`}
-      role={notice.severity === "security" ? "alert" : "status"}
+      role={
+        notice.severity === "security" || notice.severity === "blocking"
+          ? "alert"
+          : "status"
+      }
       data-testid="remote-compatibility-notice"
     >
       <div className="remote-compatibility-notice__content">
