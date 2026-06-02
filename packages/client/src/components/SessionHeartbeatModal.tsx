@@ -10,7 +10,7 @@ import { useServerSettings } from "../hooks/useServerSettings";
 import { useI18n } from "../i18n";
 import { Modal } from "./ui/Modal";
 
-const DEFAULT_HEARTBEAT_TEXT = "heartbeat";
+const DEFAULT_HEARTBEAT_TEXT = "continue";
 const DEFAULT_HEARTBEAT_AFTER_MINUTES = 15;
 const HEARTBEAT_AFTER_PRESETS = [5, 15, 30, 60] as const;
 const HEARTBEAT_FORCE_PRESETS = [1, 5, 15] as const;

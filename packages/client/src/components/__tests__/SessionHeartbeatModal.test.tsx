@@ -70,7 +70,7 @@ describe("SessionHeartbeatModal", () => {
   beforeEach(() => {
     serverSettingsState.settings = {
       heartbeatTurnsAfterMinutes: 20,
-      heartbeatTurnText: "yepanywhere heartbeat",
+      heartbeatTurnText: "continue",
     };
     mockUpdateSessionMetadata.mockResolvedValue({});
   });
@@ -83,9 +83,7 @@ describe("SessionHeartbeatModal", () => {
   it("shows default heartbeat text as an editable placeholder", () => {
     renderModal();
 
-    const input = screen.getByPlaceholderText(
-      "yepanywhere heartbeat",
-    ) as HTMLInputElement;
+    const input = screen.getByPlaceholderText("continue") as HTMLInputElement;
 
     expect(input.value).toBe("");
   });
@@ -94,7 +92,7 @@ describe("SessionHeartbeatModal", () => {
     const onClose = vi.fn();
     renderModal({ onClose });
 
-    const input = screen.getByPlaceholderText("yepanywhere heartbeat");
+    const input = screen.getByPlaceholderText("continue");
     fireEvent.change(input, { target: { value: "checking in" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
@@ -150,7 +148,7 @@ describe("SessionHeartbeatModal", () => {
     const onClose = vi.fn();
     renderModal({ onClose });
 
-    const input = screen.getByPlaceholderText("yepanywhere heartbeat");
+    const input = screen.getByPlaceholderText("continue");
     const overlay = document.querySelector(".modal-overlay");
 
     expect(overlay).not.toBeNull();

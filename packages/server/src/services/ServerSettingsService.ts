@@ -13,9 +13,14 @@ import type {
 } from "@yep-anywhere/shared";
 import { normalizeYaClientBaseUrlFromShareViewerUrl } from "@yep-anywhere/shared";
 
-const CURRENT_VERSION = 1;
+const CURRENT_VERSION = 2;
 export const DEFAULT_SPEECH_AUDIO_RETENTION_MAX_AGE_DAYS = 56;
 export const DEFAULT_SPEECH_AUDIO_RETENTION_MAX_BYTES = 400 * 1024 * 1024;
+const DEFAULT_HEARTBEAT_TURN_TEXT = "continue";
+const LEGACY_DEFAULT_HEARTBEAT_TURN_TEXTS = new Set([
+  "heartbeat",
+  "yepanywhere heartbeat",
+]);
 
 export interface SpeechAudioRetentionSettings {
   /** Whether YA persists server-routed speech audio and sidecar metadata. */
@@ -96,7 +101,7 @@ export const DEFAULT_SERVER_SETTINGS: ServerSettings = {
   clientLogCollectionRequested: false,
   publicSharesEnabled: false,
   heartbeatTurnsAfterMinutes: 15,
-  heartbeatTurnText: "heartbeat",
+  heartbeatTurnText: DEFAULT_HEARTBEAT_TURN_TEXT,
   speechAudioRetention: {
     enabled: true,
     maxAgeDays: DEFAULT_SPEECH_AUDIO_RETENTION_MAX_AGE_DAYS,
@@ -110,6 +115,13 @@ export const DEFAULT_SERVER_SETTINGS: ServerSettings = {
 
 function normalizeLoadedSettings(settings: ServerSettings): ServerSettings {
   const normalized = { ...DEFAULT_SERVER_SETTINGS, ...settings };
+  const loadedHeartbeatText = settings.heartbeatTurnText?.trim();
+  if (
+    loadedHeartbeatText &&
+    LEGACY_DEFAULT_HEARTBEAT_TURN_TEXTS.has(loadedHeartbeatText)
+  ) {
+    normalized.heartbeatTurnText = DEFAULT_SERVER_SETTINGS.heartbeatTurnText;
+  }
   if (!normalized.yaClientBaseUrl && normalized.publicShareViewerBaseUrl) {
     try {
       normalized.yaClientBaseUrl = normalizeYaClientBaseUrlFromShareViewerUrl(

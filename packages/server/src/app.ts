@@ -559,7 +559,7 @@ export function createApp(options: AppOptions): AppResult {
                 options.serverSettingsService?.getSetting(
                   "heartbeatTurnText",
                 ) ??
-                "yepanywhere heartbeat",
+                "continue",
             };
           }
         : undefined,

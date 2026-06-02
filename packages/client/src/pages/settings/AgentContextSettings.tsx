@@ -3,7 +3,7 @@ import { useServerSettings } from "../../hooks/useServerSettings";
 import { useI18n } from "../../i18n";
 
 const MAX_LENGTH = 10000;
-const DEFAULT_HEARTBEAT_TEXT = "heartbeat";
+const DEFAULT_HEARTBEAT_TEXT = "continue";
 const DEFAULT_HEARTBEAT_AFTER_MINUTES = 15;
 
 export function AgentContextSettings() {
