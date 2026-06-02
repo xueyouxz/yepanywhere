@@ -13,8 +13,8 @@ import { useRemoteBasePath } from "../hooks/useRemoteBasePath";
 import { useI18n } from "../i18n";
 import { toBrowserAppHref } from "../lib/appHref";
 import {
+  LocalFileModal,
   LocalMediaModal,
-  LocalResourceNotice,
   useLocalMediaInlinePreviews,
   useLocalResourceClick,
 } from "./LocalMediaModal";
@@ -128,10 +128,10 @@ export const FileViewer = memo(function FileViewer({
   const markdownPreviewRef = useRef<HTMLDivElement>(null);
   const {
     modal: localMediaModal,
-    resourceNotice: localResourceNotice,
+    localFileModal,
     handleClick: handleLocalResourceClick,
     closeModal: closeLocalMediaModal,
-    clearResourceNotice: clearLocalResourceNotice,
+    closeLocalFileModal,
   } = useLocalResourceClick();
   const handleLocalResourceKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -337,12 +337,6 @@ export const FileViewer = memo(function FileViewer({
                 }}
               />
             </div>
-            {localResourceNotice && (
-              <LocalResourceNotice
-                message={localResourceNotice}
-                onDismiss={clearLocalResourceNotice}
-              />
-            )}
           </>
         );
       }
@@ -543,6 +537,12 @@ export const FileViewer = memo(function FileViewer({
           path={localMediaModal.path}
           mediaType={localMediaModal.mediaType}
           onClose={closeLocalMediaModal}
+        />
+      ) : null}
+      {localFileModal ? (
+        <LocalFileModal
+          resource={localFileModal}
+          onClose={closeLocalFileModal}
         />
       ) : null}
     </div>

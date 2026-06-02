@@ -59,6 +59,47 @@ function isActivityDebugEnabled(): boolean {
   }
 }
 
+function getRelayHeader(
+  headers: Record<string, string> | undefined,
+  name: string,
+): string | undefined {
+  if (!headers) return undefined;
+  const direct = headers[name];
+  if (direct !== undefined) return direct;
+  const normalizedName = name.toLowerCase();
+  return Object.entries(headers).find(
+    ([key]) => key.toLowerCase() === normalizedName,
+  )?.[1];
+}
+
+function getRelayErrorDetail(body: unknown): string | null {
+  if (typeof body === "string") {
+    const detail = body.trim();
+    return detail || null;
+  }
+  if (body && typeof body === "object" && "error" in body) {
+    const detail = String((body as { error: unknown }).error).trim();
+    return detail || null;
+  }
+  return null;
+}
+
+function createRelayApiError(
+  response: RelayResponse,
+): Error & { setupRequired?: boolean; status: number } {
+  const detail = getRelayErrorDetail(response.body);
+  const error = new Error(
+    detail
+      ? `API error: ${response.status}: ${detail}`
+      : `API error: ${response.status}`,
+  ) as Error & { setupRequired?: boolean; status: number };
+  error.status = response.status;
+  if (getRelayHeader(response.headers, "X-Setup-Required") === "true") {
+    error.setupRequired = true;
+  }
+  return error;
+}
+
 /** Default chunk size for file uploads (64KB) */
 const DEFAULT_CHUNK_SIZE = 64 * 1024;
 
@@ -350,14 +391,7 @@ export class RelayProtocol {
       this.pendingRequests.set(id, {
         resolve: (response: RelayResponse) => {
           if (response.status >= 400) {
-            const error = new Error(
-              `API error: ${response.status}`,
-            ) as Error & { status: number; setupRequired?: boolean };
-            error.status = response.status;
-            if (response.headers?.["X-Setup-Required"] === "true") {
-              error.setupRequired = true;
-            }
-            reject(error);
+            reject(createRelayApiError(response));
           } else {
             resolve(response.body as T);
           }
@@ -417,7 +451,7 @@ export class RelayProtocol {
       this.pendingRequests.set(id, {
         resolve: (response: RelayResponse) => {
           if (response.status >= 400) {
-            reject(new Error(`API error: ${response.status}`));
+            reject(createRelayApiError(response));
             return;
           }
 

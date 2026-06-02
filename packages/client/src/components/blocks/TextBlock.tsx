@@ -4,8 +4,8 @@ import { useStreamingMarkdownContext } from "../../contexts/StreamingMarkdownCon
 import { useStreamingMarkdown } from "../../hooks/useStreamingMarkdown";
 import { registerMarkdownCopySource } from "../../lib/markdownSelectionCopy";
 import {
+  LocalFileModal,
   LocalMediaModal,
-  LocalResourceNotice,
   useLocalMediaInlinePreviews,
   useLocalResourceClick,
 } from "../LocalMediaModal";
@@ -109,10 +109,10 @@ export const TextBlock = memo(function TextBlock({
 
   const {
     modal,
-    resourceNotice,
+    localFileModal,
     handleClick,
     closeModal,
-    clearResourceNotice,
+    closeLocalFileModal,
   } = useLocalResourceClick();
   useLocalMediaInlinePreviews(copySourceRef);
 
@@ -206,18 +206,18 @@ export const TextBlock = memo(function TextBlock({
           ))}
       </div>
 
-      {resourceNotice && (
-        <LocalResourceNotice
-          message={resourceNotice}
-          onDismiss={clearResourceNotice}
-        />
-      )}
-
       {modal && (
         <LocalMediaModal
           path={modal.path}
           mediaType={modal.mediaType}
           onClose={closeModal}
+        />
+      )}
+
+      {localFileModal && (
+        <LocalFileModal
+          resource={localFileModal}
+          onClose={closeLocalFileModal}
         />
       )}
     </div>

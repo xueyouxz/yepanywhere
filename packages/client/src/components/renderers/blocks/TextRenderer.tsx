@@ -1,6 +1,6 @@
 import {
+  LocalFileModal,
   LocalMediaModal,
-  LocalResourceNotice,
   useLocalResourceClick,
 } from "../../LocalMediaModal";
 import type { ContentBlock, ContentRenderer } from "../types";
@@ -18,10 +18,10 @@ interface TextBlock extends ContentBlock {
 function TextRendererComponent({ block }: { block: TextBlock }) {
   const {
     modal,
-    resourceNotice,
+    localFileModal,
     handleClick,
     closeModal,
-    clearResourceNotice,
+    closeLocalFileModal,
   } = useLocalResourceClick();
 
   // Prefer server-rendered HTML if available
@@ -34,17 +34,17 @@ function TextRendererComponent({ block }: { block: TextBlock }) {
           // biome-ignore lint/security/noDangerouslySetInnerHtml: server-rendered markdown
           dangerouslySetInnerHTML={{ __html: block._renderedHtml }}
         />
-        {resourceNotice && (
-          <LocalResourceNotice
-            message={resourceNotice}
-            onDismiss={clearResourceNotice}
-          />
-        )}
         {modal && (
           <LocalMediaModal
             path={modal.path}
             mediaType={modal.mediaType}
             onClose={closeModal}
+          />
+        )}
+        {localFileModal && (
+          <LocalFileModal
+            resource={localFileModal}
+            onClose={closeLocalFileModal}
           />
         )}
       </div>

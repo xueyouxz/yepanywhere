@@ -4,11 +4,15 @@ import { I18nProvider } from "../../../i18n";
 import { type Connection, setGlobalConnection } from "../../../lib/connection";
 import { TextBlock } from "../TextBlock";
 
-function mockRemoteConnection(): Connection {
+function mockRemoteConnection(
+  fetchBlob = vi.fn(
+    async () => new Blob(["remote file"], { type: "text/plain" }),
+  ),
+): Connection {
   return {
     mode: "secure",
     fetch: vi.fn(),
-    fetchBlob: vi.fn(async () => new Blob(["png"], { type: "image/png" })),
+    fetchBlob,
   } as unknown as Connection;
 }
 
@@ -117,12 +121,45 @@ describe("TextBlock", () => {
     ).toBeTruthy();
   });
 
-  it("allows direct local-file links to keep their fallback href behavior", () => {
+  it("opens direct local-file links in a modal", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response('{"ok": true}\n', {
+          headers: { "Content-Type": "application/json; charset=utf-8" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <I18nProvider>
+        <TextBlock
+          text="[probe json](/tmp/probe.json)"
+          augmentHtml={
+            '<p><a href="/api/local-file?path=%2Ftmp%2Fprobe.json">probe json</a></p>'
+          }
+        />
+      </I18nProvider>,
+    );
+
+    const clickAllowed = fireEvent.click(
+      screen.getByRole("link", { name: "probe json" }),
+    );
+
+    expect(clickAllowed).toBe(false);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/local-file?path=%2Ftmp%2Fprobe.json",
+      { credentials: "include" },
+    );
+    expect(screen.getByRole("dialog").textContent).toContain("probe.json");
+    expect(await screen.findByText(/"ok": true/)).toBeTruthy();
+  });
+
+  it("preserves direct browser gestures for local-file links", () => {
     render(
       <TextBlock
-        text="[probe json](C:/tmp/probe.json)"
+        text="[probe json](/tmp/probe.json)"
         augmentHtml={
-          '<p><a href="/api/local-file?path=C%3A%2Ftmp%2Fprobe.json">probe json</a></p>'
+          '<p><a href="/api/local-file?path=%2Ftmp%2Fprobe.json">probe json</a></p>'
         }
       />,
     );
@@ -137,22 +174,29 @@ describe("TextBlock", () => {
       { once: true },
     );
 
-    fireEvent.click(screen.getByRole("link", { name: "probe json" }));
+    fireEvent.click(screen.getByRole("link", { name: "probe json" }), {
+      metaKey: true,
+    });
 
     expect(defaultPreventedBeforeDocument).toBe(false);
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("blocks raw local-file navigation while connected through remote access", () => {
-    setGlobalConnection(mockRemoteConnection());
+  it("opens remote local-file links through the active connection", async () => {
+    const fetchBlob = vi.fn(
+      async () => new Blob(["remote file"], { type: "text/plain" }),
+    );
+    setGlobalConnection(mockRemoteConnection(fetchBlob));
 
     render(
-      <TextBlock
-        text="[probe json](C:/tmp/probe.json)"
-        augmentHtml={
-          '<p><a href="/api/local-file?path=C%3A%2Ftmp%2Fprobe.json">probe json</a></p>'
-        }
-      />,
+      <I18nProvider>
+        <TextBlock
+          text="[probe json](C:/tmp/probe.json)"
+          augmentHtml={
+            '<p><a href="/api/local-file?path=C%3A%2Ftmp%2Fprobe.json">probe json</a></p>'
+          }
+        />
+      </I18nProvider>,
     );
 
     const clickAllowed = fireEvent.click(
@@ -160,6 +204,36 @@ describe("TextBlock", () => {
     );
 
     expect(clickAllowed).toBe(false);
-    expect(screen.getByRole("status").textContent).toContain("in-app viewer");
+    expect(fetchBlob).toHaveBeenCalledWith(
+      "/api/local-file?path=C%3A%2Ftmp%2Fprobe.json",
+    );
+    expect(await screen.findByText("remote file")).toBeTruthy();
+  });
+
+  it("shows remote local-file server rejections inside the modal", async () => {
+    const fetchBlob = vi.fn(async () => {
+      throw new Error("API error: 403: Path not in allowed directories");
+    });
+    setGlobalConnection(mockRemoteConnection(fetchBlob));
+
+    render(
+      <I18nProvider>
+        <TextBlock
+          text="[probe json](C:/tmp/probe.json)"
+          augmentHtml={
+            '<p><a href="/api/local-file?path=C%3A%2Ftmp%2Fprobe.json">probe json</a></p>'
+          }
+        />
+      </I18nProvider>,
+    );
+
+    const clickAllowed = fireEvent.click(
+      screen.getByRole("link", { name: "probe json" }),
+    );
+
+    expect(clickAllowed).toBe(false);
+    expect(
+      await screen.findByText(/Path not in allowed directories/),
+    ).toBeTruthy();
   });
 });

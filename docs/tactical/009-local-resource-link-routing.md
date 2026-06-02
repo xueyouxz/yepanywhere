@@ -13,6 +13,13 @@ Progress:
   existing local-media modal branch and blocks raw local-file/project-raw API
   navigation in remote mode with an explicit notice until the file viewer branch
   is wired.
+- [x] 2026-06-02: Replaced the temporary remote local-file blocked notice with
+  a local-file modal branch. The modal fetches local-file and project raw-file
+  responses through the active connection, renders text/JSON/log files directly,
+  renders direct-mode HTML/Markdown output in a sandboxed iframe, renders PDFs
+  from blob URLs, and surfaces server-side rejections in the modal. Remote mode
+  currently fetches HTML/Markdown through the relay but shows it as source text
+  until nested iframe links/images can be routed through the same handler.
 
 ## Context
 
@@ -325,12 +332,16 @@ Current implementation state:
   in `FileViewer` use that handler.
 - `local-media` references still open `LocalMediaModal`, including references
   described only by `data-ya-resource` attributes.
-- In remote mode, recognized raw local-file and project-raw API links are
-  intercepted before the browser can navigate to the hosted client's `/api`
-  route. They currently show an explicit in-app notice.
-- The next implementation branch should replace that temporary notice for
-  `local-file` with a modal/fetch path that reaches the user's YA server
-  through the active connection and shows server-side approved-folder errors.
+- Recognized local-file and project raw-file links open `LocalFileModal` on
+  normal clicks. Direct browser link gestures are preserved outside remote mode;
+  remote mode intercepts those links before the browser can navigate to the
+  hosted client's `/api` route.
+- `LocalFileModal` reaches the user's YA server through the active connection,
+  and the blob-fetch error path now preserves JSON route error messages such as
+  approved-folder rejections.
+- The next implementation branch should emit semantic `data-ya-resource`
+  attributes from the server renderers for local-file links, keeping legacy
+  href parsing as fallback.
 
 ### 4. Server Route Cleanup
 
@@ -358,7 +369,7 @@ The first implementation series should stay small and staged:
 2. [x] Add a generic delegated click handler in normal rendered message/file
    previews that blocks raw `/api/local-file` navigation in remote mode.
 3. [x] For local media, route to the existing media modal unchanged.
-4. [ ] For local text-like files, open a simple modal populated through the
+4. [x] For local text-like files, open a simple modal populated through the
    current connection.
 5. [ ] Add server renderer tests that prove agent-authored Markdown links become
    YA-authored semantic metadata while preserving fallback hrefs.
