@@ -49,6 +49,7 @@ import { RelayConnectionGate } from "./pages/RelayConnectionGate";
 import { RelayLoginPage } from "./pages/RelayLoginPage";
 import { SessionPage } from "./pages/SessionPage";
 import { SettingsLayout } from "./pages/settings";
+import { useRemoteBasePath } from "./hooks/useRemoteBasePath";
 import "./styles/index.css";
 
 // Apply saved preferences before React renders to avoid flash
@@ -60,6 +61,11 @@ initializeContentMaxWidth();
 // Get base URL for router (Vite sets this based on --base flag)
 // Remove trailing slash for BrowserRouter basename
 const basename = import.meta.env.BASE_URL.replace(/\/$/, "") || undefined;
+
+function ProjectRedirect() {
+  const basePath = useRemoteBasePath();
+  return <Navigate to={`${basePath}/sessions`} replace />;
+}
 
 /**
  * Shared app routes used by both direct mode (ConnectionGate) and
@@ -73,6 +79,7 @@ const APP_ROUTES = (
     {/* IMPORTANT: Keep routes in sync with main.tsx — adding a route here? Add it there too! */}
     <Route element={<NavigationLayout />}>
       <Route path="projects" element={<ProjectsPage />} />
+      <Route path="projects/:projectId" element={<ProjectRedirect />} />
       <Route path="sessions" element={<GlobalSessionsPage />} />
       <Route path="agents" element={<AgentsPage />} />
       <Route path="inbox" element={<InboxPage />} />

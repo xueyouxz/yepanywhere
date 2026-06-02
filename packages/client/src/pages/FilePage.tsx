@@ -15,9 +15,6 @@ export function FilePage() {
   const filePath = searchParams.get("path");
   const lineNumber = parsePositiveInteger(searchParams.get("line"));
   const lineEnd = parsePositiveInteger(searchParams.get("lineEnd"));
-  const projectSessionsPath = projectId
-    ? `${basePath}/sessions?project=${encodeURIComponent(projectId)}`
-    : `${basePath}/projects`;
 
   if (!projectId) {
     return (
@@ -39,7 +36,10 @@ export function FilePage() {
         <div className="file-page-error-content">
           <h1>{t("fileInvalidUrl" as never)}</h1>
           <p>{t("fileMissingPath" as never)}</p>
-          <Link to={projectSessionsPath} className="file-page-back-link">
+          <Link
+            to={`${basePath}/projects/${projectId}`}
+            className="file-page-back-link"
+          >
             {t("fileGoToProject" as never)}
           </Link>
         </div>
@@ -51,7 +51,7 @@ export function FilePage() {
     <div className="file-page">
       <div className="file-page-nav">
         <Link
-          to={projectSessionsPath}
+          to={`${basePath}/projects/${projectId}`}
           className="file-page-back-link"
           title={t("fileBackToProject" as never)}
         >
