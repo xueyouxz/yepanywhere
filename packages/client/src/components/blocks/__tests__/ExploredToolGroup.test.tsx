@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { toUrlProjectId } from "@yep-anywhere/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionMetadataProvider } from "../../../contexts/SessionMetadataContext";
+import { I18nProvider } from "../../../i18n";
 import type { Message } from "../../../types";
 import type { RenderItem, ToolCallItem } from "../../../types/renderItems";
 import {
@@ -157,7 +158,8 @@ describe("ExploredToolGroup", () => {
     expect(readLink.getAttribute("href")).toBe(
       `/projects/${projectId}/file?path=topics%2Frich-text-rendering.md`,
     );
-    expect(screen.getByText("tool|bash → 0 matches")).toBeDefined();
+    expect(screen.getByText("tool|bash in packages/client/src")).toBeDefined();
+    expect(screen.getByText("0 matches")).toBeDefined();
     expect(screen.getByText("packages/client/src")).toBeDefined();
 
     fireEvent.click(
@@ -168,5 +170,78 @@ describe("ExploredToolGroup", () => {
     expect(
       screen.getByRole("button", { name: "Expand explored tools" }),
     ).toBeDefined();
+  });
+
+  it("lets explored grep match counts open a match table", () => {
+    const read = toolCall(
+      "read-1",
+      "Read",
+      { file_path: "README.md" },
+      "2026-05-28T00:00:00.000Z",
+      {
+        content: "file contents",
+        isError: false,
+        structured: {
+          type: "text",
+          file: {
+            filePath: "README.md",
+            content: "line\n".repeat(3),
+            numLines: 3,
+            startLine: 1,
+            totalLines: 3,
+          },
+        },
+      },
+    );
+    const search = toolCall(
+      "grep-1",
+      "Grep",
+      { pattern: "needle", path: "src", output_mode: "content" },
+      "2026-05-28T00:00:00.000Z",
+      {
+        content: "",
+        isError: false,
+        structured: {
+          mode: "content",
+          filenames: [],
+          numFiles: 2,
+          content: "src/a.ts:12:const needle = true;\nsrc/b.ts:7:needle again",
+          matches: [
+            {
+              filePath: "src/a.ts",
+              lineNumber: 12,
+              text: "const needle = true;",
+              ranges: [{ start: 6, end: 12 }],
+            },
+            {
+              filePath: "src/b.ts",
+              lineNumber: 7,
+              text: "needle again",
+              ranges: [{ start: 0, end: 6 }],
+            },
+          ],
+        },
+      },
+    );
+
+    render(
+      <I18nProvider>
+        <SessionMetadataProvider
+          projectId={projectId}
+          projectPath={projectRoot}
+          sessionId="session-1"
+        >
+          <ExploredToolGroup id="explored-test" items={[read, search]} />
+        </SessionMetadataProvider>
+      </I18nProvider>,
+    );
+
+    expect(screen.getByText("needle in src")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "2 matches" }));
+
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByText("src/a.ts")).toBeDefined();
+    expect(screen.getByText("12")).toBeDefined();
+    expect(document.querySelectorAll(".grep-match-highlight")).toHaveLength(2);
   });
 });

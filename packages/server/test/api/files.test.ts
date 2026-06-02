@@ -123,6 +123,108 @@ describe("Files API", () => {
       );
     });
 
+    it("wraps requested Markdown preview line ranges", async () => {
+      const { app } = createApp({
+        sdk: mockSdk,
+        projectsDir: join(testDir, "sessions"),
+      });
+
+      const res = await app.request(
+        `/api/projects/${projectId}/files?path=docs/guide.md&highlight=true&line=1&lineEnd=3`,
+      );
+
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as FileContentResponse;
+      expect(json.renderedMarkdownHtml).toContain(
+        'class="markdown-preview-line-boundary markdown-preview-line-boundary-start" data-line="1"',
+      );
+      expect(json.renderedMarkdownHtml).toContain(
+        'class="markdown-preview-span markdown-preview-span-start" data-line-start="1" data-line-end="3"',
+      );
+      expect(json.renderedMarkdownHtml).toContain(
+        'class="markdown-preview-line-boundary markdown-preview-line-boundary-end" data-line="3"',
+      );
+    });
+
+    it("snaps split Markdown preview ranges to block boundaries", async () => {
+      await writeFile(
+        join(projectPath, "docs", "list.md"),
+        "# Snap\n\n- first\n- selected\n- last\n\nTail",
+      );
+      const { app } = createApp({
+        sdk: mockSdk,
+        projectsDir: join(testDir, "sessions"),
+      });
+
+      const res = await app.request(
+        `/api/projects/${projectId}/files?path=docs/list.md&highlight=true&line=4&lineEnd=4`,
+      );
+
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as FileContentResponse;
+      expect(json.renderedMarkdownHtml).toContain(
+        'class="markdown-preview-span markdown-preview-span-start" data-line-start="3" data-line-end="5"',
+      );
+      expect(json.renderedMarkdownHtml).toContain("<li>first</li>");
+      expect(json.renderedMarkdownHtml).toContain("<li>selected</li>");
+      expect(json.renderedMarkdownHtml).toContain("<li>last</li>");
+    });
+
+    it("keeps Markdown reference definitions available in range previews", async () => {
+      await writeFile(
+        join(projectPath, "docs", "references.md"),
+        "See [Peer][peer]\n\nContext\n\n[peer]: peer.md",
+      );
+      const { app } = createApp({
+        sdk: mockSdk,
+        projectsDir: join(testDir, "sessions"),
+      });
+
+      const res = await app.request(
+        `/api/projects/${projectId}/files?path=docs/references.md&highlight=true&view=range&line=1&lineEnd=1`,
+      );
+
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as FileContentResponse;
+      const peerPath = await realpath(join(projectPath, "docs", "peer.md"));
+      expect(json.content).toBe("See [Peer][peer]");
+      expect(json.renderedMarkdownHtml).toContain(
+        'class="markdown-preview-span markdown-preview-span-start" data-line-start="1" data-line-end="1"',
+      );
+      expect(json.renderedMarkdownHtml).toContain(
+        `href="/api/local-file?path=${encodeURIComponent(peerPath)}&amp;render=1"`,
+      );
+    });
+
+    it("uses bounded Markdown context for large range previews", async () => {
+      await writeFile(
+        join(projectPath, "docs", "large-references.md"),
+        [
+          "See [Peer][peer]",
+          "",
+          "[peer]: peer.md",
+          "",
+          "tail\n".repeat(240_000),
+        ].join("\n"),
+      );
+      const { app } = createApp({
+        sdk: mockSdk,
+        projectsDir: join(testDir, "sessions"),
+      });
+
+      const res = await app.request(
+        `/api/projects/${projectId}/files?path=docs/large-references.md&highlight=true&view=range&line=1&lineEnd=1`,
+      );
+
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as FileContentResponse;
+      const peerPath = await realpath(join(projectPath, "docs", "peer.md"));
+      expect(json.content).toBe("See [Peer][peer]");
+      expect(json.renderedMarkdownHtml).toContain(
+        `href="/api/local-file?path=${encodeURIComponent(peerPath)}&amp;render=1"`,
+      );
+    });
+
     it("returns file metadata and content for TypeScript file", async () => {
       const { app } = createApp({
         sdk: mockSdk,
@@ -234,19 +336,26 @@ describe("Files API", () => {
       expect(json.error).toBe("Invalid file path");
     });
 
-    it("returns 400 for absolute path", async () => {
+    it("returns file metadata and content for absolute live file path", async () => {
+      const outsideDir = join(testDir, "outside");
+      const outsideFile = join(outsideDir, "notes.txt");
+      await mkdir(outsideDir, { recursive: true });
+      await writeFile(outsideFile, "outside notes");
+
       const { app } = createApp({
         sdk: mockSdk,
         projectsDir: join(testDir, "sessions"),
       });
 
       const res = await app.request(
-        `/api/projects/${projectId}/files?path=/etc/passwd`,
+        `/api/projects/${projectId}/files?path=${encodeURIComponent(outsideFile)}`,
       );
 
-      expect(res.status).toBe(400);
-      const json = (await res.json()) as { error: string };
-      expect(json.error).toBe("Invalid file path");
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as FileContentResponse;
+      expect(json.metadata.path).toBe(outsideFile);
+      expect(json.content).toBe("outside notes");
+      expect(json.rawUrl).toContain(encodeURIComponent(outsideFile));
     });
 
     it("returns 400 for symlink escaping project root", async () => {
@@ -383,6 +492,26 @@ describe("Files API", () => {
 
       expect(res.status).toBe(200);
       expect(res.headers.get("Content-Disposition")).toContain("inline");
+    });
+
+    it("returns raw content for an absolute live file path", async () => {
+      const outsideDir = join(testDir, "outside");
+      const outsideFile = join(outsideDir, "raw-notes.txt");
+      await mkdir(outsideDir, { recursive: true });
+      await writeFile(outsideFile, "outside raw notes");
+
+      const { app } = createApp({
+        sdk: mockSdk,
+        projectsDir: join(testDir, "sessions"),
+      });
+
+      const res = await app.request(
+        `/api/projects/${projectId}/files/raw?path=${encodeURIComponent(outsideFile)}`,
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Content-Type")).toBe("text/plain");
+      expect(await res.text()).toBe("outside raw notes");
     });
 
     it("returns 400 for path traversal attempt", async () => {

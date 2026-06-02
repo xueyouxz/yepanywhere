@@ -235,7 +235,7 @@ function renderEntrySummary(
   };
 
   if (
-    kind === "read" &&
+    (kind === "read" || kind === "search") &&
     isComplete &&
     toolRegistry.hasInteractiveSummary(item.toolName)
   ) {

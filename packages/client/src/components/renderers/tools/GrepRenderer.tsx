@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import type { ZodError } from "zod";
 import { useSchemaValidationContext } from "../../../contexts/SchemaValidationContext";
 import { validateToolResult } from "../../../lib/validateToolResult";
 import { SchemaWarning } from "../../SchemaWarning";
-import type { GrepInput, GrepResult, ToolRenderer } from "./types";
+import { Modal } from "../../ui/Modal";
+import type { GrepInput, GrepMatch, GrepResult, ToolRenderer } from "./types";
 
 const MAX_FILES_COLLAPSED = 20;
 const MAX_LINES_COLLAPSED = 30;
@@ -13,6 +14,172 @@ function countGrepMatches(content: string | undefined): number {
     return 0;
   }
   return content.split("\n").filter((line) => /(^|:)\d+:/.test(line)).length;
+}
+
+const MAX_GREP_MATCH_ROWS = 100;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getHighlightRegex(pattern: string | undefined): RegExp | null {
+  if (!pattern) {
+    return null;
+  }
+  try {
+    const regex = new RegExp(pattern, "g");
+    return regex.source === "(?:)" ? null : regex;
+  } catch {
+    const escaped = escapeRegExp(pattern);
+    return escaped ? new RegExp(escaped, "gi") : null;
+  }
+}
+
+function renderHighlightedRanges(text: string, ranges: GrepMatch["ranges"]) {
+  if (!ranges || ranges.length === 0) {
+    return null;
+  }
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  for (const [key, range] of ranges.entries()) {
+    const start = Math.max(0, Math.min(text.length, range.start));
+    const end = Math.max(start, Math.min(text.length, range.end));
+    if (start > lastIndex) {
+      nodes.push(text.slice(lastIndex, start));
+    }
+    if (end > start) {
+      nodes.push(
+        <mark className="grep-match-highlight" key={`match-${key}`}>
+          {text.slice(start, end)}
+        </mark>,
+      );
+    }
+    lastIndex = end;
+    if (key >= 50) {
+      break;
+    }
+  }
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+  return nodes.length > 0 ? nodes : null;
+}
+
+function renderHighlightedText(
+  text: string,
+  ranges: GrepMatch["ranges"],
+  pattern: string | undefined,
+) {
+  const rangeNodes = renderHighlightedRanges(text, ranges);
+  if (rangeNodes) {
+    return rangeNodes;
+  }
+  const regex = getHighlightRegex(pattern);
+  if (!regex) {
+    return text;
+  }
+
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  let key = 0;
+  for (const match of text.matchAll(regex)) {
+    const matchText = match[0];
+    const index = match.index ?? 0;
+    if (!matchText) {
+      break;
+    }
+    if (index > lastIndex) {
+      nodes.push(text.slice(lastIndex, index));
+    }
+    nodes.push(
+      <mark className="grep-match-highlight" key={`match-${key}`}>
+        {matchText}
+      </mark>,
+    );
+    key += 1;
+    lastIndex = index + matchText.length;
+    if (key >= 50) {
+      break;
+    }
+  }
+  if (nodes.length === 0) {
+    return text;
+  }
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+  return nodes;
+}
+
+function GrepMatchDrilldown({
+  label,
+  matches,
+  pattern,
+}: {
+  label: string;
+  matches: GrepMatch[];
+  pattern?: string;
+}) {
+  const [showModal, setShowModal] = useState(false);
+  const displayMatches = matches.slice(0, MAX_GREP_MATCH_ROWS);
+
+  if (matches.length === 0) {
+    return <span className="grep-count">{label}</span>;
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className="grep-match-count-button"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setShowModal(true);
+        }}
+      >
+        {label}
+      </button>
+      {showModal && (
+        <Modal title={label} onClose={() => setShowModal(false)}>
+          <div className="grep-match-modal">
+            <table className="grep-match-table">
+              <thead>
+                <tr>
+                  <th>File</th>
+                  <th>Line</th>
+                  <th>Text</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displayMatches.map((match, index) => (
+                  <tr
+                    key={`${match.filePath}:${match.lineNumber}:${match.columnNumber ?? ""}:${index}`}
+                  >
+                    <td className="grep-match-file">{match.filePath}</td>
+                    <td className="grep-match-line">
+                      {match.columnNumber
+                        ? `${match.lineNumber}:${match.columnNumber}`
+                        : match.lineNumber}
+                    </td>
+                    <td className="grep-match-text">
+                      {renderHighlightedText(match.text, match.ranges, pattern)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {matches.length > displayMatches.length && (
+              <div className="grep-match-truncated">
+                Showing first {displayMatches.length} of {matches.length}{" "}
+                matches
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+    </>
+  );
 }
 
 /**
@@ -120,9 +287,11 @@ function ContentView({
  * Grep tool result - shows search results based on mode
  */
 function GrepToolResult({
+  input,
   result,
   isError,
 }: {
+  input?: GrepInput;
   result: GrepResult;
   isError: boolean;
 }) {
@@ -184,14 +353,18 @@ function GrepToolResult({
 
   // Content mode - show search results
   if (mode === "content" && content) {
-    const matchCount = countGrepMatches(content);
+    const matches = result.matches ?? [];
+    const matchCount = matches.length || countGrepMatches(content);
+    const matchLabel = `${matchCount} ${matchCount === 1 ? "match" : "matches"}`;
 
     return (
       <div className="grep-result">
         <div className="grep-header">
-          <span className="grep-count">
-            {matchCount} {matchCount === 1 ? "match" : "matches"}
-          </span>
+          <GrepMatchDrilldown
+            label={matchLabel}
+            matches={matches}
+            pattern={input?.pattern}
+          />
           {appliedLimit && (
             <span className="badge badge-info">limit: {appliedLimit}</span>
           )}
@@ -237,6 +410,67 @@ function GrepToolResult({
   );
 }
 
+function getGrepUseSummary(input: GrepInput): string {
+  const parts = [input.pattern];
+  const scope = input.path || input.glob;
+  if (scope) {
+    parts.push(`in ${scope}`);
+  }
+  return parts.filter(Boolean).join(" ");
+}
+
+function getGrepResultLabel(result: GrepResult): {
+  matches: GrepMatch[];
+  text: string;
+} {
+  if (result.mode === "content") {
+    const matches = result.matches ?? [];
+    const matchCount = matches.length || countGrepMatches(result.content);
+    return {
+      matches,
+      text: `${matchCount} ${matchCount === 1 ? "match" : "matches"}`,
+    };
+  }
+
+  if (result.numFiles === 0) {
+    return { matches: [], text: "0 matches" };
+  }
+
+  return {
+    matches: [],
+    text:
+      result.numFiles !== undefined
+        ? `${result.numFiles} ${result.numFiles === 1 ? "file" : "files"}`
+        : "Results",
+  };
+}
+
+function GrepInteractiveSummary({
+  input,
+  result,
+  isError,
+}: {
+  input: GrepInput;
+  result: GrepResult | undefined;
+  isError: boolean;
+}) {
+  if (isError || !result) {
+    return null;
+  }
+  const resultLabel = getGrepResultLabel(result);
+  return (
+    <span className="grep-inline-summary">
+      <span>{getGrepUseSummary(input)}</span>
+      <span aria-hidden="true"> → </span>
+      <GrepMatchDrilldown
+        label={resultLabel.text}
+        matches={resultLabel.matches}
+        pattern={input.pattern}
+      />
+    </span>
+  );
+}
+
 export const grepRenderer: ToolRenderer<GrepInput, GrepResult> = {
   tool: "Grep",
   displayName: "Grep",
@@ -245,28 +479,34 @@ export const grepRenderer: ToolRenderer<GrepInput, GrepResult> = {
     return <GrepToolUse input={input as GrepInput} />;
   },
 
-  renderToolResult(result, isError, _context) {
-    return <GrepToolResult result={result as GrepResult} isError={isError} />;
+  renderToolResult(result, isError, _context, input) {
+    return (
+      <GrepToolResult
+        input={input as GrepInput | undefined}
+        result={result as GrepResult}
+        isError={isError}
+      />
+    );
   },
 
   getUseSummary(input) {
-    return (input as GrepInput).pattern;
+    return getGrepUseSummary(input as GrepInput);
   },
 
   getResultSummary(result, isError) {
     if (isError) return "Error";
     const r = result as GrepResult;
     if (!r) return "Results";
+    return getGrepResultLabel(r).text;
+  },
 
-    // For content mode, count actual matches
-    if (r.mode === "content") {
-      const matchCount = countGrepMatches(r.content);
-      return `${matchCount} ${matchCount === 1 ? "match" : "matches"}`;
-    }
-
-    if (r.numFiles === 0) {
-      return "0 matches";
-    }
-    return r.numFiles !== undefined ? `${r.numFiles} files` : "Results";
+  renderInteractiveSummary(input, result, isError) {
+    return (
+      <GrepInteractiveSummary
+        input={input as GrepInput}
+        result={result as GrepResult | undefined}
+        isError={isError}
+      />
+    );
   },
 };

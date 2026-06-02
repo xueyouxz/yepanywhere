@@ -62,6 +62,7 @@ interface FileViewerProps {
   projectId: string;
   filePath: string;
   source?: FileViewerSource;
+  openInNewTabUrl?: string | null;
   onClose?: () => void;
   /** If true, renders as standalone page layout instead of modal content */
   standalone?: boolean;
@@ -249,6 +250,31 @@ function downloadBlob(blob: Blob, fileName: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+function getTargetTopWithinContainer(
+  container: HTMLElement,
+  target: HTMLElement,
+): number {
+  const containerRect = container.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  return targetRect.top - containerRect.top + container.scrollTop;
+}
+
+function getFileViewerTargetScrollTop(
+  container: HTMLElement,
+  target: HTMLElement,
+): number {
+  if (container.scrollHeight <= container.clientHeight) {
+    return 0;
+  }
+  const targetTop = getTargetTopWithinContainer(container, target);
+  const leadIn = container.clientHeight * 0.1;
+  const maxScrollTop = Math.max(
+    0,
+    container.scrollHeight - container.clientHeight,
+  );
+  return Math.max(0, Math.min(maxScrollTop, targetTop - leadIn));
+}
+
 /**
  * FileViewer component - displays file content with appropriate formatting.
  */
@@ -256,6 +282,7 @@ export const FileViewer = memo(function FileViewer({
   projectId,
   filePath,
   source = DEFAULT_FILE_VIEWER_SOURCE,
+  openInNewTabUrl,
   onClose,
   standalone = false,
   lineNumber,
@@ -417,14 +444,15 @@ export const FileViewer = memo(function FileViewer({
     const highlightedLine =
       highlightedLineRef ??
       fileViewerBodyRef.current?.querySelector<HTMLElement>(
-        ".highlighted-line-start",
+        ".highlighted-line-start, .markdown-preview-span-start",
       );
-    if (highlightedLine) {
+    const viewerBody = fileViewerBodyRef.current;
+    if (highlightedLine && viewerBody) {
       requestAnimationFrame(() => {
-        highlightedLine.scrollIntoView({
-          behavior: "auto",
-          block: "center",
-        });
+        viewerBody.scrollTop = getFileViewerTargetScrollTop(
+          viewerBody,
+          highlightedLine,
+        );
       });
     }
   }, [fileData, highlightedLineRef, lineEnd, lineNumber, showPreview]);
@@ -462,6 +490,10 @@ export const FileViewer = memo(function FileViewer({
   }, [fileData, fileName, filePath, projectId, source]);
 
   const handleOpenInNewTab = useCallback(() => {
+    if (openInNewTabUrl) {
+      window.open(openInNewTabUrl, "_blank");
+      return;
+    }
     const searchParams = new URLSearchParams({ path: filePath });
     if (lineNumber !== undefined) {
       searchParams.set("line", String(lineNumber));
@@ -474,7 +506,7 @@ export const FileViewer = memo(function FileViewer({
     }
     const url = `/projects/${projectId}/file?${searchParams}`;
     window.open(url, "_blank");
-  }, [projectId, filePath, lineNumber, lineEnd, viewMode]);
+  }, [projectId, filePath, lineNumber, lineEnd, openInNewTabUrl, viewMode]);
 
   // Render loading state
   if (loading) {

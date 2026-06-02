@@ -142,7 +142,10 @@ export function normalizeCodexToolOutputWithContext(
 
   if (context?.toolName === "Grep") {
     const grepContent = extractCodexShellOutputContent(content);
-    const grepResult = normalizeRipgrepOutput(grepContent);
+    const grepResult = normalizeRipgrepOutput(
+      grepContent,
+      getGrepPattern(context.input),
+    );
     const isNoMatchesResult = exitCode === 1 && grepResult.numFiles === 0;
 
     if (!isError || isNoMatchesResult) {
@@ -220,7 +223,10 @@ export function normalizeCodexCommandExecutionOutput(
 
   let structured: unknown;
   if (context?.toolName === "Grep") {
-    const grepResult = normalizeRipgrepOutput(baseOutput);
+    const grepResult = normalizeRipgrepOutput(
+      baseOutput,
+      getGrepPattern(context.input),
+    );
     const isNoMatchesResult =
       execution.exitCode === 1 && grepResult.numFiles === 0;
     if (!isError || isNoMatchesResult) {
@@ -621,6 +627,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+function getGrepPattern(input: unknown): string | undefined {
+  if (!isRecord(input)) {
+    return undefined;
+  }
+  const pattern = input.pattern;
+  return typeof pattern === "string" ? pattern : undefined;
+}
+
 function parseNumericExitCode(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) {
     return Math.trunc(value);
@@ -929,11 +943,28 @@ function createBashToolResult(
   };
 }
 
-function normalizeRipgrepOutput(output: string): {
+interface NormalizedGrepMatchRange {
+  start: number;
+  end: number;
+}
+
+interface NormalizedGrepMatch {
+  columnNumber?: number;
+  filePath: string;
+  lineNumber: number;
+  ranges?: NormalizedGrepMatchRange[];
+  text: string;
+}
+
+function normalizeRipgrepOutput(
+  output: string,
+  pattern?: string,
+): {
   mode: "files_with_matches" | "content";
   filenames: string[];
   numFiles: number;
   content?: string;
+  matches?: NormalizedGrepMatch[];
   numLines?: number;
 } {
   const normalized = output.replace(/\r\n/g, "\n").replace(/\n+$/, "");
@@ -951,11 +982,17 @@ function normalizeRipgrepOutput(output: string): {
   );
 
   if (hasLineBasedMatches) {
+    const matches = lines
+      .map((line) => parseRipgrepMatchLine(line, pattern))
+      .filter((match): match is NormalizedGrepMatch => !!match);
     const filenames = Array.from(
       new Set(
-        lines
-          .map(extractFilenameFromRipgrepLine)
-          .filter((file): file is string => !!file),
+        (matches.length > 0
+          ? matches.map((match) => match.filePath)
+          : lines
+              .map(extractFilenameFromRipgrepLine)
+              .filter((file): file is string => !!file)
+        ).filter(Boolean),
       ),
     );
 
@@ -965,6 +1002,7 @@ function normalizeRipgrepOutput(output: string): {
       filenames,
       numFiles,
       content: normalized,
+      matches,
       numLines: lines.length,
     };
   }
@@ -985,6 +1023,48 @@ function extractFilenameFromRipgrepLine(line: string): string | null {
     return match[1];
   }
   return null;
+}
+
+function parseRipgrepMatchLine(
+  line: string,
+  pattern?: string,
+): NormalizedGrepMatch | null {
+  const match = /^(.+?):(\d+)(?::(\d+))?:(.*)$/.exec(line);
+  if (!match?.[1] || !match[2]) {
+    return null;
+  }
+  const text = match[4] ?? "";
+  const columnNumber = match[3] ? Number(match[3]) : undefined;
+  return {
+    filePath: match[1],
+    lineNumber: Number(match[2]),
+    columnNumber,
+    text,
+    ranges:
+      columnNumber !== undefined
+        ? undefined
+        : getLiteralMatchRanges(text, pattern),
+  };
+}
+
+function getLiteralMatchRanges(
+  text: string,
+  pattern: string | undefined,
+): NormalizedGrepMatchRange[] | undefined {
+  if (!pattern) {
+    return undefined;
+  }
+  const ranges: NormalizedGrepMatchRange[] = [];
+  let start = 0;
+  while (ranges.length < 50) {
+    const index = text.indexOf(pattern, start);
+    if (index < 0) {
+      break;
+    }
+    ranges.push({ start: index, end: index + pattern.length });
+    start = index + Math.max(1, pattern.length);
+  }
+  return ranges.length > 0 ? ranges : undefined;
 }
 
 function normalizeReadOutput(

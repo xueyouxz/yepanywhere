@@ -648,15 +648,17 @@ describe("EditRenderer collapsed preview fallback", () => {
     ) as HTMLAnchorElement | null;
     expect(titleLink?.textContent).toContain("progress-2026-05-18.md");
     expect(titleLink?.getAttribute("href")).toBe(
-      "/projects/project-1/file?path=research%2Fprogress-2026-05-18.md",
+      "/projects/project-1/file?path=research%2Fprogress-2026-05-18.md&line=1&lineEnd=13",
     );
     const pathLink = screen.getByRole("link", {
-      name: "research/progress-2026-05-18.md",
+      name: /research\/progress-2026-05-18\.md\s*:1-13/,
     });
     expect(pathLink.getAttribute("href")).toBe(
-      "/projects/project-1/file?path=research%2Fprogress-2026-05-18.md",
+      "/projects/project-1/file?path=research%2Fprogress-2026-05-18.md&line=1&lineEnd=13",
     );
-    const modalToggle = modal?.querySelector(".fixed-font-render-toggle__button");
+    const modalToggle = modal?.querySelector(
+      ".fixed-font-render-toggle__button",
+    );
     expect(modalToggle).toBeTruthy();
 
     fireEvent.click(modalToggle as Element);

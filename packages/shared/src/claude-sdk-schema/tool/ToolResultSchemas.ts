@@ -185,6 +185,19 @@ export const GlobResultSchema = withStringError(GlobResultObjectSchema);
 
 export type GlobResultValidated = z.infer<typeof GlobResultSchema>;
 
+const GrepMatchRangeSchema = z.object({
+  start: z.number(),
+  end: z.number(),
+});
+
+const GrepMatchSchema = z.object({
+  filePath: z.string(),
+  lineNumber: z.number(),
+  columnNumber: z.number().optional(),
+  text: z.string(),
+  ranges: z.array(GrepMatchRangeSchema).optional(),
+});
+
 const GrepResultObjectSchema = z.object({
   mode: z.enum(["files_with_matches", "content", "count"]).optional(),
   filenames: z.array(z.string()).optional(),
@@ -192,6 +205,7 @@ const GrepResultObjectSchema = z.object({
   content: z.string().optional(),
   numLines: z.number().optional(),
   appliedLimit: z.number().optional(),
+  matches: z.array(GrepMatchSchema).optional(),
 });
 
 /**

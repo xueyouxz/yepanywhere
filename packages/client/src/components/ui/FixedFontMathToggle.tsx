@@ -1,16 +1,17 @@
-import { type ReactNode, useCallback, useMemo, useState } from "react";
-import { useScrollPreservingToggle } from "../../lib/scrollAnchor";
 import katex from "katex";
-import { useRenderModeToggle } from "../../contexts/RenderModeContext";
-import { useOptionalSessionMetadata } from "../../contexts/SessionMetadataContext";
+import { type ReactNode, useCallback, useMemo, useState } from "react";
 import {
   buildPublicShareFileHref,
   type PublicShareContextValue,
   usePublicShareContext,
 } from "../../contexts/PublicShareContext";
+import { useRenderModeToggle } from "../../contexts/RenderModeContext";
+import { useOptionalSessionMetadata } from "../../contexts/SessionMetadataContext";
 import { profileRenderWork } from "../../lib/diagnostics/renderProfiler";
+import { useScrollPreservingToggle } from "../../lib/scrollAnchor";
 import { makeDisplayPath } from "../../lib/text";
 import { FileViewerModal } from "../FilePathLink";
+import { createPublicShareFileViewerSource } from "../publicShareFileViewerSource";
 import { RenderModeGlyph } from "./RenderModeGlyph";
 
 interface FixedFontMathToggleProps {
@@ -752,7 +753,15 @@ export function FixedFontMathToggle({
 }: FixedFontMathToggleProps) {
   const sessionMetadata = useOptionalSessionMetadata();
   const publicShare = usePublicShareContext();
-  const [viewerFilePath, setViewerFilePath] = useState<string | null>(null);
+  const [viewerLink, setViewerLink] = useState<{
+    filePath: string;
+    href: string | null;
+  } | null>(null);
+  const publicShareFileViewerSource = useMemo(
+    () =>
+      publicShare ? createPublicShareFileViewerSource(publicShare) : undefined,
+    [publicShare],
+  );
   const rendered = useMemo(
     () =>
       precomputedRendered ??
@@ -791,23 +800,26 @@ export function FixedFontMathToggle({
       if (!link) {
         return;
       }
-      if (publicShare) {
-        return;
-      }
       if (
         event.button !== 0 ||
         event.metaKey ||
         event.ctrlKey ||
-        event.shiftKey
+        event.shiftKey ||
+        event.altKey
       ) {
         return;
       }
       event.preventDefault();
       event.stopPropagation();
-      setViewerFilePath(link.dataset.fixedFontFilePath ?? null);
+      setViewerLink({
+        filePath: link.dataset.fixedFontFilePath ?? "",
+        href: link.getAttribute("href"),
+      });
     },
-    [publicShare],
+    [],
   );
+  const viewerProjectId =
+    sessionMetadata?.projectId ?? publicShare?.projectId ?? "";
 
   return (
     <div className="fixed-font-render-toggle">
@@ -833,11 +845,13 @@ export function FixedFontMathToggle({
           <RenderModeGlyph />
         </button>
       )}
-      {viewerFilePath && sessionMetadata?.projectId && (
+      {viewerLink && viewerProjectId !== "" && (
         <FileViewerModal
-          projectId={sessionMetadata.projectId}
-          filePath={viewerFilePath}
-          onClose={() => setViewerFilePath(null)}
+          projectId={viewerProjectId}
+          filePath={viewerLink.filePath}
+          source={publicShareFileViewerSource}
+          openInNewTabUrl={viewerLink.href}
+          onClose={() => setViewerLink(null)}
         />
       )}
     </div>

@@ -1,6 +1,6 @@
 import {
-  type ReactNode,
   memo,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -18,14 +18,19 @@ import {
 } from "../../../lib/classifyToolError";
 import { makeDisplayPath } from "../../../lib/text";
 import { validateToolResult } from "../../../lib/validateToolResult";
-import { SchemaWarning } from "../../SchemaWarning";
 import { FilePathLink } from "../../FilePathLink";
+import { SchemaWarning } from "../../SchemaWarning";
 import { FilePathDisplay } from "../../ui/FilePathDisplay";
 import { FixedFontMathToggle } from "../../ui/FixedFontMathToggle";
 import { Modal } from "../../ui/Modal";
 import type { EditInput, EditResult, PatchHunk, ToolRenderer } from "./types";
 
 const MAX_VISIBLE_LINES = 12;
+
+interface FileLineRange {
+  lineEnd?: number;
+  lineNumber: number;
+}
 
 /** Extended input type with embedded augment data from server */
 interface EditInputWithAugment extends EditInput {
@@ -206,6 +211,31 @@ function computeChangeSummary(structuredPatch: PatchHunk[]): string | null {
     return `Removed ${deletions} line${deletions !== 1 ? "s" : ""}`;
   }
   return null;
+}
+
+function getPatchFileLineRange(
+  structuredPatch?: PatchHunk[],
+): FileLineRange | undefined {
+  if (!structuredPatch || structuredPatch.length === 0) {
+    return undefined;
+  }
+
+  let lineNumber: number | null = null;
+  let lineEnd: number | null = null;
+  for (const hunk of structuredPatch) {
+    const start = Math.max(1, hunk.newStart || 1);
+    const end = start + Math.max(1, hunk.newLines || 1) - 1;
+    lineNumber = lineNumber === null ? start : Math.min(lineNumber, start);
+    lineEnd = lineEnd === null ? end : Math.max(lineEnd, end);
+  }
+
+  if (lineNumber === null || lineEnd === null) {
+    return undefined;
+  }
+  return {
+    lineNumber,
+    lineEnd: lineEnd > lineNumber ? lineEnd : undefined,
+  };
 }
 
 function diffTextToNewSide(diffText: string): string {
@@ -616,6 +646,7 @@ function DiffModalContent({
     showFullContext && result?.structuredPatch
       ? result.structuredPatch
       : structuredPatch;
+  const fileLineRange = getPatchFileLineRange(displayPatch);
 
   // Strip project path prefix for display
   const displayPath = makeDisplayPath(filePath, projectPath);
@@ -628,6 +659,8 @@ function DiffModalContent({
             projectId={sessionMetadata.projectId}
             filePath={filePath}
             displayText={displayPath}
+            lineNumber={fileLineRange?.lineNumber}
+            lineEnd={fileLineRange?.lineEnd}
           />
         ) : (
           <span className="diff-context-path">{displayPath}</span>
@@ -667,9 +700,11 @@ function DiffModalContent({
 function EditModalTitle({
   filePath,
   displayText,
+  lineRange,
 }: {
   filePath: string;
   displayText?: string;
+  lineRange?: FileLineRange;
 }) {
   const sessionMetadata = useOptionalSessionMetadata();
   const text = displayText ?? getFileName(filePath);
@@ -680,6 +715,8 @@ function EditModalTitle({
         projectId={sessionMetadata.projectId}
         filePath={filePath}
         displayText={text}
+        lineNumber={lineRange?.lineNumber}
+        lineEnd={lineRange?.lineEnd}
       />
     );
   }
@@ -751,6 +788,7 @@ function EditCollapsedPreview({
   // Get structuredPatch - prefer result, then input augment
   const structuredPatch =
     result?.structuredPatch ?? input._structuredPatch ?? [];
+  const fileLineRange = getPatchFileLineRange(structuredPatch);
 
   // Get diffHtml from input augment (only used for tool_use display)
   const diffHtml = input._diffHtml;
@@ -843,7 +881,13 @@ function EditCollapsedPreview({
         </div>
         {isModalOpen && hasProposedDiff && (
           <Modal
-            title={<EditModalTitle filePath={filePath} displayText={fileName} />}
+            title={
+              <EditModalTitle
+                filePath={filePath}
+                displayText={fileName}
+                lineRange={fileLineRange}
+              />
+            }
             onClose={handleClose}
           >
             <DiffModalContent
@@ -958,7 +1002,13 @@ function EditCollapsedPreview({
       </div>
       {isModalOpen && (
         <Modal
-          title={<EditModalTitle filePath={filePath} displayText={fileName} />}
+          title={
+            <EditModalTitle
+              filePath={filePath}
+              displayText={fileName}
+              lineRange={fileLineRange}
+            />
+          }
           onClose={handleClose}
         >
           <DiffModalContent
@@ -1024,6 +1074,7 @@ function EditInteractiveSummary({
     result?.structuredPatch ?? input._structuredPatch ?? [];
   const diffHtml = input._diffHtml;
   const changeSummary = computeChangeSummary(structuredPatch);
+  const fileLineRange = getPatchFileLineRange(structuredPatch);
 
   if (isError) {
     return (
@@ -1109,7 +1160,11 @@ function EditInteractiveSummary({
       {showModal && (
         <Modal
           title={
-            <EditModalTitle filePath={filePath} displayText={fileName} />
+            <EditModalTitle
+              filePath={filePath}
+              displayText={fileName}
+              lineRange={fileLineRange}
+            />
           }
           onClose={() => setShowModal(false)}
         >
@@ -1230,6 +1285,9 @@ function EditToolResult({
 
     const filePath = getEditFilePath(inputWithAugment);
     const fileName = getFileName(filePath);
+    const fileLineRange = getPatchFileLineRange(
+      inputWithAugment?._structuredPatch,
+    );
 
     return (
       <>
@@ -1287,7 +1345,13 @@ function EditToolResult({
         </div>
         {showModal && hasProposedDiff && inputWithAugment && (
           <Modal
-            title={<EditModalTitle filePath={filePath} displayText={fileName} />}
+            title={
+              <EditModalTitle
+                filePath={filePath}
+                displayText={fileName}
+                lineRange={fileLineRange}
+              />
+            }
             onClose={() => setShowModal(false)}
           >
             <DiffModalContent
@@ -1384,6 +1448,7 @@ function EditToolResult({
             <EditModalTitle
               filePath={result.filePath}
               displayText={getFileName(result.filePath)}
+              lineRange={getPatchFileLineRange(result.structuredPatch)}
             />
           }
           onClose={() => setShowModal(false)}

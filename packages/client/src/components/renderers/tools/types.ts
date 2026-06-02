@@ -157,6 +157,20 @@ export interface GrepResult {
   content?: string;
   numLines?: number;
   appliedLimit?: number;
+  matches?: GrepMatch[];
+}
+
+export interface GrepMatchRange {
+  start: number;
+  end: number;
+}
+
+export interface GrepMatch {
+  columnNumber?: number;
+  filePath: string;
+  lineNumber: number;
+  ranges?: GrepMatchRange[];
+  text: string;
 }
 
 /**

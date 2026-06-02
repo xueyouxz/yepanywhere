@@ -1,21 +1,13 @@
-import type { FileContentResponse } from "@yep-anywhere/shared";
 import { DEFAULT_RELAY_URL, normalizeRelayUrl } from "@yep-anywhere/shared";
 import { useMemo } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { FileViewer, type FileViewerSource } from "../components/FileViewer";
+import { createPublicShareFileViewerSource } from "../components/publicShareFileViewerSource";
 import {
-  buildPublicShareRawFileApiPath,
-  normalizePublicShareFilePath,
   type PublicShareContextValue,
   PublicShareProvider,
-  rewritePublicShareLocalAppLinks,
 } from "../contexts/PublicShareContext";
 import { useI18n } from "../i18n";
-import { getEmbeddedFileMediaBlob } from "../lib/embeddedFileMedia";
-import {
-  fetchPublicShareBlobViaRelay,
-  fetchPublicShareJsonViaRelay,
-} from "../lib/publicShareRelay";
 
 function parsePositiveInteger(value: string | null): number | undefined {
   if (!value) {
@@ -23,16 +15,6 @@ function parsePositiveInteger(value: string | null): number | undefined {
   }
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
-}
-
-function rewriteRenderedMarkdownHtml(
-  html: string,
-  context: PublicShareContextValue,
-): string {
-  const template = document.createElement("template");
-  template.innerHTML = html;
-  rewritePublicShareLocalAppLinks(template.content, context);
-  return template.innerHTML;
 }
 
 export function PublicShareFilePage() {
@@ -86,91 +68,11 @@ export function PublicShareFilePage() {
   }, [projectId, relayConfig.url, relayUsername, secret]);
 
   const source = useMemo<FileViewerSource | null>(() => {
-    if (!secret || !relayUsername || !filePath || relayConfig.error) {
+    if (!publicShareContext || !filePath || relayConfig.error) {
       return null;
     }
-    const fetchRawFileBlob = async (
-      fileData: FileContentResponse,
-      rawPath: string,
-    ): Promise<Blob> => {
-      const normalized = publicShareContext
-        ? normalizePublicShareFilePath(rawPath, publicShareContext.projectId)
-            ?.path
-        : null;
-      const embedded =
-        (normalized ? getEmbeddedFileMediaBlob(fileData, normalized) : null) ??
-        getEmbeddedFileMediaBlob(fileData, rawPath);
-      if (embedded) {
-        return embedded;
-      }
-      const params = new URLSearchParams({ path: normalized ?? rawPath });
-      return await fetchPublicShareBlobViaRelay({
-        relayUrl: relayConfig.url,
-        relayUsername,
-        path: `/public-api/shares/${encodeURIComponent(secret)}/files/raw?${params}`,
-      });
-    };
-    return {
-      loadFile: async (
-        _projectId,
-        rawPath,
-        highlight,
-        lineNumber,
-        lineEnd,
-        viewMode,
-      ) => {
-        const params = new URLSearchParams({ path: rawPath });
-        if (highlight) {
-          params.set("highlight", "true");
-        }
-        if (lineNumber !== undefined) {
-          params.set("line", String(lineNumber));
-        }
-        if (lineEnd !== undefined) {
-          params.set("lineEnd", String(lineEnd));
-        }
-        if (viewMode === "range") {
-          params.set("view", "range");
-        }
-        return await fetchPublicShareJsonViaRelay<FileContentResponse>({
-          relayUrl: relayConfig.url,
-          relayUsername,
-          path: `/public-api/shares/${encodeURIComponent(secret)}/files?${params}`,
-        });
-      },
-      getRawFileUrl: () => null,
-      fetchRawFileBlob,
-      createMediaSource: (fileData) => ({
-        buildApiPath: (rawPath) =>
-          publicShareContext
-            ? buildPublicShareRawFileApiPath(publicShareContext, rawPath)
-            : null,
-        fetchBlob: async (rawPath) => {
-          if (!publicShareContext) {
-            throw new Error("File is outside this public share");
-          }
-          return await fetchRawFileBlob(
-            fileData ??
-              ({
-                embeddedMedia: {},
-              } as FileContentResponse),
-            rawPath,
-          );
-        },
-      }),
-      transformRenderedMarkdownHtml: (html) =>
-        publicShareContext
-          ? rewriteRenderedMarkdownHtml(html, publicShareContext)
-          : html,
-    };
-  }, [
-    filePath,
-    publicShareContext,
-    relayConfig.error,
-    relayConfig.url,
-    relayUsername,
-    secret,
-  ]);
+    return createPublicShareFileViewerSource(publicShareContext);
+  }, [filePath, publicShareContext, relayConfig.error]);
 
   const content = (
     <div className="file-page">

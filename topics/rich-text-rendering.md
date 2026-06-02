@@ -39,6 +39,17 @@ These run unconditionally and are not user-configurable:
   navigating to authenticated local file APIs.
 - **Line numbers** — shown in the plain-text fallback path (no Shiki highlight).
 
+## File Content Viewer Contract
+
+When a renderer shows file contents outside an inline transcript block, it
+should use the shared `FileViewer` surface with a `FileViewerSource` adapter
+rather than a bespoke modal. The common primitive is a full-file view with an
+optional source span (`line` / `lineEnd`) and an optional compact range-only
+mode. Read links, Edit filename links, standalone file pages, and public-share
+file links should therefore inherit the same source/preview controls,
+large-file windowing, hline span markers, scrollbars, copy affordance, media
+hydration, and public-share capability scoping.
+
 ## Toggleable transforms (sigma Σ button)
 
 `FixedFontMathToggle` wraps a source view and, if `rendered.changed = true`, shows

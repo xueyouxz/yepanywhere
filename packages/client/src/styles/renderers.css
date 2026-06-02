@@ -2770,6 +2770,78 @@ details[open] .collapsible__icon {
   font-size: var(--font-size-base);
 }
 
+.grep-inline-summary {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.15rem;
+  max-width: 100%;
+}
+
+.grep-match-count-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+}
+
+.grep-match-count-button:hover {
+  text-decoration-color: currentColor;
+}
+
+.grep-match-modal {
+  max-height: min(70vh, 42rem);
+  overflow: auto;
+}
+
+.grep-match-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.grep-match-table th,
+.grep-match-table td {
+  border-bottom: 1px solid var(--border-subtle, var(--border-color));
+  padding: 0.25rem 0.4rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.grep-match-file {
+  max-width: 18rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.grep-match-line {
+  width: 4.5rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.grep-match-text {
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.grep-match-highlight {
+  background: color-mix(in srgb, var(--warning-color, #cca700) 28%, transparent);
+  color: inherit;
+  padding: 0 0.05rem;
+}
+
+.grep-match-truncated {
+  padding: 0.5rem 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
 .grep-count-summary {
   color: var(--text-muted);
   font-size: var(--font-size-lg);
@@ -3970,7 +4042,7 @@ details[open] .collapsible__icon {
 }
 
 .file-viewer-code .highlighted-line-start {
-  scroll-margin-block: 45vh;
+  scroll-margin-block-start: 10vh;
 }
 
 .file-viewer-code .highlighted-line-start::before,
@@ -4485,6 +4557,25 @@ pre.code-highlighter-plain code {
   );
   line-height: calc(1.46em + var(--markdown-preview-vspace-offset));
   color: var(--text-primary);
+}
+
+.markdown-preview .markdown-preview-span {
+  scroll-margin-block-start: 10vh;
+}
+
+.markdown-preview .markdown-preview-line-boundary {
+  height: 1px;
+  background: var(--error-color);
+  opacity: 0.42;
+  pointer-events: none;
+}
+
+.markdown-preview .markdown-preview-line-boundary-start {
+  margin-right: 2.75rem;
+}
+
+.markdown-preview .markdown-preview-line-boundary-end {
+  margin-left: 2.75rem;
 }
 
 .markdown-preview .markdown-rendered h1,

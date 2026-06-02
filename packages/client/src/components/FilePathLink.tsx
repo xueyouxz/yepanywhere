@@ -5,7 +5,12 @@ import {
   buildPublicShareFileHref,
   usePublicShareContext,
 } from "../contexts/PublicShareContext";
-import { FileViewer, type FileViewerMode } from "./FileViewer";
+import {
+  FileViewer,
+  type FileViewerMode,
+  type FileViewerSource,
+} from "./FileViewer";
+import { createPublicShareFileViewerSource } from "./publicShareFileViewerSource";
 
 interface FilePathLinkProps {
   /** The file path to display and link to */
@@ -126,28 +131,37 @@ export const FilePathLink = memo(function FilePathLink({
       })
     : null;
   const fileViewUrl =
-    publicShareFileViewUrl ??
-    getProjectFileViewUrl(
-      projectId,
-      viewerFilePath,
-      lineNumber,
-      lineEnd,
-      viewMode,
-    );
+    publicShareContext !== null
+      ? publicShareFileViewUrl
+      : getProjectFileViewUrl(
+          projectId,
+          viewerFilePath,
+          lineNumber,
+          lineEnd,
+          viewMode,
+        );
+  const publicShareFileViewerSource = useMemo(
+    () =>
+      publicShareContext
+        ? createPublicShareFileViewerSource(publicShareContext)
+        : undefined,
+    [publicShareContext],
+  );
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (publicShareFileViewUrl) {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
         return;
       }
-      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+      if (publicShareContext && !publicShareFileViewUrl) {
+        e.preventDefault();
         return;
       }
       e.preventDefault();
       setShowModal(true);
     },
-    [publicShareFileViewUrl],
+    [publicShareContext, publicShareFileViewUrl],
   );
 
   const handleClose = useCallback(() => {
@@ -169,7 +183,7 @@ export const FilePathLink = memo(function FilePathLink({
   return (
     <>
       <a
-        href={fileViewUrl}
+        href={fileViewUrl ?? "#"}
         className="file-path-link"
         onClick={handleClick}
         title={`${filePath}${suffix}\nClick to view, or use a browser link gesture to open this file`}
@@ -187,6 +201,8 @@ export const FilePathLink = memo(function FilePathLink({
             lineNumber={lineNumber}
             lineEnd={lineEnd}
             viewMode={viewMode}
+            source={publicShareFileViewerSource}
+            openInNewTabUrl={fileViewUrl}
             onClose={handleClose}
           />,
           document.body,
@@ -204,6 +220,8 @@ export function FileViewerModal({
   lineNumber,
   lineEnd,
   viewMode = "full",
+  source,
+  openInNewTabUrl,
   onClose,
 }: {
   projectId: string;
@@ -211,6 +229,8 @@ export function FileViewerModal({
   lineNumber?: number;
   lineEnd?: number;
   viewMode?: FileViewerMode;
+  source?: FileViewerSource;
+  openInNewTabUrl?: string | null;
   onClose: () => void;
 }) {
   const handleOverlayClick = (e: React.MouseEvent) => {
@@ -262,6 +282,8 @@ export function FileViewerModal({
           lineNumber={lineNumber}
           lineEnd={lineEnd}
           viewMode={viewMode}
+          source={source}
+          openInNewTabUrl={openInNewTabUrl}
           onClose={onClose}
         />
       </dialog>

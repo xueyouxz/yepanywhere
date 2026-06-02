@@ -580,6 +580,53 @@ describe("Codex Normalization", () => {
     });
   });
 
+  it("normalizes ripgrep content matches into structured match rows", () => {
+    const entries: CodexSessionEntry[] = [
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:01Z",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          call_id: "call-rg-matches",
+          arguments: '{"cmd":"rg -n \\"needle\\" src"}',
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:02Z",
+        payload: {
+          type: "function_call_output",
+          call_id: "call-rg-matches",
+          output:
+            "Chunk ID: match\nWall time: 0.01 seconds\nProcess exited with code 0\nOutput:\nsrc/a.ts:12:const needle = true;\nsrc/b.ts:7:needle again\n",
+        },
+      },
+    ];
+
+    const result = normalizeSession(buildLoadedSession(entries));
+
+    expect(result.messages[1]?.toolUseResult).toMatchObject({
+      mode: "content",
+      numFiles: 2,
+      filenames: ["src/a.ts", "src/b.ts"],
+      matches: [
+        {
+          filePath: "src/a.ts",
+          lineNumber: 12,
+          text: "const needle = true;",
+          ranges: [{ start: 6, end: 12 }],
+        },
+        {
+          filePath: "src/b.ts",
+          lineNumber: 7,
+          text: "needle again",
+          ranges: [{ start: 0, end: 6 }],
+        },
+      ],
+    });
+  });
+
   it("maps sed range commands to Read with line metadata", () => {
     const entries: CodexSessionEntry[] = [
       {

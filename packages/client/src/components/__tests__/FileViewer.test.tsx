@@ -1,10 +1,37 @@
-import { cleanup, render, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import type { FileContentResponse } from "@yep-anywhere/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../i18n";
 import { FileViewer, type FileViewerSource } from "../FileViewer";
 
 const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+const originalGetBoundingClientRect =
+  HTMLElement.prototype.getBoundingClientRect;
+const originalClientHeightDescriptor = Object.getOwnPropertyDescriptor(
+  HTMLElement.prototype,
+  "clientHeight",
+);
+const originalScrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+  HTMLElement.prototype,
+  "scrollHeight",
+);
+
+function restorePrototypeProperty(
+  name: keyof HTMLElement,
+  descriptor: PropertyDescriptor | undefined,
+) {
+  if (descriptor) {
+    Object.defineProperty(HTMLElement.prototype, name, descriptor);
+  } else {
+    Reflect.deleteProperty(HTMLElement.prototype, name);
+  }
+}
 
 describe("FileViewer", () => {
   beforeEach(() => {
@@ -29,9 +56,44 @@ describe("FileViewer", () => {
     } else {
       Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
     }
+    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: originalGetBoundingClientRect,
+    });
+    restorePrototypeProperty("clientHeight", originalClientHeightDescriptor);
+    restorePrototypeProperty("scrollHeight", originalScrollHeightDescriptor);
   });
 
-  it("marks and scrolls a line range in highlighted source", async () => {
+  it("marks and scrolls a line range 10% below the viewer top", async () => {
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get() {
+        return this.classList.contains("file-viewer-body") ? 100 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        return this.classList.contains("file-viewer-body") ? 1000 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value(this: HTMLElement) {
+        const top = this.classList.contains("highlighted-line-start") ? 200 : 0;
+        return {
+          bottom: top,
+          height: 0,
+          left: 0,
+          right: 0,
+          toJSON: () => ({}),
+          top,
+          width: 0,
+          x: 0,
+          y: top,
+        };
+      },
+    });
     const fileResponse: FileContentResponse = {
       metadata: {
         path: "src/App.ts",
@@ -82,7 +144,10 @@ describe("FileViewer", () => {
       ),
     ).toBe(false);
     expect(container.querySelector(".highlighted-line")).toBeNull();
-    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+    expect(
+      container.querySelector<HTMLElement>(".file-viewer-body")?.scrollTop,
+    ).toBe(190);
   });
 
   it("paints a single highlighted line", async () => {
@@ -174,5 +239,52 @@ describe("FileViewer", () => {
         .querySelector(".highlighted-line-end")
         ?.getAttribute("data-line"),
     ).toBe("42");
+  });
+
+  it("keeps Markdown preview toggleable in range views", async () => {
+    const fileResponse: FileContentResponse = {
+      metadata: {
+        path: "notes.md",
+        size: 64,
+        mimeType: "text/markdown",
+        isText: true,
+      },
+      rawUrl: "",
+      content: "# Title\n\nSelected text",
+      contentStartLine: 10,
+      contentEndLine: 12,
+      highlightedHtml:
+        '<pre class="shiki"><code><span class="line"># Title</span>\n<span class="line"></span>\n<span class="line">Selected text</span></code></pre>',
+      renderedMarkdownHtml:
+        '<div class="markdown-preview-line-boundary markdown-preview-line-boundary-start" data-line="10"></div><div class="markdown-preview-span markdown-preview-span-start" data-line-start="10" data-line-end="12"><h1>Title</h1><p>Selected text</p></div><div class="markdown-preview-line-boundary markdown-preview-line-boundary-end" data-line="12"></div>',
+    };
+    const source: FileViewerSource = {
+      loadFile: vi.fn(async () => fileResponse),
+    };
+
+    const { container } = render(
+      <I18nProvider>
+        <FileViewer
+          projectId="project-id"
+          filePath="notes.md"
+          lineNumber={10}
+          lineEnd={12}
+          viewMode="range"
+          source={source}
+        />
+      </I18nProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Preview" })).toBeTruthy();
+    });
+
+    expect(container.querySelector(".shiki-container")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+
+    expect(await screen.findByRole("heading", { name: "Title" })).toBeTruthy();
+    expect(
+      container.querySelector(".markdown-preview-span-start"),
+    ).toBeTruthy();
   });
 });

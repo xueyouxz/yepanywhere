@@ -1,5 +1,6 @@
 import { createReadStream, type Stats } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import {
   dirname,
   extname,
@@ -12,12 +13,13 @@ import { createInterface } from "node:readline";
 import {
   type FileContentResponse,
   type FileMetadata,
-  type PatchHunk,
   isUrlProjectId,
+  type PatchHunk,
 } from "@yep-anywhere/shared";
 import { Hono } from "hono";
 import { computeEditAugment } from "../augments/edit-augments.js";
 import { renderMarkdownToHtml } from "../augments/markdown-augments.js";
+import { renderSafeMarkdown } from "../augments/safe-markdown.js";
 import { highlightFile } from "../highlighting/index.js";
 import type { ProjectScanner } from "../projects/scanner.js";
 
@@ -272,6 +274,170 @@ function getLineRange(
     end: Math.max(lineNumber, lineEnd ?? lineNumber),
     start: lineNumber,
   };
+}
+
+function isBlankMarkdownLine(line: string): boolean {
+  return line.trim() === "";
+}
+
+function getMarkdownFenceMarker(
+  line: string,
+): { char: "`" | "~"; length: number } | null {
+  const match = /^(`{3,}|~{3,})/.exec(line.trimStart());
+  if (!match?.[1]) {
+    return null;
+  }
+  return {
+    char: match[1][0] as "`" | "~",
+    length: match[1].length,
+  };
+}
+
+function expandMarkdownSplitRange(
+  lines: string[],
+  startIndex: number,
+  endIndexExclusive: number,
+): { endIndexExclusive: number; startIndex: number } {
+  let start = startIndex;
+  let end = endIndexExclusive;
+
+  const expandToBlankBoundaries = () => {
+    while (start > 0 && !isBlankMarkdownLine(lines[start - 1] ?? "")) {
+      start -= 1;
+    }
+    while (end < lines.length && !isBlankMarkdownLine(lines[end] ?? "")) {
+      end += 1;
+    }
+  };
+
+  expandToBlankBoundaries();
+
+  let openFence: {
+    char: "`" | "~";
+    length: number;
+    startIndex: number;
+  } | null = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    const marker = getMarkdownFenceMarker(lines[index] ?? "");
+    if (!marker) {
+      continue;
+    }
+    if (
+      openFence &&
+      marker.char === openFence.char &&
+      marker.length >= openFence.length
+    ) {
+      const fenceEnd = index + 1;
+      if (openFence.startIndex < end && fenceEnd > start) {
+        start = Math.min(start, openFence.startIndex);
+        end = Math.max(end, fenceEnd);
+      }
+      openFence = null;
+    } else if (!openFence) {
+      openFence = { ...marker, startIndex: index };
+    }
+  }
+  if (openFence && openFence.startIndex < end) {
+    start = Math.min(start, openFence.startIndex);
+    end = lines.length;
+  }
+
+  expandToBlankBoundaries();
+
+  return { startIndex: start, endIndexExclusive: end };
+}
+
+function collectMarkdownDefinitionLines(lines: string[]): string[] {
+  const definitions: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    if (!/^\s{0,3}\[[^\]]+]:/.test(line)) {
+      continue;
+    }
+
+    definitions.push(line);
+    for (let next = index + 1; next < lines.length; next += 1) {
+      const continuation = lines[next] ?? "";
+      if (!/^(?:\t| {4,})\S/.test(continuation)) {
+        break;
+      }
+      definitions.push(continuation);
+      index = next;
+    }
+  }
+  return definitions;
+}
+
+function appendMarkdownDefinitionContext(
+  markdown: string,
+  definitions: string[],
+): string {
+  if (!markdown.trim() || definitions.length === 0) {
+    return markdown;
+  }
+  return `${markdown.replace(/\s+$/, "")}\n\n${definitions.join("\n")}`;
+}
+
+async function renderMarkdownFilePreview(
+  content: string,
+  options: { localFileBasePath: string },
+  contentStartLine: number,
+  requestedRange: { end: number; start: number } | null,
+  viewMode: FileViewMode,
+): Promise<string> {
+  if (!requestedRange) {
+    return await renderMarkdownToHtml(content, options);
+  }
+
+  const lines = content.split("\n");
+  const startIndex = Math.max(0, requestedRange.start - contentStartLine);
+  const endIndexExclusive = Math.min(
+    lines.length,
+    requestedRange.end - contentStartLine + 1,
+  );
+  if (startIndex >= endIndexExclusive) {
+    return await renderMarkdownToHtml(content, options);
+  }
+
+  const snappedRange = expandMarkdownSplitRange(
+    lines,
+    startIndex,
+    endIndexExclusive,
+  );
+  const spanStartLine = contentStartLine + snappedRange.startIndex;
+  const spanEndLine = contentStartLine + snappedRange.endIndexExclusive - 1;
+  const before = lines.slice(0, snappedRange.startIndex).join("\n");
+  const span = lines
+    .slice(snappedRange.startIndex, snappedRange.endIndexExclusive)
+    .join("\n");
+  const after = lines.slice(snappedRange.endIndexExclusive).join("\n");
+  const definitionLines = collectMarkdownDefinitionLines(lines);
+  const renderChunk = (markdown: string) =>
+    definitionLines.length > 0
+      ? renderSafeMarkdown(
+          appendMarkdownDefinitionContext(markdown, definitionLines),
+          options,
+        )
+      : renderMarkdownToHtml(markdown, options);
+
+  const parts: string[] = [];
+  if (viewMode !== "range" && before.trim()) {
+    parts.push(await renderChunk(before));
+  }
+  parts.push(
+    `<div class="markdown-preview-line-boundary markdown-preview-line-boundary-start" data-line="${spanStartLine}"></div>`,
+  );
+  parts.push(
+    `<div class="markdown-preview-span markdown-preview-span-start" data-line-start="${spanStartLine}" data-line-end="${spanEndLine}">${await renderChunk(span)}</div>`,
+  );
+  parts.push(
+    `<div class="markdown-preview-line-boundary markdown-preview-line-boundary-end" data-line="${spanEndLine}"></div>`,
+  );
+  if (viewMode !== "range" && after.trim()) {
+    parts.push(await renderChunk(after));
+  }
+
+  return parts.filter(Boolean).join("\n");
 }
 
 interface TextContentSlice {
@@ -635,20 +801,33 @@ function isTextFile(filePath: string): boolean {
   return TEXT_DOTFILES.has(fileName.toLowerCase());
 }
 
+function expandHomePath(requestedPath: string): string {
+  if (requestedPath === "~") {
+    return homedir();
+  }
+  if (requestedPath.startsWith("~/") || requestedPath.startsWith("~\\")) {
+    return resolve(homedir(), requestedPath.slice(2));
+  }
+  return requestedPath;
+}
+
 /**
- * Validate and resolve file path, preventing directory traversal.
- * Returns null if the path is invalid or escapes the project root.
+ * Validate and resolve a file path for authenticated project file APIs.
+ *
+ * Relative paths stay project-contained and symlink-safe. Absolute and
+ * home-relative paths are intentionally allowed here because the authenticated
+ * YA operator can already inspect host files through provider actions. Public
+ * share file routes use separate share-scoped resolution.
  */
 async function resolveFilePath(
   projectRoot: string,
   relativePath: string,
 ): Promise<string | null> {
   // Normalize the path to handle . and ..
-  const normalized = normalize(relativePath);
+  const normalized = normalize(expandHomePath(relativePath));
 
-  // Reject absolute paths
-  if (normalized.startsWith("/") || /^[a-zA-Z]:/.test(normalized)) {
-    return null;
+  if (isAbsolute(normalized) || /^[a-zA-Z]:/.test(normalized)) {
+    return (await realpath(normalized).catch(() => null)) ?? normalized;
   }
 
   // Reject paths that try to escape (after normalization, should not start with ..)
@@ -777,17 +956,18 @@ export function createFilesRoutes(deps: FilesDeps): Hono {
     // files, include a bounded window centered on the target.
     if (isText && (stats.size <= MAX_INLINE_SIZE || requestedRange)) {
       try {
+        const fullInlineContent =
+          stats.size <= MAX_INLINE_SIZE
+            ? await readFile(filePath, "utf-8")
+            : undefined;
         const slice =
           viewMode === "range" && requestedRange
-            ? stats.size <= MAX_INLINE_SIZE
-              ? sliceContentToRange(
-                  await readFile(filePath, "utf-8"),
-                  requestedRange,
-                )
+            ? fullInlineContent !== undefined
+              ? sliceContentToRange(fullInlineContent, requestedRange)
               : await readExactTextRange(filePath, requestedRange)
-            : stats.size <= MAX_INLINE_SIZE
+            : fullInlineContent !== undefined
               ? {
-                  content: await readFile(filePath, "utf-8"),
+                  content: fullInlineContent,
                   endLine: undefined,
                   startLine: 1,
                   totalLines: undefined,
@@ -820,9 +1000,29 @@ export function createFilesRoutes(deps: FilesDeps): Hono {
           const ext = extname(relativePath).toLowerCase();
           if (ext === ".md" || ext === ".markdown") {
             try {
-              const renderedMarkdownHtml = await renderMarkdownToHtml(content, {
-                localFileBasePath: dirname(filePath),
-              });
+              const largeRangePreviewSlice =
+                fullInlineContent === undefined &&
+                viewMode === "range" &&
+                requestedRange
+                  ? await readTargetedTextWindow(filePath, requestedRange)
+                  : undefined;
+              const previewContent =
+                fullInlineContent !== undefined && requestedRange
+                  ? fullInlineContent
+                  : (largeRangePreviewSlice?.content ?? content);
+              const previewStartLine =
+                fullInlineContent !== undefined && requestedRange
+                  ? 1
+                  : (largeRangePreviewSlice?.startLine ?? slice.startLine);
+              const renderedMarkdownHtml = await renderMarkdownFilePreview(
+                previewContent,
+                {
+                  localFileBasePath: dirname(filePath),
+                },
+                previewStartLine,
+                requestedRange,
+                viewMode,
+              );
               response.renderedMarkdownHtml = renderedMarkdownHtml;
               response.embeddedMedia = await collectEmbeddedMarkdownMedia(
                 renderedMarkdownHtml,
