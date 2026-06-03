@@ -2,11 +2,13 @@ import {
   type ReactNode,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import type { ZodError } from "zod";
 import { useSchemaValidationContext } from "../../../contexts/SchemaValidationContext";
+import { useOutputToolPreviewLineCount } from "../../../hooks/useOutputAppearance";
 import { validateToolResult } from "../../../lib/validateToolResult";
 import { SchemaWarning } from "../../SchemaWarning";
 import { SessionFilePathLink } from "../../SessionFilePathLink";
@@ -24,8 +26,6 @@ function countGrepMatches(content: string | undefined): number {
   }
   return content.split("\n").filter((line) => /(^|:)\d+:/.test(line)).length;
 }
-
-const MAX_GREP_MATCH_ROWS = 100;
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -130,7 +130,7 @@ function GrepMatchDrilldown({
   pattern?: string;
 }) {
   const [showModal, setShowModal] = useState(false);
-  const displayMatches = matches.slice(0, MAX_GREP_MATCH_ROWS);
+  const showFileColumn = hasMultipleGrepMatchFiles(matches);
 
   if (matches.length === 0) {
     return <span className="grep-count">{label}</span>;
@@ -155,17 +155,19 @@ function GrepMatchDrilldown({
             <table className="grep-match-table">
               <thead>
                 <tr>
-                  <th>File</th>
+                  {showFileColumn && <th>File</th>}
                   <th>Line</th>
                   <th>Text</th>
                 </tr>
               </thead>
               <tbody>
-                {displayMatches.map((match, index) => (
+                {matches.map((match, index) => (
                   <tr
                     key={`${match.filePath}:${match.lineNumber}:${match.columnNumber ?? ""}:${index}`}
                   >
-                    <td className="grep-match-file">{match.filePath}</td>
+                    {showFileColumn && (
+                      <td className="grep-match-file">{match.filePath}</td>
+                    )}
                     <td className="grep-match-line">
                       {match.columnNumber
                         ? `${match.lineNumber}:${match.columnNumber}`
@@ -178,12 +180,6 @@ function GrepMatchDrilldown({
                 ))}
               </tbody>
             </table>
-            {matches.length > displayMatches.length && (
-              <div className="grep-match-truncated">
-                Showing first {displayMatches.length} of {matches.length}{" "}
-                matches
-              </div>
-            )}
           </div>
         </Modal>
       )}
@@ -197,6 +193,11 @@ function GrepMatchDrilldown({
 function getFileName(filePath: string): string {
   const trimmed = filePath.replace(/\/+$/, "");
   return trimmed.split("/").pop() || filePath;
+}
+
+function hasMultipleGrepMatchFiles(matches: GrepMatch[]): boolean {
+  const files = new Set(matches.map((match) => match.filePath));
+  return files.size > 1;
 }
 
 /**
@@ -290,6 +291,63 @@ function ContentView({
         </button>
       )}
     </>
+  );
+}
+
+function GrepCollapsedPreview({
+  input,
+  result,
+  isError,
+}: {
+  input?: GrepInput;
+  result: GrepResult | undefined;
+  isError: boolean;
+}) {
+  const previewLineCount = useOutputToolPreviewLineCount();
+  const matches = useMemo(() => {
+    if (isError || result?.mode !== "content") {
+      return [];
+    }
+    return result.matches ?? [];
+  }, [isError, result]);
+  const visibleMatchCount = Math.max(0, previewLineCount - 1);
+  const previewMatches = matches.slice(0, visibleMatchCount);
+
+  if (previewMatches.length === 0) {
+    return null;
+  }
+
+  const showFileColumn = hasMultipleGrepMatchFiles(matches);
+  const hiddenMatchCount = Math.max(0, matches.length - previewMatches.length);
+
+  return (
+    <div className="grep-collapsed-preview">
+      {previewMatches.map((match, index) => (
+        <div
+          className="grep-preview-match"
+          key={`${match.filePath}:${match.lineNumber}:${match.columnNumber ?? ""}:${index}`}
+        >
+          {showFileColumn && (
+            <span className="grep-preview-file" title={match.filePath}>
+              {getFileName(match.filePath)}
+            </span>
+          )}
+          <span className="grep-preview-line">
+            {match.columnNumber
+              ? `${match.lineNumber}:${match.columnNumber}`
+              : match.lineNumber}
+          </span>
+          <span className="grep-preview-text">
+            {renderHighlightedText(match.text, match.ranges, input?.pattern)}
+          </span>
+        </div>
+      ))}
+      {hiddenMatchCount > 0 && (
+        <div className="grep-preview-more">
+          +{hiddenMatchCount} {hiddenMatchCount === 1 ? "match" : "matches"}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -689,6 +747,16 @@ export const grepRenderer: ToolRenderer<GrepInput, GrepResult> = {
         isError={isError}
         summaryExpanded={context.summaryExpanded}
         toggleSummaryExpanded={context.toggleSummaryExpanded}
+      />
+    );
+  },
+
+  renderCollapsedPreview(input, result, isError) {
+    return (
+      <GrepCollapsedPreview
+        input={input as GrepInput | undefined}
+        result={result as GrepResult | undefined}
+        isError={isError}
       />
     );
   },

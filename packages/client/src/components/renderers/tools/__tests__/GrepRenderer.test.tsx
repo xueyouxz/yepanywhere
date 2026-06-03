@@ -8,6 +8,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionMetadataProvider } from "../../../../contexts/SessionMetadataContext";
 import { I18nProvider } from "../../../../i18n";
+import { UI_KEYS } from "../../../../lib/storageKeys";
 import { grepRenderer, truncateGrepPatternForWidth } from "../GrepRenderer";
 
 vi.mock("../../../../contexts/SchemaValidationContext", () => ({
@@ -26,6 +27,7 @@ const renderContext = {
 describe("GrepRenderer", () => {
   afterEach(() => {
     cleanup();
+    window.localStorage.clear();
   });
 
   it("opens parsed content matches as a highlighted table", () => {
@@ -68,6 +70,125 @@ describe("GrepRenderer", () => {
     expect(screen.getByText("7:3")).toBeTruthy();
     expect(screen.getAllByText("needle")).toHaveLength(2);
     expect(document.querySelectorAll(".grep-match-highlight")).toHaveLength(2);
+  });
+
+  it("does not cap the parsed match table at 100 rows", () => {
+    const matches = Array.from({ length: 125 }, (_, index) => ({
+      filePath: "src/results.ts",
+      lineNumber: index + 1,
+      text: `needle-${index + 1}`,
+    }));
+    render(
+      <I18nProvider>
+        {grepRenderer.renderToolResult(
+          {
+            mode: "content",
+            filenames: [],
+            numFiles: 1,
+            content: matches
+              .map(
+                (match) =>
+                  `${match.filePath}:${match.lineNumber}:${match.text}`,
+              )
+              .join("\n"),
+            matches,
+          },
+          false,
+          renderContext,
+          { pattern: "needle", output_mode: "content" },
+        )}
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "125 matches" }));
+
+    expect(
+      screen.getByText(
+        (_content, element) =>
+          element?.classList.contains("grep-match-text") === true &&
+          element.textContent === "needle-125",
+      ),
+    ).toBeDefined();
+    expect(screen.queryByText(/Showing first/)).toBeNull();
+  });
+
+  it("omits the repeated file column for single-file match tables", () => {
+    render(
+      <I18nProvider>
+        {grepRenderer.renderToolResult(
+          {
+            mode: "content",
+            filenames: [],
+            numFiles: 1,
+            content: "src/a.ts:12:needle one\nsrc/a.ts:13:needle two",
+            matches: [
+              {
+                filePath: "src/a.ts",
+                lineNumber: 12,
+                text: "needle one",
+              },
+              {
+                filePath: "src/a.ts",
+                lineNumber: 13,
+                text: "needle two",
+              },
+            ],
+          },
+          false,
+          renderContext,
+          { pattern: "needle", output_mode: "content", path: "src/a.ts" },
+        )}
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "2 matches" }));
+
+    expect(screen.queryByRole("columnheader", { name: "File" })).toBeNull();
+    expect(screen.getByRole("columnheader", { name: "Line" })).toBeDefined();
+    expect(
+      screen.getByText(
+        (_content, element) =>
+          element?.classList.contains("grep-match-text") === true &&
+          element.textContent === "needle two",
+      ),
+    ).toBeDefined();
+  });
+
+  it("uses the tool preview line setting for collapsed Grep matches", () => {
+    window.localStorage.setItem(UI_KEYS.outputToolPreviewLineCount, "2");
+    const { container } = render(
+      <div>
+        {grepRenderer.renderCollapsedPreview?.(
+          { pattern: "needle", output_mode: "content", path: "src/a.ts" },
+          {
+            mode: "content",
+            filenames: [],
+            numFiles: 1,
+            content: "src/a.ts:1:needle one\nsrc/a.ts:2:needle two",
+            matches: [
+              {
+                filePath: "src/a.ts",
+                lineNumber: 1,
+                text: "needle one",
+              },
+              {
+                filePath: "src/a.ts",
+                lineNumber: 2,
+                text: "needle two",
+              },
+            ],
+          },
+          false,
+          renderContext,
+        )}
+      </div>,
+    );
+
+    expect(screen.getByText("needle")).toBeDefined();
+    expect(screen.getByText("one")).toBeDefined();
+    expect(screen.queryByText("two")).toBeNull();
+    expect(screen.getByText("+1 match")).toBeDefined();
+    expect(container.querySelector(".grep-preview-file")).toBeNull();
   });
 
   it("keeps long patterns clipped until summary context expands them", () => {
