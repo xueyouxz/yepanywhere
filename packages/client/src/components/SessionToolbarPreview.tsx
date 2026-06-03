@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSessionToolbarVisibility } from "../hooks/useSessionToolbarVisibility";
 import { useI18n } from "../i18n";
+import { getEffortLevelOptions } from "../lib/effortLevels";
 import {
   getModelIndicatorTextVariants,
   getModelIndicatorTooltip,
@@ -52,6 +53,14 @@ export function SessionToolbarPreview() {
     }),
     [previewNowMs],
   );
+  const effortOptions = useMemo(
+    () =>
+      getEffortLevelOptions({
+        provider: "codex",
+        model: "gpt-5.5-codex",
+      }),
+    [],
+  );
 
   useEffect(() => {
     const element = inertRef.current as
@@ -86,7 +95,10 @@ export function SessionToolbarPreview() {
           thinkingControl={{
             mode: "auto",
             level: "max",
-            onCycle: noop,
+            effortOptions,
+            onSetMode: noop,
+            onSetEffort: noop,
+            onToggleEnabled: noop,
           }}
           renderModeControl={{
             state: "mixed",

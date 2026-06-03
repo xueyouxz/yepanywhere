@@ -260,7 +260,12 @@ button.tool-summary {
 }
 
 .tool-summary-command {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
   cursor: pointer;
+  white-space: normal;
+  text-overflow: clip;
 }
 
 .tool-summary-command:hover {
@@ -273,11 +278,36 @@ button.tool-summary {
 }
 
 .tool-summary-command.is-expanded {
+  display: block;
   max-height: min(30vh, 16rem);
   overflow: auto;
   text-overflow: clip;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.tool-summary-command-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tool-summary-command-more {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  margin-top: 0.05rem;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--border-subtle, var(--border-color));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-secondary) 84%, transparent);
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  line-height: 1.25;
+  white-space: nowrap;
 }
 
 .tool-header-copy {

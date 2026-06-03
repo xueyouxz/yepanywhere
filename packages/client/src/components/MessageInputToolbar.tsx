@@ -1,4 +1,7 @@
-import type { SessionLivenessSnapshot } from "@yep-anywhere/shared";
+import type {
+  ProviderName,
+  SessionLivenessSnapshot,
+} from "@yep-anywhere/shared";
 import type { MouseEvent, RefObject, TouchEvent } from "react";
 import {
   type Dispatch,
@@ -24,7 +27,12 @@ import {
 import { useVersion } from "../hooks/useVersion";
 import { useI18n } from "../i18n";
 import type { BtwToolbarMode } from "../lib/btwAsideRouting";
-import { getEffortLevelLabel } from "../lib/effortLevels";
+import {
+  type EffortLevelOption,
+  getEffortLevelLabel,
+  getEffortLevelOptions,
+  resolveSupportedEffortLevel,
+} from "../lib/effortLevels";
 import {
   formatAbsoluteTimestamp,
   formatCompactRelativeAge,
@@ -312,7 +320,10 @@ interface ToolbarSlashControl {
 interface ToolbarThinkingControl {
   mode: ThinkingMode;
   level: EffortLevel;
-  onCycle: () => void;
+  effortOptions: EffortLevelOption[];
+  onSetMode: (mode: ThinkingMode) => void;
+  onSetEffort: (level: EffortLevel) => void;
+  onToggleEnabled: () => void;
 }
 
 interface ToolbarRenderModeControl {
@@ -472,6 +483,248 @@ function ToolbarMicrophoneIcon() {
   );
 }
 
+function ThinkingToolbarIcon({ mode }: { mode: ThinkingMode }) {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+      {mode === "auto" && (
+        <g>
+          <circle cx="19" cy="5" r="5.5" fill="currentColor" stroke="none" />
+          <text
+            x="19"
+            y="5"
+            textAnchor="middle"
+            dominantBaseline="central"
+            fill="var(--bg-primary, #1a1a2e)"
+            fontSize="8"
+            fontWeight="700"
+            fontFamily="system-ui, sans-serif"
+            stroke="none"
+          >
+            A
+          </text>
+        </g>
+      )}
+    </svg>
+  );
+}
+
+function getToolbarThinkingLabel(control: ToolbarThinkingControl): string {
+  if (control.mode === "off") return "Off";
+  if (control.mode === "auto") return "Auto";
+  if (control.level === "xhigh") return "XHigh";
+  return getEffortLevelLabel(control.level);
+}
+
+function getToolbarThinkingTitle(
+  t: ToolbarTranslate,
+  control: ToolbarThinkingControl,
+): string {
+  const current =
+    control.mode === "off"
+      ? t("newSessionThinkingOff")
+      : control.mode === "auto"
+        ? t("newSessionThinkingAuto")
+        : t("newSessionThinkingOn", {
+            level:
+              control.effortOptions.find(
+                (option) => option.value === control.level,
+              )?.label ?? getEffortLevelLabel(control.level),
+          });
+  return `${current}. Click to choose; right-click or long-press to toggle off/on. Applies next turn.`;
+}
+
+function ThinkingToolbarControl({
+  control,
+  t,
+}: {
+  control: ToolbarThinkingControl;
+  t: ToolbarTranslate;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressTouchClickRef = useRef(false);
+  const title = getToolbarThinkingTitle(t, control);
+
+  const close = useCallback(() => setOpen(false), []);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+      }
+    };
+    const handleMouseDown = (event: globalThis.MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        close();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown, true);
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown, true);
+      document.removeEventListener("mousedown", handleMouseDown);
+    };
+  }, [close, open]);
+
+  const clearLongPress = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  const toggleEnabled = useCallback(() => {
+    control.onToggleEnabled();
+    setOpen(false);
+  }, [control]);
+
+  const handleContextMenu = useCallback(
+    (event: MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      toggleEnabled();
+    },
+    [toggleEnabled],
+  );
+
+  const handleTouchStart = useCallback(() => {
+    clearLongPress();
+    suppressTouchClickRef.current = false;
+    longPressTimerRef.current = setTimeout(() => {
+      suppressTouchClickRef.current = true;
+      longPressTimerRef.current = null;
+      toggleEnabled();
+    }, 450);
+  }, [clearLongPress, toggleEnabled]);
+
+  const handleTouchEnd = useCallback(
+    (event: TouchEvent<HTMLButtonElement>) => {
+      if (suppressTouchClickRef.current) {
+        event.preventDefault();
+      }
+      clearLongPress();
+    },
+    [clearLongPress],
+  );
+
+  const selectMode = (mode: ThinkingMode) => {
+    control.onSetMode(mode);
+    setOpen(false);
+  };
+
+  const selectEffort = (level: EffortLevel) => {
+    control.onSetEffort(level);
+    control.onSetMode("on");
+    setOpen(false);
+  };
+
+  return (
+    <div className="thinking-toolbar-control" ref={rootRef}>
+      <button
+        type="button"
+        className={`thinking-toggle-button ${control.mode !== "off" ? `active ${control.mode}` : ""}`}
+        onClick={(event) => {
+          if (suppressTouchClickRef.current) {
+            suppressTouchClickRef.current = false;
+            return;
+          }
+          event.currentTarget.blur();
+          setOpen((current) => !current);
+        }}
+        onContextMenu={handleContextMenu}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={clearLongPress}
+        onTouchMove={clearLongPress}
+        title={title}
+        aria-label={title}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <ThinkingToolbarIcon mode={control.mode} />
+        <span className="thinking-toggle-label">
+          {getToolbarThinkingLabel(control)}
+        </span>
+      </button>
+      {open && (
+        <div className="thinking-toolbar-menu" role="menu">
+          <div className="thinking-toolbar-menu-section">
+            <div className="thinking-toolbar-menu-label">
+              {t("modelSettingsThinkingTitle")}
+            </div>
+            <div className="thinking-toolbar-menu-options">
+              {(["off", "auto", "on"] as ThinkingMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={control.mode === mode}
+                  className={`thinking-toolbar-option ${control.mode === mode ? "active" : ""}`}
+                  onClick={() => selectMode(mode)}
+                >
+                  <span className={`mode-option-dot thinking-${mode}`} />
+                  <span>
+                    {mode === "off"
+                      ? t("modelSettingsThinkingOffLabel")
+                      : mode === "auto"
+                        ? t("modelSettingsThinkingAutoLabel")
+                        : t("modelSettingsThinkingOnLabel")}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="thinking-toolbar-menu-section">
+            <div className="thinking-toolbar-menu-label">
+              {t("modelSettingsEffortTitle")}
+            </div>
+            <div className="thinking-toolbar-menu-options effort-options">
+              {control.effortOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={
+                    control.mode === "on" && control.level === option.value
+                  }
+                  className={`thinking-toolbar-option ${
+                    control.mode === "on" && control.level === option.value
+                      ? "active"
+                      : ""
+                  }`}
+                  title={option.description}
+                  onClick={() => selectEffort(option.value)}
+                >
+                  <span
+                    className={`model-switch-indicator-dot tone-${option.value}`}
+                    aria-hidden="true"
+                  />
+                  <span>{option.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="thinking-toolbar-menu-hint">Applies next turn</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MessageInputToolbarView({
   t,
   refs,
@@ -557,62 +810,7 @@ export function MessageInputToolbarView({
           />
         )}
         {visibility.thinkingToggle && thinkingControl && (
-          <button
-            type="button"
-            className={`thinking-toggle-button ${thinkingControl.mode !== "off" ? `active ${thinkingControl.mode}` : ""}`}
-            onClick={thinkingControl.onCycle}
-            title={
-              thinkingControl.mode === "off"
-                ? t("newSessionThinkingOff")
-                : thinkingControl.mode === "auto"
-                  ? t("newSessionThinkingAuto")
-                  : t("newSessionThinkingOn", {
-                      level: getEffortLevelLabel(thinkingControl.level),
-                    })
-            }
-            aria-label={t("newSessionThinkingMode", {
-              mode: thinkingControl.mode,
-            })}
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12 6 12 12 16 14" />
-              {thinkingControl.mode === "auto" && (
-                <g>
-                  <circle
-                    cx="19"
-                    cy="5"
-                    r="5.5"
-                    fill="currentColor"
-                    stroke="none"
-                  />
-                  <text
-                    x="19"
-                    y="5"
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fill="var(--bg-primary, #1a1a2e)"
-                    fontSize="8"
-                    fontWeight="700"
-                    fontFamily="system-ui, sans-serif"
-                    stroke="none"
-                  >
-                    A
-                  </text>
-                </g>
-              )}
-            </svg>
-          </button>
+          <ThinkingToolbarControl control={thinkingControl} t={t} />
         )}
         {visibility.renderMode && renderModeControl && (
           <button
@@ -1141,8 +1339,9 @@ export function MessageInputToolbar({
   const { t } = useI18n();
   const {
     thinkingMode,
-    cycleThinkingMode,
     thinkingLevel,
+    setThinkingMode,
+    setEffortLevel,
     voiceInputEnabled = true,
     speechMethod = "browser-native",
     hasStoredSpeechMethod = false,
@@ -1160,6 +1359,8 @@ export function MessageInputToolbar({
   const [isearchScope, setIsearchScope] = useState<SessionIsearchScope | null>(
     null,
   );
+  const lastNonOffThinkingModeRef =
+    useRef<Exclude<ThinkingMode, "off">>("auto");
   const modelToolbarButtonRef = useRef<HTMLButtonElement | null>(null);
   const modelToolbarMeasureCtxRef = useRef<CanvasRenderingContext2D | null>(
     null,
@@ -1182,6 +1383,18 @@ export function MessageInputToolbar({
   const normalizedModelIndicatorProvider = useMemo(
     () => normalizeProviderKey(modelIndicatorProvider),
     [modelIndicatorProvider],
+  );
+  const thinkingEffortOptions = useMemo(
+    () =>
+      getEffortLevelOptions({
+        provider: normalizedModelIndicatorProvider as ProviderName,
+        model: modelIndicatorModel,
+      }),
+    [modelIndicatorModel, normalizedModelIndicatorProvider],
+  );
+  const effectiveThinkingLevel = useMemo(
+    () => resolveSupportedEffortLevel(thinkingLevel, thinkingEffortOptions),
+    [thinkingEffortOptions, thinkingLevel],
   );
   const modelToolbarVariants = useMemo(
     () =>
@@ -1332,6 +1545,18 @@ export function MessageInputToolbar({
   const showLastActivityChip =
     toolbarVisibility.sessionStatus && showLastActivityAge;
   const showToolbarStatus = showLivenessChip || showLastActivityChip;
+
+  useEffect(() => {
+    if (thinkingMode !== "off") {
+      lastNonOffThinkingModeRef.current = thinkingMode;
+    }
+  }, [thinkingMode]);
+
+  const toggleThinkingEnabled = useCallback(() => {
+    setThinkingMode(
+      thinkingMode === "off" ? lastNonOffThinkingModeRef.current : "off",
+    );
+  }, [setThinkingMode, thinkingMode]);
 
   useLayoutEffect(() => {
     if (typeof window === "undefined" || !hasModelIndicator) {
@@ -1614,8 +1839,11 @@ export function MessageInputToolbar({
         supportsThinkingToggle
           ? {
               mode: thinkingMode,
-              level: thinkingLevel,
-              onCycle: cycleThinkingMode,
+              level: effectiveThinkingLevel,
+              effortOptions: thinkingEffortOptions,
+              onSetMode: setThinkingMode,
+              onSetEffort: setEffortLevel,
+              onToggleEnabled: toggleThinkingEnabled,
             }
           : null
       }

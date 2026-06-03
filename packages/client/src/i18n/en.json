@@ -65,6 +65,8 @@
   "appearanceOutputMathSizeOffsetLabel": "Math size offset",
   "appearanceOutputLineSpacingLabel": "Wrapped line spacing (% of font)",
   "appearanceOutputVerticalSpacingLabel": "Paragraph spacing (% of font)",
+  "appearanceOutputToolPreviewLinesLabel": "Tool preview lines",
+  "appearanceOutputToolPreviewLinesUnit": "lines",
   "appearanceOutputPreviewLabel": "Output preview",
   "appearanceOutputSpecimenLabel": "Specimen",
   "outputProseFontSystem": "System",

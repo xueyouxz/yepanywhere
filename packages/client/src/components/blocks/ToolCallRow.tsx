@@ -10,7 +10,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { OUTPUT_APPEARANCE_CHANGE_EVENT } from "../../hooks/useOutputAppearance";
+import {
+  OUTPUT_APPEARANCE_CHANGE_EVENT,
+  useOutputToolPreviewLineCount,
+} from "../../hooks/useOutputAppearance";
 import { useStableToolPreviewRendering } from "../../hooks/useStableToolPreviewRendering";
 import { getDisplayBashCommandFromInput } from "../../lib/bashCommand";
 import { PREDICTIVE_SCROLL_ROOT_MARGIN } from "../../lib/predictiveScroll";
@@ -59,6 +62,13 @@ const DEFAULT_DEFERRED_PREVIEW_TYPOGRAPHY: DeferredPreviewTypographyMetrics = {
 type DeferredPreviewStyle = CSSProperties & {
   "--tool-row-deferred-preview-height"?: string;
 };
+
+interface CommandPreview {
+  text: string;
+  hiddenLabel: string | null;
+}
+
+const COMMAND_PREVIEW_MAX_CHARS_PER_LINE = 220;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -112,6 +122,48 @@ function estimateWrappedLineCount(text: string, charsPerLine: number): number {
     count += Math.max(1, Math.ceil(line.length / charsPerLine));
   }
   return count;
+}
+
+function formatHiddenCommandLabel({
+  hiddenChars,
+  hiddenLines,
+}: {
+  hiddenChars: number;
+  hiddenLines: number;
+}): string | null {
+  const parts: string[] = [];
+  if (hiddenLines > 0) {
+    parts.push(`+${hiddenLines} ${hiddenLines === 1 ? "line" : "lines"}`);
+  }
+  if (hiddenChars > 0) {
+    parts.push(`+${hiddenChars} ${hiddenChars === 1 ? "char" : "chars"}`);
+  }
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
+function getCommandPreview(
+  command: string,
+  visibleLineCount: number,
+): CommandPreview {
+  const maxLines = clamp(Math.round(visibleLineCount), 1, 8);
+  const lines = command.replace(/\r\n/g, "\n").split("\n");
+  const visibleLines = lines.slice(0, maxLines);
+  let hiddenChars = 0;
+  const text = visibleLines
+    .map((line) => {
+      if (line.length <= COMMAND_PREVIEW_MAX_CHARS_PER_LINE) {
+        return line;
+      }
+      hiddenChars += line.length - COMMAND_PREVIEW_MAX_CHARS_PER_LINE;
+      return `${line.slice(0, COMMAND_PREVIEW_MAX_CHARS_PER_LINE)}...`;
+    })
+    .join("\n");
+  const hiddenLines = Math.max(0, lines.length - visibleLines.length);
+
+  return {
+    text,
+    hiddenLabel: formatHiddenCommandLabel({ hiddenChars, hiddenLines }),
+  };
 }
 
 export function estimateDeferredPreviewHeightPx(params: {
@@ -363,6 +415,7 @@ export const ToolCallRow = memo(function ToolCallRow({
 }: Props) {
   const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [bashCommandExpanded, setBashCommandExpanded] = useState(false);
+  const outputToolPreviewLineCount = useOutputToolPreviewLineCount();
   const deferredPreviewTypography = useDeferredPreviewTypographyMetrics();
   const toggleSummaryExpanded = useCallback(() => {
     setSummaryExpanded((current) => !current);
@@ -577,6 +630,10 @@ export const ToolCallRow = memo(function ToolCallRow({
     toolInput.description.trim().length > 0;
   const showBashCommandTarget =
     isBashTool && !hasBashDescription && headerCommand.length > 0;
+  const bashCommandPreview = useMemo(
+    () => getCommandPreview(headerCommand, outputToolPreviewLineCount),
+    [headerCommand, outputToolPreviewLineCount],
+  );
 
   useEffect(() => {
     setBashCommandExpanded(false);
@@ -777,7 +834,14 @@ export const ToolCallRow = memo(function ToolCallRow({
               setBashCommandExpanded((current) => !current);
             }}
           >
-            {headerCommand}
+            <span className="tool-summary-command-text">
+              {bashCommandExpanded ? headerCommand : bashCommandPreview.text}
+            </span>
+            {!bashCommandExpanded && bashCommandPreview.hiddenLabel && (
+              <span className="tool-summary-command-more">
+                {bashCommandPreview.hiddenLabel}
+              </span>
+            )}
           </button>
         ) : (
           <span className="tool-summary">

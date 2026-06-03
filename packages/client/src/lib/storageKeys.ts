@@ -56,6 +56,7 @@ export const UI_KEYS = {
   outputProseVerticalSpacing: "yep-anywhere-output-prose-vertical-spacing",
   outputProseVerticalSpacingPercent:
     "yep-anywhere-output-prose-vertical-spacing-percent",
+  outputToolPreviewLineCount: "yep-anywhere-output-tool-preview-line-count",
   tabSize: "yep-anywhere-tab-size",
   contentMaxWidth: "yep-anywhere-content-max-width",
   sidebarWidth: "yep-anywhere-sidebar-width",

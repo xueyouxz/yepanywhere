@@ -17,6 +17,7 @@ import {
   DEFAULT_OUTPUT_LINE_SPACING_PERCENT,
   DEFAULT_OUTPUT_MATH_FONT_SIZE_OFFSET_PX,
   DEFAULT_OUTPUT_THINKING_FONT_SIZE_OFFSET_PX,
+  DEFAULT_OUTPUT_TOOL_PREVIEW_LINE_COUNT,
   DEFAULT_OUTPUT_VERTICAL_SPACING_PERCENT,
   OUTPUT_FONT_SIZE_MAX_PX,
   OUTPUT_FONT_SIZE_MIN_PX,
@@ -32,6 +33,9 @@ import {
   OUTPUT_THINKING_FONT_SIZE_OFFSET_MAX_PX,
   OUTPUT_THINKING_FONT_SIZE_OFFSET_MIN_PX,
   OUTPUT_THINKING_FONT_SIZE_OFFSET_STEP_PX,
+  OUTPUT_TOOL_PREVIEW_LINE_COUNT_MAX,
+  OUTPUT_TOOL_PREVIEW_LINE_COUNT_MIN,
+  OUTPUT_TOOL_PREVIEW_LINE_COUNT_STEP,
   OUTPUT_VERTICAL_SPACING_MAX_PERCENT,
   OUTPUT_VERTICAL_SPACING_MIN_PERCENT,
   OUTPUT_VERTICAL_SPACING_STEP_PERCENT,
@@ -69,12 +73,14 @@ export function AppearanceSettings() {
     outputMathFontSizeOffsetPx,
     outputLineSpacingPercent,
     outputVerticalSpacingPercent,
+    outputToolPreviewLineCount,
     setOutputFont,
     setOutputFontSizePx,
     setOutputThinkingFontSizeOffsetPx,
     setOutputMathFontSizeOffsetPx,
     setOutputLineSpacingPercent,
     setOutputVerticalSpacingPercent,
+    setOutputToolPreviewLineCount,
   } = useOutputAppearance();
   const { tabSize, setTabSize } = useTabSize();
   const { contentMaxWidth, setContentMaxWidth } = useContentMaxWidth();
@@ -96,6 +102,8 @@ export function AppearanceSettings() {
   const [outputVerticalSpacingDraft, setOutputVerticalSpacingDraft] = useState(
     () => formatNumberSetting(outputVerticalSpacingPercent),
   );
+  const [outputToolPreviewLineCountDraft, setOutputToolPreviewLineCountDraft] =
+    useState(() => formatNumberSetting(outputToolPreviewLineCount));
   const { theme, setTheme } = useTheme();
   const { streamingEnabled, setStreamingEnabled } = useStreamingEnabled();
   const { stableToolPreviewRendering, setStableToolPreviewRendering } =
@@ -216,6 +224,12 @@ export function AppearanceSettings() {
     );
   }, [outputVerticalSpacingPercent]);
 
+  useEffect(() => {
+    setOutputToolPreviewLineCountDraft(
+      formatNumberSetting(outputToolPreviewLineCount),
+    );
+  }, [outputToolPreviewLineCount]);
+
   const commitContentMaxWidth = () => {
     const parsed = Number.parseInt(contentMaxWidthDraft, 10);
     setContentMaxWidth(
@@ -261,6 +275,13 @@ export function AppearanceSettings() {
       Number.isFinite(parsed)
         ? parsed
         : DEFAULT_OUTPUT_VERTICAL_SPACING_PERCENT,
+    );
+  };
+
+  const commitOutputToolPreviewLineCount = () => {
+    const parsed = Number(outputToolPreviewLineCountDraft);
+    setOutputToolPreviewLineCount(
+      Number.isFinite(parsed) ? parsed : DEFAULT_OUTPUT_TOOL_PREVIEW_LINE_COUNT,
     );
   };
 
@@ -574,6 +595,52 @@ export function AppearanceSettings() {
                       aria-label={t("appearanceOutputVerticalSpacingLabel")}
                     />
                     <span className="output-appearance-unit">%</span>
+                  </span>
+                </span>
+              </label>
+
+              <label
+                className="output-appearance-control"
+                htmlFor="output-tool-preview-lines"
+              >
+                <span className="output-appearance-label">
+                  {t("appearanceOutputToolPreviewLinesLabel")}
+                </span>
+                <span className="output-appearance-slider-row">
+                  <input
+                    id="output-tool-preview-lines"
+                    type="range"
+                    min={OUTPUT_TOOL_PREVIEW_LINE_COUNT_MIN}
+                    max={OUTPUT_TOOL_PREVIEW_LINE_COUNT_MAX}
+                    step={OUTPUT_TOOL_PREVIEW_LINE_COUNT_STEP}
+                    value={outputToolPreviewLineCount}
+                    onChange={(e) =>
+                      setOutputToolPreviewLineCount(Number(e.target.value))
+                    }
+                  />
+                  <span className="output-appearance-number-wrap">
+                    <input
+                      type="number"
+                      className="settings-input-small output-appearance-number"
+                      min={OUTPUT_TOOL_PREVIEW_LINE_COUNT_MIN}
+                      max={OUTPUT_TOOL_PREVIEW_LINE_COUNT_MAX}
+                      step={OUTPUT_TOOL_PREVIEW_LINE_COUNT_STEP}
+                      value={outputToolPreviewLineCountDraft}
+                      onChange={(e) =>
+                        setOutputToolPreviewLineCountDraft(e.target.value)
+                      }
+                      onBlur={commitOutputToolPreviewLineCount}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          commitOutputToolPreviewLineCount();
+                          e.currentTarget.blur();
+                        }
+                      }}
+                      aria-label={t("appearanceOutputToolPreviewLinesLabel")}
+                    />
+                    <span className="output-appearance-unit">
+                      {t("appearanceOutputToolPreviewLinesUnit")}
+                    </span>
                   </span>
                 </span>
               </label>

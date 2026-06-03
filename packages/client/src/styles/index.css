@@ -4270,9 +4270,11 @@ a.sidebar-nav-item {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: var(--composer-control-size);
+  gap: 0.25rem;
+  min-width: var(--composer-control-size);
+  width: auto;
   height: var(--composer-control-size);
-  padding: 0;
+  padding: 0 0.45rem;
   background: transparent;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
@@ -4289,6 +4291,7 @@ a.sidebar-nav-item {
 }
 
 .thinking-toggle-button > svg {
+  flex: 0 0 auto;
   display: block;
 }
 
@@ -4316,6 +4319,86 @@ a.sidebar-nav-item {
 
 .thinking-toggle-button.active.on:hover {
   background: rgba(59, 130, 246, 0.25);
+}
+
+.thinking-toggle-label {
+  color: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.thinking-toolbar-control {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.thinking-toolbar-menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 120;
+  display: grid;
+  gap: var(--space-3);
+  width: min(18rem, calc(100vw - 1.5rem));
+  padding: var(--space-3);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
+}
+
+.thinking-toolbar-menu-section {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.thinking-toolbar-menu-label {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.thinking-toolbar-menu-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.thinking-toolbar-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-code);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.thinking-toolbar-option:hover {
+  border-color: var(--border-input);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.thinking-toolbar-option.active {
+  border-color: var(--app-yep-green);
+  background: color-mix(in srgb, var(--app-yep-green) 13%, var(--bg-code));
+  color: var(--text-primary);
+}
+
+.thinking-toolbar-menu-hint {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
 }
 
 .new-session-effort-selector {
@@ -6904,8 +6987,18 @@ a.sidebar-nav-item {
 
 .session-default-effort-selector {
   margin-top: var(--space-2);
-  width: fit-content;
+  width: 100%;
   max-width: 100%;
+  height: auto;
+  min-height: var(--composer-control-size);
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.session-default-effort-selector .new-session-effort-option {
+  flex: 1 1 5.4rem;
+  min-height: var(--composer-control-size);
+  white-space: nowrap;
 }
 
 .speech-backend-settings-field {

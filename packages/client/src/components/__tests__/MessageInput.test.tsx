@@ -12,10 +12,16 @@ import { type ComponentProps, useCallback, useMemo, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SESSION_ISEARCH_GUIDE_EVENT } from "../../lib/sessionIsearchGuide";
 import { MessageInput } from "../MessageInput";
+import {
+  MessageInputToolbarView,
+  type MessageInputToolbarViewProps,
+} from "../MessageInputToolbar";
 
 const {
   versionState,
   modelSettingsState,
+  mockSetThinkingMode,
+  mockSetEffortLevel,
   mockSetSpeechMethod,
   mockSetSpeechSmartTurnSettings,
   mockSetGrokSpeechAudioSettings,
@@ -47,6 +53,8 @@ const {
     },
   },
   mockSetSpeechMethod: vi.fn(),
+  mockSetThinkingMode: vi.fn(),
+  mockSetEffortLevel: vi.fn(),
   mockSetSpeechSmartTurnSettings: vi.fn(),
   mockSetGrokSpeechAudioSettings: vi.fn(),
   mockVoiceToggle: vi.fn(),
@@ -93,6 +101,8 @@ vi.mock("../../hooks/useModelSettings", () => ({
     thinkingMode: "off",
     cycleThinkingMode: vi.fn(),
     thinkingLevel: "high",
+    setThinkingMode: mockSetThinkingMode,
+    setEffortLevel: mockSetEffortLevel,
     voiceInputEnabled: true,
     speechMethod: modelSettingsState.speechMethod,
     hasStoredSpeechMethod: modelSettingsState.hasStoredSpeechMethod,
@@ -231,6 +241,58 @@ function expectSubmission(
   });
 }
 
+const toolbarVisibility: MessageInputToolbarViewProps["visibility"] = {
+  modeSelector: false,
+  attachments: false,
+  slashMenu: false,
+  thinkingToggle: true,
+  renderMode: false,
+  modelIndicator: false,
+  microphone: false,
+  shortcutsHelp: false,
+  contextUsage: false,
+  btw: false,
+  nudge: false,
+  queueControls: false,
+  sessionStatus: false,
+};
+
+const toolbarT = ((key: string, params?: Record<string, string>) => {
+  const translations: Record<string, string> = {
+    modelSettingsEffortTitle: "Effort Level",
+    modelSettingsThinkingAutoLabel: "Auto",
+    modelSettingsThinkingOffLabel: "Off",
+    modelSettingsThinkingOnLabel: "On",
+    modelSettingsThinkingTitle: "Thinking Mode",
+    newSessionThinkingAuto: "Thinking: auto",
+    newSessionThinkingOff: "Thinking: off",
+    newSessionThinkingOn: `Thinking: on (${params?.level ?? ""})`,
+  };
+  return translations[key] ?? key;
+}) as MessageInputToolbarViewProps["t"];
+
+function renderToolbarView(
+  thinkingControl: MessageInputToolbarViewProps["thinkingControl"],
+) {
+  render(
+    <MessageInputToolbarView
+      t={toolbarT}
+      visibility={toolbarVisibility}
+      attachmentControl={{ attachmentCount: 0 }}
+      thinkingControl={thinkingControl}
+      shortcutsControl={{
+        open: false,
+        isearchScope: null,
+        setOpen:
+          vi.fn() as unknown as MessageInputToolbarViewProps["shortcutsControl"]["setOpen"],
+        hasDualActions: false,
+        queueShortcutLabel: "Queue while agent runs",
+      }}
+      actionsControl={{}}
+    />,
+  );
+}
+
 describe("MessageInput", () => {
   beforeEach(() => {
     versionState.version = {
@@ -252,6 +314,8 @@ describe("MessageInput", () => {
       uplinkMode: "pcm16",
     };
     mockSetSpeechMethod.mockReset();
+    mockSetThinkingMode.mockReset();
+    mockSetEffortLevel.mockReset();
     mockSetSpeechSmartTurnSettings.mockReset();
     mockSetGrokSpeechAudioSettings.mockReset();
     mockVoiceToggle.mockReset();
@@ -272,6 +336,79 @@ describe("MessageInput", () => {
     fireEvent.keyDown(textarea, { key: "p", ctrlKey: true });
 
     expect(onRecallLastSubmission).toHaveBeenCalledTimes(2);
+  });
+
+  it("opens explicit thinking choices from the toolbar button", () => {
+    const onSetMode = vi.fn();
+    renderToolbarView({
+      mode: "off",
+      level: "high",
+      effortOptions: [
+        { value: "low", label: "Low", description: "Fastest responses" },
+        { value: "high", label: "High", description: "Deep reasoning" },
+      ],
+      onSetMode,
+      onSetEffort: vi.fn(),
+      onToggleEnabled: vi.fn(),
+    });
+
+    const button = screen.getByRole("button", {
+      name: /Click to choose/i,
+    });
+    expect(button.textContent).toContain("Off");
+
+    fireEvent.click(button);
+
+    expect(screen.getByRole("menu")).toBeDefined();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Auto" }));
+
+    expect(onSetMode).toHaveBeenCalledWith("auto");
+  });
+
+  it("sets toolbar effort choices through Thinking On", () => {
+    const onSetMode = vi.fn();
+    const onSetEffort = vi.fn();
+    renderToolbarView({
+      mode: "auto",
+      level: "high",
+      effortOptions: [
+        { value: "high", label: "High", description: "Deep reasoning" },
+        {
+          value: "xhigh",
+          label: "Extra High",
+          description: "Extra-high reasoning",
+        },
+      ],
+      onSetMode,
+      onSetEffort,
+      onToggleEnabled: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Click to choose/i }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Extra High" }));
+
+    expect(onSetEffort).toHaveBeenCalledWith("xhigh");
+    expect(onSetMode).toHaveBeenCalledWith("on");
+  });
+
+  it("uses the thinking secondary gesture as an off/on toggle", () => {
+    const onToggleEnabled = vi.fn();
+    renderToolbarView({
+      mode: "auto",
+      level: "high",
+      effortOptions: [
+        { value: "high", label: "High", description: "Deep reasoning" },
+      ],
+      onSetMode: vi.fn(),
+      onSetEffort: vi.fn(),
+      onToggleEnabled,
+    });
+
+    fireEvent.contextMenu(
+      screen.getByRole("button", { name: /right-click or long-press/i }),
+    );
+
+    expect(onToggleEnabled).toHaveBeenCalledTimes(1);
   });
 
   it("selects the preferred active server STT backend for the mic button", () => {

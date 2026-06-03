@@ -42,6 +42,10 @@ export const OUTPUT_VERTICAL_SPACING_MIN_PERCENT = -40;
 export const OUTPUT_VERTICAL_SPACING_MAX_PERCENT = 70;
 export const OUTPUT_VERTICAL_SPACING_STEP_PERCENT = 1;
 export const DEFAULT_OUTPUT_VERTICAL_SPACING_PERCENT = 0;
+export const OUTPUT_TOOL_PREVIEW_LINE_COUNT_MIN = 1;
+export const OUTPUT_TOOL_PREVIEW_LINE_COUNT_MAX = 8;
+export const OUTPUT_TOOL_PREVIEW_LINE_COUNT_STEP = 1;
+export const DEFAULT_OUTPUT_TOOL_PREVIEW_LINE_COUNT = 2;
 const SOURCE_SERIF_4_OUTPUT_OPSZ_MIN = 8;
 const SOURCE_SERIF_4_OUTPUT_OPSZ_MAX = 20;
 
@@ -52,6 +56,7 @@ interface OutputAppearance {
   mathFontSizeOffsetPx: number;
   lineSpacingPercent: number;
   verticalSpacingPercent: number;
+  toolPreviewLineCount: number;
 }
 
 const outputFontStacks: Record<OutputProseFont, string> = {
@@ -116,6 +121,15 @@ function normalizeLineSpacingPercent(value: number): number {
     roundToStep(value, OUTPUT_LINE_SPACING_STEP_PERCENT),
     OUTPUT_LINE_SPACING_MIN_PERCENT,
     OUTPUT_LINE_SPACING_MAX_PERCENT,
+  );
+}
+
+function normalizeToolPreviewLineCount(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_OUTPUT_TOOL_PREVIEW_LINE_COUNT;
+  return clamp(
+    roundToStep(value, OUTPUT_TOOL_PREVIEW_LINE_COUNT_STEP),
+    OUTPUT_TOOL_PREVIEW_LINE_COUNT_MIN,
+    OUTPUT_TOOL_PREVIEW_LINE_COUNT_MAX,
   );
 }
 
@@ -210,6 +224,12 @@ function loadOutputAppearance(): OutputAppearance {
       ),
     ),
     verticalSpacingPercent: readStoredVerticalSpacingPercent(fontSizePx),
+    toolPreviewLineCount: normalizeToolPreviewLineCount(
+      readStoredNumber(
+        UI_KEYS.outputToolPreviewLineCount,
+        DEFAULT_OUTPUT_TOOL_PREVIEW_LINE_COUNT,
+      ),
+    ),
   };
 }
 
@@ -260,10 +280,40 @@ function applyOutputAppearance(appearance: OutputAppearance) {
     `${deriveFontRelativePx(thinkingFontSizePx, appearance.lineSpacingPercent)}px`,
   );
   root.style.setProperty(
+    "--tool-preview-line-count",
+    String(appearance.toolPreviewLineCount),
+  );
+  root.style.setProperty(
     "--thinking-prose-font-variation-settings",
     getFontVariationSettings(appearance, thinkingFontSizePx),
   );
   window.dispatchEvent(new Event(OUTPUT_APPEARANCE_CHANGE_EVENT));
+}
+
+export function getOutputToolPreviewLineCount(): number {
+  return normalizeToolPreviewLineCount(
+    readStoredNumber(
+      UI_KEYS.outputToolPreviewLineCount,
+      DEFAULT_OUTPUT_TOOL_PREVIEW_LINE_COUNT,
+    ),
+  );
+}
+
+export function useOutputToolPreviewLineCount(): number {
+  const [lineCount, setLineCount] = useState(getOutputToolPreviewLineCount);
+
+  useEffect(() => {
+    const updateLineCount = () => setLineCount(getOutputToolPreviewLineCount());
+    updateLineCount();
+    window.addEventListener(OUTPUT_APPEARANCE_CHANGE_EVENT, updateLineCount);
+    return () =>
+      window.removeEventListener(
+        OUTPUT_APPEARANCE_CHANGE_EVENT,
+        updateLineCount,
+      );
+  }, []);
+
+  return lineCount;
 }
 
 export function useOutputAppearance() {
@@ -342,6 +392,18 @@ export function useOutputAppearance() {
     [],
   );
 
+  const setOutputToolPreviewLineCount = useCallback((lineCount: number) => {
+    const normalized = normalizeToolPreviewLineCount(lineCount);
+    localStorage.setItem(
+      UI_KEYS.outputToolPreviewLineCount,
+      String(normalized),
+    );
+    setAppearance((current) => ({
+      ...current,
+      toolPreviewLineCount: normalized,
+    }));
+  }, []);
+
   return {
     outputFont: appearance.font,
     outputFontSizePx: appearance.fontSizePx,
@@ -349,12 +411,14 @@ export function useOutputAppearance() {
     outputMathFontSizeOffsetPx: appearance.mathFontSizeOffsetPx,
     outputLineSpacingPercent: appearance.lineSpacingPercent,
     outputVerticalSpacingPercent: appearance.verticalSpacingPercent,
+    outputToolPreviewLineCount: appearance.toolPreviewLineCount,
     setOutputFont,
     setOutputFontSizePx,
     setOutputThinkingFontSizeOffsetPx,
     setOutputMathFontSizeOffsetPx,
     setOutputLineSpacingPercent,
     setOutputVerticalSpacingPercent,
+    setOutputToolPreviewLineCount,
   };
 }
 

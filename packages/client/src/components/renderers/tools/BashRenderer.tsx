@@ -8,6 +8,7 @@ import {
 import type { ZodError } from "zod";
 import { useSchemaValidationContext } from "../../../contexts/SchemaValidationContext";
 import { useOptionalSessionMetadata } from "../../../contexts/SessionMetadataContext";
+import { useOutputToolPreviewLineCount } from "../../../hooks/useOutputAppearance";
 import {
   getDisplayBashCommandFromInput,
   isCodexProvider,
@@ -26,10 +27,7 @@ import type { BashInput, BashResult, ToolRenderer } from "./types";
 
 const MAX_LINES_COLLAPSED = 20;
 const MAX_LINES_TOOL_USE = 12;
-const DEFAULT_PREVIEW_LINES = 4;
-const DEFAULT_PREVIEW_MAX_CHARS = 400; // 4 * 100 chars
-const CODEX_PREVIEW_LINES = 2;
-const CODEX_PREVIEW_MAX_CHARS = 220;
+const PREVIEW_MAX_CHARS_PER_LINE = 110;
 const RICH_PREVIEW_LINES = 20;
 const RICH_PREVIEW_MAX_CHARS = 4000;
 const NO_FIXED_FONT_RICH_CONTENT: RenderedMathResult = {
@@ -93,20 +91,14 @@ function sanitizeOutputForPreview(output: string, provider?: string): string {
   return filtered.join("\n");
 }
 
-function getPreviewLimits(provider?: string): {
+function getPreviewLimits(lineCount: number): {
   maxLines: number;
   maxChars: number;
 } {
-  if (isCodexProvider(provider)) {
-    return {
-      maxLines: CODEX_PREVIEW_LINES,
-      maxChars: CODEX_PREVIEW_MAX_CHARS,
-    };
-  }
-
+  const normalizedLineCount = Math.max(1, Math.round(lineCount));
   return {
-    maxLines: DEFAULT_PREVIEW_LINES,
-    maxChars: DEFAULT_PREVIEW_MAX_CHARS,
+    maxLines: normalizedLineCount,
+    maxChars: normalizedLineCount * PREVIEW_MAX_CHARS_PER_LINE,
   };
 }
 
@@ -157,13 +149,7 @@ function CheckIcon() {
   );
 }
 
-function BashCopyButton({
-  text,
-  label,
-}: {
-  text: string;
-  label: string;
-}) {
+function BashCopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(
@@ -546,6 +532,7 @@ function BashCollapsedPreview({
   provider?: string;
 }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const outputToolPreviewLineCount = useOutputToolPreviewLineCount();
   const { enabled, reportValidationError, isToolIgnored } =
     useSchemaValidationContext();
   const [validationErrors, setValidationErrors] = useState<ZodError | null>(
@@ -587,7 +574,7 @@ function BashCollapsedPreview({
     output,
     fullRichPreview.changed
       ? { maxLines: RICH_PREVIEW_LINES, maxChars: RICH_PREVIEW_MAX_CHARS }
-      : getPreviewLimits(provider),
+      : getPreviewLimits(outputToolPreviewLineCount),
   );
   const previewRichContent = useMemo(() => {
     if (previewText === output) {
@@ -610,15 +597,18 @@ function BashCollapsedPreview({
     setIsModalOpen(true);
   }, []);
 
-  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.target !== event.currentTarget) {
-      return;
-    }
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      setIsModalOpen(true);
-    }
-  }, []);
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (event.target !== event.currentTarget) {
+        return;
+      }
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        setIsModalOpen(true);
+      }
+    },
+    [],
+  );
 
   const handleClose = useCallback(() => {
     setIsModalOpen(false);

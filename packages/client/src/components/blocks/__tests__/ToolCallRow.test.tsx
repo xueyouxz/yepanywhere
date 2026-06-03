@@ -211,6 +211,44 @@ describe("ToolCallRow", () => {
     expect(container.querySelector(".tool-row-collapsed-preview")).toBeNull();
   });
 
+  it("shows hidden multiline Bash command content before expansion", () => {
+    const command = ["printf first", "printf second", "printf third"].join(
+      "\n",
+    );
+    render(
+      <ToolCallRow
+        id="tool-multiline-bash"
+        toolName="Bash"
+        toolInput={{ command }}
+        toolResult={{
+          structured: {
+            stdout: "",
+            stderr: "",
+            interrupted: false,
+            isImage: false,
+          },
+          content: "",
+          isError: false,
+        }}
+        status="complete"
+        sessionProvider="codex"
+      />,
+    );
+
+    const commandButton = screen.getByRole("button", {
+      name: "Show full command",
+    });
+    expect(commandButton.textContent).toContain("printf first");
+    expect(commandButton.textContent).toContain("printf second");
+    expect(commandButton.textContent).toContain("+1 line");
+    expect(commandButton.textContent).not.toContain("printf third");
+
+    fireEvent.click(commandButton);
+
+    expect(commandButton.textContent).toContain("printf third");
+    expect(commandButton.textContent).not.toContain("+1 line");
+  });
+
   it("uses the timeline dot to expand long Grep summaries", () => {
     const pattern =
       "Ran codex update\\. It completed cleanly and kept the existing session ready for follow-up work\\.";
