@@ -144,17 +144,6 @@ export const ProcessingIndicator = memo(function ProcessingIndicator({
         !isProcessing ? "processing-indicator--control-only" : ""
       } ${!thinkingItemsVisible && hasThinkingItems ? "processing-indicator--thinking-hidden" : ""}`}
     >
-      {isProcessing && (
-        <>
-          <div className="processing-dot-container">
-            <ThinkingIndicator />
-          </div>
-          <span className="processing-text">
-            {displayedText}
-            <span className="processing-cursor">|</span>
-          </span>
-        </>
-      )}
       {showThinkingToggle && (
         <button
           type="button"
@@ -168,6 +157,17 @@ export const ProcessingIndicator = memo(function ProcessingIndicator({
         >
           <ThoughtTranscriptIcon muted={!thinkingItemsVisible} />
         </button>
+      )}
+      {isProcessing && (
+        <>
+          <div className="processing-dot-container">
+            <ThinkingIndicator />
+          </div>
+          <span className="processing-text">
+            {displayedText}
+            <span className="processing-cursor">|</span>
+          </span>
+        </>
       )}
     </div>
   );

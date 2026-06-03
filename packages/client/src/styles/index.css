@@ -5201,6 +5201,7 @@ a.sidebar-nav-item {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 22px;
   width: 22px;
   height: 20px;
   padding: 0;
