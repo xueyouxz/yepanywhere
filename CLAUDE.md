@@ -93,9 +93,9 @@ Environment variables:
 - `ENABLED_PROVIDERS` - Comma-separated list of provider names to expose (default: all). Valid names: `claude`, `claude-ollama`, `codex`, `codex-oss`, `gemini`, `gemini-acp`, `opencode`, `grok`
 - `VOICE_INPUT` - Set to `false` to disable the voice input button server-side (default: `true`)
 
-## Android Emulator Testing
+## Device Control Testing
 
-Always use the Android emulator to test when it's available. Check with `source ~/.profile && adb devices` and deploy/test on the emulator whenever possible.
+Use the Android emulator only when testing the device-control/device-bridge feature. Check with `source ~/.profile && adb devices` and deploy/test on the emulator for changes that touch device streaming, `/api/devices`, `deviceBridge`, or `packages/device-bridge`. For general client, server, web UI, provider, relay, or rendering changes, do not require emulator testing.
 
 ## Browser Control (UI Testing)
 
