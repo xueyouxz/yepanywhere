@@ -43,6 +43,22 @@ compatibility; then summarize the behavioral changes, risks, and follow-on work.
 Also state the likely benefit in one sentence, e.g. that this catches protocol
 or schema drift early and reduces silent breakage in YA's Codex integration.
 
+## Commit Lock Protocol
+
+Before staging or committing, acquire `.git/yepanywhere-commit.lock`. The
+required flow is:
+
+1. Check for and acquire `.git/yepanywhere-commit.lock`.
+2. If it already exists, sleep 10 seconds and retry.
+3. Hold the lock through:
+   - staging
+   - staged diff review
+   - `git commit`
+4. Remove the lock after the commit completes.
+
+The working tree may contain concurrent human or agent edits. Avoid reverting
+or tidying unrelated changes unless the task directly requires them.
+
 ## Commit Message Guidance
 
 Aim for a <=65 char subject, and strictly enforce a 72-column line wrap
