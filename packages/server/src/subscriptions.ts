@@ -27,6 +27,8 @@ export interface SubscriptionOptions {
   onError?: (err: unknown) => void;
   /** Optional label for debug logs (e.g., subscription id). */
   logLabel?: string;
+  /** Whether this subscriber wants live provider deltas and streaming augments. */
+  wantsLiveDeltas?: boolean;
 }
 
 /**
@@ -73,6 +75,10 @@ function isPlainUserEcho(message: Record<string, unknown>): boolean {
   );
 }
 
+function isLiveDeltaMessage(message: Record<string, unknown>): boolean {
+  return message.type === "stream_event" || message._isStreaming === true;
+}
+
 /**
  * Create a session subscription that forwards process events via `emit`.
  *
@@ -86,6 +92,10 @@ export function createSessionSubscription(
 ): { cleanup: () => void } {
   let completed = false;
   let currentStreamingMessageId: string | null = null;
+  const wantsLiveDeltas = options?.wantsLiveDeltas !== false;
+  const unregisterLiveDeltaSubscriber = wantsLiveDeltas
+    ? process.registerLiveDeltaSubscriber()
+    : null;
 
   // Lazy augmenter
   let augmenter: StreamAugmenter | null = null;
@@ -138,6 +148,9 @@ export function createSessionSubscription(
           const message = normalizeStreamMessage(
             event.message as Record<string, unknown>,
           );
+          if (!wantsLiveDeltas && isLiveDeltaMessage(message)) {
+            break;
+          }
           const isStreamEvent = message.type === "stream_event";
           const processAugments = async () => {
             const aug = await getAugmenter();
@@ -271,7 +284,9 @@ export function createSessionSubscription(
   }
 
   // Catch-up: send accumulated streaming text as pending HTML
-  const streamingContent = process.getStreamingContent();
+  const streamingContent = wantsLiveDeltas
+    ? process.getStreamingContent()
+    : null;
   if (streamingContent) {
     getAugmenter()
       .then(async (aug) => {
@@ -293,6 +308,7 @@ export function createSessionSubscription(
       completed = true;
       clearInterval(heartbeatInterval);
       unsubscribe();
+      unregisterLiveDeltaSubscriber?.();
       if (currentStreamingMessageId) {
         process.clearStreamingText();
         currentStreamingMessageId = null;

@@ -1,5 +1,6 @@
 export type {
   Connection,
+  SessionSubscriptionOptions,
   StreamHandlers,
   Subscription,
   UploadOptions,

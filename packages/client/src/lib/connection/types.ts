@@ -165,6 +165,11 @@ export interface StreamHandlers {
   onClose?: (error?: Error) => void;
 }
 
+export interface SessionSubscriptionOptions {
+  /** Whether this subscriber wants live provider deltas (default: true). */
+  wantsLiveDeltas?: boolean;
+}
+
 /**
  * Options for file upload.
  */
@@ -231,6 +236,7 @@ export interface Connection {
     sessionId: string,
     handlers: StreamHandlers,
     lastEventId?: string,
+    options?: SessionSubscriptionOptions,
   ): Subscription;
 
   /**

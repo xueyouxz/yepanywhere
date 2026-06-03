@@ -18,7 +18,12 @@ import type {
 import { getOrCreateBrowserProfileId } from "../storageKeys";
 import { generateUUID } from "../uuid";
 import { connectionManager } from "./ConnectionManager";
-import type { StreamHandlers, Subscription, UploadOptions } from "./types";
+import type {
+  SessionSubscriptionOptions,
+  StreamHandlers,
+  Subscription,
+  UploadOptions,
+} from "./types";
 import { SubscriptionError } from "./types";
 
 /**
@@ -495,6 +500,7 @@ export class RelayProtocol {
     sessionId: string,
     handlers: StreamHandlers,
     lastEventId?: string,
+    options?: SessionSubscriptionOptions,
   ): Subscription {
     const subscriptionId = generateId();
 
@@ -509,6 +515,7 @@ export class RelayProtocol {
           channel: "session",
           sessionId,
           lastEventId,
+          wantsLiveDeltas: options?.wantsLiveDeltas,
         };
         this.transport.sendMessage(msg);
       })

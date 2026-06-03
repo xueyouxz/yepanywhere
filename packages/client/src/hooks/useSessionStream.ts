@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   type Subscription,
   connectionManager,
@@ -7,6 +13,10 @@ import {
   isNonRetryableError,
 } from "../lib/connection";
 import { logSessionUiTrace } from "../lib/diagnostics/uiTrace";
+import {
+  getStreamingEnabled,
+  subscribeStreamingEnabled,
+} from "./useStreamingEnabled";
 
 interface UseSessionStreamOptions {
   onMessage: (data: { eventType: string; [key: string]: unknown }) => void;
@@ -39,6 +49,11 @@ export function useSessionStream(
   options: UseSessionStreamOptions,
 ) {
   const [connected, setConnected] = useState(false);
+  const wantsLiveDeltas = useSyncExternalStore(
+    subscribeStreamingEnabled,
+    getStreamingEnabled,
+    () => true,
+  );
   const wsSubscriptionRef = useRef<Subscription | null>(null);
   const lastEventIdRef = useRef<string | null>(null);
   const optionsRef = useRef(options);
@@ -68,6 +83,7 @@ export function useSessionStream(
             onClose?: () => void;
           },
           lastEventId?: string,
+          options?: { wantsLiveDeltas?: boolean },
         ) => Subscription;
       },
     ) => {
@@ -153,15 +169,17 @@ export function useSessionStream(
       logSessionUiTrace("session-stream-subscribe", {
         sessionId,
         lastEventId: lastEventIdRef.current ?? null,
+        wantsLiveDeltas,
       });
       sub = connection.subscribeSession(
         sessionId,
         handlers,
         lastEventIdRef.current ?? undefined,
+        { wantsLiveDeltas },
       );
       wsSubscriptionRef.current = sub;
     },
-    [],
+    [wantsLiveDeltas],
   );
 
   const connect = useCallback(() => {

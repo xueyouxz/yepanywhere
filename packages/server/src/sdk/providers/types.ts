@@ -81,6 +81,12 @@ export interface StartSessionOptions {
   globalInstructions?: string;
   /** Native prompt-suggestion protocol opt-in for providers that support it. */
   promptSuggestions?: boolean;
+  /**
+   * Whether live provider deltas currently have an active consumer.
+   * Providers that can skip expensive transient delta work should treat
+   * undefined as true for compatibility.
+   */
+  shouldEmitLiveDeltas?: () => boolean;
 }
 
 /**

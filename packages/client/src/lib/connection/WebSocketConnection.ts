@@ -15,6 +15,7 @@ import { getDesktopAuthToken } from "../../api/client";
 import { RelayProtocol } from "./RelayProtocol";
 import type {
   Connection,
+  SessionSubscriptionOptions,
   StreamHandlers,
   Subscription,
   UploadOptions,
@@ -179,8 +180,14 @@ export class WebSocketConnection implements Connection {
     sessionId: string,
     handlers: StreamHandlers,
     lastEventId?: string,
+    options?: SessionSubscriptionOptions,
   ): Subscription {
-    return this.protocol.subscribeSession(sessionId, handlers, lastEventId);
+    return this.protocol.subscribeSession(
+      sessionId,
+      handlers,
+      lastEventId,
+      options,
+    );
   }
 
   subscribeActivity(handlers: StreamHandlers): Subscription {

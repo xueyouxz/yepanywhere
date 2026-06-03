@@ -793,6 +793,8 @@ export class Supervisor {
       remoteEnv: modelSettings?.remoteEnv,
       globalInstructions: modelSettings?.globalInstructions,
       promptSuggestions: promptSuggestionMode === "native",
+      shouldEmitLiveDeltas: () =>
+        processHolder.process?.hasLiveDeltaSubscribers() ?? false,
       onToolApproval: async (toolName, input, opts) => {
         if (!processHolder.process) {
           return { behavior: "deny", message: "Process not ready" };
@@ -904,6 +906,8 @@ export class Supervisor {
       remoteEnv: modelSettings?.remoteEnv,
       globalInstructions: modelSettings?.globalInstructions,
       promptSuggestions: promptSuggestionMode === "native",
+      shouldEmitLiveDeltas: () =>
+        processHolder.process?.hasLiveDeltaSubscribers() ?? false,
       onToolApproval: async (toolName, input, opts) => {
         if (!processHolder.process) {
           return { behavior: "deny", message: "Process not ready" };

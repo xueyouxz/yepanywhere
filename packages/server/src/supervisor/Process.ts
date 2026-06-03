@@ -213,6 +213,7 @@ export class Process {
   private abortFn: (() => void) | null;
   private _state: ProcessState = { type: "in-turn" };
   private listeners: Set<Listener> = new Set();
+  private liveDeltaSubscriberCount = 0;
   private idleTimer: NodeJS.Timeout | null = null;
   private idleTimeoutMs: number;
   private iteratorDone = false;
@@ -2084,6 +2085,23 @@ export class Process {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
+    };
+  }
+
+  hasLiveDeltaSubscribers(): boolean {
+    return this.liveDeltaSubscriberCount > 0;
+  }
+
+  registerLiveDeltaSubscriber(): () => void {
+    this.liveDeltaSubscriberCount += 1;
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      this.liveDeltaSubscriberCount = Math.max(
+        0,
+        this.liveDeltaSubscriberCount - 1,
+      );
     };
   }
 

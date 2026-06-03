@@ -681,6 +681,9 @@ class CodexAppServerClient {
     private readonly command: string,
     private readonly cwd: string,
     private readonly env: NodeJS.ProcessEnv,
+    private readonly shouldSuppressNotification?: (
+      notification: JsonRpcNotification,
+    ) => boolean,
   ) {}
 
   setServerRequestHandler(handler: AppServerRequestHandler): void {
@@ -780,15 +783,13 @@ class CodexAppServerClient {
         return;
       }
 
-      if (
-        isCodexLiveDeltaSuppressionEnabled() &&
-        isCodexLiveDeltaNotificationMethod(method)
-      ) {
+      const notification = { method, params: message.params };
+      if (this.shouldSuppressNotification?.(notification)) {
         return;
       }
 
       this.recordRawProviderEvent(`codex:notification:${method}`);
-      this.notifications.push({ method, params: message.params });
+      this.notifications.push(notification);
       return;
     }
 
@@ -1686,6 +1687,8 @@ export class CodexProvider implements AgentProvider {
       codexCommand,
       options.cwd,
       this.getCodexEnv(),
+      (notification) =>
+        this.shouldSuppressLiveDeltaNotification(notification, options),
     );
     setActiveClient(appServer);
 
@@ -1849,7 +1852,7 @@ export class CodexProvider implements AgentProvider {
 
         while (!turnComplete && !signal.aborted) {
           const notification = await appServer.nextNotification(signal);
-          if (this.shouldSuppressLiveDeltaNotification(notification)) {
+          if (this.shouldSuppressLiveDeltaNotification(notification, options)) {
             continue;
           }
           logRawNotification(notification);
@@ -1973,11 +1976,15 @@ export class CodexProvider implements AgentProvider {
 
   private shouldSuppressLiveDeltaNotification(
     notification: JsonRpcNotification,
+    options: StartSessionOptions,
   ): boolean {
-    return (
-      isCodexLiveDeltaSuppressionEnabled() &&
-      isCodexLiveDeltaNotificationMethod(notification.method)
-    );
+    if (!isCodexLiveDeltaNotificationMethod(notification.method)) {
+      return false;
+    }
+    if (isCodexLiveDeltaSuppressionEnabled()) {
+      return true;
+    }
+    return options.shouldEmitLiveDeltas?.() === false;
   }
 
   private isTurnTerminalNotification(

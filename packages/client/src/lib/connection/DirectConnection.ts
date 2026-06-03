@@ -3,6 +3,7 @@ import { uploadFile } from "../../api/upload";
 import { authEvents } from "../authEvents";
 import type {
   Connection,
+  SessionSubscriptionOptions,
   StreamHandlers,
   Subscription,
   UploadOptions,
@@ -100,6 +101,7 @@ export class DirectConnection implements Connection {
     _sessionId: string,
     _handlers: StreamHandlers,
     _lastEventId?: string,
+    _options?: SessionSubscriptionOptions,
   ): Subscription {
     throw new Error("Use WebSocket subscriptions");
   }

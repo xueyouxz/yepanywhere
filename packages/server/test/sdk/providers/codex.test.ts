@@ -349,6 +349,72 @@ describe("CodexProvider app-server lifecycle", () => {
     }
   });
 
+  it("drops Codex live deltas before raw logging when no subscriber wants them", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "codex-provider-no-demand-"));
+    const logPath = join(tempDir, "fake-codex-requests.jsonl");
+    const codexPath = join(tempDir, "fake-codex-live-deltas.mjs");
+    writeFileSync(
+      codexPath,
+      buildFakeCodexAppServerWithLiveDelta(logPath),
+      "utf-8",
+    );
+    chmodSync(codexPath, 0o755);
+
+    let session: Awaited<ReturnType<CodexProvider["startSession"]>> | undefined;
+    let consume: Promise<void> | undefined;
+
+    try {
+      const testProvider = new CodexProvider({ codexPath });
+      session = await testProvider.startSession({
+        cwd: tempDir,
+        initialMessage: { text: "start a fake streamed turn" },
+        effort: "low",
+        shouldEmitLiveDeltas: () => false,
+      });
+
+      const messages: Array<Record<string, unknown>> = [];
+      consume = (async () => {
+        for await (const message of session?.iterator ?? []) {
+          messages.push(message);
+          if (message.type === "result") {
+            break;
+          }
+        }
+      })();
+
+      await consume;
+
+      expect(messages.some((message) => message._isStreaming)).toBe(false);
+      expect(
+        messages.some(
+          (message) =>
+            message.type === "assistant" &&
+            (message.message as { content?: unknown } | undefined)?.content ===
+              "Final streamed answer",
+        ),
+      ).toBe(true);
+
+      const rawNotifications = vi
+        .mocked(logSDKMessage)
+        .mock.calls.map((call) => call[1] as { method?: string });
+      expect(
+        rawNotifications.some(
+          (notification) =>
+            notification.method === "item/agentMessage/delta",
+        ),
+      ).toBe(false);
+      expect(
+        rawNotifications.some(
+          (notification) => notification.method === "item/completed",
+        ),
+      ).toBe(true);
+    } finally {
+      session?.abort();
+      await consume?.catch(() => undefined);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("accepts interrupt with a Codex background tool handle", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "codex-provider-background-"));
     const logPath = join(tempDir, "fake-codex-requests.jsonl");
@@ -1385,10 +1451,16 @@ describe("CodexProvider Event Normalization", () => {
 
   it("identifies live delta notifications for the backend suppression toggle", () => {
     const provider = createTestProvider() as unknown as {
-      shouldSuppressLiveDeltaNotification: (notification: {
-        method: string;
-        params?: unknown;
-      }) => boolean;
+      shouldSuppressLiveDeltaNotification: (
+        notification: {
+          method: string;
+          params?: unknown;
+        },
+        options: {
+          cwd: string;
+          shouldEmitLiveDeltas?: () => boolean;
+        },
+      ) => boolean;
     };
     const liveDeltaMethods = [
       "item/agentMessage/delta",
@@ -1399,23 +1471,41 @@ describe("CodexProvider Event Normalization", () => {
     ];
 
     try {
+      vi.stubEnv("YA_CODEX_DISABLE_LIVE_DELTAS", "false");
+
       for (const method of liveDeltaMethods) {
         expect(
-          provider.shouldSuppressLiveDeltaNotification({ method }),
+          provider.shouldSuppressLiveDeltaNotification({ method }, {
+            cwd: "/tmp",
+          }),
         ).toBe(false);
+      }
+
+      for (const method of liveDeltaMethods) {
+        expect(
+          provider.shouldSuppressLiveDeltaNotification(
+            { method },
+            { cwd: "/tmp", shouldEmitLiveDeltas: () => false },
+          ),
+        ).toBe(true);
       }
 
       vi.stubEnv("YA_CODEX_DISABLE_LIVE_DELTAS", "true");
 
       for (const method of liveDeltaMethods) {
-        expect(provider.shouldSuppressLiveDeltaNotification({ method })).toBe(
-          true,
-        );
+        expect(
+          provider.shouldSuppressLiveDeltaNotification({ method }, {
+            cwd: "/tmp",
+          }),
+        ).toBe(true);
       }
       expect(
-        provider.shouldSuppressLiveDeltaNotification({
-          method: "item/completed",
-        }),
+        provider.shouldSuppressLiveDeltaNotification(
+          {
+            method: "item/completed",
+          },
+          { cwd: "/tmp", shouldEmitLiveDeltas: () => false },
+        ),
       ).toBe(false);
     } finally {
       vi.unstubAllEnvs();

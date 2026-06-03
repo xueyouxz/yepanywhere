@@ -67,6 +67,8 @@ function createMockProcess(overrides?: Partial<Record<string, unknown>>): {
     getStreamingContent: vi.fn(() => null),
     accumulateStreamingText: vi.fn(),
     clearStreamingText: vi.fn(),
+    hasLiveDeltaSubscribers: vi.fn(() => false),
+    registerLiveDeltaSubscriber: vi.fn(() => vi.fn()),
     getDeferredQueueSummary: vi.fn(() => []),
     getLivenessSnapshot: vi.fn(() => MOCK_LIVENESS),
     ...overrides,
@@ -132,6 +134,67 @@ describe("createSessionSubscription", () => {
     // Since subscribe is synchronous and emit("connected") happens after,
     // we verify subscribe was called exactly once.
     expect((process.subscribe as Mock).mock.calls).toHaveLength(1);
+  });
+
+  it("registers live delta demand by default and releases it on cleanup", () => {
+    const unregister = vi.fn();
+    const { process } = createMockProcess({
+      registerLiveDeltaSubscriber: vi.fn(() => unregister),
+    });
+    const { emit } = collectEmit();
+
+    const subscription = createSessionSubscription(process, emit);
+
+    expect(process.registerLiveDeltaSubscriber).toHaveBeenCalledOnce();
+
+    subscription.cleanup();
+
+    expect(unregister).toHaveBeenCalledOnce();
+  });
+
+  it("skips live delta messages for subscribers that opt out", async () => {
+    const { process, fireEvent } = createMockProcess();
+    const { emit, events } = collectEmit();
+
+    createSessionSubscription(process, emit, { wantsLiveDeltas: false });
+
+    expect(process.registerLiveDeltaSubscriber).not.toHaveBeenCalled();
+
+    await fireEvent({
+      type: "message",
+      message: {
+        type: "assistant",
+        uuid: "codex-live-1",
+        _isStreaming: true,
+        message: {
+          role: "assistant",
+          content: "partial",
+        },
+      },
+    } as ProcessEvent);
+
+    expect(events.filter(([type]) => type === "message")).toHaveLength(0);
+    expect(process.accumulateStreamingText).not.toHaveBeenCalled();
+
+    await fireEvent({
+      type: "message",
+      message: {
+        type: "assistant",
+        uuid: "codex-live-1",
+        message: {
+          role: "assistant",
+          content: "complete",
+        },
+      },
+    } as ProcessEvent);
+
+    const messageEvents = events.filter(([type]) => type === "message");
+    expect(messageEvents).toHaveLength(1);
+    expect(messageEvents[0]?.[1]).toMatchObject({
+      type: "assistant",
+      uuid: "codex-live-1",
+      message: { content: "complete" },
+    });
   });
 
   it("emits connected with correct process state", () => {

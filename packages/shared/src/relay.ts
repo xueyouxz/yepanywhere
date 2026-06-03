@@ -80,6 +80,8 @@ export interface RelaySubscribe {
   provider?: string;
   /** Last event ID for resumption */
   lastEventId?: string;
+  /** Whether this subscriber wants live provider deltas (default: true) */
+  wantsLiveDeltas?: boolean;
   /** Browser profile identifier for connection tracking (stored in localStorage, shared across tabs) */
   browserProfileId?: string;
   /** Origin metadata for connection tracking */

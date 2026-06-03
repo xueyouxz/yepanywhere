@@ -36,7 +36,15 @@ buffer, and no batching: emit is in-process, in-thread, one frame per event.
 4. **Fan-out** — `Process.emit()` (`Process.ts:1999-2019`) iterates
    `this.listeners: Set<Listener>` and calls each one inline. Listener errors
    are swallowed so one bad subscriber can't stall the others.
-5. **WS encode** — each WS subscription wraps its listener with `createSendFn()`
+5. **Live-delta demand** — session subscribers advertise
+   `wantsLiveDeltas`. Older clients default to `true`; current clients derive
+   it from the browser-local response streaming preference. A subscriber with
+   live deltas off skips `_isStreaming`, `stream_event`, `pending`, and
+   streaming block `markdown-augment` events. For Codex, when no active
+   subscriber for the Process wants live deltas, YA drops Codex live delta
+   notifications before raw logging, normalization, augmentation, replay
+   buffering, or client emission. Final completed messages still flow.
+6. **WS encode** — each WS subscription wraps its listener with `createSendFn()`
    (`ws-relay-handlers.ts:253-304`), which JSON-encodes the event and writes
    one `ws.send()` per frame. Three wire variants negotiated at handshake:
    text JSON (legacy), binary `encodeJsonFrame` (Phase 0/1), or NaCl-encrypted
@@ -84,17 +92,20 @@ ordering without polling.
 | Provider → Process | none | SDK iterator is the natural pacer |
 | Process → listeners | none (sync emit) | sub-ms cost, simple to reason about |
 | WS framing | `ws` lib socket buffer | OS-level backpressure suffices at YA's client counts |
+| Codex live deltas | active subscriber demand | avoid live-delta processing when no connected client wants it |
 | Heartbeats | 30 s interval | keepalive only, not coalescing |
 | Upload chunk progress | every 64 KB (`PROGRESS_INTERVAL`) | avoid one frame per chunk |
 | SRP handshake | token-bucket per peer (`ConnectionState.srpLimiter`) | brute-force defense |
 | Replay buffer | two buckets × 15 s | bound memory |
 | **Client-side throttle** | adaptive 100–750 ms in `useStreamingContent` / `useStreamingMarkdown` | the only render-rate governor in the system |
 
-The deliberate choice is: **the client throttles, the server doesn't**. Server
-work per event is cheap (one JSON encode + one socket write per subscriber);
-React reconciliation is not. Pushing the rate limiter onto the server would
-only help if a future provider produced deltas faster than the SDK currently
-chunks them, *and* the network couldn't absorb them.
+The deliberate choice is: **the client throttles, the server mostly doesn't**.
+Server work per ordinary event is cheap (one JSON encode + one socket write per
+subscriber); React reconciliation is not. Codex live deltas are the exception:
+they can arrive as cumulative transient messages that trigger server
+normalization/augmentation work. YA therefore suppresses Codex live deltas when
+there is no active live-delta subscriber, without adding server-side rate
+limiting or shared augmentation.
 
 ## Maintenance surface
 
