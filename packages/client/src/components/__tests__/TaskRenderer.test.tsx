@@ -259,4 +259,94 @@ describe("Task rendering", () => {
     ).toBeDefined();
     expect(screen.queryByText(/agentId:\s*summary123/i)).toBeNull();
   });
+
+  it("renders provider reasoning result blocks as toggleable thinking", () => {
+    const messages: Message[] = [
+      {
+        id: "msg-1",
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-1",
+            name: "Agent",
+            input: {
+              description: "Explore codebase for refactoring",
+              prompt: "Find cleanup opportunities",
+              subagent_type: "Explore",
+            },
+          },
+        ],
+      },
+      {
+        id: "msg-2",
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-1",
+            content: [
+              {
+                type: "reasoning",
+                summary: [
+                  {
+                    type: "summary_text",
+                    text: "Checking the task result renderer",
+                  },
+                ],
+              },
+              {
+                type: "text",
+                text: "agentId: summary456\n<usage>total_tokens: 200\ntool_uses: 3\nduration_ms: 1000</usage>",
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    const [item] = preprocessMessages(messages);
+
+    expect(item?.type).toBe("tool_call");
+    if (item?.type !== "tool_call") {
+      throw new Error("Expected a tool_call render item");
+    }
+    const itemWithoutAgentLookup = {
+      ...item,
+      toolResult: item.toolResult
+        ? {
+            ...item.toolResult,
+            structured:
+              item.toolResult.structured &&
+              typeof item.toolResult.structured === "object"
+                ? {
+                    ...(item.toolResult.structured as Record<string, unknown>),
+                    agentId: undefined,
+                  }
+                : item.toolResult.structured,
+          }
+        : item.toolResult,
+    };
+
+    render(
+      <TestWrapper>
+        <RenderItemComponent
+          item={itemWithoutAgentLookup}
+          isStreaming={false}
+          thinkingExpanded={false}
+          toggleThinkingExpanded={() => {}}
+        />
+      </TestWrapper>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Explore codebase for refactoring/i }),
+    );
+
+    expect(screen.getByRole("button", { name: /Thinking/i })).toBeDefined();
+    expect(document.querySelector(".fallback-block")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Thinking/i }));
+
+    expect(screen.getByText("Checking the task result renderer")).toBeDefined();
+  });
 });

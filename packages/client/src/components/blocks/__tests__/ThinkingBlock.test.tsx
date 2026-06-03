@@ -23,7 +23,7 @@ describe("ThinkingBlock", () => {
 
   it("toggles from the timeline dot button", () => {
     const onToggle = vi.fn();
-    const { container } = render(
+    render(
       <ThinkingBlock
         thinking="Working through the plan"
         status="complete"
@@ -32,16 +32,12 @@ describe("ThinkingBlock", () => {
       />,
     );
 
-    const dot = container.querySelector(".thinking-dot-btn");
-    if (!dot) {
-      throw new Error("Missing thinking timeline dot");
-    }
-    fireEvent.click(dot);
+    fireEvent.click(screen.getByRole("button", { name: "Expand thinking" }));
 
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the timeline dot inside the collapsed summary", () => {
+  it("keeps the summary toggle visible when collapsed", () => {
     render(
       <ThinkingBlock
         thinking="Working through the plan"
@@ -51,10 +47,9 @@ describe("ThinkingBlock", () => {
       />,
     );
 
-    const dot = document.querySelector(".thinking-dot-btn");
-    if (!dot) {
-      throw new Error("Missing thinking timeline dot");
-    }
-    expect(dot.closest("summary")).not.toBeNull();
+    expect(screen.getByText("Thinking")).toBeDefined();
+    expect(
+      screen.getByRole("button", { name: "Expand thinking" }),
+    ).toBeDefined();
   });
 });

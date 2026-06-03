@@ -5170,9 +5170,17 @@ a.sidebar-nav-item {
 /* Processing Indicator - shown at bottom of message list */
 .processing-indicator {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
   padding-top: 2px; /* Match text-block padding */
   padding-left: 24px; /* Align with assistant turn padding */
   margin: 4px 0; /* Match timeline-item margin */
+}
+
+.processing-indicator--control-only {
+  min-height: 18px;
 }
 
 .processing-dot-container {
@@ -5187,6 +5195,48 @@ a.sidebar-nav-item {
   font-size: var(--font-size-sm);
   color: var(--text-muted);
   font-style: italic;
+}
+
+.processing-thinking-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dimmed);
+  cursor: pointer;
+}
+
+.processing-thinking-toggle:hover,
+.processing-thinking-toggle:focus-visible {
+  background: var(--bg-hover);
+  border-color: var(--border-subtle);
+  color: var(--text-muted);
+}
+
+.processing-thinking-toggle:focus {
+  outline: none;
+}
+
+.processing-thinking-toggle.is-visible {
+  color: var(--thinking-color);
+}
+
+.processing-thinking-toggle.is-muted {
+  color: var(--timeline-dot-warning);
+  opacity: 0.85;
+}
+
+.processing-thinking-toggle-icon {
+  display: block;
+}
+
+.processing-thinking-toggle-slash {
+  stroke-width: 2.4;
 }
 
 .processing-cursor {

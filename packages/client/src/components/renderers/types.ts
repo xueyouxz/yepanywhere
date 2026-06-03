@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
  * Extended content block with all possible fields from Claude messages
  */
 export interface ContentBlock {
-  type: "text" | "thinking" | "tool_use" | "tool_result";
+  type: string;
   // text block
   text?: string;
   // thinking block
@@ -16,7 +16,8 @@ export interface ContentBlock {
   input?: unknown;
   // tool_result block
   tool_use_id?: string;
-  content?: string;
+  content?: string | ContentBlock[];
+  summary?: Array<string | { type?: string; text?: string }>;
   is_error?: boolean;
 }
 

@@ -20,6 +20,7 @@ import {
   type SessionIsearchScope,
 } from "../lib/sessionIsearchGuide";
 import { stabilizeRenderItems } from "../lib/stableRenderItems";
+import { UI_KEYS } from "../lib/storageKeys";
 import type { Message } from "../types";
 import type { ContentBlock } from "../types";
 import type { RenderItem } from "../types/renderItems";
@@ -299,8 +300,11 @@ const BOTTOM_FOLLOW_VIEWPORT_FRACTION = 0.45;
 const FOLLOW_CATCH_UP_DELAYS_MS = [50, 120, 240, 480, 960, 1600, 2400];
 const SEND_CATCH_UP_DELAYS_MS = [80, 240, 640];
 const TOUCH_SCROLL_CANCEL_THRESHOLD_PX = 6;
+const THINKING_AUTO_COLLAPSE_MS = 4200;
 const INTERACTIVE_SCROLL_TARGET_SELECTOR =
   "button, input, textarea, select, a[href], [contenteditable='true']";
+
+type ThinkingStatus = "streaming" | "complete";
 
 function highResolutionNowMs(): number {
   return typeof performance !== "undefined" &&
@@ -335,6 +339,49 @@ function isInteractiveScrollTarget(target: EventTarget | null): boolean {
     target instanceof Element &&
     target.closest(INTERACTIVE_SCROLL_TARGET_SELECTOR) !== null
   );
+}
+
+function loadSessionThinkingVisible(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(UI_KEYS.sessionThinkingVisible) !==
+      "false";
+  } catch {
+    return true;
+  }
+}
+
+function saveSessionThinkingVisible(visible: boolean) {
+  try {
+    globalThis.localStorage?.setItem(
+      UI_KEYS.sessionThinkingVisible,
+      visible ? "true" : "false",
+    );
+  } catch {
+    // localStorage is only a display preference; in-memory state still applies.
+  }
+}
+
+function getCurrentTurnThinkingItemId(items: readonly RenderItem[]) {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item?.type === "thinking") {
+      return item.id;
+    }
+    if (item?.type === "user_prompt" || item?.type === "session_setup") {
+      return null;
+    }
+  }
+  return null;
+}
+
+function countThinkingItems(items: readonly RenderItem[]) {
+  let count = 0;
+  for (const item of items) {
+    if (item.type === "thinking") {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 function formatSize(bytes: number): string {
@@ -687,10 +734,23 @@ export const MessageList = memo(function MessageList({
   const navMotionCueClearTimerRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+  const thinkingAutoCollapseTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const activeThinkingItemIdRef = useRef<string | null>(null);
+  const thinkingStatusesRef = useRef<Map<string, ThinkingStatus>>(new Map());
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchRestoreFocusRef = useRef<HTMLElement | null>(null);
   const searchOriginalScrollTopRef = useRef<number | null>(null);
-  const [thinkingExpanded, setThinkingExpanded] = useState(false);
+  const [thinkingItemsVisible, setThinkingItemsVisible] = useState(
+    loadSessionThinkingVisible,
+  );
+  const [thinkingExpansionOverrides, setThinkingExpansionOverrides] = useState<
+    Record<string, boolean>
+  >({});
+  const [recentCompletedThinkingId, setRecentCompletedThinkingId] = useState<
+    string | null
+  >(null);
   const [navMotionCue, setNavMotionCue] = useState<UserTurnNavMotionCue | null>(
     null,
   );
@@ -851,30 +911,105 @@ export const MessageList = memo(function MessageList({
   useEffect(() => {
     previousRenderItemsRef.current = renderItems;
   }, [renderItems]);
+  const thinkingItemCount = useMemo(
+    () => countThinkingItems(renderItems),
+    [renderItems],
+  );
+  const hasThinkingItems = thinkingItemCount > 0;
+  const currentTurnThinkingItemId = useMemo(
+    () => (isProcessing ? getCurrentTurnThinkingItemId(renderItems) : null),
+    [isProcessing, renderItems],
+  );
+  const autoExpandedThinkingItemId =
+    currentTurnThinkingItemId ?? recentCompletedThinkingId;
+  const displayRenderItems = useMemo(
+    () =>
+      thinkingItemsVisible
+        ? renderItems
+        : renderItems.filter((item) => item.type !== "thinking"),
+    [renderItems, thinkingItemsVisible],
+  );
+  useEffect(() => {
+    const previousStatuses = thinkingStatusesRef.current;
+    const previousActiveThinkingId = activeThinkingItemIdRef.current;
+    const nextStatuses = new Map<string, ThinkingStatus>();
+    let completedFromStreamingId: string | null = null;
+
+    for (const item of renderItems) {
+      if (item.type !== "thinking") {
+        continue;
+      }
+      nextStatuses.set(item.id, item.status);
+      if (
+        item.status === "complete" &&
+        previousStatuses.get(item.id) === "streaming"
+      ) {
+        completedFromStreamingId = item.id;
+      }
+    }
+
+    thinkingStatusesRef.current = nextStatuses;
+    activeThinkingItemIdRef.current = currentTurnThinkingItemId;
+
+    const clearThinkingAutoCollapseTimer = () => {
+      if (thinkingAutoCollapseTimerRef.current !== null) {
+        clearTimeout(thinkingAutoCollapseTimerRef.current);
+        thinkingAutoCollapseTimerRef.current = null;
+      }
+    };
+
+    if (currentTurnThinkingItemId) {
+      clearThinkingAutoCollapseTimer();
+      setRecentCompletedThinkingId(null);
+      return;
+    }
+
+    const recentlyFinishedThinkingId =
+      completedFromStreamingId ??
+      (previousActiveThinkingId && nextStatuses.has(previousActiveThinkingId)
+        ? previousActiveThinkingId
+        : null);
+
+    if (recentlyFinishedThinkingId) {
+      clearThinkingAutoCollapseTimer();
+      setRecentCompletedThinkingId(recentlyFinishedThinkingId);
+      thinkingAutoCollapseTimerRef.current = setTimeout(() => {
+        setRecentCompletedThinkingId((current) =>
+          current === recentlyFinishedThinkingId ? null : current,
+        );
+        thinkingAutoCollapseTimerRef.current = null;
+      }, THINKING_AUTO_COLLAPSE_MS);
+      return;
+    }
+
+    setRecentCompletedThinkingId((current) =>
+      current && nextStatuses.has(current) ? current : null,
+    );
+  }, [currentTurnThinkingItemId, renderItems]);
   const turnGroups = useMemo(() => {
     const startedAt = highResolutionNowMs();
-    const grouped = groupItemsIntoTurns(renderItems);
+    const grouped = groupItemsIntoTurns(displayRenderItems);
     markReloadPerfPhase("message_list_group_end", {
-      renderItems: renderItems.length,
+      renderItems: displayRenderItems.length,
       turnGroups: grouped.length,
       durationMs: highResolutionNowMs() - startedAt,
     });
     return grouped;
-  }, [renderItems]);
+  }, [displayRenderItems]);
   useEffect(() => {
     markReloadPerfPhase("message_list_commit_effect", {
       messages: messages.length,
-      renderItems: renderItems.length,
+      renderItems: displayRenderItems.length,
       turnGroups: turnGroups.length,
     });
-  }, [messages.length, renderItems.length, turnGroups.length]);
+  }, [messages.length, displayRenderItems.length, turnGroups.length]);
   const hasUserSearchableTurn = useMemo(
-    () => renderItems.some((item) => getSearchableUserTurnPreview(item)),
-    [renderItems],
+    () => displayRenderItems.some((item) => getSearchableUserTurnPreview(item)),
+    [displayRenderItems],
   );
   const getUserTurnNavAnchors = useCallback((): UserTurnNavAnchor[] => {
     const anchors: UserTurnNavAnchor[] = [];
-    for (const item of renderItems) {
+    for (const item of displayRenderItems) {
       const preview = getSearchableUserTurnPreview(item);
       if (!preview) {
         continue;
@@ -882,7 +1017,7 @@ export const MessageList = memo(function MessageList({
       anchors.push({ id: item.id, preview });
     }
     return anchors;
-  }, [renderItems]);
+  }, [displayRenderItems]);
   const searchReady =
     userTurnSearch.active &&
     normalizeSearchText(userTurnSearch.query).length >= 2;
@@ -893,7 +1028,7 @@ export const MessageList = memo(function MessageList({
       return [];
     }
     const anchors: UserTurnNavAnchor[] = [];
-    for (const item of renderItems) {
+    for (const item of displayRenderItems) {
       if (item.type !== "user_prompt" || item.isSubagent) {
         continue;
       }
@@ -904,7 +1039,7 @@ export const MessageList = memo(function MessageList({
       }
     }
     return anchors;
-  }, [includeUserTurnSearchAnchors, renderItems]);
+  }, [includeUserTurnSearchAnchors, displayRenderItems]);
   const includeAllTurnSearchAnchors =
     searchReady && userTurnSearch.scope === "all";
   const sessionTurnNavAnchors = useMemo<UserTurnNavAnchor[]>(() => {
@@ -912,7 +1047,7 @@ export const MessageList = memo(function MessageList({
       return [];
     }
     const anchors: UserTurnNavAnchor[] = [];
-    for (const item of renderItems) {
+    for (const item of displayRenderItems) {
       if (item.type === "user_prompt") {
         const text = getPromptTextForCorrection(item.content);
         const preview = getSearchPreviewFallback(text);
@@ -936,7 +1071,7 @@ export const MessageList = memo(function MessageList({
       }
     }
     return anchors;
-  }, [includeAllTurnSearchAnchors, renderItems]);
+  }, [includeAllTurnSearchAnchors, displayRenderItems]);
   const activeSearchAnchors =
     userTurnSearch.scope === "all"
       ? sessionTurnNavAnchors
@@ -1028,6 +1163,15 @@ export const MessageList = memo(function MessageList({
     },
     [],
   );
+  useEffect(
+    () => () => {
+      if (thinkingAutoCollapseTimerRef.current !== null) {
+        clearTimeout(thinkingAutoCollapseTimerRef.current);
+        thinkingAutoCollapseTimerRef.current = null;
+      }
+    },
+    [],
+  );
   useEffect(() => {
     const handleCopy = (event: ClipboardEvent) => {
       const root = containerRef.current;
@@ -1048,7 +1192,7 @@ export const MessageList = memo(function MessageList({
       latest = latest === null ? timestampMs : Math.max(latest, timestampMs);
     };
 
-    for (const item of renderItems) {
+    for (const item of displayRenderItems) {
       includeTimestamp(getLatestMessageTimestampMs(item.sourceMessages));
     }
     for (const pending of pendingMessages) {
@@ -1062,7 +1206,7 @@ export const MessageList = memo(function MessageList({
     }
 
     return latest;
-  }, [renderItems, pendingMessages, deferredMessages, btwAsides]);
+  }, [displayRenderItems, pendingMessages, deferredMessages, btwAsides]);
   const composerTailItems = useMemo(() => {
     let sourceIndex = 0;
     const items: ComposerTailItem[] = [];
@@ -1189,8 +1333,36 @@ export const MessageList = memo(function MessageList({
     });
   }, [btwAsides, visibleTurnGroups]);
 
-  const toggleThinkingExpanded = useCallback(() => {
-    setThinkingExpanded((prev) => !prev);
+  const getThinkingItemExpanded = useCallback(
+    (item: RenderItem) =>
+      item.type === "thinking" &&
+      (thinkingExpansionOverrides[item.id] ??
+        item.id === autoExpandedThinkingItemId),
+    [autoExpandedThinkingItemId, thinkingExpansionOverrides],
+  );
+
+  const toggleThinkingItemExpanded = useCallback(
+    (item: RenderItem) => {
+      if (item.type !== "thinking") {
+        return;
+      }
+      setThinkingExpansionOverrides((previous) => {
+        const current =
+          previous[item.id] ?? (item.id === autoExpandedThinkingItemId);
+        return { ...previous, [item.id]: !current };
+      });
+    },
+    [autoExpandedThinkingItemId],
+  );
+
+  const noopToggleThinkingExpanded = useCallback(() => {}, []);
+
+  const toggleThinkingItemsVisible = useCallback(() => {
+    setThinkingItemsVisible((previous) => {
+      const next = !previous;
+      saveSessionThinkingVisible(next);
+      return next;
+    });
   }, []);
 
   const showNavMotionCue = useCallback((direction: "up" | "down") => {
@@ -1300,7 +1472,7 @@ export const MessageList = memo(function MessageList({
   const openUserTurnSearch = useCallback(
     (scope: SessionIsearchScope) => {
       const canSearch =
-        scope === "all" ? renderItems.length > 0 : hasUserSearchableTurn;
+        scope === "all" ? displayRenderItems.length > 0 : hasUserSearchableTurn;
       if (!canSearch) {
         return;
       }
@@ -1323,7 +1495,7 @@ export const MessageList = memo(function MessageList({
         searchInputRef.current?.select();
       });
     },
-    [hasUserSearchableTurn, renderItems.length],
+    [hasUserSearchableTurn, displayRenderItems.length],
   );
 
   const handleUserTurnSearchQueryChange = useCallback((query: string) => {
@@ -1703,14 +1875,14 @@ export const MessageList = memo(function MessageList({
 
   // Initial scroll to bottom on first render
   useEffect(() => {
-    if (isInitialLoadRef.current && renderItems.length > 0) {
+    if (isInitialLoadRef.current && displayRenderItems.length > 0) {
       const container = containerRef.current?.parentElement;
       if (container) {
         scrollToBottom(container);
       }
       isInitialLoadRef.current = false;
     }
-  }, [renderItems.length, scrollToBottom]);
+  }, [displayRenderItems.length, scrollToBottom]);
 
   const searchPanelTarget =
     userTurnSearch.active && typeof document !== "undefined"
@@ -1869,8 +2041,8 @@ export const MessageList = memo(function MessageList({
                 key={item.id}
                 item={item}
                 isStreaming={isStreaming}
-                thinkingExpanded={thinkingExpanded}
-                toggleThinkingExpanded={toggleThinkingExpanded}
+                thinkingExpanded={getThinkingItemExpanded(item)}
+                toggleThinkingExpanded={noopToggleThinkingExpanded}
                 sessionProvider={provider}
                 onCorrectUserPrompt={
                   latestCorrectablePrompt?.id === item.id
@@ -1924,8 +2096,12 @@ export const MessageList = memo(function MessageList({
                     key={item.id}
                     item={item}
                     isStreaming={isStreaming}
-                    thinkingExpanded={thinkingExpanded}
-                    toggleThinkingExpanded={toggleThinkingExpanded}
+                    thinkingExpanded={getThinkingItemExpanded(item)}
+                    toggleThinkingExpanded={
+                      item.type === "thinking"
+                        ? () => toggleThinkingItemExpanded(item)
+                        : noopToggleThinkingExpanded
+                    }
                     sessionProvider={provider}
                     onTrimBeforeUserPrompt={
                       item.type === "user_prompt" &&
@@ -2149,7 +2325,12 @@ export const MessageList = memo(function MessageList({
             <span className="system-message-text">Compacting context...</span>
           </div>
         )}
-        <ProcessingIndicator isProcessing={isProcessing} />
+        <ProcessingIndicator
+          isProcessing={isProcessing}
+          thinkingItemsVisible={thinkingItemsVisible}
+          hasThinkingItems={hasThinkingItems}
+          onToggleThinkingItemsVisible={toggleThinkingItemsVisible}
+        />
       </div>
     </>
   );

@@ -1,4 +1,10 @@
-import { act, cleanup, render } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProcessingIndicator } from "../ProcessingIndicator";
 
@@ -62,6 +68,27 @@ describe("ProcessingIndicator", () => {
 
     const dotContainer = document.querySelector(".processing-dot-container");
     expect(dotContainer).not.toBeNull();
+  });
+
+  it("can expose a compact thinking transcript visibility toggle", () => {
+    const onToggle = vi.fn();
+    render(
+      <ProcessingIndicator
+        isProcessing={false}
+        hasThinkingItems={true}
+        thinkingItemsVisible={false}
+        onToggleThinkingItemsVisible={onToggle}
+      />,
+    );
+
+    const button = screen.getByRole("button", {
+      name: "Show hidden thinking transcript",
+    });
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(button);
+
+    expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
   it("hides when processing stops", async () => {

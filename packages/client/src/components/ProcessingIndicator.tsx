@@ -42,14 +42,48 @@ function shuffle<T>(array: T[]): T[] {
 
 interface Props {
   isProcessing: boolean;
+  thinkingItemsVisible?: boolean;
+  hasThinkingItems?: boolean;
+  onToggleThinkingItemsVisible?: () => void;
+}
+
+function ThoughtTranscriptIcon({ muted }: { muted: boolean }) {
+  return (
+    <svg
+      className="processing-thinking-toggle-icon"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M20 11.5c0 4-3.8 7.25-8.5 7.25-1.1 0-2.2-.18-3.15-.52L4 20l1.2-3.25C3.85 15.42 3 13.58 3 11.5 3 7.5 6.8 4.25 11.5 4.25S20 7.5 20 11.5Z" />
+      <path d="M8.5 11.5h.01" />
+      <path d="M11.5 11.5h.01" />
+      <path d="M14.5 11.5h.01" />
+      {muted && (
+        <path className="processing-thinking-toggle-slash" d="M4 20 20 4" />
+      )}
+    </svg>
+  );
 }
 
 export const ProcessingIndicator = memo(function ProcessingIndicator({
   isProcessing,
+  thinkingItemsVisible = true,
+  hasThinkingItems = false,
+  onToggleThinkingItemsVisible,
 }: Props) {
   const [phraseIndex, setPhraseIndex] = useState(0);
   const [displayedText, setDisplayedText] = useState("");
   const [isTyping, setIsTyping] = useState(true);
+  const showThinkingToggle = Boolean(
+    onToggleThinkingItemsVisible && (isProcessing || hasThinkingItems),
+  );
 
   // Check setting and shuffle phrases when processing starts
   const phrases = useMemo(() => {
@@ -94,19 +128,47 @@ export const ProcessingIndicator = memo(function ProcessingIndicator({
     return () => clearTimeout(timeout);
   }, [isProcessing, isTyping, phraseIndex, displayedText, phrases]);
 
-  if (!isProcessing) {
+  if (!isProcessing && !showThinkingToggle) {
     return null;
   }
 
+  const thinkingToggleTitle = thinkingItemsVisible
+    ? "Hide thinking transcript"
+    : hasThinkingItems
+      ? "Show hidden thinking transcript"
+      : "Show thinking transcript";
+
   return (
-    <div className="processing-indicator">
-      <div className="processing-dot-container">
-        <ThinkingIndicator />
-      </div>
-      <span className="processing-text">
-        {displayedText}
-        <span className="processing-cursor">|</span>
-      </span>
+    <div
+      className={`processing-indicator ${
+        !isProcessing ? "processing-indicator--control-only" : ""
+      } ${!thinkingItemsVisible && hasThinkingItems ? "processing-indicator--thinking-hidden" : ""}`}
+    >
+      {isProcessing && (
+        <>
+          <div className="processing-dot-container">
+            <ThinkingIndicator />
+          </div>
+          <span className="processing-text">
+            {displayedText}
+            <span className="processing-cursor">|</span>
+          </span>
+        </>
+      )}
+      {showThinkingToggle && (
+        <button
+          type="button"
+          className={`processing-thinking-toggle ${
+            thinkingItemsVisible ? "is-visible" : "is-muted"
+          }`}
+          onClick={onToggleThinkingItemsVisible}
+          aria-pressed={thinkingItemsVisible}
+          aria-label={thinkingToggleTitle}
+          title={thinkingToggleTitle}
+        >
+          <ThoughtTranscriptIcon muted={!thinkingItemsVisible} />
+        </button>
+      )}
     </div>
   );
 });

@@ -205,6 +205,10 @@ function TaskInline({
   // Always start collapsed - users can expand if they want to see details
   const [isExpanded, setIsExpanded] = useState(false);
   const [isLoadingContent, setIsLoadingContent] = useState(false);
+  const [thinkingExpanded, setThinkingExpanded] = useState(false);
+  const toggleThinkingExpanded = useCallback(() => {
+    setThinkingExpanded((prev) => !prev);
+  }, []);
 
   // Autoscroll refs
   const contentRef = useRef<HTMLDivElement>(null);
@@ -469,7 +473,12 @@ function TaskInline({
                     `${agentId}-${block.type}-${block.text?.slice(0, 20) ?? ""}`
                   }
                   block={block}
-                  context={{ isStreaming: false, theme: "dark" }}
+                  context={{
+                    isStreaming: false,
+                    theme: "dark",
+                    thinkingExpanded,
+                    toggleThinkingExpanded,
+                  }}
                 />
               ))}
             </div>
@@ -519,6 +528,10 @@ function TaskToolResult({
   isError: boolean;
 }) {
   const [isExpanded, setIsExpanded] = useState(true);
+  const [thinkingExpanded, setThinkingExpanded] = useState(false);
+  const toggleThinkingExpanded = useCallback(() => {
+    setThinkingExpanded((prev) => !prev);
+  }, []);
 
   if (isError) {
     return (
@@ -564,7 +577,12 @@ function TaskToolResult({
             <ContentBlockRenderer
               key={`${result.agentId}-${i}`}
               block={block}
-              context={{ isStreaming: false, theme: "dark" }}
+              context={{
+                isStreaming: false,
+                theme: "dark",
+                thinkingExpanded,
+                toggleThinkingExpanded,
+              }}
             />
           ))}
         </div>

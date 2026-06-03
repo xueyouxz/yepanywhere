@@ -1,9 +1,30 @@
+import { useState } from "react";
 import type { ContentBlock, ContentRenderer, RenderContext } from "../types";
 
 interface ThinkingBlock extends ContentBlock {
-  type: "thinking";
-  thinking: string;
+  type: "thinking" | "reasoning" | "reasoning_text" | "summary_text";
+  thinking?: string;
+  text?: string;
+  summary?: Array<string | { type?: string; text?: string }>;
   signature?: string; // Never rendered
+}
+
+function extractThinkingText(block: ThinkingBlock): string {
+  if (typeof block.thinking === "string") {
+    return block.thinking;
+  }
+  const summaryText = block.summary
+    ?.map((entry) => (typeof entry === "string" ? entry : entry.text))
+    .filter((text): text is string => typeof text === "string")
+    .join("\n")
+    .trim();
+  if (summaryText) {
+    return summaryText;
+  }
+  if (typeof block.text === "string") {
+    return block.text;
+  }
+  return "";
 }
 
 /**
@@ -16,8 +37,11 @@ function ThinkingRendererComponent({
   block: ThinkingBlock;
   context: RenderContext;
 }) {
-  const thinking = block.thinking || "";
-  const isExpanded = context.thinkingExpanded ?? false;
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const thinking = extractThinkingText(block);
+  const isExpanded = context.thinkingExpanded ?? localExpanded;
+  const toggleThinkingExpanded =
+    context.toggleThinkingExpanded ?? (() => setLocalExpanded((prev) => !prev));
 
   if (isExpanded) {
     // Expanded: whole block is clickable to collapse
@@ -25,7 +49,7 @@ function ThinkingRendererComponent({
       <button
         type="button"
         className="thinking-block thinking-block-expanded"
-        onClick={context.toggleThinkingExpanded}
+        onClick={toggleThinkingExpanded}
         aria-expanded={true}
       >
         <div className="thinking-toggle-expanded">
@@ -47,7 +71,7 @@ function ThinkingRendererComponent({
       <button
         type="button"
         className="thinking-toggle-collapsed"
-        onClick={context.toggleThinkingExpanded}
+        onClick={toggleThinkingExpanded}
         aria-expanded={false}
       >
         <span className="thinking-label">
@@ -60,7 +84,7 @@ function ThinkingRendererComponent({
 }
 
 export const thinkingRenderer: ContentRenderer<ThinkingBlock> = {
-  type: "thinking",
+  type: ["thinking", "reasoning", "reasoning_text", "summary_text"],
   render(block, context) {
     return (
       <ThinkingRendererComponent
@@ -70,7 +94,7 @@ export const thinkingRenderer: ContentRenderer<ThinkingBlock> = {
     );
   },
   getSummary(block) {
-    const thinking = (block as ThinkingBlock).thinking || "";
+    const thinking = extractThinkingText(block as ThinkingBlock);
     const firstLine = thinking.split("\n")[0] || "";
     return firstLine.length > 80 ? `${firstLine.slice(0, 77)}...` : firstLine;
   },

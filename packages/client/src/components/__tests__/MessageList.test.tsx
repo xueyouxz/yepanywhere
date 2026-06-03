@@ -41,6 +41,24 @@ function assistantMessage(
   };
 }
 
+function codexThinkingMessage(
+  uuid: string,
+  thinking: string,
+  timestamp?: string,
+  isStreaming = false,
+): Message {
+  return {
+    type: "assistant",
+    uuid,
+    timestamp,
+    _isStreaming: isStreaming,
+    message: {
+      role: "assistant",
+      content: [{ type: "thinking", thinking }],
+    },
+  };
+}
+
 function systemMessage(uuid: string, content: string): Message {
   return {
     type: "system",
@@ -87,6 +105,7 @@ describe("MessageList", () => {
       configurable: true,
       value: ResizeObserverMock,
     });
+    window.localStorage.clear();
   });
 
   afterEach(() => {
@@ -169,6 +188,181 @@ describe("MessageList", () => {
     expect(
       screen.getByText('Change: replace "testing" with "test correction".'),
     ).toBeTruthy();
+  });
+
+  it("renders Codex reasoning summaries as collapsed thinking blocks", () => {
+    const { container } = render(
+      <MessageList
+        provider="codex"
+        messages={[
+          codexThinkingMessage(
+            "thinking-1",
+            "**Checking instructions**\n\nI need to inspect the repo.",
+          ),
+        ]}
+      />,
+    );
+
+    expect(container.querySelector(".thinking-block")).not.toBeNull();
+    expect(screen.getByText("Thinking")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Expand thinking" }),
+    ).toBeTruthy();
+    expect(container.querySelector(".text-block-assistant")).toBeNull();
+  });
+
+  it("auto-expands only the current streaming Codex thinking block", () => {
+    const { container, rerender } = render(
+      <MessageList
+        provider="codex"
+        isProcessing={true}
+        messages={[
+          codexThinkingMessage(
+            "thinking-1",
+            "First active thought",
+            "2026-04-25T00:00:00.000Z",
+            true,
+          ),
+        ]}
+      />,
+    );
+
+    let thinkingBlocks =
+      container.querySelectorAll<HTMLDetailsElement>("details.thinking-block");
+    expect(thinkingBlocks).toHaveLength(1);
+    expect(thinkingBlocks[0]?.open).toBe(true);
+
+    rerender(
+      <MessageList
+        provider="codex"
+        isProcessing={true}
+        messages={[
+          codexThinkingMessage(
+            "thinking-1",
+            "First active thought",
+            "2026-04-25T00:00:00.000Z",
+          ),
+          codexThinkingMessage(
+            "thinking-2",
+            "Second active thought",
+            "2026-04-25T00:00:02.000Z",
+            true,
+          ),
+        ]}
+      />,
+    );
+
+    thinkingBlocks =
+      container.querySelectorAll<HTMLDetailsElement>("details.thinking-block");
+    expect(thinkingBlocks).toHaveLength(2);
+    expect(thinkingBlocks[0]?.open).toBe(false);
+    expect(thinkingBlocks[1]?.open).toBe(true);
+  });
+
+  it("auto-expands the latest complete Codex thinking block while processing", () => {
+    const { container } = render(
+      <MessageList
+        provider="codex"
+        isProcessing={true}
+        messages={[
+          codexThinkingMessage(
+            "thinking-1",
+            "Earlier complete thought",
+            "2026-04-25T00:00:00.000Z",
+          ),
+          codexThinkingMessage(
+            "thinking-2",
+            "Latest complete thought",
+            "2026-04-25T00:00:02.000Z",
+          ),
+        ]}
+      />,
+    );
+
+    const thinkingBlocks =
+      container.querySelectorAll<HTMLDetailsElement>("details.thinking-block");
+    expect(thinkingBlocks).toHaveLength(2);
+    expect(thinkingBlocks[0]?.open).toBe(false);
+    expect(thinkingBlocks[1]?.open).toBe(true);
+  });
+
+  it("collapses an auto-expanded thinking block after completion timeout", async () => {
+    vi.useFakeTimers();
+    const { container, rerender } = render(
+      <MessageList
+        provider="codex"
+        isProcessing={true}
+        messages={[
+          codexThinkingMessage(
+            "thinking-1",
+            "Completing thought",
+            "2026-04-25T00:00:00.000Z",
+            true,
+          ),
+        ]}
+      />,
+    );
+
+    expect(
+      container.querySelector<HTMLDetailsElement>("details.thinking-block")
+        ?.open,
+    ).toBe(true);
+
+    rerender(
+      <MessageList
+        provider="codex"
+        isProcessing={false}
+        messages={[
+          codexThinkingMessage(
+            "thinking-1",
+            "Completing thought",
+            "2026-04-25T00:00:00.000Z",
+          ),
+        ]}
+      />,
+    );
+
+    expect(
+      container.querySelector<HTMLDetailsElement>("details.thinking-block")
+        ?.open,
+    ).toBe(true);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4500);
+    });
+
+    expect(
+      container.querySelector<HTMLDetailsElement>("details.thinking-block")
+        ?.open,
+    ).toBe(false);
+  });
+
+  it("hides and restores thinking transcript rows from the compact toggle", () => {
+    const { container } = render(
+      <MessageList
+        provider="codex"
+        messages={[
+          codexThinkingMessage("thinking-1", "First stored thought"),
+          codexThinkingMessage("thinking-2", "Second stored thought"),
+        ]}
+      />,
+    );
+
+    expect(container.querySelectorAll("details.thinking-block")).toHaveLength(2);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Hide thinking transcript" }),
+    );
+
+    expect(container.querySelectorAll("details.thinking-block")).toHaveLength(0);
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Show hidden thinking transcript",
+      }),
+    );
+
+    expect(container.querySelectorAll("details.thinking-block")).toHaveLength(2);
   });
 
   it("marks queued messages that are blocked behind an edit", () => {
