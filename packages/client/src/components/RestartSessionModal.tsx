@@ -235,6 +235,8 @@ interface RestartSessionModalProps {
       provider?: ProviderName;
       model?: string;
       title?: string;
+      permissionMode: PermissionMode;
+      modeVersion: number;
       oldProcessAborted: boolean;
     },
     options?: {

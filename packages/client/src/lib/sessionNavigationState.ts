@@ -1,8 +1,15 @@
-import { ALL_PROVIDERS, type ProviderName } from "@yep-anywhere/shared";
+import {
+  ALL_PERMISSION_MODES,
+  ALL_PROVIDERS,
+  type PermissionMode,
+  type ProviderName,
+} from "@yep-anywhere/shared";
 
 export interface InitialSessionStatus {
   owner: "self";
   processId: string;
+  permissionMode?: PermissionMode;
+  modeVersion?: number;
 }
 
 export interface SessionNavigationState {
@@ -23,6 +30,21 @@ function isProviderName(value: unknown): value is ProviderName {
   );
 }
 
+function isPermissionMode(value: unknown): value is PermissionMode {
+  return (
+    typeof value === "string" &&
+    (ALL_PERMISSION_MODES as readonly string[]).includes(value)
+  );
+}
+
+function normalizeModeVersion(value: unknown): number | undefined {
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 0
+    ? value
+    : undefined;
+}
+
 export function normalizeInitialSessionStatus(
   value: unknown,
 ): InitialSessionStatus | undefined {
@@ -30,16 +52,19 @@ export function normalizeInitialSessionStatus(
     return undefined;
   }
 
-  if (value.owner === "self") {
-    return { owner: "self", processId: value.processId };
+  if (value.owner !== "self" && value.state !== "owned") {
+    return undefined;
   }
 
-  // Older navigation state used state:"owned"; browser history can preserve it.
-  if (value.state === "owned") {
-    return { owner: "self", processId: value.processId };
-  }
-
-  return undefined;
+  const modeVersion = normalizeModeVersion(value.modeVersion);
+  return {
+    owner: "self",
+    processId: value.processId,
+    ...(isPermissionMode(value.permissionMode)
+      ? { permissionMode: value.permissionMode }
+      : {}),
+    ...(modeVersion !== undefined ? { modeVersion } : {}),
+  };
 }
 
 export function parseSessionNavigationState(

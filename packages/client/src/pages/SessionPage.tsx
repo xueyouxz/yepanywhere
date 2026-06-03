@@ -1392,7 +1392,12 @@ function SessionPageContent({
             result.serverTimestamp,
           ),
         });
-        setStatus({ owner: "self", processId: result.processId });
+        setStatus({
+          owner: "self",
+          processId: result.processId,
+          permissionMode: result.permissionMode,
+          modeVersion: result.modeVersion,
+        });
       } else {
         // Queue to existing process with current permission mode and thinking setting
         const result = await api.queueMessage(
@@ -1497,7 +1502,12 @@ function SessionPageContent({
               result.serverTimestamp,
             ),
           });
-          setStatus({ owner: "self", processId: result.processId });
+          setStatus({
+            owner: "self",
+            processId: result.processId,
+            permissionMode: result.permissionMode,
+            modeVersion: result.modeVersion,
+          });
           rememberSentSubmission(text, tempId);
           draftControlsRef.current?.clearDraft();
           setCorrectionDraft(null);
@@ -1754,7 +1764,12 @@ function SessionPageContent({
             tempId,
             processId: result.processId,
           });
-          setStatus({ owner: "self", processId: result.processId });
+          setStatus({
+            owner: "self",
+            processId: result.processId,
+            permissionMode: result.permissionMode,
+            modeVersion: result.modeVersion,
+          });
           removePendingMessage(tempId);
           rememberSentSubmission(text, tempId);
           draftControlsRef.current?.clearDraft();
@@ -3676,6 +3691,8 @@ function SessionPageContent({
                 initialStatus: {
                   owner: "self",
                   processId: result.processId,
+                  permissionMode: result.permissionMode,
+                  modeVersion: result.modeVersion,
                 },
                 initialTitle: result.title,
                 initialModel: result.model ?? liveBadgeModel,

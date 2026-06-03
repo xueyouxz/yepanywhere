@@ -11,8 +11,15 @@ describe("session navigation state", () => {
       normalizeInitialSessionStatus({
         owner: "self",
         processId: "process-1",
+        permissionMode: "bypassPermissions",
+        modeVersion: 4,
       }),
-    ).toEqual({ owner: "self", processId: "process-1" });
+    ).toEqual({
+      owner: "self",
+      processId: "process-1",
+      permissionMode: "bypassPermissions",
+      modeVersion: 4,
+    });
   });
 
   it("normalizes legacy owned initial status from browser history", () => {
@@ -32,17 +39,38 @@ describe("session navigation state", () => {
     ).toBeUndefined();
   });
 
+  it("drops malformed permission fields from initial status", () => {
+    expect(
+      normalizeInitialSessionStatus({
+        owner: "self",
+        processId: "process-1",
+        permissionMode: "anything-goes",
+        modeVersion: -1,
+      }),
+    ).toEqual({ owner: "self", processId: "process-1" });
+  });
+
   it("parses only valid typed navigation fields", () => {
     expect(
       parseSessionNavigationState({
-        initialStatus: { state: "owned", processId: "process-1" },
+        initialStatus: {
+          state: "owned",
+          processId: "process-1",
+          permissionMode: "acceptEdits",
+          modeVersion: 1,
+        },
         initialTitle: "Start here",
         initialModel: "gpt-5.3-codex",
         initialProvider: "codex",
         ignored: true,
       }),
     ).toEqual({
-      initialStatus: { owner: "self", processId: "process-1" },
+      initialStatus: {
+        owner: "self",
+        processId: "process-1",
+        permissionMode: "acceptEdits",
+        modeVersion: 1,
+      },
       initialTitle: "Start here",
       initialModel: "gpt-5.3-codex",
       initialProvider: "codex",
@@ -52,11 +80,21 @@ describe("session navigation state", () => {
   it("creates canonical navigation state", () => {
     expect(
       createSessionNavigationState({
-        initialStatus: { owner: "self", processId: "process-1" },
+        initialStatus: {
+          owner: "self",
+          processId: "process-1",
+          permissionMode: "plan",
+          modeVersion: 3,
+        },
         initialProvider: "codex",
       }),
     ).toEqual({
-      initialStatus: { owner: "self", processId: "process-1" },
+      initialStatus: {
+        owner: "self",
+        processId: "process-1",
+        permissionMode: "plan",
+        modeVersion: 3,
+      },
       initialProvider: "codex",
     });
   });

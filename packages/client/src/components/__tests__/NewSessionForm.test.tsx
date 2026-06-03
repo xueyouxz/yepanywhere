@@ -513,7 +513,12 @@ describe("NewSessionForm", () => {
       "/projects/project-1/sessions/session-1",
       expect.objectContaining({
         state: expect.objectContaining({
-          initialStatus: { owner: "self", processId: "process-1" },
+          initialStatus: {
+            owner: "self",
+            processId: "process-1",
+            permissionMode: "default",
+            modeVersion: 0,
+          },
           initialProvider: "claude",
         }),
       }),
