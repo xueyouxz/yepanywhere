@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionMetadataProvider } from "../../../contexts/SessionMetadataContext";
 import { I18nProvider } from "../../../i18n";
+import { setInlineImagesPreference } from "../../../hooks/useInlineImages";
 import { type Connection, setGlobalConnection } from "../../../lib/connection";
 import { TextBlock } from "../TextBlock";
 
@@ -29,6 +30,7 @@ describe("TextBlock", () => {
   afterEach(() => {
     cleanup();
     setGlobalConnection(null);
+    setInlineImagesPreference(true);
     apiMocks.getFile.mockReset();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -72,6 +74,7 @@ describe("TextBlock", () => {
   });
 
   it("mounts local media previews inline beside rendered markdown links", async () => {
+    setInlineImagesPreference(true);
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(new Blob(["png"], { type: "image/png" }))),
@@ -95,6 +98,53 @@ describe("TextBlock", () => {
     expect(await screen.findByAltText("trajectory.png")).toBeTruthy();
     expect(
       container.querySelector(".local-media-inline-image-button"),
+    ).toBeTruthy();
+  });
+
+  it("keeps local media links modal-clickable when inline images are disabled", async () => {
+    setInlineImagesPreference(false);
+    const fetchMock = vi.fn(
+      async () => new Response(new Blob(["png"], { type: "image/png" })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: vi.fn(() => "blob:preview"),
+      revokeObjectURL: vi.fn(),
+    });
+
+    const { container } = render(
+      <I18nProvider>
+        <TextBlock
+          text="[trajectory](/tmp/trajectory.png)"
+          augmentHtml={
+            '<span class="local-media-link-group"><button type="button" class="local-media-inline-toggle" data-media-path="/tmp/trajectory.png" data-media-type="image" data-expanded="true" aria-label="Collapse image" aria-expanded="true" title="Collapse inline preview">-</button><a href="/api/local-image?path=%2Ftmp%2Ftrajectory.png" class="local-media-link" data-ya-resource="local-media" data-ya-path="/tmp/trajectory.png" data-ya-media-type="image" data-media-type="image">trajectory<span class="local-media-type">(image)</span></a></span><span class="local-media-inline-preview" data-media-path="/tmp/trajectory.png" data-media-type="image" data-expanded="true"></span>'
+          }
+        />
+      </I18nProvider>,
+    );
+
+    const toggle = container.querySelector(
+      ".local-media-inline-toggle",
+    ) as HTMLButtonElement | null;
+    const preview = container.querySelector(
+      ".local-media-inline-preview",
+    ) as HTMLElement | null;
+
+    expect(toggle?.hidden).toBe(true);
+    expect(preview?.hidden).toBe(true);
+    expect(
+      container.querySelector(".local-media-inline-image-button"),
+    ).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const clickAllowed = fireEvent.click(
+      screen.getByRole("link", { name: /trajectory/i }),
+    );
+
+    expect(clickAllowed).toBe(false);
+    expect(
+      await screen.findByRole("img", { name: "trajectory.png" }),
     ).toBeTruthy();
   });
 

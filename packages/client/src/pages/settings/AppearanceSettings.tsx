@@ -10,6 +10,7 @@ import { useDeveloperMode } from "../../hooks/useDeveloperMode";
 import { useFloatingActionButtonEnabled } from "../../hooks/useFloatingActionButtonEnabled";
 import { FONT_SIZES, useFontSize } from "../../hooks/useFontSize";
 import { useFunPhrases } from "../../hooks/useFunPhrases";
+import { useInlineImages } from "../../hooks/useInlineImages";
 import {
   type SessionToolbarVisibilityKey,
   useSessionToolbarVisibility,
@@ -39,6 +40,7 @@ export function AppearanceSettings() {
   const { streamingEnabled, setStreamingEnabled } = useStreamingEnabled();
   const { stableToolPreviewRendering, setStableToolPreviewRendering } =
     useStableToolPreviewRendering();
+  const { inlineImagesEnabled, setInlineImagesEnabled } = useInlineImages();
   const { funPhrasesEnabled, setFunPhrasesEnabled } = useFunPhrases();
   const { floatingActionButtonEnabled, setFloatingActionButtonEnabled } =
     useFloatingActionButtonEnabled();
@@ -271,6 +273,20 @@ export function AppearanceSettings() {
               type="checkbox"
               checked={stableToolPreviewRendering}
               onChange={(e) => setStableToolPreviewRendering(e.target.checked)}
+            />
+            <span className="toggle-slider" />
+          </label>
+        </div>
+        <div className="settings-item">
+          <div className="settings-item-info">
+            <strong>{t("appearanceInlineImagesTitle")}</strong>
+            <p>{t("appearanceInlineImagesDescription")}</p>
+          </div>
+          <label className="toggle-switch">
+            <input
+              type="checkbox"
+              checked={inlineImagesEnabled}
+              onChange={(e) => setInlineImagesEnabled(e.target.checked)}
             />
             <span className="toggle-slider" />
           </label>

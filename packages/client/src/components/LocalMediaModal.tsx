@@ -6,6 +6,7 @@ import {
 } from "@yep-anywhere/shared";
 import { type MouseEvent, type RefObject, useEffect, useState } from "react";
 import { useOptionalSessionMetadata } from "../contexts/SessionMetadataContext";
+import { useInlineImages } from "../hooks/useInlineImages";
 import { useFetchedImage } from "../hooks/useRemoteImage";
 import { getGlobalConnection, isRemoteMode } from "../lib/connection";
 import { Modal } from "./ui/Modal";
@@ -720,16 +721,54 @@ export function useLocalMediaInlinePreviews(
   rootRef: RefObject<HTMLElement | null>,
   refreshKey?: unknown,
 ) {
+  const { inlineImagesEnabled } = useInlineImages();
+
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
     const objectUrls = new Set<string>();
 
+    const isImageInlineControl = (element: HTMLElement) =>
+      element.getAttribute("data-media-type") !== "video";
+
+    const syncInlineImageControls = () => {
+      const toggles = root.querySelectorAll<HTMLButtonElement>(
+        "button.local-media-inline-toggle",
+      );
+      for (const toggle of toggles) {
+        if (!isImageInlineControl(toggle)) continue;
+        toggle.hidden = !inlineImagesEnabled;
+        if (inlineImagesEnabled) {
+          toggle.removeAttribute("aria-hidden");
+          toggle.removeAttribute("tabindex");
+        } else {
+          toggle.setAttribute("aria-hidden", "true");
+          toggle.tabIndex = -1;
+        }
+      }
+
+      const previews = root.querySelectorAll<HTMLElement>(
+        ".local-media-inline-preview",
+      );
+      for (const preview of previews) {
+        if (!isImageInlineControl(preview)) continue;
+        preview.hidden = !inlineImagesEnabled;
+        if (!inlineImagesEnabled) {
+          preview.removeAttribute("data-inline-mounted");
+          if (preview.childNodes.length > 0) {
+            preview.replaceChildren();
+          }
+        }
+      }
+    };
+
     const refresh = () => {
+      syncInlineImageControls();
       const elements = Array.from(
         root.querySelectorAll<HTMLElement>(".local-media-inline-preview"),
       );
       for (const element of elements) {
+        if (!inlineImagesEnabled && isImageInlineControl(element)) continue;
         if (element.dataset.inlineMounted === "true") continue;
         const path = element.getAttribute("data-media-path");
         if (!path) continue;
@@ -769,5 +808,5 @@ export function useLocalMediaInlinePreviews(
         URL.revokeObjectURL(url);
       }
     };
-  }, [rootRef, refreshKey]);
+  }, [inlineImagesEnabled, rootRef, refreshKey]);
 }

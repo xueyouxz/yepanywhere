@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../../i18n";
+import { setInlineImagesPreference } from "../../../hooks/useInlineImages";
 import { useRemoteImage } from "../../../hooks/useRemoteImage";
 import type { ContentBlock } from "../../../types";
 import { UserPromptBlock } from "../UserPromptBlock";
@@ -18,6 +19,7 @@ vi.mock("../../../hooks/useRemoteImage", () => ({
 describe("UserPromptBlock", () => {
   afterEach(() => {
     cleanup();
+    setInlineImagesPreference(true);
     vi.clearAllMocks();
   });
 
@@ -68,6 +70,36 @@ describe("UserPromptBlock", () => {
       name: /pasted-image-1\.png/i,
     });
     fireEvent.click(attachmentButton);
+
+    expect(
+      screen.getByRole("img", { name: /pasted-image-1\.png/i }),
+    ).toBeDefined();
+  });
+
+  it("hides attachment image thumbnails when inline images are disabled", () => {
+    setInlineImagesPreference(false);
+    const content: ContentBlock[] = [
+      {
+        type: "text",
+        text: "Please review this screenshot.\n<image>\nThanks.",
+      },
+      {
+        type: "input_image",
+        image_url: "data:image/png;base64,AAAA",
+      },
+    ];
+
+    const { container } = render(
+      <I18nProvider>
+        <UserPromptBlock content={content} />
+      </I18nProvider>,
+    );
+
+    expect(container.querySelector(".attachment-preview")).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /pasted-image-1\.png/i }),
+    );
 
     expect(
       screen.getByRole("img", { name: /pasted-image-1\.png/i }),
