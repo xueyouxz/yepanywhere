@@ -45,7 +45,7 @@ kzahel commit.
 
 | rejecting commit | feature | upstream action | suggested resolution | status |
 |---|---|---|---|---|
-| `78da755` | Patient/ASAP queued-message mode | Removed the visible queue-mode toggle, prompt prefixing, `patient` metadata, and related queue tests/docs. | Restore as experimental/default-off: normal queue remains plain `deferred`; enabling `Experimental features` reveals the patient/ASAP toggle and emits `patient` only for that path. | Restored behind experimental setting in the merge. |
+| `78da755` | Patient/ASAP queued-message mode | Removed the visible queue-mode toggle, prompt prefixing, `patient` metadata, and related queue tests/docs. | Restore as experimental/default-off: normal queue remains plain `deferred`; enabling `Experimental features` reveals the patient/ASAP toggle and emits `patient` only for that path. | Superseded: the visible toggle and the `Experimental features` gate (its sole entry) were both removed. The "when done, " prefix + `patient` intent is now bound to the Ctrl+Enter accelerator only; plain-Enter steer and button-click queue stay unprefixed. See [session-ui-customization.md](session-ui-customization.md). |
 | `cdef7bf` | `/btw` toolbar button default visibility | Made the `/btw` toolbar control hidden by default through toolbar customization. | Accept upstream default; typed `/btw` and the keyboard accelerator remain valid regardless of toolbar visibility. | Accepted. |
 | `750fe20` / `cee1f6b` | Message and user-prompt controls | Hide secondary message/user prompt actions until hover or focus. | Accept upstream preference as a screen-efficiency tradeoff; keep accelerators discoverable in hover/focus help where applicable. | Accepted. |
 

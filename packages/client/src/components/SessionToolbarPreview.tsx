@@ -155,8 +155,6 @@ export function SessionToolbarPreview() {
                 hasDualActions: true,
                 queueTooltip: t("toolbarQueueTooltip"),
                 showPatientQueueMode: false,
-                patientQueueMode: false,
-                queueModeLabel: "Queue ASAP",
               },
             },
           }}

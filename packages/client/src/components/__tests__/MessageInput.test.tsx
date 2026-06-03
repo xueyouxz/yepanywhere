@@ -16,58 +16,50 @@ import { MessageInput } from "../MessageInput";
 const {
   versionState,
   modelSettingsState,
-  developerModeState,
   mockSetSpeechMethod,
   mockSetSpeechSmartTurnSettings,
   mockSetGrokSpeechAudioSettings,
-  mockSetExperimentalFeaturesEnabled,
   mockVoiceToggle,
-} = vi.hoisted(
-  () => ({
-    versionState: {
-      version: {
-        current: "test",
-        latest: null,
-        updateAvailable: false,
-        capabilities: ["voiceInput"],
-        voiceBackends: [] as string[],
-        voiceBackendCapabilities: {} as Record<
-          string,
-          { streaming?: boolean; smartTurn?: boolean }
-        >,
-      },
+} = vi.hoisted(() => ({
+  versionState: {
+    version: {
+      current: "test",
+      latest: null,
+      updateAvailable: false,
+      capabilities: ["voiceInput"],
+      voiceBackends: [] as string[],
+      voiceBackendCapabilities: {} as Record<
+        string,
+        { streaming?: boolean; smartTurn?: boolean }
+      >,
     },
-    modelSettingsState: {
-      speechMethod: "browser-native",
-      hasStoredSpeechMethod: false,
-      speechSmartTurnSettings: {
-        enabled: false,
-        threshold: 0.95,
-        timeoutMs: 3000,
-      },
-      grokSpeechAudioSettings: {
-        uplinkMode: "pcm16" as "pcm16" | "browser-compressed",
-      },
+  },
+  modelSettingsState: {
+    speechMethod: "browser-native",
+    hasStoredSpeechMethod: false,
+    speechSmartTurnSettings: {
+      enabled: false,
+      threshold: 0.95,
+      timeoutMs: 3000,
     },
-    developerModeState: {
-      experimentalFeaturesEnabled: false,
-      experimentalFeatures: {
-        patientQueueMode: true,
-      },
+    grokSpeechAudioSettings: {
+      uplinkMode: "pcm16" as "pcm16" | "browser-compressed",
     },
-    mockSetSpeechMethod: vi.fn(),
-    mockSetSpeechSmartTurnSettings: vi.fn(),
-    mockSetGrokSpeechAudioSettings: vi.fn(),
-    mockSetExperimentalFeaturesEnabled: vi.fn(),
-    mockVoiceToggle: vi.fn(),
-  }),
-);
+  },
+  mockSetSpeechMethod: vi.fn(),
+  mockSetSpeechSmartTurnSettings: vi.fn(),
+  mockSetGrokSpeechAudioSettings: vi.fn(),
+  mockVoiceToggle: vi.fn(),
+}));
 
 vi.mock("../../hooks/useDraftPersistence", () => ({
   useDraftPersistence: () => {
     const [value, setValue] = useState("");
     const getDraft = useCallback(() => value, [value]);
-    const setDraft = useCallback((nextValue: string) => setValue(nextValue), []);
+    const setDraft = useCallback(
+      (nextValue: string) => setValue(nextValue),
+      [],
+    );
     const flushDraft = useCallback(() => {}, []);
     const clearInput = useCallback(() => setValue(""), []);
     const clearDraft = useCallback(() => setValue(""), []);
@@ -109,15 +101,6 @@ vi.mock("../../hooks/useModelSettings", () => ({
     setSpeechSmartTurnSettings: mockSetSpeechSmartTurnSettings,
     grokSpeechAudioSettings: modelSettingsState.grokSpeechAudioSettings,
     setGrokSpeechAudioSettings: mockSetGrokSpeechAudioSettings,
-  }),
-}));
-
-vi.mock("../../hooks/useDeveloperMode", () => ({
-  useDeveloperMode: () => ({
-    experimentalFeaturesEnabled: developerModeState.experimentalFeaturesEnabled,
-    experimentalFeatures: developerModeState.experimentalFeatures,
-    setExperimentalFeaturesEnabled: mockSetExperimentalFeaturesEnabled,
-    setExperimentalFeatureEnabled: vi.fn(),
   }),
 }));
 
@@ -268,12 +251,9 @@ describe("MessageInput", () => {
     modelSettingsState.grokSpeechAudioSettings = {
       uplinkMode: "pcm16",
     };
-    developerModeState.experimentalFeaturesEnabled = false;
-    developerModeState.experimentalFeatures.patientQueueMode = true;
     mockSetSpeechMethod.mockReset();
     mockSetSpeechSmartTurnSettings.mockReset();
     mockSetGrokSpeechAudioSettings.mockReset();
-    mockSetExperimentalFeaturesEnabled.mockReset();
     mockVoiceToggle.mockReset();
     window.localStorage.clear();
   });
@@ -302,9 +282,9 @@ describe("MessageInput", () => {
 
     renderMessageInput();
 
-    expect(screen.getByRole("button", { name: "voice" }).dataset.speechMethod).toBe(
-      "ya-grok",
-    );
+    expect(
+      screen.getByRole("button", { name: "voice" }).dataset.speechMethod,
+    ).toBe("ya-grok");
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "voice" }));
     expect(screen.getByRole("radio", { name: /Grok STT/ })).toBeDefined();
@@ -436,12 +416,15 @@ describe("MessageInput", () => {
 
   it("keeps stop available while a running composer has queued text", () => {
     const onStop = vi.fn();
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      isRunning: true,
-      isThinking: true,
-      onQueue: vi.fn(),
-      onStop,
-    });
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        isRunning: true,
+        isThinking: true,
+        onQueue: vi.fn(),
+        onStop,
+      },
+    );
 
     fireEvent.change(textarea, { target: { value: "still editable" } });
 
@@ -453,11 +436,14 @@ describe("MessageInput", () => {
 
   it("stops the current turn with Escape from the composer", () => {
     const onStop = vi.fn();
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      isRunning: true,
-      isThinking: true,
-      onStop,
-    });
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        isRunning: true,
+        isThinking: true,
+        onStop,
+      },
+    );
 
     fireEvent.keyDown(textarea, { key: "Escape" });
 
@@ -466,11 +452,14 @@ describe("MessageInput", () => {
 
   it("leaves Escape alone when the current turn is not stoppable", () => {
     const onStop = vi.fn();
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      isRunning: true,
-      isThinking: false,
-      onStop,
-    });
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        isRunning: true,
+        isThinking: false,
+        onStop,
+      },
+    );
 
     fireEvent.keyDown(textarea, { key: "Escape" });
 
@@ -479,9 +468,12 @@ describe("MessageInput", () => {
 
   it("cancels the newest queued message with Ctrl+K", () => {
     const onCancelLatestDeferred = vi.fn(() => true);
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      onCancelLatestDeferred,
-    });
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        onCancelLatestDeferred,
+      },
+    );
 
     fireEvent.keyDown(textarea, { key: "k", ctrlKey: true });
 
@@ -490,9 +482,12 @@ describe("MessageInput", () => {
 
   it("starts a /btw aside with Ctrl+B and clears accepted text", () => {
     const onBtwShortcut = vi.fn(() => true);
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      onBtwShortcut,
-    });
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        onBtwShortcut,
+      },
+    );
 
     fireEvent.change(textarea, { target: { value: "side question" } });
     fireEvent.keyDown(textarea, { key: "b", ctrlKey: true });
@@ -503,9 +498,12 @@ describe("MessageInput", () => {
 
   it("keeps Ctrl+B text when /btw is not accepted", () => {
     const onBtwShortcut = vi.fn(() => false);
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      onBtwShortcut,
-    });
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        onBtwShortcut,
+      },
+    );
 
     fireEvent.change(textarea, { target: { value: "not supported" } });
     fireEvent.keyDown(textarea, { key: "b", ctrlKey: true });
@@ -516,9 +514,12 @@ describe("MessageInput", () => {
 
   it("starts a /btw aside from the toolbar button", () => {
     const onBtwShortcut = vi.fn(() => true);
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      onBtwShortcut,
-    });
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        onBtwShortcut,
+      },
+    );
 
     fireEvent.change(textarea, { target: { value: "tap target" } });
     fireEvent.click(screen.getByRole("button", { name: /Start \/btw aside/ }));
@@ -529,10 +530,13 @@ describe("MessageInput", () => {
 
   it("marks the /btw toolbar button active for focused aside mode", () => {
     const onBtwShortcut = vi.fn(() => false);
-    renderMessageInput(vi.fn(() => true), {
-      btwActive: true,
-      onBtwShortcut,
-    });
+    renderMessageInput(
+      vi.fn(() => true),
+      {
+        btwActive: true,
+        onBtwShortcut,
+      },
+    );
 
     const button = screen.getByRole("button", {
       name: /Composer is focused on a \/btw aside/,
@@ -546,10 +550,13 @@ describe("MessageInput", () => {
 
   it("marks a focused /btw pane without claiming footer routing", () => {
     const onBtwShortcut = vi.fn(() => false);
-    renderMessageInput(vi.fn(() => true), {
-      btwToolbarMode: "focused-pane",
-      onBtwShortcut,
-    });
+    renderMessageInput(
+      vi.fn(() => true),
+      {
+        btwToolbarMode: "focused-pane",
+        onBtwShortcut,
+      },
+    );
 
     const button = screen.getByRole("button", {
       name: /click to focus its composer/,
@@ -569,10 +576,13 @@ describe("MessageInput", () => {
       window.setTimeout(() => paneComposer.focus(), 0);
       return false;
     });
-    renderMessageInput(vi.fn(() => true), {
-      btwToolbarMode: "focused-pane",
-      onBtwShortcut,
-    });
+    renderMessageInput(
+      vi.fn(() => true),
+      {
+        btwToolbarMode: "focused-pane",
+        onBtwShortcut,
+      },
+    );
 
     try {
       fireEvent.click(
@@ -589,10 +599,13 @@ describe("MessageInput", () => {
   });
 
   it("marks the /btw toolbar button when an aside can be focused", () => {
-    renderMessageInput(vi.fn(() => true), {
-      btwHasAsides: true,
-      onBtwShortcut: vi.fn(() => false),
-    });
+    renderMessageInput(
+      vi.fn(() => true),
+      {
+        btwHasAsides: true,
+        onBtwShortcut: vi.fn(() => false),
+      },
+    );
 
     const button = screen.getByRole("button", {
       name: /Focus existing \/btw aside/,
@@ -632,9 +645,12 @@ describe("MessageInput", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-26T12:06:00.000Z"));
 
-    renderMessageInput(vi.fn(() => true), {
-      lastActivityAt: "2026-04-26T12:00:00.000Z",
-    });
+    renderMessageInput(
+      vi.fn(() => true),
+      {
+        lastActivityAt: "2026-04-26T12:00:00.000Z",
+      },
+    );
 
     expect(screen.getByText("6m ago")).toBeTruthy();
   });
@@ -643,9 +659,12 @@ describe("MessageInput", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-26T12:28:00.000Z"));
 
-    renderMessageInput(vi.fn(() => true), {
-      lastActivityAt: "2026-04-26T12:20:00.000Z",
-    });
+    renderMessageInput(
+      vi.fn(() => true),
+      {
+        lastActivityAt: "2026-04-26T12:20:00.000Z",
+      },
+    );
 
     expect(screen.getByText("8m ago")).toBeTruthy();
     expect(screen.queryByText("Last activity 8m ago")).toBeNull();
@@ -655,9 +674,12 @@ describe("MessageInput", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-26T12:35:00.000Z"));
 
-    renderMessageInput(vi.fn(() => true), {
-      lastActivityAt: "2026-04-26T12:00:00.000Z",
-    });
+    renderMessageInput(
+      vi.fn(() => true),
+      {
+        lastActivityAt: "2026-04-26T12:00:00.000Z",
+      },
+    );
 
     expect(screen.getByText("Last activity 35m")).toBeTruthy();
   });
@@ -666,30 +688,33 @@ describe("MessageInput", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-26T12:06:00.000Z"));
 
-    renderMessageInput(vi.fn(() => true), {
-      lastActivityAt: "2026-04-26T12:00:00.000Z",
-      sessionLiveness: {
-        checkedAt: "2026-04-26T12:06:00.000Z",
-        derivedStatus: "verified-progressing",
-        activeWorkKind: "agent-turn",
-        state: "in-turn",
-        evidence: ["provider-message"],
-        lastProviderMessageAt: "2026-04-26T12:01:00.000Z",
-        lastRawProviderEventAt: null,
-        lastRawProviderEventSource: null,
-        lastStateChangeAt: "2026-04-26T11:59:00.000Z",
-        lastVerifiedProgressAt: "2026-04-26T12:01:00.000Z",
-        lastVerifiedIdleAt: null,
-        lastLivenessProbeAt: null,
-        lastLivenessProbeStatus: null,
-        lastLivenessProbeSource: null,
-        silenceMs: 300_000,
-        longSilenceThresholdMs: 300_000,
-        processAlive: true,
-        queueDepth: 0,
-        deferredQueueDepth: 0,
+    renderMessageInput(
+      vi.fn(() => true),
+      {
+        lastActivityAt: "2026-04-26T12:00:00.000Z",
+        sessionLiveness: {
+          checkedAt: "2026-04-26T12:06:00.000Z",
+          derivedStatus: "verified-progressing",
+          activeWorkKind: "agent-turn",
+          state: "in-turn",
+          evidence: ["provider-message"],
+          lastProviderMessageAt: "2026-04-26T12:01:00.000Z",
+          lastRawProviderEventAt: null,
+          lastRawProviderEventSource: null,
+          lastStateChangeAt: "2026-04-26T11:59:00.000Z",
+          lastVerifiedProgressAt: "2026-04-26T12:01:00.000Z",
+          lastVerifiedIdleAt: null,
+          lastLivenessProbeAt: null,
+          lastLivenessProbeStatus: null,
+          lastLivenessProbeSource: null,
+          silenceMs: 300_000,
+          longSilenceThresholdMs: 300_000,
+          processAlive: true,
+          queueDepth: 0,
+          deferredQueueDepth: 0,
+        },
       },
-    });
+    );
 
     expect(
       screen.queryByLabelText(
@@ -702,11 +727,14 @@ describe("MessageInput", () => {
 
   it("keeps a send affordance visible when the composer is collapsed", () => {
     const onSend = vi.fn();
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      onSend,
-      collapsed: true,
-      placeholder: "messageInputContinueAbove",
-    });
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        onSend,
+        collapsed: true,
+        placeholder: "messageInputContinueAbove",
+      },
+    );
 
     fireEvent.change(textarea, { target: { value: "collapsed send" } });
     fireEvent.click(screen.getByLabelText("toolbarSend"));
@@ -716,11 +744,14 @@ describe("MessageInput", () => {
 
   it("keeps a queue affordance visible when the running composer is collapsed", () => {
     const onQueue = vi.fn();
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      onQueue,
-      collapsed: true,
-      placeholder: "messageInputContinueAbove",
-    });
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        onQueue,
+        collapsed: true,
+        placeholder: "messageInputContinueAbove",
+      },
+    );
 
     fireEvent.change(textarea, { target: { value: "collapsed queue" } });
     fireEvent.click(screen.getByLabelText("toolbarQueueLabel"));
@@ -730,10 +761,13 @@ describe("MessageInput", () => {
 
   it("queues steering-capable messages without adding a mode prefix", () => {
     const onQueue = vi.fn();
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      supportsSteering: true,
-      onQueue,
-    });
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        supportsSteering: true,
+        onQueue,
+      },
+    );
 
     expect(
       screen.queryByRole("button", { name: "Queue when done" }),
@@ -748,10 +782,13 @@ describe("MessageInput", () => {
 
   it("preserves manually typed when-done text as a normal queue message", () => {
     const onQueue = vi.fn();
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      supportsSteering: true,
-      onQueue,
-    });
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        supportsSteering: true,
+        onQueue,
+      },
+    );
 
     fireEvent.change(textarea, {
       target: { value: "when done, already manual" },
@@ -761,53 +798,35 @@ describe("MessageInput", () => {
     expectSubmission(onQueue, "when done, already manual", "deferred");
   });
 
-  it("restores patient queue mode only when experimental features are enabled", () => {
-    developerModeState.experimentalFeaturesEnabled = true;
-    developerModeState.experimentalFeatures.patientQueueMode = true;
+  it("adds the when-done prefix only via the Ctrl+Enter accelerator", () => {
     const onQueue = vi.fn();
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      supportsSteering: true,
-      onQueue,
-    });
-
-    expect(screen.getByRole("button", { name: "Queue when done" })).toBeDefined();
-
-    fireEvent.change(textarea, { target: { value: "follow up later" } });
-    fireEvent.click(screen.getByLabelText("toolbarQueueLabel"));
-
-    expectSubmission(onQueue, "when done, follow up later", "patient");
-  });
-
-  it("lets experimental patient queue mode toggle back to ASAP", () => {
-    developerModeState.experimentalFeaturesEnabled = true;
-    developerModeState.experimentalFeatures.patientQueueMode = true;
-    const onQueue = vi.fn();
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      supportsSteering: true,
-      onQueue,
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Queue when done" }));
-    expect(screen.getByRole("button", { name: "Queue ASAP" })).toBeDefined();
-
-    fireEvent.change(textarea, { target: { value: "ship immediately" } });
-    fireEvent.click(screen.getByLabelText("toolbarQueueLabel"));
-
-    expectSubmission(onQueue, "ship immediately", "deferred");
-  });
-
-  it("hides patient queue mode when the specific experimental feature is off", () => {
-    developerModeState.experimentalFeaturesEnabled = true;
-    developerModeState.experimentalFeatures.patientQueueMode = false;
-    const onQueue = vi.fn();
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      supportsSteering: true,
-      onQueue,
-    });
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        supportsSteering: true,
+        onQueue,
+      },
+    );
 
     expect(
       screen.queryByRole("button", { name: "Queue when done" }),
     ).toBeNull();
+
+    fireEvent.change(textarea, { target: { value: "follow up later" } });
+    fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+
+    expectSubmission(onQueue, "when done, follow up later", "patient");
+  });
+
+  it("leaves a button-click queue unprefixed and deferred", () => {
+    const onQueue = vi.fn();
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        supportsSteering: true,
+        onQueue,
+      },
+    );
 
     fireEvent.change(textarea, { target: { value: "follow up later" } });
     fireEvent.click(screen.getByLabelText("toolbarQueueLabel"));
@@ -815,12 +834,51 @@ describe("MessageInput", () => {
     expectSubmission(onQueue, "follow up later", "deferred");
   });
 
+  it("does not duplicate a manually typed when-done prefix on Ctrl+Enter", () => {
+    const onQueue = vi.fn();
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        supportsSteering: true,
+        onQueue,
+      },
+    );
+
+    fireEvent.change(textarea, {
+      target: { value: "when done, when done attempt" },
+    });
+    fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+
+    expectSubmission(onQueue, "when done, when done attempt", "patient");
+  });
+
+  it("does not prefix a Ctrl+Enter message already opening with when done (any case)", () => {
+    const onQueue = vi.fn();
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        supportsSteering: true,
+        onQueue,
+      },
+    );
+
+    fireEvent.change(textarea, {
+      target: { value: "When done please run tests" },
+    });
+    fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+
+    expectSubmission(onQueue, "When done please run tests", "patient");
+  });
+
   it("routes a queue-only primary button through onSend", () => {
     const onSend = vi.fn();
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      onSend,
-      primaryActionKind: "queue",
-    });
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        onSend,
+        primaryActionKind: "queue",
+      },
+    );
 
     const primaryButton = screen.getByLabelText("toolbarQueueLabel");
     expect(primaryButton.getAttribute("title")).toBe("toolbarQueueTooltip");
@@ -834,10 +892,13 @@ describe("MessageInput", () => {
   it("routes Enter through a queue-only primary action", () => {
     const restoreMatchMedia = installDesktopMatchMedia();
     const onSend = vi.fn();
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      onSend,
-      primaryActionKind: "queue",
-    });
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        onSend,
+        primaryActionKind: "queue",
+      },
+    );
 
     try {
       fireEvent.change(textarea, { target: { value: "claude queue enter" } });
@@ -851,7 +912,10 @@ describe("MessageInput", () => {
 
   it("keeps non-steering queue text unchanged", () => {
     const onQueue = vi.fn();
-    const textarea = renderMessageInput(vi.fn(() => true), { onQueue });
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      { onQueue },
+    );
 
     expect(
       screen.queryByRole("button", { name: "Queue when done" }),
@@ -865,11 +929,14 @@ describe("MessageInput", () => {
 
   it("keeps queue available when the primary steer action downgrades", () => {
     const onQueue = vi.fn();
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      supportsSteering: true,
-      onQueue,
-      primaryActionKind: "queue",
-    });
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        supportsSteering: true,
+        onQueue,
+        primaryActionKind: "queue",
+      },
+    );
 
     fireEvent.change(textarea, { target: { value: "queue fallback" } });
     fireEvent.click(screen.getByLabelText("toolbarQueueLabel"));
@@ -881,12 +948,15 @@ describe("MessageInput", () => {
   it("routes the primary downgraded steer action to queue", () => {
     const onQueue = vi.fn();
     const onSend = vi.fn();
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      onSend,
-      supportsSteering: true,
-      onQueue,
-      primaryActionKind: "queue",
-    });
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        onSend,
+        supportsSteering: true,
+        onQueue,
+        primaryActionKind: "queue",
+      },
+    );
 
     fireEvent.change(textarea, { target: { value: "queue from primary" } });
     fireEvent.click(screen.getByLabelText("Queue from primary action"));

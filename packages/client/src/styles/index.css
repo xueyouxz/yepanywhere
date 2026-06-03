@@ -3603,53 +3603,6 @@ a.sidebar-nav-item {
   color: white;
 }
 
-.queue-mode-toggle {
-  height: var(--composer-control-size);
-  min-width: 76px;
-  padding: 0 var(--space-2);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  box-sizing: border-box;
-  cursor: pointer;
-  flex-shrink: 0;
-  font-size: var(--font-size-xs);
-  font-weight: 700;
-  line-height: 1;
-  white-space: nowrap;
-  transition:
-    background-color 0.15s,
-    border-color 0.15s,
-    opacity 0.15s;
-}
-
-.queue-mode-toggle.patient {
-  background: rgba(245, 158, 11, 0.16);
-  border-color: rgba(245, 158, 11, 0.55);
-  color: #f6c453;
-}
-
-.queue-mode-toggle.asap {
-  background: rgba(34, 197, 94, 0.13);
-  border-color: rgba(34, 197, 94, 0.5);
-  color: #56d687;
-}
-
-.queue-mode-toggle:hover:not(:disabled) {
-  opacity: 0.86;
-}
-
-.queue-mode-toggle:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.queue-mode-label-short {
-  display: none;
-}
-
 .send-button-with-help::after {
   content: attr(data-tooltip);
   position: absolute;
@@ -8037,11 +7990,6 @@ a.sidebar-nav-item {
     gap: 0.3rem;
   }
 
-  .queue-mode-toggle {
-    min-width: 68px;
-    padding: 0 0.45rem;
-  }
-
   .message-input-left {
     flex: 0 1 auto;
     overflow: visible;
@@ -8128,17 +8076,6 @@ a.sidebar-nav-item {
     display: none;
   }
 
-  .queue-mode-toggle {
-    min-width: 46px;
-  }
-
-  .queue-mode-label-long {
-    display: none;
-  }
-
-  .queue-mode-label-short {
-    display: inline;
-  }
 }
 
 @media (max-width: 480px) {

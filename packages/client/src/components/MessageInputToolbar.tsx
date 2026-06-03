@@ -1,4 +1,5 @@
 import type { SessionLivenessSnapshot } from "@yep-anywhere/shared";
+import type { MouseEvent, RefObject, TouchEvent } from "react";
 import {
   type Dispatch,
   type SetStateAction,
@@ -9,12 +10,11 @@ import {
   useRef,
   useState,
 } from "react";
-import type { MouseEvent, RefObject, TouchEvent } from "react";
 import { useOptionalRenderModeContext } from "../contexts/RenderModeContext";
 import {
   type EffortLevel,
-  useModelSettings,
   type ThinkingMode,
+  useModelSettings,
 } from "../hooks/useModelSettings";
 import { useRelativeNow } from "../hooks/useRelativeNow";
 import {
@@ -23,20 +23,21 @@ import {
 } from "../hooks/useSessionToolbarVisibility";
 import { useVersion } from "../hooks/useVersion";
 import { useI18n } from "../i18n";
+import type { BtwToolbarMode } from "../lib/btwAsideRouting";
+import { getEffortLevelLabel } from "../lib/effortLevels";
 import {
   formatAbsoluteTimestamp,
   formatCompactRelativeAge,
   isStaleTimestamp,
   parseTimestampMs,
 } from "../lib/messageAge";
-import { getEffortLevelLabel } from "../lib/effortLevels";
 import type { ModelIndicatorTone } from "../lib/modelConfigIndicator";
 import {
   getModelIndicatorTextVariants,
   getModelIndicatorTooltip,
+  type ModelToolbarDensity,
   modelIndicatorFitsWithMode,
   normalizeProviderKey,
-  type ModelToolbarDensity,
 } from "../lib/modelIndicatorText";
 import {
   SESSION_ISEARCH_GUIDE_EVENT,
@@ -55,15 +56,14 @@ import type {
   SpeechTranscriptionContext,
   SpeechTranscriptionResultMetadata,
 } from "../lib/speechProviders/SpeechProvider";
-import type { BtwToolbarMode } from "../lib/btwAsideRouting";
 import type { ContextUsage, PermissionMode } from "../types";
+import { ContextUsageIndicator } from "./ContextUsageIndicator";
 import type { FilterOption } from "./FilterDropdown";
 import { MessageAge } from "./MessageAge";
-import { RenderModeGlyph } from "./ui/RenderModeGlyph";
-import { ContextUsageIndicator } from "./ContextUsageIndicator";
 import { ModeSelector } from "./ModeSelector";
-import { SpeechControlMenu } from "./SpeechControlMenu";
 import { SlashCommandButton } from "./SlashCommandButton";
+import { SpeechControlMenu } from "./SpeechControlMenu";
+import { RenderModeGlyph } from "./ui/RenderModeGlyph";
 import { VoiceInputButton, type VoiceInputButtonRef } from "./VoiceInputButton";
 
 export interface MessageInputToolbarProps {
@@ -115,12 +115,8 @@ export interface MessageInputToolbarProps {
   lastActivityAt?: string | null;
   /** Server-derived provider/session liveness evidence. */
   sessionLiveness?: SessionLivenessSnapshot | null;
-  /** Show the experimental patient-vs-ASAP queued-message mode toggle. */
+  /** Ctrl+Enter queue prepends "when done, " (deferred/patient) and is available. */
   showPatientQueueMode?: boolean;
-  /** Queue mode used when queueing through the deferred queue path. */
-  patientQueueMode?: boolean;
-  /** Toggle patient queued-message mode. */
-  onPatientQueueModeChange?: (enabled: boolean) => void;
 
   // Actions
   isRunning?: boolean;
@@ -410,9 +406,6 @@ interface ToolbarQueueControl {
   hasDualActions: boolean;
   queueTooltip: string;
   showPatientQueueMode: boolean;
-  patientQueueMode: boolean;
-  onPatientQueueModeChange?: (enabled: boolean) => void;
-  queueModeLabel: string;
 }
 
 interface ToolbarSendControl {
@@ -1066,31 +1059,6 @@ export function MessageInputToolbarView({
         {showSendButton && actionsControl.send ? (
           <>
             {visibility.queueControls &&
-              queueControl?.showPatientQueueMode &&
-              queueControl.onQueue && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    queueControl.onPatientQueueModeChange?.(
-                      !queueControl.patientQueueMode,
-                    )}
-                  disabled={actionsControl.disabled}
-                  className={`queue-mode-toggle ${
-                    queueControl.patientQueueMode ? "patient" : "asap"
-                  }`}
-                  aria-label={queueControl.queueModeLabel}
-                  aria-pressed={queueControl.patientQueueMode}
-                  title={queueControl.queueTooltip}
-                >
-                  <span className="queue-mode-label queue-mode-label-long">
-                    {queueControl.patientQueueMode ? "when done" : "ASAP"}
-                  </span>
-                  <span className="queue-mode-label queue-mode-label-short">
-                    {queueControl.patientQueueMode ? "done" : "ASAP"}
-                  </span>
-                </button>
-              )}
-            {visibility.queueControls &&
               queueControl?.hasDualActions &&
               queueControl.onQueue && (
                 <button
@@ -1160,8 +1128,6 @@ export function MessageInputToolbar({
   lastActivityAt,
   sessionLiveness,
   showPatientQueueMode = false,
-  patientQueueMode = false,
-  onPatientQueueModeChange,
   isRunning,
   isThinking,
   onStop,
@@ -1288,20 +1254,13 @@ export function MessageInputToolbar({
       ? t("toolbarSteerTooltip")
       : effectivePrimaryActionKind === "queue"
         ? showPatientQueueMode
-          ? patientQueueMode
-            ? 'Queue when done; queued text starts with "when done,"'
-            : "Queue ASAP"
+          ? 'Queue (sent when the turn ends). Ctrl+Enter prepends "when done,"'
           : t("toolbarQueueTooltip")
         : t("toolbarSendTooltip");
-  const queueModeLabel = patientQueueMode ? "Queue when done" : "Queue ASAP";
   const queueTooltip = showPatientQueueMode
-    ? patientQueueMode
-      ? 'Queue when done; queued text starts with "when done,"'
-      : "Queue ASAP"
+    ? 'Queue (sent when the turn ends). Ctrl+Enter prepends "when done,"'
     : t("toolbarQueueTooltip");
-  const queueShortcutLabel = showPatientQueueMode
-    ? `${queueModeLabel} while agent runs`
-    : "Queue while agent runs";
+  const queueShortcutLabel = "Queue while agent runs";
   const effectiveBtwToolbarMode =
     btwToolbarMode ??
     (btwActive ? "focused-footer" : btwHasAsides ? "focus-existing" : "start");
@@ -1781,9 +1740,6 @@ export function MessageInputToolbar({
                 hasDualActions,
                 queueTooltip,
                 showPatientQueueMode,
-                patientQueueMode,
-                onPatientQueueModeChange,
-                queueModeLabel,
               },
             }
           : null,

@@ -2,9 +2,6 @@ import { useCallback, useSyncExternalStore } from "react";
 import { UI_KEYS } from "../lib/storageKeys";
 
 interface DeveloperModeSettings {
-  /** Enables default-off experimental UI features that may be upstream-sensitive */
-  experimentalFeaturesEnabled: boolean;
-  experimentalFeatures: ExperimentalFeatureSettings;
   /** Log relay requests/responses to console for debugging */
   relayDebugEnabled: boolean;
   /** Capture connection logs and send to server for debugging */
@@ -13,19 +10,7 @@ interface DeveloperModeSettings {
   showConnectionBars: boolean;
 }
 
-export type ExperimentalFeatureId = "patientQueueMode";
-
-export interface ExperimentalFeatureSettings {
-  patientQueueMode: boolean;
-}
-
-const DEFAULT_EXPERIMENTAL_FEATURES: ExperimentalFeatureSettings = {
-  patientQueueMode: true,
-};
-
 const DEFAULT_SETTINGS: DeveloperModeSettings = {
-  experimentalFeaturesEnabled: false,
-  experimentalFeatures: DEFAULT_EXPERIMENTAL_FEATURES,
   relayDebugEnabled: false,
   remoteLogCollectionEnabled: false,
   showConnectionBars: false,
@@ -37,13 +22,6 @@ function normalizeSettings(raw: unknown): DeveloperModeSettings {
   }
   const parsed = raw as Partial<DeveloperModeSettings>;
   return {
-    experimentalFeaturesEnabled:
-      parsed.experimentalFeaturesEnabled ??
-      DEFAULT_SETTINGS.experimentalFeaturesEnabled,
-    experimentalFeatures: {
-      ...DEFAULT_EXPERIMENTAL_FEATURES,
-      ...parsed.experimentalFeatures,
-    },
     relayDebugEnabled:
       parsed.relayDebugEnabled ?? DEFAULT_SETTINGS.relayDebugEnabled,
     remoteLogCollectionEnabled:
@@ -114,23 +92,6 @@ export function setRemoteLogCollectionEnabledValue(enabled: boolean): void {
 export function useDeveloperMode() {
   const settings = useSyncExternalStore(subscribe, getSnapshot);
 
-  const setExperimentalFeaturesEnabled = useCallback((enabled: boolean) => {
-    updateSettings({ ...currentSettings, experimentalFeaturesEnabled: enabled });
-  }, []);
-
-  const setExperimentalFeatureEnabled = useCallback(
-    (feature: ExperimentalFeatureId, enabled: boolean) => {
-      updateSettings({
-        ...currentSettings,
-        experimentalFeatures: {
-          ...currentSettings.experimentalFeatures,
-          [feature]: enabled,
-        },
-      });
-    },
-    [],
-  );
-
   const setRelayDebugEnabled = useCallback((enabled: boolean) => {
     updateSettings({ ...currentSettings, relayDebugEnabled: enabled });
   }, []);
@@ -145,10 +106,6 @@ export function useDeveloperMode() {
   }, []);
 
   return {
-    experimentalFeaturesEnabled: settings.experimentalFeaturesEnabled,
-    setExperimentalFeaturesEnabled,
-    experimentalFeatures: settings.experimentalFeatures,
-    setExperimentalFeatureEnabled,
     relayDebugEnabled: settings.relayDebugEnabled,
     setRelayDebugEnabled,
     remoteLogCollectionEnabled: settings.remoteLogCollectionEnabled,

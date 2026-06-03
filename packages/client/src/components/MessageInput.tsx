@@ -18,11 +18,10 @@ import {
   type DraftControls,
   useDraftPersistence,
 } from "../hooks/useDraftPersistence";
-import { useDeveloperMode } from "../hooks/useDeveloperMode";
 import { useI18n } from "../i18n";
 import type { BtwToolbarMode } from "../lib/btwAsideRouting";
-import type { ModelIndicatorTone } from "../lib/modelConfigIndicator";
 import { hasCoarsePointer } from "../lib/deviceDetection";
+import type { ModelIndicatorTone } from "../lib/modelConfigIndicator";
 import type {
   SpeechTranscriptionContext,
   SpeechTranscriptionResultMetadata,
@@ -80,12 +79,13 @@ function clearTextareaContentsUndoably(textarea: HTMLTextAreaElement): void {
 }
 
 function createClientSpeechTurnId(): string {
-  return globalThis.crypto?.randomUUID?.() ??
-    `speech-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return (
+    globalThis.crypto?.randomUUID?.() ??
+    `speech-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  );
 }
 
 const PATIENT_QUEUE_PREFIX = "when done, ";
-const PATIENT_QUEUE_STORAGE_SUFFIX = ":patient-queue-mode";
 const PATIENT_QUEUE_PREFIXES = [
   PATIENT_QUEUE_PREFIX,
   "when you are at a natural wrap-up point, ",
@@ -95,42 +95,11 @@ const PATIENT_QUEUE_PREFIXES = [
   "zzz: ",
 ];
 
-function patientQueueStorageKey(draftKey: string): string {
-  return `${draftKey}${PATIENT_QUEUE_STORAGE_SUFFIX}`;
-}
-
-function readPatientQueueMode(
-  draftKey: string,
-  defaultEnabled: boolean,
-): boolean {
-  if (!defaultEnabled) return false;
-
-  try {
-    const stored = globalThis.localStorage?.getItem(
-      patientQueueStorageKey(draftKey),
-    );
-    if (stored === "patient") return true;
-    if (stored === "asap") return false;
-  } catch {
-    // Local storage is a convenience, not part of queue delivery.
-  }
-
-  return defaultEnabled;
-}
-
-function writePatientQueueMode(draftKey: string, enabled: boolean): void {
-  try {
-    globalThis.localStorage?.setItem(
-      patientQueueStorageKey(draftKey),
-      enabled ? "patient" : "asap",
-    );
-  } catch {
-    // Local storage is a convenience, not part of queue delivery.
-  }
-}
-
 function hasPatientQueuePrefix(message: string): boolean {
   const normalized = message.trimStart().toLocaleLowerCase();
+  // Any message already opening with "when done" carries the deferred
+  // semantics, so adding the prefix would read as "when done, when done …".
+  if (normalized.startsWith("when done")) return true;
   return PATIENT_QUEUE_PREFIXES.some((prefix) =>
     normalized.startsWith(prefix.toLocaleLowerCase()),
   );
@@ -270,8 +239,6 @@ export function MessageInput({
   onDismissPromptSuggestion,
 }: Props) {
   const { t } = useI18n();
-  const { experimentalFeaturesEnabled, experimentalFeatures } =
-    useDeveloperMode();
   const [text, setText, controls] = useDraftPersistence(draftKey);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -304,25 +271,20 @@ export function MessageInput({
   const collapsed = userCollapsed || externalCollapsed;
   const canSubmit = !!(text.trim() || attachments.length > 0);
   const effectivePrimaryActionKind =
-    primaryActionKind ?? (supportsSteering && onQueue
-      ? "steer"
-      : onQueue
-        ? "queue"
-        : "send");
-  const showPatientQueueMode =
-    experimentalFeaturesEnabled &&
-    experimentalFeatures.patientQueueMode &&
-    supportsSteering &&
-    !!onQueue;
-  const [patientQueueMode, setPatientQueueMode] = useState(() =>
-    readPatientQueueMode(draftKey, showPatientQueueMode),
-  );
-  const patientQueueEnabled = showPatientQueueMode && patientQueueMode;
-  const primaryActionLabel = effectivePrimaryActionKind === "steer"
-    ? t("toolbarSteerTooltip")
-    : effectivePrimaryActionKind === "queue"
-      ? t("toolbarQueueLabel")
-      : t("toolbarSend");
+    primaryActionKind ??
+    (supportsSteering && onQueue ? "steer" : onQueue ? "queue" : "send");
+  // The "when done, " prefix is exclusively the Ctrl+Enter accelerator's
+  // behavior (deferred/patient queue). Plain Enter steers immediately when
+  // busy, and a button-click queue stays unprefixed — adding "when done" to an
+  // immediate steer would contradict its meaning. onQueue is only set while the
+  // agent is running, so a "done" agent never reaches the queue path.
+  const showPatientQueueMode = supportsSteering && !!onQueue;
+  const primaryActionLabel =
+    effectivePrimaryActionKind === "steer"
+      ? t("toolbarSteerTooltip")
+      : effectivePrimaryActionKind === "queue"
+        ? t("toolbarQueueLabel")
+        : t("toolbarSend");
 
   const canAttach = !!(projectId && sessionId && onAttach);
 
@@ -406,102 +368,92 @@ export function MessageInput({
     onDraftControlsReady?.(controls);
   }, [controls, onDraftControlsReady]);
 
-  useEffect(() => {
-    setPatientQueueMode(readPatientQueueMode(draftKey, showPatientQueueMode));
-  }, [draftKey, showPatientQueueMode]);
+  const handleSubmit = useCallback(
+    (messageOverride?: unknown) => {
+      const override =
+        typeof messageOverride === "string" ? messageOverride : undefined;
+      // Stop voice recording and get any pending interim text
+      const pendingVoice =
+        override === undefined
+          ? (voiceButtonRef.current?.stopAndFinalize() ?? "")
+          : "";
 
-  const handlePatientQueueModeChange = useCallback(
-    (enabled: boolean) => {
-      setPatientQueueMode(enabled);
-      writePatientQueueMode(draftKey, enabled);
+      // Combine committed text with any pending voice text
+      let finalText = (override ?? controls.getDraft()).trimEnd();
+      if (pendingVoice) {
+        finalText = finalText ? `${finalText} ${pendingVoice}` : pendingVoice;
+      }
+
+      const hasContent = finalText.trim() || attachments.length > 0;
+      if (hasContent && !disabled) {
+        const message = finalText.trim();
+        const deliveryIntent =
+          effectivePrimaryActionKind === "steer"
+            ? "steer"
+            : effectivePrimaryActionKind === "queue"
+              ? "deferred"
+              : "direct";
+        const metadata = buildSubmissionMetadata(deliveryIntent);
+        // Clear input state but keep localStorage for failure recovery
+        controls.clearInput();
+        resetCompositionMetadata();
+        setInterimTranscript("");
+        onSend(message, metadata);
+        // Refocus the textarea so user can continue typing
+        textareaRef.current?.focus();
+      }
     },
-    [draftKey],
+    [
+      disabled,
+      controls,
+      onSend,
+      attachments.length,
+      effectivePrimaryActionKind,
+      buildSubmissionMetadata,
+      resetCompositionMetadata,
+    ],
   );
 
-  const handleSubmit = useCallback((messageOverride?: unknown) => {
-    const override =
-      typeof messageOverride === "string" ? messageOverride : undefined;
-    // Stop voice recording and get any pending interim text
-    const pendingVoice =
-      override === undefined
-        ? (voiceButtonRef.current?.stopAndFinalize() ?? "")
-        : "";
+  // patient=true only for the Ctrl+Enter accelerator: it queues the message as
+  // deferred and prepends "when done, ". Button-driven queues pass false.
+  const handleQueue = useCallback(
+    (patient = false) => {
+      const queueHandler =
+        onQueue ??
+        (effectivePrimaryActionKind === "queue" ? onSend : undefined);
 
-    // Combine committed text with any pending voice text
-    let finalText = (override ?? controls.getDraft()).trimEnd();
-    if (pendingVoice) {
-      finalText = finalText ? `${finalText} ${pendingVoice}` : pendingVoice;
-    }
+      // Stop voice recording and get any pending interim text
+      const pendingVoice = voiceButtonRef.current?.stopAndFinalize() ?? "";
 
-    const hasContent = finalText.trim() || attachments.length > 0;
-    if (hasContent && !disabled) {
-      const message = finalText.trim();
-      const deliveryIntent =
-        effectivePrimaryActionKind === "steer"
-          ? "steer"
-          : effectivePrimaryActionKind === "queue"
-            ? patientQueueEnabled
-              ? "patient"
-              : "deferred"
-            : "direct";
-      const metadata = buildSubmissionMetadata(deliveryIntent);
-      // Clear input state but keep localStorage for failure recovery
-      controls.clearInput();
-      resetCompositionMetadata();
-      setInterimTranscript("");
-      onSend(message, metadata);
-      // Refocus the textarea so user can continue typing
-      textareaRef.current?.focus();
-    }
-  }, [
-    disabled,
-    controls,
-    onSend,
-    attachments.length,
-    effectivePrimaryActionKind,
-    patientQueueEnabled,
-    buildSubmissionMetadata,
-    resetCompositionMetadata,
-  ]);
+      let finalText = controls.getDraft().trimEnd();
+      if (pendingVoice) {
+        finalText = finalText ? `${finalText} ${pendingVoice}` : pendingVoice;
+      }
 
-  const handleQueue = useCallback(() => {
-    const queueHandler =
-      onQueue ?? (effectivePrimaryActionKind === "queue" ? onSend : undefined);
-
-    // Stop voice recording and get any pending interim text
-    const pendingVoice = voiceButtonRef.current?.stopAndFinalize() ?? "";
-
-    let finalText = controls.getDraft().trimEnd();
-    if (pendingVoice) {
-      finalText = finalText ? `${finalText} ${pendingVoice}` : pendingVoice;
-    }
-
-    const hasContent = finalText.trim() || attachments.length > 0;
-    if (hasContent && !disabled && queueHandler) {
-      const message = applyPatientQueuePrefix(
-        finalText.trim(),
-        patientQueueEnabled,
-      );
-      const metadata = buildSubmissionMetadata(
-        patientQueueEnabled ? "patient" : "deferred",
-      );
-      controls.clearInput();
-      resetCompositionMetadata();
-      setInterimTranscript("");
-      queueHandler(message, metadata);
-      textareaRef.current?.focus();
-    }
-  }, [
-    disabled,
-    controls,
-    onQueue,
-    onSend,
-    effectivePrimaryActionKind,
-    attachments.length,
-    patientQueueEnabled,
-    buildSubmissionMetadata,
-    resetCompositionMetadata,
-  ]);
+      const hasContent = finalText.trim() || attachments.length > 0;
+      if (hasContent && !disabled && queueHandler) {
+        const message = applyPatientQueuePrefix(finalText.trim(), patient);
+        const metadata = buildSubmissionMetadata(
+          patient ? "patient" : "deferred",
+        );
+        controls.clearInput();
+        resetCompositionMetadata();
+        setInterimTranscript("");
+        queueHandler(message, metadata);
+        textareaRef.current?.focus();
+      }
+    },
+    [
+      disabled,
+      controls,
+      onQueue,
+      onSend,
+      effectivePrimaryActionKind,
+      attachments.length,
+      buildSubmissionMetadata,
+      resetCompositionMetadata,
+    ],
+  );
 
   const handleBtwClick = useCallback(() => {
     if (disabled || !onBtwShortcut) return;
@@ -520,30 +472,35 @@ export function MessageInput({
   }, [controls, disabled, onBtwShortcut, resetCompositionMetadata]);
 
   const submitPrimaryAction =
-    effectivePrimaryActionKind === "queue" ? handleQueue : handleSubmit;
+    effectivePrimaryActionKind === "queue"
+      ? () => handleQueue(false)
+      : handleSubmit;
 
-  const recallLastSubmission = useCallback((allowExistingText = false) => {
-    if (
-      disabled ||
-      (!allowExistingText && displayText.trim()) ||
-      attachments.length > 0 ||
-      uploadProgress.length > 0
-    ) {
-      return false;
-    }
-    const recalled = onRecallLastSubmission?.() ?? false;
-    if (recalled) {
-      setInterimTranscript("");
-      textareaRef.current?.focus();
-    }
-    return recalled;
-  }, [
-    attachments.length,
-    disabled,
-    displayText,
-    onRecallLastSubmission,
-    uploadProgress.length,
-  ]);
+  const recallLastSubmission = useCallback(
+    (allowExistingText = false) => {
+      if (
+        disabled ||
+        (!allowExistingText && displayText.trim()) ||
+        attachments.length > 0 ||
+        uploadProgress.length > 0
+      ) {
+        return false;
+      }
+      const recalled = onRecallLastSubmission?.() ?? false;
+      if (recalled) {
+        setInterimTranscript("");
+        textareaRef.current?.focus();
+      }
+      return recalled;
+    },
+    [
+      attachments.length,
+      disabled,
+      displayText,
+      onRecallLastSubmission,
+      uploadProgress.length,
+    ],
+  );
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (
@@ -612,12 +569,7 @@ export function MessageInput({
       return;
     }
 
-    if (
-      e.key.toLowerCase() === "g" &&
-      e.ctrlKey &&
-      !e.shiftKey &&
-      !e.altKey
-    ) {
+    if (e.key.toLowerCase() === "g" && e.ctrlKey && !e.shiftKey && !e.altKey) {
       e.preventDefault();
       if (!disabled) {
         voiceButtonRef.current?.stopAndFinalize();
@@ -658,10 +610,10 @@ export function MessageInput({
       // Skip Enter during IME composition (e.g. Chinese/Japanese/Korean input)
       if (e.nativeEvent.isComposing) return;
 
-      // Ctrl+Enter queues a deferred message when agent is running
+      // Ctrl+Enter queues a "when done, " (patient) message when agent is running
       if (onQueue && e.ctrlKey && !e.shiftKey) {
         e.preventDefault();
-        handleQueue();
+        handleQueue(true);
         return;
       }
 
@@ -726,10 +678,7 @@ export function MessageInput({
 
   // Voice input handlers
   const handleVoiceTranscript = useCallback(
-    (
-      transcript: string,
-      metadata?: SpeechTranscriptionResultMetadata,
-    ) => {
+    (transcript: string, metadata?: SpeechTranscriptionResultMetadata) => {
       // Append transcript to existing text with space separator
       // Trim the transcript since mobile speech API includes leading/trailing spaces
       const trimmedTranscript = transcript.trim();
@@ -1012,17 +961,15 @@ export function MessageInput({
             lastActivityAt={lastActivityAt}
             sessionLiveness={sessionLiveness}
             showPatientQueueMode={showPatientQueueMode}
-            patientQueueMode={patientQueueEnabled}
-            onPatientQueueModeChange={handlePatientQueueModeChange}
             isRunning={isRunning}
             isThinking={isThinking}
             onStop={onStop}
             onSend={
               effectivePrimaryActionKind === "queue"
-                ? handleQueue
+                ? () => handleQueue(false)
                 : handleSubmit
             }
-            onQueue={onQueue ? handleQueue : undefined}
+            onQueue={onQueue ? () => handleQueue(false) : undefined}
             primaryActionKind={effectivePrimaryActionKind}
             canSend={canSubmit}
             disabled={disabled}
