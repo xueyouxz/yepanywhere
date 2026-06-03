@@ -28,6 +28,11 @@ export const OUTPUT_THINKING_FONT_SIZE_OFFSET_STEP_PX = 0.5;
 export const DEFAULT_OUTPUT_THINKING_FONT_SIZE_OFFSET_PX = -1;
 const OUTPUT_THINKING_FONT_SIZE_MIN_PX = 10;
 
+export const OUTPUT_MATH_FONT_SIZE_OFFSET_MIN_PX = -2;
+export const OUTPUT_MATH_FONT_SIZE_OFFSET_MAX_PX = 4;
+export const OUTPUT_MATH_FONT_SIZE_OFFSET_STEP_PX = 0.5;
+export const DEFAULT_OUTPUT_MATH_FONT_SIZE_OFFSET_PX = 1;
+
 export const OUTPUT_LINE_SPACING_MIN_PERCENT = -30;
 export const OUTPUT_LINE_SPACING_MAX_PERCENT = 50;
 export const OUTPUT_LINE_SPACING_STEP_PERCENT = 1;
@@ -44,6 +49,7 @@ interface OutputAppearance {
   font: OutputProseFont;
   fontSizePx: number;
   thinkingFontSizeOffsetPx: number;
+  mathFontSizeOffsetPx: number;
   lineSpacingPercent: number;
   verticalSpacingPercent: number;
 }
@@ -86,6 +92,15 @@ function normalizeThinkingFontSizeOffset(value: number): number {
   );
 }
 
+function normalizeMathFontSizeOffset(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_OUTPUT_MATH_FONT_SIZE_OFFSET_PX;
+  return clamp(
+    roundToStep(value, OUTPUT_MATH_FONT_SIZE_OFFSET_STEP_PX),
+    OUTPUT_MATH_FONT_SIZE_OFFSET_MIN_PX,
+    OUTPUT_MATH_FONT_SIZE_OFFSET_MAX_PX,
+  );
+}
+
 function normalizeVerticalSpacingPercent(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_OUTPUT_VERTICAL_SPACING_PERCENT;
   return clamp(
@@ -108,15 +123,22 @@ function deriveFontRelativePx(fontSizePx: number, percent: number): number {
   return Number(((fontSizePx * percent) / 100).toFixed(2));
 }
 
+function deriveOffsetFontSizePx(
+  fontSizePx: number,
+  offsetPx: number,
+  minPx: number,
+): number {
+  return Number(Math.max(minPx, fontSizePx + offsetPx).toFixed(2));
+}
+
 function deriveThinkingFontSizePx(
   fontSizePx: number,
   thinkingFontSizeOffsetPx: number,
 ): number {
-  return Number(
-    Math.max(
-      OUTPUT_THINKING_FONT_SIZE_MIN_PX,
-      fontSizePx + thinkingFontSizeOffsetPx,
-    ).toFixed(2),
+  return deriveOffsetFontSizePx(
+    fontSizePx,
+    thinkingFontSizeOffsetPx,
+    OUTPUT_THINKING_FONT_SIZE_MIN_PX,
   );
 }
 
@@ -175,6 +197,12 @@ function loadOutputAppearance(): OutputAppearance {
         DEFAULT_OUTPUT_THINKING_FONT_SIZE_OFFSET_PX,
       ),
     ),
+    mathFontSizeOffsetPx: normalizeMathFontSizeOffset(
+      readStoredNumber(
+        UI_KEYS.outputProseMathFontSizeOffset,
+        DEFAULT_OUTPUT_MATH_FONT_SIZE_OFFSET_PX,
+      ),
+    ),
     lineSpacingPercent: normalizeLineSpacingPercent(
       readStoredNumber(
         UI_KEYS.outputProseLineSpacingPercent,
@@ -195,7 +223,6 @@ function applyOutputAppearance(appearance: OutputAppearance) {
     appearance.fontSizePx,
     appearance.thinkingFontSizeOffsetPx,
   );
-
   root.style.setProperty(
     "--output-prose-font-family",
     outputFontStacks[appearance.font],
@@ -223,6 +250,10 @@ function applyOutputAppearance(appearance: OutputAppearance) {
   root.style.setProperty(
     "--thinking-prose-font-size",
     `${thinkingFontSizePx}px`,
+  );
+  root.style.setProperty(
+    "--output-math-font-size-offset",
+    `${appearance.mathFontSizeOffsetPx}px`,
   );
   root.style.setProperty(
     "--thinking-prose-line-height-offset",
@@ -267,6 +298,18 @@ export function useOutputAppearance() {
     }));
   }, []);
 
+  const setOutputMathFontSizeOffsetPx = useCallback((offsetPx: number) => {
+    const normalized = normalizeMathFontSizeOffset(offsetPx);
+    localStorage.setItem(
+      UI_KEYS.outputProseMathFontSizeOffset,
+      String(normalized),
+    );
+    setAppearance((current) => ({
+      ...current,
+      mathFontSizeOffsetPx: normalized,
+    }));
+  }, []);
+
   const setOutputLineSpacingPercent = useCallback(
     (lineSpacingPercent: number) => {
       const normalized = normalizeLineSpacingPercent(lineSpacingPercent);
@@ -303,11 +346,13 @@ export function useOutputAppearance() {
     outputFont: appearance.font,
     outputFontSizePx: appearance.fontSizePx,
     outputThinkingFontSizeOffsetPx: appearance.thinkingFontSizeOffsetPx,
+    outputMathFontSizeOffsetPx: appearance.mathFontSizeOffsetPx,
     outputLineSpacingPercent: appearance.lineSpacingPercent,
     outputVerticalSpacingPercent: appearance.verticalSpacingPercent,
     setOutputFont,
     setOutputFontSizePx,
     setOutputThinkingFontSizeOffsetPx,
+    setOutputMathFontSizeOffsetPx,
     setOutputLineSpacingPercent,
     setOutputVerticalSpacingPercent,
   };

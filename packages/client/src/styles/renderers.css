@@ -250,6 +250,7 @@
 .text-block-local-rendered .katex,
 .markdown-preview .markdown-rendered .katex {
   font-family: var(--font-math);
+  font-size: max(10px, calc(1em + var(--output-math-font-size-offset)));
   font-optical-sizing: auto;
   font-variation-settings: normal;
 }

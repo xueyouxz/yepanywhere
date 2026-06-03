@@ -15,6 +15,7 @@ import { useInlineMedia } from "../../hooks/useInlineMedia";
 import {
   DEFAULT_OUTPUT_FONT_SIZE_PX,
   DEFAULT_OUTPUT_LINE_SPACING_PERCENT,
+  DEFAULT_OUTPUT_MATH_FONT_SIZE_OFFSET_PX,
   DEFAULT_OUTPUT_THINKING_FONT_SIZE_OFFSET_PX,
   DEFAULT_OUTPUT_VERTICAL_SPACING_PERCENT,
   OUTPUT_FONT_SIZE_MAX_PX,
@@ -24,6 +25,9 @@ import {
   OUTPUT_LINE_SPACING_MAX_PERCENT,
   OUTPUT_LINE_SPACING_MIN_PERCENT,
   OUTPUT_LINE_SPACING_STEP_PERCENT,
+  OUTPUT_MATH_FONT_SIZE_OFFSET_MAX_PX,
+  OUTPUT_MATH_FONT_SIZE_OFFSET_MIN_PX,
+  OUTPUT_MATH_FONT_SIZE_OFFSET_STEP_PX,
   OUTPUT_PROSE_FONTS,
   OUTPUT_THINKING_FONT_SIZE_OFFSET_MAX_PX,
   OUTPUT_THINKING_FONT_SIZE_OFFSET_MIN_PX,
@@ -62,11 +66,13 @@ export function AppearanceSettings() {
     outputFont,
     outputFontSizePx,
     outputThinkingFontSizeOffsetPx,
+    outputMathFontSizeOffsetPx,
     outputLineSpacingPercent,
     outputVerticalSpacingPercent,
     setOutputFont,
     setOutputFontSizePx,
     setOutputThinkingFontSizeOffsetPx,
+    setOutputMathFontSizeOffsetPx,
     setOutputLineSpacingPercent,
     setOutputVerticalSpacingPercent,
   } = useOutputAppearance();
@@ -82,6 +88,8 @@ export function AppearanceSettings() {
     outputThinkingFontSizeOffsetDraft,
     setOutputThinkingFontSizeOffsetDraft,
   ] = useState(() => formatNumberSetting(outputThinkingFontSizeOffsetPx));
+  const [outputMathFontSizeOffsetDraft, setOutputMathFontSizeOffsetDraft] =
+    useState(() => formatNumberSetting(outputMathFontSizeOffsetPx));
   const [outputLineSpacingDraft, setOutputLineSpacingDraft] = useState(() =>
     formatNumberSetting(outputLineSpacingPercent),
   );
@@ -193,6 +201,12 @@ export function AppearanceSettings() {
   }, [outputThinkingFontSizeOffsetPx]);
 
   useEffect(() => {
+    setOutputMathFontSizeOffsetDraft(
+      formatNumberSetting(outputMathFontSizeOffsetPx),
+    );
+  }, [outputMathFontSizeOffsetPx]);
+
+  useEffect(() => {
     setOutputLineSpacingDraft(formatNumberSetting(outputLineSpacingPercent));
   }, [outputLineSpacingPercent]);
 
@@ -222,6 +236,15 @@ export function AppearanceSettings() {
       Number.isFinite(parsed)
         ? parsed
         : DEFAULT_OUTPUT_THINKING_FONT_SIZE_OFFSET_PX,
+    );
+  };
+
+  const commitOutputMathFontSizeOffset = () => {
+    const parsed = Number(outputMathFontSizeOffsetDraft);
+    setOutputMathFontSizeOffsetPx(
+      Number.isFinite(parsed)
+        ? parsed
+        : DEFAULT_OUTPUT_MATH_FONT_SIZE_OFFSET_PX,
     );
   };
 
@@ -425,6 +448,50 @@ export function AppearanceSettings() {
 
               <label
                 className="output-appearance-control"
+                htmlFor="output-math-size-offset"
+              >
+                <span className="output-appearance-label">
+                  {t("appearanceOutputMathSizeOffsetLabel")}
+                </span>
+                <span className="output-appearance-slider-row">
+                  <input
+                    id="output-math-size-offset"
+                    type="range"
+                    min={OUTPUT_MATH_FONT_SIZE_OFFSET_MIN_PX}
+                    max={OUTPUT_MATH_FONT_SIZE_OFFSET_MAX_PX}
+                    step={OUTPUT_MATH_FONT_SIZE_OFFSET_STEP_PX}
+                    value={outputMathFontSizeOffsetPx}
+                    onChange={(e) =>
+                      setOutputMathFontSizeOffsetPx(Number(e.target.value))
+                    }
+                  />
+                  <span className="output-appearance-number-wrap">
+                    <input
+                      type="number"
+                      className="settings-input-small output-appearance-number"
+                      min={OUTPUT_MATH_FONT_SIZE_OFFSET_MIN_PX}
+                      max={OUTPUT_MATH_FONT_SIZE_OFFSET_MAX_PX}
+                      step={OUTPUT_MATH_FONT_SIZE_OFFSET_STEP_PX}
+                      value={outputMathFontSizeOffsetDraft}
+                      onChange={(e) =>
+                        setOutputMathFontSizeOffsetDraft(e.target.value)
+                      }
+                      onBlur={commitOutputMathFontSizeOffset}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          commitOutputMathFontSizeOffset();
+                          e.currentTarget.blur();
+                        }
+                      }}
+                      aria-label={t("appearanceOutputMathSizeOffsetLabel")}
+                    />
+                    <span className="output-appearance-unit">px</span>
+                  </span>
+                </span>
+              </label>
+
+              <label
+                className="output-appearance-control"
                 htmlFor="output-line-spacing"
               >
                 <span className="output-appearance-label">
@@ -512,51 +579,59 @@ export function AppearanceSettings() {
               </label>
             </div>
 
-            <div
-              className="output-appearance-preview"
-              role="region"
-              aria-label={t("appearanceOutputPreviewLabel")}
-            >
-              <div className="output-preview-system">
-                <span className="output-preview-system-icon">ok</span>
-                <span>System note: provider configuration was applied.</span>
+            <div className="output-appearance-specimen">
+              <div className="output-appearance-specimen-label">
+                {t("appearanceOutputSpecimenLabel")}
               </div>
-              <div className="output-preview-prose">
-                <p>
-                  Ran <code>codex update</code>. It completed cleanly and kept
-                  the existing session ready for follow-up work.
-                </p>
-                <p>
-                  Inline math:{" "}
-                  <span className="output-preview-math">f(x) = 100%</span>
-                </p>
-                <p>Post-checks:</p>
-                <ul>
-                  <li>
-                    Codex version: <code>codex-cli 0.136.0</code>
-                  </li>
-                  <li>
-                    Doctor summary: <code>17 ok / 0 warn / 0 fail</code>
-                  </li>
-                </ul>
-              </div>
-              <div className="output-preview-thinking thinking-content">
-                <ThinkingText
-                  text={[
-                    "**Considering spacing adjustments**",
-                    "",
-                    "Thinking text stays quieter and one step smaller.",
-                  ].join("\n")}
-                />
-              </div>
-              <div className="output-preview-diff" aria-hidden="true">
-                <div>
-                  <span className="output-preview-diff-gutter">+</span>
-                  <span>Rendered diff prose follows the output font.</span>
+              <div
+                className="output-appearance-preview"
+                role="region"
+                aria-label={t("appearanceOutputPreviewLabel")}
+              >
+                <div className="output-preview-system">
+                  <span className="output-preview-system-icon">ok</span>
+                  <span>
+                    System note: provider configuration was applied after the
+                    session reconnected.
+                  </span>
                 </div>
-                <div>
-                  <span className="output-preview-diff-gutter">-</span>
-                  <span>Extra paragraph space can be dialed down.</span>
+                <div className="output-preview-prose">
+                  <p>
+                    Inline code such as <code>codex update</code> stays fixed
+                    width. The specimen is deliberately phone-width so font,
+                    spacing, and Markdown rendering can be judged after a
+                    natural line wrap.
+                  </p>
+                  <p>
+                    Inline math:{" "}
+                    <span className="output-preview-math">f(x) = 100%</span>
+                  </p>
+                  <p>Specimen rows:</p>
+                  <ul>
+                    <li>
+                      Source-like tokens: <code>fixed width</code>
+                    </li>
+                    <li>Math uses a TeX-like face with its own offset.</li>
+                  </ul>
+                </div>
+                <div className="output-preview-thinking thinking-content">
+                  <ThinkingText
+                    text={[
+                      "**Considering spacing adjustments**",
+                      "",
+                      "Thinking text stays quieter, narrower, and [configured offset] smaller.",
+                    ].join("\n")}
+                  />
+                </div>
+                <div className="output-preview-diff" aria-hidden="true">
+                  <div>
+                    <span className="output-preview-diff-gutter">+</span>
+                    <span>Rendered diff prose follows the output font.</span>
+                  </div>
+                  <div>
+                    <span className="output-preview-diff-gutter">-</span>
+                    <span>Extra paragraph space can be dialed down.</span>
+                  </div>
                 </div>
               </div>
             </div>
