@@ -7740,14 +7740,16 @@ a.sidebar-nav-item {
   display: flex;
   gap: var(--space-4);
   min-height: 0;
+  width: 100%;
   padding: 1rem;
-  max-width: calc(280px + var(--content-max-width) + var(--space-4));
+  box-sizing: border-box;
+  max-width: calc(17.5rem + var(--content-max-width) + var(--space-4));
   margin: 0 auto;
 }
 
 .settings-category-nav {
   flex-shrink: 0;
-  width: 280px;
+  width: clamp(13rem, 28vw, 17.5rem);
   overflow-y: auto;
 }
 

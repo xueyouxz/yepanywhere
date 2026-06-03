@@ -3,6 +3,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { useReloadNotifications } from "../../hooks/useReloadNotifications";
 import { useRemoteBasePath } from "../../hooks/useRemoteBasePath";
 import { useVersion } from "../../hooks/useVersion";
+import { useViewportWidth } from "../../hooks/useViewportWidth";
 import { useI18n } from "../../i18n";
 import {
   getDevelopmentCategory,
@@ -45,6 +46,12 @@ const CATEGORY_COMPONENTS: Record<string, React.ComponentType> = {
   development: DevelopmentSettings,
 };
 
+export const SETTINGS_TWO_COLUMN_BREAKPOINT = 720;
+
+export function shouldUseSettingsTwoColumn(viewportWidth: number): boolean {
+  return viewportWidth >= SETTINGS_TWO_COLUMN_BREAKPOINT;
+}
+
 interface SettingsCategoryItemProps {
   category: SettingsCategory;
   isActive: boolean;
@@ -81,6 +88,8 @@ export function SettingsLayout() {
   const basePath = useRemoteBasePath();
   const { openSidebar, isWideScreen, toggleSidebar, isSidebarCollapsed } =
     useNavigationLayout();
+  const viewportWidth = useViewportWidth();
+  const useTwoColumnSettings = shouldUseSettingsTwoColumn(viewportWidth);
   const { isManualReloadMode } = useReloadNotifications();
   const { version: versionInfo } = useVersion();
   const capabilities = versionInfo?.capabilities ?? [];
@@ -106,9 +115,9 @@ export function SettingsLayout() {
     categories.push(getDevelopmentCategory((key) => t(key as never)));
   }
 
-  // On wide screen, default to first category if none selected
+  // Two-column settings can fit before the persistent app sidebar can.
   const effectiveCategory =
-    category || (isWideScreen ? categories[0]?.id : undefined);
+    category || (useTwoColumnSettings ? categories[0]?.id : undefined);
 
   const handleCategoryClick = (categoryId: string) => {
     navigate(`${basePath}/settings/${categoryId}`);
@@ -123,8 +132,8 @@ export function SettingsLayout() {
     ? CATEGORY_COMPONENTS[effectiveCategory]
     : null;
 
-  // Mobile: category list OR category detail (not both)
-  if (!isWideScreen) {
+  // Narrow settings: category list OR category detail (not both)
+  if (!useTwoColumnSettings) {
     if (!category) {
       // Show category list
       return (
