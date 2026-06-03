@@ -587,6 +587,8 @@ export class Supervisor {
       queue,
       abortFn: abort,
       isProcessAlive,
+      shouldRetainIdleProcess: (sessionId) =>
+        this.shouldRetainIdleProcess(sessionId),
       probeLivenessFn: probeLiveness,
       getProviderActivityFn: getProviderActivity,
       pid: () => {
@@ -707,6 +709,8 @@ export class Supervisor {
       queue,
       abortFn: abort,
       isProcessAlive,
+      shouldRetainIdleProcess: (sessionId) =>
+        this.shouldRetainIdleProcess(sessionId),
       probeLivenessFn: probeLiveness,
       getProviderActivityFn: getProviderActivity,
       pid: () => {
@@ -827,6 +831,8 @@ export class Supervisor {
       queue,
       abortFn: abort,
       isProcessAlive,
+      shouldRetainIdleProcess: (sessionId) =>
+        this.shouldRetainIdleProcess(sessionId),
       probeLivenessFn: probeLiveness,
       getProviderActivityFn: getProviderActivity,
       pid: () => {
@@ -940,6 +946,8 @@ export class Supervisor {
       queue,
       abortFn: abort,
       isProcessAlive,
+      shouldRetainIdleProcess: (sessionId) =>
+        this.shouldRetainIdleProcess(sessionId),
       probeLivenessFn: probeLiveness,
       getProviderActivityFn: getProviderActivity,
       pid: () => {
@@ -1462,6 +1470,10 @@ export class Supervisor {
     } finally {
       this.heartbeatTurnInFlight = false;
     }
+  }
+
+  private shouldRetainIdleProcess(sessionId: string): boolean {
+    return this.getHeartbeatTurnSettings?.(sessionId)?.enabled === true;
   }
 
   private async queueHeartbeatTurnForProcess(
@@ -2105,7 +2117,9 @@ export class Supervisor {
     }
     this.observedProcessIds.add(process.id);
     process.subscribe((event) => {
-      if (event.type === "complete") {
+      if (event.type === "idle-reap") {
+        this.emitSessionAborted(process.sessionId, process.projectId);
+      } else if (event.type === "complete") {
         this.unregisterProcess(process);
       } else if (event.type === "session-id-changed") {
         // Update session→process mapping when temp ID is replaced by real ID from SDK
@@ -2529,9 +2543,10 @@ export class Supervisor {
    * This catches phantom processes where the underlying Claude process died
    * without the SDK iterator returning done or throwing.
    *
-   * When process liveness checking is available (via spawn wrapper), we use
-   * it to distinguish "process died silently" from "process is busy with a
-   * long tool call". Only dead processes are terminated.
+   * When process liveness checking is available (via spawn wrapper), use it to
+   * distinguish "process died silently" from "process is busy with a long tool
+   * call". Silence alone is not a termination signal; a turn may legitimately
+   * run for hours.
    */
   private terminateStaleProcesses(): void {
     const now = Date.now();
@@ -2555,10 +2570,9 @@ export class Supervisor {
       const log = getLogger();
 
       if (alive === undefined) {
-        // Liveness check unavailable — fall back to time-based heuristic
         log.warn(
           {
-            event: "stale_process_detected",
+            event: "stale_process_liveness_unknown",
             sessionId: process.sessionId,
             processId: process.id,
             projectId: process.projectId,
@@ -2569,25 +2583,26 @@ export class Supervisor {
             lastMessageTime: process.lastMessageTime.toISOString(),
             livenessAvailable: false,
           },
-          `Terminating stale process (no liveness check): ${process.sessionId} (no messages for ${Math.round(silentMs / 1000)}s)`,
+          `Leaving long-silent process running without liveness check: ${process.sessionId} (no messages for ${Math.round(silentMs / 1000)}s)`,
         );
-      } else {
-        // alive === false — process is confirmed dead
-        log.warn(
-          {
-            event: "stale_process_dead",
-            sessionId: process.sessionId,
-            processId: process.id,
-            projectId: process.projectId,
-            provider: process.provider,
-            silentMs,
-            staleThresholdMs,
-            startedAt: process.startedAt.toISOString(),
-            lastMessageTime: process.lastMessageTime.toISOString(),
-          },
-          `Terminating dead process: ${process.sessionId} (exited, silent for ${Math.round(silentMs / 1000)}s)`,
-        );
+        continue;
       }
+
+      // alive === false — process is confirmed dead
+      log.warn(
+        {
+          event: "stale_process_dead",
+          sessionId: process.sessionId,
+          processId: process.id,
+          projectId: process.projectId,
+          provider: process.provider,
+          silentMs,
+          staleThresholdMs,
+          startedAt: process.startedAt.toISOString(),
+          lastMessageTime: process.lastMessageTime.toISOString(),
+        },
+        `Terminating dead process: ${process.sessionId} (exited, silent for ${Math.round(silentMs / 1000)}s)`,
+      );
 
       process.terminate(
         `stale: no SDK messages for ${Math.round(silentMs / 1000)}s`,

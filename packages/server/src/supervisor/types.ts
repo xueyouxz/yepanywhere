@@ -235,6 +235,7 @@ export type ProcessEvent =
   | { type: "mode-change"; mode: PermissionMode; version: number }
   | { type: "session-id-changed"; oldSessionId: string; newSessionId: string }
   | { type: "error"; error: Error }
+  | { type: "idle-reap" }
   | { type: "complete" }
   | { type: "terminated"; reason: string; error?: Error }
   | {

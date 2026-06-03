@@ -1534,10 +1534,13 @@ describe("Supervisor", () => {
       });
     });
 
-    it("keeps idle sessions owned while the underlying process is still alive", async () => {
+    it("reaps idle sessions even when the underlying process is still alive", async () => {
       vi.useFakeTimers();
       try {
         let aborted = false;
+        const eventBus = new EventBus();
+        const events: BusEvent[] = [];
+        eventBus.subscribe((event) => events.push(event));
 
         const realSdk: RealClaudeSDKInterface = {
           startSession: async () => {
@@ -1568,6 +1571,7 @@ describe("Supervisor", () => {
         const supervisorWithAliveProcess = new Supervisor({
           realSdk,
           idleTimeoutMs: 100,
+          eventBus,
         });
 
         const process = await supervisorWithAliveProcess.startSession(
@@ -1586,12 +1590,82 @@ describe("Supervisor", () => {
           supervisorWithAliveProcess.getProcessForSession(
             "idle-alive-session-1",
           ),
-        ).toBe(process);
+        ).toBeUndefined();
+        expect(aborted).toBe(true);
 
-        const abortPromise = supervisorWithAliveProcess.abortProcess(
+        const abortedIndex = events.findIndex(
+          (event) =>
+            event.type === "session-aborted" &&
+            event.sessionId === "idle-alive-session-1",
+        );
+        const releasedIndex = events.findIndex(
+          (event) =>
+            event.type === "session-status-changed" &&
+            event.sessionId === "idle-alive-session-1" &&
+            event.ownership.owner === "none",
+        );
+        expect(abortedIndex).toBeGreaterThanOrEqual(0);
+        expect(releasedIndex).toBeGreaterThan(abortedIndex);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not terminate long-silent active sessions without liveness", async () => {
+      vi.useFakeTimers();
+      try {
+        let aborted = false;
+
+        const realSdk: RealClaudeSDKInterface = {
+          startSession: async () => {
+            async function* iterator() {
+              yield {
+                type: "system",
+                subtype: "init",
+                session_id: "silent-unknown-liveness-session",
+              };
+
+              while (!aborted) {
+                await new Promise((resolve) => setTimeout(resolve, 10));
+              }
+            }
+
+            return {
+              iterator: iterator(),
+              queue: new MessageQueue(),
+              abort: () => {
+                aborted = true;
+              },
+            };
+          },
+        };
+
+        const supervisorWithUnknownLiveness = new Supervisor({
+          realSdk,
+          idleTimeoutMs: 100,
+        });
+
+        const process = await supervisorWithUnknownLiveness.startSession(
+          "/tmp/test",
+          {
+            text: "Run quietly",
+          },
+        );
+
+        await vi.advanceTimersByTimeAsync(6 * 60 * 1000);
+
+        expect(process.state.type).toBe("in-turn");
+        expect(
+          supervisorWithUnknownLiveness.getProcessForSession(
+            "silent-unknown-liveness-session",
+          ),
+        ).toBe(process);
+        expect(aborted).toBe(false);
+
+        const abortPromise = supervisorWithUnknownLiveness.abortProcess(
           process.id,
         );
-        await vi.advanceTimersByTimeAsync(20);
+        await vi.advanceTimersByTimeAsync(5000);
         await expect(abortPromise).resolves.toBe(true);
       } finally {
         vi.useRealTimers();
