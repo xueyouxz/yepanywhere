@@ -1,7 +1,5 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { I18nProvider } from "../../../../i18n";
-import { setInlineImagesPreference } from "../../../../hooks/useInlineImages";
 import { readRenderer } from "../ReadRenderer";
 
 vi.mock("../../../../contexts/SchemaValidationContext", () => ({
@@ -27,7 +25,6 @@ if (!readRenderer.renderInteractiveSummary) {
 describe("ReadRenderer", () => {
   afterEach(() => {
     cleanup();
-    setInlineImagesPreference(true);
   });
 
   it("keeps normal text reads clickable", () => {
@@ -113,38 +110,5 @@ describe("ReadRenderer", () => {
       screen.queryByRole("button", { name: /useGlobalSessions\.ts/i }),
     ).toBeNull();
     expect(screen.getByText(/continues in Shell/)).toBeDefined();
-  });
-
-  it("replaces inline image results with a modal opener when disabled", () => {
-    setInlineImagesPreference(false);
-
-    render(
-      <I18nProvider>
-        {readRenderer.renderToolResult(
-          {
-            type: "image",
-            file: {
-              base64: "AAAA",
-              type: "image/png",
-              originalSize: 2048,
-              dimensions: {
-                originalWidth: 40,
-                originalHeight: 20,
-                displayWidth: 40,
-                displayHeight: 20,
-              },
-            },
-          } as never,
-          false,
-          renderContext,
-        )}
-      </I18nProvider>,
-    );
-
-    expect(screen.queryByRole("img")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: /File content/i }));
-
-    expect(screen.getByRole("img", { name: "File content" })).toBeDefined();
   });
 });

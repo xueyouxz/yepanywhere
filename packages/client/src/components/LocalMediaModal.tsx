@@ -626,6 +626,7 @@ export function useLocalResourceClick(
       const preview =
         toggle.closest(".local-media-link-group")?.nextElementSibling ?? null;
 
+      toggle.dataset.userToggled = "true";
       toggle.dataset.expanded = String(nextExpanded);
       toggle.setAttribute("aria-expanded", String(nextExpanded));
       toggle.setAttribute(
@@ -636,7 +637,11 @@ export function useLocalResourceClick(
         ? "Collapse inline preview"
         : "Expand inline preview";
       toggle.textContent = nextExpanded ? "-" : "+";
-      if (preview?.classList.contains("local-media-inline-preview")) {
+      if (
+        preview instanceof HTMLElement &&
+        preview.classList.contains("local-media-inline-preview")
+      ) {
+        preview.dataset.userToggled = "true";
         preview.setAttribute("data-expanded", String(nextExpanded));
       }
       return;
@@ -721,60 +726,91 @@ export function useLocalMediaInlinePreviews(
   rootRef: RefObject<HTMLElement | null>,
   refreshKey?: unknown,
 ) {
-  const { inlineImagesEnabled } = useInlineImages();
+  const { inlineImagesExpandedByDefault } = useInlineImages();
 
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
     const objectUrls = new Set<string>();
 
-    const isImageInlineControl = (element: HTMLElement) =>
-      element.getAttribute("data-media-type") !== "video";
+    const getInlineMediaType = (element: HTMLElement) => {
+      const mediaType = element.getAttribute("data-media-type");
+      return isLocalMediaType(mediaType) ? mediaType : "image";
+    };
 
-    const syncInlineImageControls = () => {
+    const isImageInlineControl = (element: HTMLElement) =>
+      getInlineMediaType(element) !== "video";
+
+    const setToggleExpanded = (
+      toggle: HTMLButtonElement,
+      expanded: boolean,
+      mediaType: LocalResourceMediaType,
+    ) => {
+      toggle.dataset.expanded = String(expanded);
+      toggle.setAttribute("aria-expanded", String(expanded));
+      toggle.setAttribute(
+        "aria-label",
+        `${expanded ? "Collapse" : "Expand"} ${mediaType}`,
+      );
+      toggle.title = expanded
+        ? "Collapse inline preview"
+        : "Expand inline preview";
+      toggle.textContent = expanded ? "-" : "+";
+    };
+
+    const getPreviewForToggle = (
+      toggle: HTMLButtonElement,
+    ): HTMLElement | null => {
+      const preview =
+        toggle.closest(".local-media-link-group")?.nextElementSibling ?? null;
+      return preview instanceof HTMLElement &&
+        preview.classList.contains("local-media-inline-preview")
+        ? preview
+        : null;
+    };
+
+    const syncDefaultExpansion = () => {
       const toggles = root.querySelectorAll<HTMLButtonElement>(
         "button.local-media-inline-toggle",
       );
       for (const toggle of toggles) {
         if (!isImageInlineControl(toggle)) continue;
-        toggle.hidden = !inlineImagesEnabled;
-        if (inlineImagesEnabled) {
-          toggle.removeAttribute("aria-hidden");
-          toggle.removeAttribute("tabindex");
-        } else {
-          toggle.setAttribute("aria-hidden", "true");
-          toggle.tabIndex = -1;
+        if (toggle.dataset.userToggled === "true") continue;
+        if (
+          toggle.dataset.defaultExpanded ===
+          String(inlineImagesExpandedByDefault)
+        ) {
+          continue;
         }
-      }
 
-      const previews = root.querySelectorAll<HTMLElement>(
-        ".local-media-inline-preview",
-      );
-      for (const preview of previews) {
-        if (!isImageInlineControl(preview)) continue;
-        preview.hidden = !inlineImagesEnabled;
-        if (!inlineImagesEnabled) {
-          preview.removeAttribute("data-inline-mounted");
-          if (preview.childNodes.length > 0) {
-            preview.replaceChildren();
-          }
+        const mediaType = getInlineMediaType(toggle);
+        setToggleExpanded(toggle, inlineImagesExpandedByDefault, mediaType);
+        toggle.dataset.defaultExpanded = String(inlineImagesExpandedByDefault);
+
+        const preview = getPreviewForToggle(toggle);
+        if (preview && preview.dataset.userToggled !== "true") {
+          preview.setAttribute(
+            "data-expanded",
+            String(inlineImagesExpandedByDefault),
+          );
+          preview.dataset.defaultExpanded = String(
+            inlineImagesExpandedByDefault,
+          );
         }
       }
     };
 
     const refresh = () => {
-      syncInlineImageControls();
+      syncDefaultExpansion();
       const elements = Array.from(
         root.querySelectorAll<HTMLElement>(".local-media-inline-preview"),
       );
       for (const element of elements) {
-        if (!inlineImagesEnabled && isImageInlineControl(element)) continue;
+        if (element.getAttribute("data-expanded") === "false") continue;
         if (element.dataset.inlineMounted === "true") continue;
         const path = element.getAttribute("data-media-path");
         if (!path) continue;
-        const mediaType =
-          (element.getAttribute("data-media-type") as "image" | "video") ??
-          "image";
+        const mediaType = getInlineMediaType(element);
         element.dataset.inlineMounted = "true";
         element.replaceChildren();
 
@@ -801,12 +837,17 @@ export function useLocalMediaInlinePreviews(
 
     refresh();
     const observer = new MutationObserver(refresh);
-    observer.observe(root, { childList: true, subtree: true });
+    observer.observe(root, {
+      attributeFilter: ["data-expanded"],
+      attributes: true,
+      childList: true,
+      subtree: true,
+    });
     return () => {
       observer.disconnect();
       for (const url of objectUrls) {
         URL.revokeObjectURL(url);
       }
     };
-  }, [inlineImagesEnabled, rootRef, refreshKey]);
+  }, [inlineImagesExpandedByDefault, rootRef, refreshKey]);
 }

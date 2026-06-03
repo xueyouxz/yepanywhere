@@ -57,7 +57,8 @@ export const UI_KEYS = {
   sessionToolbarVisibility: "yep-anywhere-session-toolbar-visibility",
   stableToolPreviewRendering:
     "yep-anywhere-stable-tool-preview-rendering-enabled",
-  inlineImagesEnabled: "yep-anywhere-inline-images-enabled",
+  // Preserve the first-shipped key; true now means previews start expanded.
+  inlineImagesExpandedByDefault: "yep-anywhere-inline-images-enabled",
   schemaValidation: "yep-anywhere-schema-validation",
   emulatorMaxFps: "yep-anywhere-emulator-max-fps",
   emulatorMaxWidth: "yep-anywhere-emulator-max-width",

@@ -1,7 +1,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { UI_KEYS } from "../lib/storageKeys";
 
-const DEFAULT_INLINE_IMAGES_ENABLED = false;
+const DEFAULT_INLINE_IMAGES_EXPANDED_BY_DEFAULT = false;
 
 const listeners = new Set<() => void>();
 
@@ -15,21 +15,21 @@ function getStorage(): Storage | null {
   return globalThis.localStorage;
 }
 
-function loadInlineImagesEnabled(): boolean {
-  const stored = getStorage()?.getItem(UI_KEYS.inlineImagesEnabled);
+function loadInlineImagesExpandedByDefault(): boolean {
+  const stored = getStorage()?.getItem(UI_KEYS.inlineImagesExpandedByDefault);
   if (stored === null || stored === undefined) {
-    return DEFAULT_INLINE_IMAGES_ENABLED;
+    return DEFAULT_INLINE_IMAGES_EXPANDED_BY_DEFAULT;
   }
   return stored === "true";
 }
 
-function saveInlineImagesEnabled(enabled: boolean): void {
+function saveInlineImagesExpandedByDefault(expanded: boolean): void {
   const storage = getStorage();
   if (!storage || typeof storage.setItem !== "function") return;
-  storage.setItem(UI_KEYS.inlineImagesEnabled, String(enabled));
+  storage.setItem(UI_KEYS.inlineImagesExpandedByDefault, String(expanded));
 }
 
-let currentInlineImagesEnabled = loadInlineImagesEnabled();
+let currentInlineImagesExpandedByDefault = loadInlineImagesExpandedByDefault();
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
@@ -37,7 +37,7 @@ function subscribe(listener: () => void) {
 }
 
 function getSnapshot() {
-  return currentInlineImagesEnabled;
+  return currentInlineImagesExpandedByDefault;
 }
 
 function emitChange() {
@@ -46,27 +46,30 @@ function emitChange() {
   }
 }
 
-export function setInlineImagesPreference(enabled: boolean): void {
-  currentInlineImagesEnabled = enabled;
-  saveInlineImagesEnabled(enabled);
+export function setInlineImagesExpandedPreference(expanded: boolean): void {
+  currentInlineImagesExpandedByDefault = expanded;
+  saveInlineImagesExpandedByDefault(expanded);
   emitChange();
 }
 
 export function useInlineImages() {
-  const inlineImagesEnabled = useSyncExternalStore(
+  const inlineImagesExpandedByDefault = useSyncExternalStore(
     subscribe,
     getSnapshot,
-    () => DEFAULT_INLINE_IMAGES_ENABLED,
+    () => DEFAULT_INLINE_IMAGES_EXPANDED_BY_DEFAULT,
   );
 
-  const setInlineImagesEnabled = useCallback(setInlineImagesPreference, []);
+  const setInlineImagesExpandedByDefault = useCallback(
+    setInlineImagesExpandedPreference,
+    [],
+  );
 
   return {
-    inlineImagesEnabled,
-    setInlineImagesEnabled,
+    inlineImagesExpandedByDefault,
+    setInlineImagesExpandedByDefault,
   };
 }
 
-export function getInlineImagesEnabled(): boolean {
-  return currentInlineImagesEnabled;
+export function getInlineImagesExpandedByDefault(): boolean {
+  return currentInlineImagesExpandedByDefault;
 }

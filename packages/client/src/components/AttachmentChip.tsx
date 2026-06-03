@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { planThumbnail, toUrlProjectId } from "@yep-anywhere/shared";
-import { useInlineImages } from "../hooks/useInlineImages";
 import { useRemoteImage } from "../hooks/useRemoteImage";
 import { loadCachedAttachmentPreview } from "../lib/attachmentPreviewCache";
 import { Modal } from "./ui/Modal";
@@ -83,7 +82,6 @@ function getUploadUrl(filePath: string): string | null {
 function useCachedAttachmentImage(
   attachmentId: string,
   path: string,
-  enabled: boolean,
   remotePreviewEnabled: boolean,
   previewUrl?: string,
 ): {
@@ -117,21 +115,6 @@ function useCachedAttachmentImage(
     setCacheFullUrl(null);
     setCachePreviewWidth(null);
     setCachePreviewHeight(null);
-
-    if (!enabled) {
-      setLoading(false);
-      setRemoteEnabled(false);
-      return () => {
-        if (previewUrlRef.current) {
-          URL.revokeObjectURL(previewUrlRef.current);
-          previewUrlRef.current = null;
-        }
-        if (fullUrlRef.current) {
-          URL.revokeObjectURL(fullUrlRef.current);
-          fullUrlRef.current = null;
-        }
-      };
-    }
 
     if (previewUrl) {
       setLoading(false);
@@ -196,16 +179,16 @@ function useCachedAttachmentImage(
         fullUrlRef.current = null;
       }
     };
-  }, [attachmentId, enabled, path, previewUrl, remotePath]);
+  }, [attachmentId, path, previewUrl, remotePath]);
 
   const remote = useRemoteImage(
     remotePath,
-    enabled && remotePreviewEnabled && remoteEnabled && !previewUrl,
+    remotePreviewEnabled && remoteEnabled && !previewUrl,
   );
 
   return {
-    previewUrl: enabled ? (previewUrl ?? cachePreviewUrl ?? remote.url) : null,
-    fullUrl: enabled ? (previewUrl ?? cacheFullUrl ?? remote.url) : null,
+    previewUrl: previewUrl ?? cachePreviewUrl ?? remote.url,
+    fullUrl: previewUrl ?? cacheFullUrl ?? remote.url,
     previewWidth: cachePreviewWidth,
     previewHeight: cachePreviewHeight,
     loading: loading || remote.loading,
@@ -225,10 +208,8 @@ export function AttachmentChip({
   onRemove,
 }: AttachmentChipProps) {
   const [showModal, setShowModal] = useState(false);
-  const { inlineImagesEnabled } = useInlineImages();
   const isImage = isImageMimeType(mimeType);
   const cacheKey = attachmentId ?? path;
-  const imageLoadEnabled = inlineImagesEnabled || showModal;
   const {
     previewUrl: imagePreviewUrl,
     fullUrl,
@@ -236,13 +217,7 @@ export function AttachmentChip({
     previewHeight,
     loading,
     error,
-  } = useCachedAttachmentImage(
-    cacheKey,
-    path,
-    imageLoadEnabled,
-    showModal,
-    previewUrl,
-  );
+  } = useCachedAttachmentImage(cacheKey, path, showModal, previewUrl);
   const previewPlan =
     previewWidth && previewHeight
       ? { width: previewWidth, height: previewHeight }
@@ -293,19 +268,17 @@ export function AttachmentChip({
           aria-label={`Open ${originalName}`}
           title={`${mimeType}, ${sizeLabel}`}
         >
-          {inlineImagesEnabled && (
-            <span
-              className="attachment-preview"
-              aria-hidden="true"
-              style={previewStyle}
-            >
-              {imagePreviewUrl ? (
-                <img src={imagePreviewUrl} alt="" />
-              ) : (
-                <span className="attachment-preview-fallback">📎</span>
-              )}
-            </span>
-          )}
+          <span
+            className="attachment-preview"
+            aria-hidden="true"
+            style={previewStyle}
+          >
+            {imagePreviewUrl ? (
+              <img src={imagePreviewUrl} alt="" />
+            ) : (
+              <span className="attachment-preview-fallback">📎</span>
+            )}
+          </span>
           <span className="attachment-name" title={path}>
             {formatAttachmentName(originalName)}
           </span>

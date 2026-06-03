@@ -8,7 +8,6 @@ import {
 import type { ZodError } from "zod";
 import { useOptionalSessionMetadata } from "../../../contexts/SessionMetadataContext";
 import { useSchemaValidationContext } from "../../../contexts/SchemaValidationContext";
-import { useInlineImages } from "../../../hooks/useInlineImages";
 import { makeDisplayPath } from "../../../lib/text";
 import { validateToolResult } from "../../../lib/validateToolResult";
 import { SchemaWarning } from "../../SchemaWarning";
@@ -304,7 +303,7 @@ function TextFileResult({
 /**
  * Image file result - renders as img tag
  */
-function ImageFilePreview({ file }: { file: ImageFile }) {
+function ImageFileResult({ file }: { file: ImageFile }) {
   const sizeKB = file.originalSize ? Math.round(file.originalSize / 1024) : 0;
   const { dimensions } = file;
   const hasDimensions =
@@ -330,41 +329,6 @@ function ImageFilePreview({ file }: { file: ImageFile }) {
         width={dimensions?.displayWidth}
         height={dimensions?.displayHeight}
       />
-    </div>
-  );
-}
-
-function ImageFileResult({
-  file,
-  fileName = "File content",
-  forceInline = false,
-}: {
-  file: ImageFile;
-  fileName?: string;
-  forceInline?: boolean;
-}) {
-  const { inlineImagesEnabled } = useInlineImages();
-  const [showModal, setShowModal] = useState(false);
-
-  if (forceInline || inlineImagesEnabled) {
-    return <ImageFilePreview file={file} />;
-  }
-
-  return (
-    <div className="read-image-result">
-      <button
-        type="button"
-        className="file-link-button"
-        onClick={() => setShowModal(true)}
-      >
-        {fileName}
-        <span className="file-line-count">(image)</span>
-      </button>
-      {showModal && (
-        <Modal title={fileName} onClose={() => setShowModal(false)}>
-          <ImageFilePreview file={file} />
-        </Modal>
-      )}
     </div>
   );
 }
@@ -599,7 +563,7 @@ function ReadInteractiveSummary({
         </button>
         {showModal && (
           <Modal title={fileName} onClose={() => setShowModal(false)}>
-            <ImageFileResult file={imageFile} fileName={fileName} forceInline />
+            <ImageFileResult file={imageFile} />
           </Modal>
         )}
       </>

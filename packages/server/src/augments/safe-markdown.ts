@@ -220,10 +220,16 @@ function renderLocalMediaLink(
   const escapedLabel = escapeHtml(label || getFileName(parsed.filePath));
   const mediaType = VIDEO_EXTENSIONS.has(ext) ? "video" : "image";
   const typeLabel = VIDEO_EXTENSIONS.has(ext) ? "video" : "image";
+  const defaultExpanded = mediaType === "video";
+  const toggleVerb = defaultExpanded ? "Collapse" : "Expand";
+  const toggleTitle = defaultExpanded
+    ? "Collapse inline preview"
+    : "Expand inline preview";
+  const toggleText = defaultExpanded ? "-" : "+";
   const resourceAttrs = localResourceDataAttributes("local-media", parsed, {
     mediaType,
   });
-  return `<span class="local-media-link-group"><button type="button" class="local-media-inline-toggle" data-media-path="${escapedPath}" data-media-type="${mediaType}" data-expanded="true" aria-label="Collapse ${mediaType}" aria-expanded="true" title="Collapse inline preview">-</button><a href="${apiUrl}" class="local-media-link" data-media-type="${mediaType}" ${resourceAttrs}>${escapedLabel}<span class="local-media-type">(${typeLabel})</span></a></span><span class="local-media-inline-preview" data-media-path="${escapedPath}" data-media-type="${mediaType}" data-expanded="true"></span>`;
+  return `<span class="local-media-link-group"><button type="button" class="local-media-inline-toggle" data-media-path="${escapedPath}" data-media-type="${mediaType}" data-expanded="${defaultExpanded}" aria-label="${toggleVerb} ${mediaType}" aria-expanded="${defaultExpanded}" title="${toggleTitle}">${toggleText}</button><a href="${apiUrl}" class="local-media-link" data-media-type="${mediaType}" ${resourceAttrs}>${escapedLabel}<span class="local-media-type">(${typeLabel})</span></a></span><span class="local-media-inline-preview" data-media-path="${escapedPath}" data-media-type="${mediaType}" data-expanded="${defaultExpanded}"></span>`;
 }
 
 function renderDirectLocalImage(path: string, altText: string, title?: string) {

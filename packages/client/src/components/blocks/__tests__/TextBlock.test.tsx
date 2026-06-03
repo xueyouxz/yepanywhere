@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionMetadataProvider } from "../../../contexts/SessionMetadataContext";
 import { I18nProvider } from "../../../i18n";
-import { setInlineImagesPreference } from "../../../hooks/useInlineImages";
+import { setInlineImagesExpandedPreference } from "../../../hooks/useInlineImages";
 import { type Connection, setGlobalConnection } from "../../../lib/connection";
 import { TextBlock } from "../TextBlock";
 
@@ -30,7 +30,7 @@ describe("TextBlock", () => {
   afterEach(() => {
     cleanup();
     setGlobalConnection(null);
-    setInlineImagesPreference(true);
+    setInlineImagesExpandedPreference(false);
     apiMocks.getFile.mockReset();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -74,7 +74,7 @@ describe("TextBlock", () => {
   });
 
   it("mounts local media previews inline beside rendered markdown links", async () => {
-    setInlineImagesPreference(true);
+    setInlineImagesExpandedPreference(true);
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(new Blob(["png"], { type: "image/png" }))),
@@ -101,8 +101,8 @@ describe("TextBlock", () => {
     ).toBeTruthy();
   });
 
-  it("keeps local media links modal-clickable when inline images are disabled", async () => {
-    setInlineImagesPreference(false);
+  it("keeps local media previews collapsed by default until expanded", async () => {
+    setInlineImagesExpandedPreference(false);
     const fetchMock = vi.fn(
       async () => new Response(new Blob(["png"], { type: "image/png" })),
     );
@@ -131,18 +131,29 @@ describe("TextBlock", () => {
       ".local-media-inline-preview",
     ) as HTMLElement | null;
 
-    expect(toggle?.hidden).toBe(true);
-    expect(preview?.hidden).toBe(true);
+    expect(toggle?.hidden).toBe(false);
+    expect(toggle?.textContent).toBe("+");
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    expect(preview?.hidden).toBe(false);
+    expect(preview?.getAttribute("data-expanded")).toBe("false");
     expect(
       container.querySelector(".local-media-inline-image-button"),
     ).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.click(toggle as HTMLButtonElement);
+
+    expect(toggle?.textContent).toBe("-");
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    expect(await screen.findByAltText("trajectory.png")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     const clickAllowed = fireEvent.click(
       screen.getByRole("link", { name: /trajectory/i }),
     );
 
     expect(clickAllowed).toBe(false);
+    expect(screen.getByRole("dialog").textContent).toContain("trajectory.png");
     expect(
       await screen.findByRole("img", { name: "trajectory.png" }),
     ).toBeTruthy();

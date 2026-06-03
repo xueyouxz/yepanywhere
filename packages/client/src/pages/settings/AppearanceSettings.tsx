@@ -40,7 +40,8 @@ export function AppearanceSettings() {
   const { streamingEnabled, setStreamingEnabled } = useStreamingEnabled();
   const { stableToolPreviewRendering, setStableToolPreviewRendering } =
     useStableToolPreviewRendering();
-  const { inlineImagesEnabled, setInlineImagesEnabled } = useInlineImages();
+  const { inlineImagesExpandedByDefault, setInlineImagesExpandedByDefault } =
+    useInlineImages();
   const { funPhrasesEnabled, setFunPhrasesEnabled } = useFunPhrases();
   const { floatingActionButtonEnabled, setFloatingActionButtonEnabled } =
     useFloatingActionButtonEnabled();
@@ -285,8 +286,10 @@ export function AppearanceSettings() {
           <label className="toggle-switch">
             <input
               type="checkbox"
-              checked={inlineImagesEnabled}
-              onChange={(e) => setInlineImagesEnabled(e.target.checked)}
+              checked={inlineImagesExpandedByDefault}
+              onChange={(e) =>
+                setInlineImagesExpandedByDefault(e.target.checked)
+              }
             />
             <span className="toggle-slider" />
           </label>
