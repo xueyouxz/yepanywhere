@@ -2970,20 +2970,31 @@ details[open] .collapsible__icon {
   width: 100%;
   min-width: 0;
   max-width: 100%;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
 }
 
 .grep-summary-pattern {
   display: grid;
   gap: 0.18rem;
   min-width: 0;
+  position: relative;
+}
+
+.grep-summary-pattern-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .grep-summary-pattern-clip {
-  display: block;
+  display: inline-block;
+  flex: 0 1 auto;
   min-width: 0;
-  width: 100%;
+  max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -3011,6 +3022,37 @@ details[open] .collapsible__icon {
   color: var(--text-secondary);
   overflow-wrap: anywhere;
   white-space: normal;
+}
+
+.grep-summary-pattern-measure {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  visibility: hidden;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.grep-summary-scope {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: baseline;
+  gap: 0.25rem;
+  min-width: 0;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.grep-summary-scope .file-path-link-name {
+  word-break: normal;
+}
+
+.grep-summary-scope-prefix {
+  color: var(--text-dimmed, var(--text-muted));
+}
+
+.grep-summary-scope-text {
+  color: var(--vscode-textLink-foreground, #3794ff);
 }
 
 .grep-summary-arrow {

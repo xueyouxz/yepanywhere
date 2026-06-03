@@ -263,8 +263,9 @@ describe("MessageList", () => {
       />,
     );
 
-    let thinkingBlocks =
-      container.querySelectorAll<HTMLDetailsElement>("details.thinking-block");
+    let thinkingBlocks = container.querySelectorAll<HTMLDetailsElement>(
+      "details.thinking-block",
+    );
     expect(thinkingBlocks).toHaveLength(1);
     expect(thinkingBlocks[0]?.open).toBe(true);
 
@@ -288,8 +289,9 @@ describe("MessageList", () => {
       />,
     );
 
-    thinkingBlocks =
-      container.querySelectorAll<HTMLDetailsElement>("details.thinking-block");
+    thinkingBlocks = container.querySelectorAll<HTMLDetailsElement>(
+      "details.thinking-block",
+    );
     expect(thinkingBlocks).toHaveLength(2);
     expect(thinkingBlocks[0]?.open).toBe(false);
     expect(thinkingBlocks[1]?.open).toBe(true);
@@ -315,8 +317,9 @@ describe("MessageList", () => {
       />,
     );
 
-    const thinkingBlocks =
-      container.querySelectorAll<HTMLDetailsElement>("details.thinking-block");
+    const thinkingBlocks = container.querySelectorAll<HTMLDetailsElement>(
+      "details.thinking-block",
+    );
     expect(thinkingBlocks).toHaveLength(2);
     expect(thinkingBlocks[0]?.open).toBe(false);
     expect(thinkingBlocks[1]?.open).toBe(true);
@@ -384,13 +387,17 @@ describe("MessageList", () => {
       />,
     );
 
-    expect(container.querySelectorAll("details.thinking-block")).toHaveLength(2);
+    expect(container.querySelectorAll("details.thinking-block")).toHaveLength(
+      2,
+    );
 
     fireEvent.click(
       screen.getByRole("button", { name: "Hide thinking transcript" }),
     );
 
-    expect(container.querySelectorAll("details.thinking-block")).toHaveLength(0);
+    expect(container.querySelectorAll("details.thinking-block")).toHaveLength(
+      0,
+    );
 
     fireEvent.click(
       screen.getByRole("button", {
@@ -398,7 +405,9 @@ describe("MessageList", () => {
       }),
     );
 
-    expect(container.querySelectorAll("details.thinking-block")).toHaveLength(2);
+    expect(container.querySelectorAll("details.thinking-block")).toHaveLength(
+      2,
+    );
   });
 
   it("marks queued messages that are blocked behind an edit", () => {
@@ -712,16 +721,15 @@ describe("MessageList", () => {
     );
 
     const userText = screen.getByText("user selected text").firstChild;
-    const assistantText = screen.getByText("assistant selected text").firstChild;
+    const assistantText = screen.getByText(
+      "assistant selected text",
+    ).firstChild;
     expect(userText).toBeTruthy();
     expect(assistantText).toBeTruthy();
 
     const range = document.createRange();
     range.setStart(userText as Node, 0);
-    range.setEnd(
-      assistantText as Node,
-      "assistant selected text".length,
-    );
+    range.setEnd(assistantText as Node, "assistant selected text".length);
     const selection = window.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
@@ -863,6 +871,110 @@ describe("MessageList", () => {
 
     expect(scrollTo).not.toHaveBeenCalled();
     expect(container.scrollTop).toBe(900);
+    composerTarget.remove();
+  });
+
+  it("does not follow visible thinking deltas until Follow is clicked", async () => {
+    const composerTarget = document.createElement("div");
+    composerTarget.className = "session-input-inner";
+    document.body.append(composerTarget);
+
+    let resizeCallback: ResizeObserverCallback | null = null;
+    class CapturingResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallback = callback;
+      }
+      observe() {}
+      disconnect() {}
+    }
+    Object.defineProperty(window, "ResizeObserver", {
+      configurable: true,
+      value: CapturingResizeObserver,
+    });
+
+    const { container, rerender } = render(
+      <MessageList
+        provider="codex"
+        isProcessing={true}
+        messages={[
+          codexThinkingMessage(
+            "thinking-1",
+            "Initial visible thought",
+            "2026-04-25T00:00:00.000Z",
+            true,
+          ),
+        ]}
+      />,
+    );
+    let scrollHeight = 1000;
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      value: 500,
+      writable: true,
+    });
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 500,
+    });
+    container.scrollTo = vi.fn((options: ScrollToOptions) => {
+      container.scrollTop = Number(options.top ?? 0);
+    }) as typeof container.scrollTo;
+
+    scrollHeight = 1400;
+    rerender(
+      <MessageList
+        provider="codex"
+        isProcessing={true}
+        messages={[
+          codexThinkingMessage(
+            "thinking-1",
+            "Initial visible thought\nA longer visible thinking delta",
+            "2026-04-25T00:00:00.000Z",
+            true,
+          ),
+        ]}
+      />,
+    );
+    act(() => {
+      resizeCallback?.([], {} as ResizeObserver);
+    });
+
+    expect(container.scrollTop).toBe(500);
+    const followButton = await screen.findByRole("button", {
+      name: "Follow latest session output",
+    });
+
+    fireEvent.click(followButton);
+    expect(container.scrollTop).toBe(900);
+
+    scrollHeight = 1600;
+    rerender(
+      <MessageList
+        provider="codex"
+        isProcessing={true}
+        messages={[
+          codexThinkingMessage(
+            "thinking-1",
+            [
+              "Initial visible thought",
+              "A longer visible thinking delta",
+              "Another visible thinking delta after Follow",
+            ].join("\n"),
+            "2026-04-25T00:00:00.000Z",
+            true,
+          ),
+        ]}
+      />,
+    );
+    act(() => {
+      resizeCallback?.([], {} as ResizeObserver);
+    });
+
+    expect(container.scrollTop).toBe(1100);
     composerTarget.remove();
   });
 

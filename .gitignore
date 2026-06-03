@@ -45,10 +45,14 @@ tasks/
 
 # Yep Anywhere local data
 .yep-anywhere/
+.artifacts/
 .attachments/
 /.codex
+.handoff*
+.snapshots/
 /last-session.md
 /AGENTS.local.md
+/ui-report/
 
 # Codex sample sessions (local dev data)
 codex-sample-sessions/

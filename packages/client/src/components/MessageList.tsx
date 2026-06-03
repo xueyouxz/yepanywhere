@@ -1,48 +1,55 @@
 import type { MarkdownAugment, UploadedFile } from "@yep-anywhere/shared";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
+import { useRelativeNow } from "../hooks/useRelativeNow";
+import { markReloadPerfPhase } from "../lib/diagnostics/reloadPerfProbe";
+import { copyMarkdownSelectionToClipboard } from "../lib/markdownSelectionCopy";
+import {
+  getLatestMessageTimestampMs,
+  isStaleTimestamp,
+  MESSAGE_STALE_THRESHOLD_MS,
+  parseTimestampMs,
+} from "../lib/messageAge";
+import { parseUserPrompt } from "../lib/parseUserPrompt";
 import {
   type ActiveToolApproval,
   preprocessMessages,
 } from "../lib/preprocessMessages";
-import { useRelativeNow } from "../hooks/useRelativeNow";
-import {
-  MESSAGE_STALE_THRESHOLD_MS,
-  getLatestMessageTimestampMs,
-  isStaleTimestamp,
-  parseTimestampMs,
-} from "../lib/messageAge";
-import { markReloadPerfPhase } from "../lib/diagnostics/reloadPerfProbe";
-import { parseUserPrompt } from "../lib/parseUserPrompt";
-import { copyMarkdownSelectionToClipboard } from "../lib/markdownSelectionCopy";
 import {
   dispatchSessionIsearchGuideState,
   type SessionIsearchScope,
 } from "../lib/sessionIsearchGuide";
 import { stabilizeRenderItems } from "../lib/stableRenderItems";
 import { UI_KEYS } from "../lib/storageKeys";
-import type { Message } from "../types";
-import type { ContentBlock } from "../types";
+import type { ContentBlock, Message } from "../types";
 import type { RenderItem } from "../types/renderItems";
-import { ProcessingIndicator } from "./ProcessingIndicator";
-import { MessageAge } from "./MessageAge";
 import { AttachmentChip } from "./AttachmentChip";
-import { RenderItemComponent } from "./RenderItemComponent";
-import {
-  ExploredToolGroup,
-  buildAssistantRenderSegments,
-} from "./blocks/ExploredToolGroup";
-import {
-  UserTurnNavigator,
-  type UserTurnNavAnchor,
-  type UserTurnNavMotionCue,
-  type UserTurnNavSearchState,
-} from "./UserTurnNavigator";
-import { CopyTextButton } from "./ui/CopyTextButton";
 import {
   BtwAsideTranscript,
   type BtwAsideTranscriptTurn,
 } from "./BtwAsidePane";
+import {
+  buildAssistantRenderSegments,
+  ExploredToolGroup,
+} from "./blocks/ExploredToolGroup";
+import { MessageAge } from "./MessageAge";
+import { ProcessingIndicator } from "./ProcessingIndicator";
+import { RenderItemComponent } from "./RenderItemComponent";
+import {
+  type UserTurnNavAnchor,
+  UserTurnNavigator,
+  type UserTurnNavMotionCue,
+  type UserTurnNavSearchState,
+} from "./UserTurnNavigator";
+import { CopyTextButton } from "./ui/CopyTextButton";
 
 /**
  * Groups consecutive assistant items (text, thinking, tool_call) into turns.
@@ -343,8 +350,10 @@ function isInteractiveScrollTarget(target: EventTarget | null): boolean {
 
 function loadSessionThinkingVisible(): boolean {
   try {
-    return globalThis.localStorage?.getItem(UI_KEYS.sessionThinkingVisible) !==
-      "false";
+    return (
+      globalThis.localStorage?.getItem(UI_KEYS.sessionThinkingVisible) !==
+      "false"
+    );
   } catch {
     return true;
   }
@@ -730,6 +739,10 @@ export const MessageList = memo(function MessageList({
     typeof setTimeout
   > | null>(null);
   const previousRenderItemsRef = useRef<RenderItem[]>([]);
+  const previousThinkingTextLengthsRef = useRef<Map<string, number> | null>(
+    null,
+  );
+  const thinkingDeltaFollowAllowedRef = useRef(false);
   const navMotionCueTokenRef = useRef(0);
   const navMotionCueClearTimerRef = useRef<ReturnType<
     typeof setTimeout
@@ -846,6 +859,7 @@ export const MessageList = memo(function MessageList({
   const stopFollowingForUserScroll = useCallback(
     (container: HTMLElement | null | undefined) => {
       shouldAutoScrollRef.current = false;
+      thinkingDeltaFollowAllowedRef.current = false;
       isProgrammaticScrollRef.current = false;
       if (programmaticScrollReleaseRef.current !== null) {
         clearTimeout(programmaticScrollReleaseRef.current);
@@ -862,8 +876,14 @@ export const MessageList = memo(function MessageList({
   );
 
   const forceScrollToCurrent = useCallback(
-    (delays: readonly number[] = FOLLOW_CATCH_UP_DELAYS_MS) => {
+    (
+      delays: readonly number[] = FOLLOW_CATCH_UP_DELAYS_MS,
+      options: { allowThinkingDeltas?: boolean } = {},
+    ) => {
       shouldAutoScrollRef.current = true;
+      if (options.allowThinkingDeltas) {
+        thinkingDeltaFollowAllowedRef.current = true;
+      }
       const container = containerRef.current?.parentElement;
       if (container) {
         scrollToBottom(container);
@@ -929,6 +949,43 @@ export const MessageList = memo(function MessageList({
         : renderItems.filter((item) => item.type !== "thinking"),
     [renderItems, thinkingItemsVisible],
   );
+  useLayoutEffect(() => {
+    const previousThinkingTextLengths = previousThinkingTextLengthsRef.current;
+    const nextThinkingTextLengths = new Map<string, number>();
+    let visibleThinkingDelta = false;
+
+    for (const item of renderItems) {
+      if (item.type !== "thinking") {
+        continue;
+      }
+      const nextLength = item.thinking.length;
+      nextThinkingTextLengths.set(item.id, nextLength);
+
+      if (previousThinkingTextLengths === null || !thinkingItemsVisible) {
+        continue;
+      }
+
+      const isExpanded =
+        thinkingExpansionOverrides[item.id] ??
+        item.id === autoExpandedThinkingItemId;
+      const previousLength = previousThinkingTextLengths.get(item.id) ?? 0;
+      if (isExpanded && nextLength > previousLength) {
+        visibleThinkingDelta = true;
+      }
+    }
+
+    previousThinkingTextLengthsRef.current = nextThinkingTextLengths;
+
+    if (visibleThinkingDelta && !thinkingDeltaFollowAllowedRef.current) {
+      stopFollowingForUserScroll(containerRef.current?.parentElement);
+    }
+  }, [
+    autoExpandedThinkingItemId,
+    renderItems,
+    stopFollowingForUserScroll,
+    thinkingExpansionOverrides,
+    thinkingItemsVisible,
+  ]);
   useEffect(() => {
     const previousStatuses = thinkingStatusesRef.current;
     const previousActiveThinkingId = activeThinkingItemIdRef.current;
@@ -1348,7 +1405,7 @@ export const MessageList = memo(function MessageList({
       }
       setThinkingExpansionOverrides((previous) => {
         const current =
-          previous[item.id] ?? (item.id === autoExpandedThinkingItemId);
+          previous[item.id] ?? item.id === autoExpandedThinkingItemId;
         return { ...previous, [item.id]: !current };
       });
     },
@@ -1435,7 +1492,9 @@ export const MessageList = memo(function MessageList({
   );
 
   const scrollToCurrent = useCallback(() => {
-    forceScrollToCurrent();
+    forceScrollToCurrent(FOLLOW_CATCH_UP_DELAYS_MS, {
+      allowThinkingDeltas: true,
+    });
   }, [forceScrollToCurrent]);
 
   const closeUserTurnSearch = useCallback((restoreScroll: boolean) => {
@@ -1637,6 +1696,7 @@ export const MessageList = memo(function MessageList({
 
     const atBottom = isNearScrollBottom(container);
     shouldAutoScrollRef.current = atBottom;
+    thinkingDeltaFollowAllowedRef.current = atBottom;
     if (!atBottom) {
       clearForcedCurrentScrollTimers();
     }

@@ -1,13 +1,22 @@
-import { type ReactNode, useEffect, useState } from "react";
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type { ZodError } from "zod";
 import { useSchemaValidationContext } from "../../../contexts/SchemaValidationContext";
 import { validateToolResult } from "../../../lib/validateToolResult";
 import { SchemaWarning } from "../../SchemaWarning";
+import { SessionFilePathLink } from "../../SessionFilePathLink";
 import { Modal } from "../../ui/Modal";
 import type { GrepInput, GrepMatch, GrepResult, ToolRenderer } from "./types";
 
 const MAX_FILES_COLLAPSED = 20;
 const MAX_LINES_COLLAPSED = 30;
+const GREP_PATTERN_ELLIPSIS = "...";
+const GREP_SUMMARY_SCOPE_GAP_PX = 12;
 
 function countGrepMatches(content: string | undefined): number {
   if (!content) {
@@ -186,7 +195,8 @@ function GrepMatchDrilldown({
  * Extract filename from path
  */
 function getFileName(filePath: string): string {
-  return filePath.split("/").pop() || filePath;
+  const trimmed = filePath.replace(/\/+$/, "");
+  return trimmed.split("/").pop() || filePath;
 }
 
 /**
@@ -410,13 +420,53 @@ function GrepToolResult({
   );
 }
 
-function getGrepUseSummary(input: GrepInput): string {
-  const parts = [input.pattern];
-  const scope = input.path || input.glob;
-  if (scope) {
-    parts.push(`in ${scope}`);
+function getGrepScope(
+  input: GrepInput,
+):
+  | { kind: "path"; value: string; label: string }
+  | { kind: "glob"; value: string; label: string }
+  | null {
+  if (input.path) {
+    return { kind: "path", value: input.path, label: getFileName(input.path) };
   }
-  return parts.filter(Boolean).join(" ");
+  if (input.glob) {
+    return { kind: "glob", value: input.glob, label: input.glob };
+  }
+  return null;
+}
+
+function getGrepUseSummary(input: GrepInput): string {
+  const scope = getGrepScope(input);
+  return scope ? `${input.pattern} in ${scope.value}` : input.pattern;
+}
+
+export function truncateGrepPatternForWidth(
+  pattern: string,
+  maxWidthPx: number,
+  measureText: (text: string) => number,
+): string {
+  if (maxWidthPx <= 0) {
+    return "";
+  }
+  if (measureText(pattern) <= maxWidthPx) {
+    return pattern;
+  }
+  if (measureText(GREP_PATTERN_ELLIPSIS) > maxWidthPx) {
+    return "";
+  }
+
+  let low = 0;
+  let high = pattern.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    const candidate = `${pattern.slice(0, mid)}${GREP_PATTERN_ELLIPSIS}`;
+    if (measureText(candidate) <= maxWidthPx) {
+      low = mid;
+    } else {
+      high = mid - 1;
+    }
+  }
+  return `${pattern.slice(0, low)}${GREP_PATTERN_ELLIPSIS}`;
 }
 
 function GrepSummaryPattern({
@@ -429,6 +479,68 @@ function GrepSummaryPattern({
   onToggle?: () => void;
 }) {
   const summary = getGrepUseSummary(input);
+  const scope = getGrepScope(input);
+  const rowRef = useRef<HTMLSpanElement | null>(null);
+  const scopeRef = useRef<HTMLSpanElement | null>(null);
+  const measureRef = useRef<HTMLSpanElement | null>(null);
+  const [displayPattern, setDisplayPattern] = useState(input.pattern);
+
+  useLayoutEffect(() => {
+    const updateDisplayPattern = () => {
+      if (expanded) {
+        setDisplayPattern(input.pattern);
+        return;
+      }
+
+      const row = rowRef.current;
+      const measure = measureRef.current;
+      if (!row || !measure) {
+        setDisplayPattern(input.pattern);
+        return;
+      }
+
+      const rowWidthPx = row.getBoundingClientRect().width;
+      if (rowWidthPx <= 0) {
+        setDisplayPattern(input.pattern);
+        return;
+      }
+      const scopeWidthPx = scopeRef.current?.getBoundingClientRect().width ?? 0;
+      const maxPatternWidthPx = Math.max(
+        0,
+        rowWidthPx -
+          scopeWidthPx -
+          (scopeWidthPx > 0 ? GREP_SUMMARY_SCOPE_GAP_PX : 0),
+      );
+      const measureText = (text: string) => {
+        measure.textContent = text;
+        return measure.getBoundingClientRect().width;
+      };
+      setDisplayPattern(
+        truncateGrepPatternForWidth(
+          input.pattern,
+          maxPatternWidthPx,
+          measureText,
+        ),
+      );
+    };
+
+    updateDisplayPattern();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateDisplayPattern);
+      return () => window.removeEventListener("resize", updateDisplayPattern);
+    }
+
+    const resizeObserver = new ResizeObserver(updateDisplayPattern);
+    if (rowRef.current) {
+      resizeObserver.observe(rowRef.current);
+    }
+    if (scopeRef.current) {
+      resizeObserver.observe(scopeRef.current);
+    }
+    return () => resizeObserver.disconnect();
+  }, [expanded, input.pattern, scope?.value]);
+
   const clipClassName = `grep-summary-pattern-clip${onToggle ? " grep-summary-pattern-action" : ""}`;
   const clipContent = onToggle ? (
     <button
@@ -443,17 +555,36 @@ function GrepSummaryPattern({
         onToggle();
       }}
     >
-      {summary}
+      {displayPattern}
     </button>
   ) : (
     <span className={clipClassName} title={summary}>
-      {summary}
+      {displayPattern}
     </span>
   );
 
   return (
     <span className={`grep-summary-pattern${expanded ? " is-expanded" : ""}`}>
-      {clipContent}
+      <span className="grep-summary-pattern-row" ref={rowRef}>
+        {clipContent}
+        {scope && (
+          <span className="grep-summary-scope" ref={scopeRef}>
+            <span className="grep-summary-scope-prefix">in</span>
+            {scope.kind === "path" ? (
+              <SessionFilePathLink
+                displayPath={scope.label}
+                filePath={scope.value}
+                showLineSuffix={false}
+              />
+            ) : (
+              <span className="grep-summary-scope-text" title={scope.value}>
+                {scope.label}
+              </span>
+            )}
+          </span>
+        )}
+      </span>
+      <span className="grep-summary-pattern-measure" ref={measureRef} />
       {expanded && <span className="grep-summary-pattern-full">{summary}</span>}
     </span>
   );

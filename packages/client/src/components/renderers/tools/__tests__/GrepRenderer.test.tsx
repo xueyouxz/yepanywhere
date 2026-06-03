@@ -1,7 +1,14 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SessionMetadataProvider } from "../../../../contexts/SessionMetadataContext";
 import { I18nProvider } from "../../../../i18n";
-import { grepRenderer } from "../GrepRenderer";
+import { grepRenderer, truncateGrepPatternForWidth } from "../GrepRenderer";
 
 vi.mock("../../../../contexts/SchemaValidationContext", () => ({
   useSchemaValidationContext: () => ({
@@ -120,4 +127,103 @@ describe("GrepRenderer", () => {
       container.querySelector(".grep-summary-pattern-full")?.textContent,
     ).toBe(longPattern);
   });
+
+  it("truncates grep patterns by measured width with ASCII ellipsis", () => {
+    const measureText = (text: string) => text.length;
+
+    expect(truncateGrepPatternForWidth("abcdef", 6, measureText)).toBe(
+      "abcdef",
+    );
+    expect(truncateGrepPatternForWidth("abcdef", 5, measureText)).toBe("ab...");
+    expect(truncateGrepPatternForWidth("abcdef", 2, measureText)).toBe("");
+  });
+
+  it("measures the live summary width before preserving the searched path", async () => {
+    const originalGetBoundingClientRect =
+      HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function getRect() {
+      const classList = this.classList;
+      if (classList.contains("grep-summary-pattern-row")) {
+        return rect({ width: 180 });
+      }
+      if (classList.contains("grep-summary-scope")) {
+        return rect({ width: 96 });
+      }
+      if (classList.contains("grep-summary-pattern-measure")) {
+        return rect({ width: (this.textContent ?? "").length * 8 });
+      }
+      return originalGetBoundingClientRect.call(this);
+    };
+
+    try {
+      const longPattern =
+        "targetIdentifierWithEnoughCharactersToForceMeasuredTruncation";
+      render(
+        <SessionMetadataProvider
+          projectId="project-1"
+          projectPath="/repo"
+          sessionId="session-1"
+        >
+          <I18nProvider>
+            {grepRenderer.renderInteractiveSummary?.(
+              {
+                output_mode: "content",
+                path: "/repo/packages/client/src/target-file.ts",
+                pattern: longPattern,
+              },
+              {
+                mode: "content",
+                filenames: [],
+                numFiles: 1,
+                content: "target-file.ts:3:targetIdentifier",
+                matches: [
+                  {
+                    filePath: "packages/client/src/target-file.ts",
+                    lineNumber: 3,
+                    text: "targetIdentifier",
+                  },
+                ],
+              },
+              false,
+              {
+                ...renderContext,
+                summaryExpanded: false,
+                toggleSummaryExpanded: vi.fn(),
+              },
+            )}
+          </I18nProvider>
+        </SessionMetadataProvider>,
+      );
+
+      const patternButton = screen.getByRole("button", {
+        name: "Show full grep pattern",
+      });
+      await waitFor(() => {
+        expect(patternButton.textContent).toMatch(/\.\.\.$/);
+      });
+
+      expect(patternButton.textContent).not.toContain("target-file.ts");
+      expect(
+        screen.getByRole("link", { name: "target-file.ts" }),
+      ).toBeDefined();
+      expect(screen.getByRole("button", { name: "1 match" })).toBeDefined();
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect =
+        originalGetBoundingClientRect;
+    }
+  });
 });
+
+function rect({ width }: { width: number }): DOMRect {
+  return {
+    bottom: 0,
+    height: 0,
+    left: 0,
+    right: width,
+    top: 0,
+    width,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
