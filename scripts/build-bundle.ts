@@ -21,12 +21,16 @@ const CLIENT_DIST = path.join(ROOT_DIR, "packages/client/dist");
 const SERVER_PACKAGE = path.join(ROOT_DIR, "packages/server");
 const SERVER_DIST = path.join(SERVER_PACKAGE, "dist");
 const SHARED_DIST = path.join(ROOT_DIR, "packages/shared/dist");
+const ROOT_PACKAGE_JSON = path.join(ROOT_DIR, "package.json");
 
 // Staging directory for npm publishing (keeps workspace package.json intact)
 const STAGING_DIR = path.join(ROOT_DIR, "dist/npm-package");
 
-// Version for npm package - set via NPM_VERSION env var (from git tag in CI) or fallback
-const NPM_VERSION = process.env.NPM_VERSION || "0.4.8";
+const rootPackageJson = JSON.parse(fs.readFileSync(ROOT_PACKAGE_JSON, "utf-8"));
+
+// Version for npm package: CI passes the release tag via NPM_VERSION; local
+// runs use the repository's declared package version.
+const NPM_VERSION = process.env.NPM_VERSION || rootPackageJson.version;
 
 interface StepResult {
   step: string;

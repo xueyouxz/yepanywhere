@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [site-v1.6.1] - 2026-06-03
+
+### Added
+- Stable tool preview rendering controls for the hosted remote client.
+- Inline media display controls for generated and local media previews.
+- Local-resource link handling for project-root files in remote/relay sessions.
+
+### Changed
+- Gate Codex live deltas on active subscriber demand and respect the streaming
+  preference for Codex delta rendering.
+- Apply collapsed-by-default inline media behavior to images and videos.
+
+### Fixed
+- Fix file preview modal scrolling and project-root local file opening.
+- Preserve hosted relay paths when opening local-resource links in a new tab.
+- Fix relay agent session links and remote project redirect routing.
+- Stabilize transcript rendering while appending streamed content.
+
 ## [site-v1.6.0] - 2026-06-01
 
 ### Added

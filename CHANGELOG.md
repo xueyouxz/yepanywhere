@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-06-03
+
+### Added
+- Stable tool preview rendering controls, enabled by default for a steadier
+  transcript layout.
+- Inline media display controls for generated and local media previews.
+- Shared local-resource link handling for project-root files and remote/relay
+  sessions.
+
+### Changed
+- Gate Codex live deltas on active subscriber demand and respect the streaming
+  preference for Codex delta rendering.
+- Stop persisting per-session permission mode locally.
+- Apply collapsed-by-default inline media behavior to images and videos.
+
+### Fixed
+- Fix file preview modal scrolling and project-root local file opening.
+- Preserve hosted relay paths when opening local-resource links in a new tab.
+- Fix relay agent session links and remote project redirect routing.
+- Stabilize transcript rendering while appending streamed content.
+- Stabilize Codex update prompt checks in CI.
+- Use the root package version when locally building npm bundles without CI tag
+  metadata.
+
 ## [0.5.0] - 2026-06-01
 
 ### Added
