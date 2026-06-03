@@ -4338,7 +4338,7 @@ a.sidebar-nav-item {
 .thinking-toolbar-menu {
   position: absolute;
   left: 0;
-  top: calc(100% + 0.35rem);
+  bottom: calc(100% + 0.35rem);
   z-index: 120;
   display: grid;
   gap: var(--space-3);
@@ -8370,6 +8370,15 @@ a.sidebar-nav-item {
   .message-input-left {
     flex: 0 1 auto;
     overflow: visible;
+  }
+
+  .thinking-toggle-button {
+    width: var(--composer-control-size);
+    padding: 0;
+  }
+
+  .thinking-toggle-label {
+    display: none;
   }
 
   .composer-status-ages {
