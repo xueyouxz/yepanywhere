@@ -51,6 +51,18 @@ describe("GET /version", () => {
     );
   });
 
+  it("normalizes only YA semver git describe versions", async () => {
+    const { normalizeGitDescribeVersion } = await importVersion();
+
+    expect(normalizeGitDescribeVersion("v0.5.1-38-ge2ac56ed\n")).toBe(
+      "0.5.1-38-ge2ac56ed",
+    );
+    expect(normalizeGitDescribeVersion("e2ac56ed\n")).toBe("e2ac56ed");
+    expect(normalizeGitDescribeVersion("site-v1.6.1-38-ge2ac56ed\n")).toBe(
+      "site-v1.6.1-38-ge2ac56ed",
+    );
+  });
+
   it("treats 204 as up-to-date", async () => {
     mockFetch(() => new Response(null, { status: 204 }));
 

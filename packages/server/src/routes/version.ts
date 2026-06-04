@@ -15,13 +15,19 @@ const execAsync = promisify(exec);
  * Get version from git describe (for dev mode)
  * Returns something like "v0.1.7" or "v0.1.7-3-g050bfd2" (3 commits after tag)
  */
+export function normalizeGitDescribeVersion(version: string): string | null {
+  const trimmed = version.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/^v(?=\d)/, "");
+}
+
 async function getGitVersion(): Promise<string | null> {
   try {
-    const { stdout } = await execAsync("git describe --tags --always", {
-      encoding: "utf-8",
-    });
-    const version = stdout.trim();
-    return version?.replace(/^v/, "") || null;
+    const { stdout } = await execAsync(
+      "git describe --tags --always --match 'v[0-9]*.[0-9]*.[0-9]*'",
+      { encoding: "utf-8" },
+    );
+    return normalizeGitDescribeVersion(stdout);
   } catch {
     return null;
   }

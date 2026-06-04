@@ -39,6 +39,25 @@ describe("remoteCompatibilityNotices", () => {
     );
   });
 
+  it("does not display unrelated site tags as server versions", () => {
+    const notices = getRemoteCompatibilityNotices({
+      currentVersion: "site-v1.6.1",
+      latestVersion: null,
+      updateAvailable: false,
+      installSource: "source",
+      resumeProtocolVersion: 2,
+      relayUsername: "dev-box",
+    });
+
+    expect(notices.map((notice) => notice.id)).toEqual([
+      "relay-resume-v3-grace",
+    ]);
+    expect(notices[0]?.versionSummary).toBe(
+      "Server version unknown; recommended v0.5.1+",
+    );
+    expect(notices[0]?.guidance).toContain("Source checkout detected");
+  });
+
   it("emits a blocking notice for pre-v2 relay resume protocol metadata", () => {
     const notices = getRemoteCompatibilityNotices({
       currentVersion: "0.4.29",

@@ -223,7 +223,9 @@ function buildVersionSummary(
   targetVersion: string,
   targetLabel: "recommended" | "latest" = "recommended",
 ): string {
-  const current = currentVersion ? formatVersion(currentVersion) : "unknown";
+  const current = parseSemver(currentVersion)
+    ? formatVersion(currentVersion ?? "")
+    : "version unknown";
   return `Server ${current}; ${targetLabel} ${targetVersion}`;
 }
 

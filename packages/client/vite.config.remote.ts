@@ -13,12 +13,15 @@ import { cspPlugin } from "./vite-plugin-csp";
 
 function getGitVersion(): string {
   try {
-    return execSync("git describe --tags --always", {
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-    })
+    return execSync(
+      "git describe --tags --always --match 'v[0-9]*.[0-9]*.[0-9]*'",
+      {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    )
       .trim()
-      .replace(/^v/, "");
+      .replace(/^v(?=\d)/, "");
   } catch {
     return "dev";
   }
