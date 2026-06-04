@@ -204,6 +204,24 @@ function getFallbackSummary(item: ToolCallItem): string {
   );
 }
 
+export function getExploredEntrySearchPreview(item: ToolCallItem): string {
+  const summary = getFallbackSummary(item);
+  return summary
+    ? `${getDisplayLabel(item.toolName)}: ${summary}`
+    : getDisplayLabel(item.toolName);
+}
+
+export function getExploredEntrySearchText(item: ToolCallItem): string {
+  const parts = [
+    getDisplayLabel(item.toolName),
+    getFallbackSummary(item),
+    getToolSummary(item.toolName, item.toolInput, item.toolResult, item.status),
+  ];
+  return Array.from(
+    new Set(parts.map((part) => part.trim()).filter(Boolean)),
+  ).join("\n");
+}
+
 function statusGlyph(status: ToolCallItem["status"]): string {
   switch (status) {
     case "pending":

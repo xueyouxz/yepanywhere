@@ -1,6 +1,8 @@
 import {
+  type CSSProperties,
   memo,
   type ReactElement,
+  type MouseEvent as ReactMouseEvent,
   type RefObject,
   useCallback,
   useEffect,
@@ -13,10 +15,12 @@ export interface UserTurnNavAnchor {
   id: string;
   preview: string;
   searchText?: string;
+  targetId?: string;
 }
 
 export interface UserTurnNavSearchState {
   activeId: string | null;
+  caseSensitive?: boolean;
   matchIds: ReadonlySet<string>;
   preview: string | null;
   previewsById: ReadonlyMap<string, string>;
@@ -34,6 +38,7 @@ interface Props {
   messageListRef: RefObject<HTMLDivElement | null>;
   motionCue?: UserTurnNavMotionCue | null;
   onNavigateStart?: () => void;
+  onSearchMatchSelect?: (id: string, targetId: string) => void;
   onTrimAnchor?: (id: string) => void;
   searchState?: UserTurnNavSearchState | null;
 }
@@ -51,16 +56,30 @@ interface UserTurnNavLayout {
   thumbHeightPct: number;
   activeId: string;
   markers: UserTurnMarker[];
+  previewMaxWidthPx: number;
   signature: string;
 }
 
 interface UserTurnPreviewLabel {
   id: string;
+  targetId: string;
   topPx: number;
   text: string;
   compact: boolean;
   short: boolean;
   active: boolean;
+  expanded: boolean;
+  pinned: boolean;
+}
+
+interface PreviewFacsimileLine {
+  text: string;
+  mono: boolean;
+}
+
+interface PreviewFacsimile {
+  tags: string[];
+  lines: PreviewFacsimileLine[];
 }
 
 const MIN_NAV_ANCHORS = 2;
@@ -70,7 +89,7 @@ const PREVIEW_VERTICAL_MARGIN_PX = 22;
 const PREVIEW_FULL_MIN_GAP_PX = 62;
 const PREVIEW_COMPACT_MIN_GAP_PX = 24;
 const NAV_REVEAL_HOTZONE_PX = 64;
-const MAX_SEARCH_PREVIEW_LABELS = 10;
+const MAX_SEARCH_PREVIEW_LABELS = 32;
 const SHORT_PREVIEW_MAX_CHARS = 48;
 const MOTION_CUE_CLEAR_MS = 760;
 
@@ -101,23 +120,38 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function isShortSingleLinePreview(text: string): boolean {
-  return text.length <= SHORT_PREVIEW_MAX_CHARS && !text.includes("\n");
+function normalizePreviewText(text: string): string {
+  return text.replace(/\r\n?/g, "\n").replace(/\\n/g, "\n");
 }
 
-function renderHighlightedText(text: string, query: string) {
-  const normalizedQuery = query.toLowerCase().replace(/\s+/g, " ").trim();
+function isShortSingleLinePreview(text: string): boolean {
+  const normalizedText = normalizePreviewText(text);
+  return (
+    normalizedText.length <= SHORT_PREVIEW_MAX_CHARS &&
+    !normalizedText.includes("\n")
+  );
+}
+
+function renderHighlightedText(
+  text: string,
+  query: string,
+  caseSensitive = false,
+) {
+  const normalizedQuery = query.replace(/\s+/g, " ").trim();
   if (!normalizedQuery) {
     return text;
   }
 
-  const lowerText = text.toLowerCase();
+  const searchableText = caseSensitive ? text : text.toLowerCase();
+  const searchableQuery = caseSensitive
+    ? normalizedQuery
+    : normalizedQuery.toLowerCase();
   const parts: Array<string | ReactElement> = [];
   let cursor = 0;
   let key = 0;
 
   while (cursor < text.length) {
-    const index = lowerText.indexOf(normalizedQuery, cursor);
+    const index = searchableText.indexOf(searchableQuery, cursor);
     if (index === -1) {
       break;
     }
@@ -140,6 +174,121 @@ function renderHighlightedText(text: string, query: string) {
     parts.push(text.slice(cursor));
   }
   return parts;
+}
+
+function isPreviewLineMono(line: string): boolean {
+  return (
+    /(^|\s)(cat|find|git|grep|pnpm|rg|sed|tsx?|vitest)\b/.test(line) ||
+    /[/\\][\w.-]+/.test(line) ||
+    /[`{}[\]()<>=|;]/.test(line)
+  );
+}
+
+function splitPreviewFacsimile(text: string): PreviewFacsimile {
+  const normalizedText = normalizePreviewText(text);
+  const [firstLine = "", ...remainingLines] = normalizedText.split("\n");
+  const separatorIndex = firstLine.indexOf(":");
+  const tags =
+    separatorIndex > 0 && separatorIndex <= 80
+      ? firstLine
+          .slice(0, separatorIndex)
+          .split(/\s+\/\s+|\s+›\s+/)
+          .map((tag) => tag.trim())
+          .filter(Boolean)
+      : [];
+  const firstBodyLine =
+    tags.length > 0
+      ? firstLine.slice(separatorIndex + 1).trimStart()
+      : firstLine;
+  const bodyLines = [firstBodyLine, ...remainingLines]
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const lines = (bodyLines.length > 0 ? bodyLines : [normalizedText])
+    .slice(0, 6)
+    .map((line) => ({
+      text: line,
+      mono: isPreviewLineMono(line),
+    }));
+
+  return {
+    tags,
+    lines,
+  };
+}
+
+function renderFacsimileLine(
+  line: PreviewFacsimileLine,
+  index: number,
+  searchState: UserTurnNavSearchState,
+) {
+  return (
+    <span
+      key={`${index}:${line.text}`}
+      className={[
+        "user-turn-nav-preview-facsimile-line",
+        line.mono ? "is-mono" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      {renderHighlightedText(
+        line.text,
+        searchState.query,
+        searchState.caseSensitive,
+      )}
+    </span>
+  );
+}
+
+function renderPreviewFacsimile(
+  label: UserTurnPreviewLabel,
+  searchState: UserTurnNavSearchState,
+) {
+  const facsimile = splitPreviewFacsimile(label.text);
+  return (
+    <span className="user-turn-nav-preview-facsimile">
+      <span className="user-turn-nav-preview-facsimile-rail" aria-hidden />
+      <span className="user-turn-nav-preview-facsimile-content">
+        {facsimile.tags.length > 0 && (
+          <span className="user-turn-nav-preview-facsimile-tags">
+            {facsimile.tags.map((tag) => (
+              <span key={tag} className="user-turn-nav-preview-facsimile-tag">
+                {renderHighlightedText(
+                  tag,
+                  searchState.query,
+                  searchState.caseSensitive,
+                )}
+              </span>
+            ))}
+          </span>
+        )}
+        <span className="user-turn-nav-preview-facsimile-lines">
+          {facsimile.lines.map((line, index) =>
+            renderFacsimileLine(line, index, searchState),
+          )}
+        </span>
+      </span>
+    </span>
+  );
+}
+
+function renderPreviewLabelText(
+  label: UserTurnPreviewLabel,
+  searchState: UserTurnNavSearchState | null | undefined,
+) {
+  if (!searchState) {
+    return label.text;
+  }
+
+  if (!label.expanded) {
+    return renderHighlightedText(
+      normalizePreviewText(label.text),
+      searchState.query,
+      searchState.caseSensitive,
+    );
+  }
+
+  return renderPreviewFacsimile(label, searchState);
 }
 
 function findActiveId(
@@ -178,7 +327,12 @@ function getAnimationFrame(): {
 
 function buildSignature(layout: Omit<UserTurnNavLayout, "signature">): string {
   const markerSignature = layout.markers
-    .map((marker) => `${marker.id}:${Math.round(marker.topPct * 100)}`)
+    .map(
+      (marker) =>
+        `${marker.id}:${marker.targetId ?? marker.id}:${Math.round(
+          marker.topPct * 100,
+        )}`,
+    )
     .join("|");
   return [
     Math.round(layout.top),
@@ -187,6 +341,7 @@ function buildSignature(layout: Omit<UserTurnNavLayout, "signature">): string {
     Math.round(layout.thumbTopPct * 100),
     Math.round(layout.thumbHeightPct * 100),
     layout.activeId,
+    Math.round(layout.previewMaxWidthPx),
     markerSignature,
   ].join(":");
 }
@@ -224,7 +379,7 @@ function measureLayout(
   }
 
   for (const anchor of anchors) {
-    const row = rowsById.get(anchor.id);
+    const row = rowsById.get(anchor.targetId ?? anchor.id);
     if (!row) {
       continue;
     }
@@ -244,18 +399,21 @@ function measureLayout(
 
   const top = scrollRect.top + NAV_VERTICAL_INSET_PX;
   const height = Math.max(scrollRect.height - NAV_VERTICAL_INSET_PX * 2, 1);
+  const right =
+    window.innerWidth -
+    scrollRect.right +
+    NAV_EDGE_INSET_PX +
+    (scrollContainer.offsetWidth - scrollContainer.clientWidth);
+  const previewMaxWidthPx = clamp(window.innerWidth - right - 42, 160, 620);
   const layoutWithoutSignature = {
     top,
-    right:
-      window.innerWidth -
-      scrollRect.right +
-      NAV_EDGE_INSET_PX +
-      (scrollContainer.offsetWidth - scrollContainer.clientWidth),
+    right,
     height,
     thumbTopPct: clamp(scrollContainer.scrollTop / scrollHeight, 0, 1),
     thumbHeightPct: clamp(clientHeight / scrollHeight, 0.04, 1),
     activeId: findActiveId(markers, scrollContainer.scrollTop, clientHeight),
     markers,
+    previewMaxWidthPx,
   };
   return {
     ...layoutWithoutSignature,
@@ -294,12 +452,12 @@ function spreadPreviewLabels(
     return labels;
   }
 
-  const minTop = PREVIEW_VERTICAL_MARGIN_PX;
-  const maxTop = Math.max(minTop, layoutHeight - PREVIEW_VERTICAL_MARGIN_PX);
-  const availableHeight = Math.max(1, maxTop - minTop);
   const preferredGap = compact
     ? PREVIEW_COMPACT_MIN_GAP_PX
     : PREVIEW_FULL_MIN_GAP_PX;
+  const minTop = PREVIEW_VERTICAL_MARGIN_PX;
+  const maxTop = Math.max(minTop, layoutHeight - PREVIEW_VERTICAL_MARGIN_PX);
+  const availableHeight = Math.max(1, maxTop - minTop);
   const minGap = Math.min(preferredGap, availableHeight / (labels.length - 1));
   const placed = labels.map((label) => ({ ...label }));
 
@@ -373,11 +531,15 @@ export const UserTurnNavigator = memo(function UserTurnNavigator({
   messageListRef,
   motionCue,
   onNavigateStart,
+  onSearchMatchSelect,
   onTrimAnchor,
   searchState,
 }: Props) {
   const [layout, setLayout] = useState<UserTurnNavLayout | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [previewWindowAnchorId, setPreviewWindowAnchorId] = useState<
+    string | null
+  >(null);
   const [railActive, setRailActive] = useState(false);
   const [internalMotionCue, setInternalMotionCue] =
     useState<UserTurnNavMotionCue | null>(null);
@@ -388,6 +550,7 @@ export const UserTurnNavigator = memo(function UserTurnNavigator({
   const motionCueClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const visiblePreviewIdsRef = useRef<string[]>([]);
   const activeMotionCue = motionCue ?? internalMotionCue;
   const minAnchorCount = searchState ? 1 : MIN_NAV_ANCHORS;
   const shouldMeasure = railActive || !!searchState || !!activeMotionCue;
@@ -571,10 +734,10 @@ export const UserTurnNavigator = memo(function UserTurnNavigator({
   }, []);
 
   const handleJump = useCallback(
-    (id: string) => {
+    (id: string, targetId = id) => {
       const messageList = messageListRef.current;
       const scrollContainer = getScrollContainer(messageList);
-      const row = findRenderRow(messageList, id);
+      const row = findRenderRow(messageList, targetId);
       if (!scrollContainer || !row) return;
 
       onNavigateStart?.();
@@ -596,6 +759,42 @@ export const UserTurnNavigator = memo(function UserTurnNavigator({
       showInternalMotionCue,
     ],
   );
+  const handleAnchorClick = useCallback(
+    (id: string, targetId = id) => {
+      if (searchState) {
+        onSearchMatchSelect?.(id, targetId);
+      }
+      handleJump(id, targetId);
+    },
+    [handleJump, onSearchMatchSelect, searchState],
+  );
+  const keepSearchFocusOnMouseDown = useCallback(
+    (event: ReactMouseEvent) => {
+      if (searchState) {
+        event.preventDefault();
+      }
+    },
+    [searchState],
+  );
+  const focusPreview = useCallback((id: string) => {
+    setPreviewId((current) => (current === id ? current : id));
+    setPreviewWindowAnchorId((current) => {
+      const visibleIds = visiblePreviewIdsRef.current;
+      const visibleIndex = visibleIds.indexOf(id);
+      const atVisibleEdge =
+        visibleIndex === 0 || visibleIndex === visibleIds.length - 1;
+      return visibleIndex === -1 || atVisibleEdge ? id : current;
+    });
+  }, []);
+  const clearPreview = useCallback(() => {
+    setPreviewId(null);
+    setPreviewWindowAnchorId(null);
+  }, []);
+
+  useEffect(() => {
+    setPreviewId(null);
+    setPreviewWindowAnchorId(null);
+  }, [searchState?.activeId]);
 
   const previewLabels = useMemo<UserTurnPreviewLabel[]>(() => {
     if (!layout) {
@@ -608,11 +807,19 @@ export const UserTurnNavigator = memo(function UserTurnNavigator({
       const matchedMarkers = layout.markers.filter((marker) =>
         searchMatchIds.has(marker.id),
       );
+      const windowAnchorId =
+        previewWindowAnchorId && searchMatchIds.has(previewWindowAnchorId)
+          ? previewWindowAnchorId
+          : searchState.activeId;
       const previewMarkers = getSearchPreviewWindow(
         matchedMarkers,
-        searchState.activeId,
+        windowAnchorId,
         layout.height,
       );
+      const expandedId =
+        previewId && searchMatchIds.has(previewId)
+          ? previewId
+          : searchState.activeId;
       const rawTops = previewMarkers.map((marker) =>
         clamp(
           marker.topPct * layout.height,
@@ -632,17 +839,22 @@ export const UserTurnNavigator = memo(function UserTurnNavigator({
               top - (rawTops[index - 1] ?? top) < PREVIEW_FULL_MIN_GAP_PX,
           ));
       const labels = previewMarkers.map((marker, index) => {
+        const rawTopPx = rawTops[index] ?? PREVIEW_VERTICAL_MARGIN_PX;
         const text =
           searchState.previewsById.get(marker.id) ??
           (marker.id === searchState.activeId ? searchState.preview : null) ??
           marker.preview;
+        const expanded = marker.id === expandedId;
         return {
           id: marker.id,
-          topPx: rawTops[index] ?? PREVIEW_VERTICAL_MARGIN_PX,
+          targetId: marker.targetId ?? marker.id,
+          topPx: rawTopPx,
           text,
           compact: crowded,
           short: !crowded && isShortSingleLinePreview(text),
           active: marker.id === searchState.activeId,
+          expanded,
+          pinned: expanded && marker.id === previewId,
         };
       });
       return spreadPreviewLabels(labels, layout.height, crowded);
@@ -658,6 +870,7 @@ export const UserTurnNavigator = memo(function UserTurnNavigator({
     return [
       {
         id: hoverPreviewMarker.id,
+        targetId: hoverPreviewMarker.targetId ?? hoverPreviewMarker.id,
         topPx: clamp(
           hoverPreviewMarker.topPct * layout.height,
           PREVIEW_VERTICAL_MARGIN_PX,
@@ -670,9 +883,15 @@ export const UserTurnNavigator = memo(function UserTurnNavigator({
         compact: false,
         short: isShortSingleLinePreview(hoverPreviewMarker.preview),
         active: false,
+        expanded: false,
+        pinned: false,
       },
     ];
-  }, [layout, previewId, searchState]);
+  }, [layout, previewId, previewWindowAnchorId, searchState]);
+
+  useEffect(() => {
+    visiblePreviewIdsRef.current = previewLabels.map((label) => label.id);
+  }, [previewLabels]);
 
   if (!layout) {
     return null;
@@ -691,12 +910,15 @@ export const UserTurnNavigator = memo(function UserTurnNavigator({
     <nav
       className="user-turn-nav"
       aria-label="Turn navigation"
-      style={{
-        top: `${layout.top}px`,
-        right: `${layout.right}px`,
-        height: `${layout.height}px`,
-      }}
-      onMouseLeave={() => setPreviewId(null)}
+      style={
+        {
+          top: `${layout.top}px`,
+          right: `${layout.right}px`,
+          height: `${layout.height}px`,
+          "--user-turn-nav-preview-max-width": `${layout.previewMaxWidthPx}px`,
+        } as CSSProperties
+      }
+      onMouseLeave={clearPreview}
     >
       <div className="user-turn-nav-track">
         <div
@@ -736,11 +958,13 @@ export const UserTurnNavigator = memo(function UserTurnNavigator({
               style={{ top: `${marker.topPct * 100}%` }}
               aria-label={`Jump to turn: ${marker.preview}`}
               title={marker.preview}
-              onClick={() => handleJump(marker.id)}
-              onFocus={() => setPreviewId(marker.id)}
-              onBlur={() => setPreviewId(null)}
-              onPointerEnter={() => setPreviewId(marker.id)}
-              onPointerDown={() => setPreviewId(marker.id)}
+              onClick={() => handleAnchorClick(marker.id, marker.targetId)}
+              onFocus={() => focusPreview(marker.id)}
+              onBlur={clearPreview}
+              onMouseDown={keepSearchFocusOnMouseDown}
+              onPointerEnter={() => focusPreview(marker.id)}
+              onPointerMove={() => focusPreview(marker.id)}
+              onPointerDown={() => focusPreview(marker.id)}
             >
               <span className="user-turn-nav-marker-line" />
             </button>
@@ -752,10 +976,11 @@ export const UserTurnNavigator = memo(function UserTurnNavigator({
                 aria-label={`Load client transcript from turn: ${marker.preview}`}
                 title="Load client transcript from this turn"
                 onClick={() => onTrimAnchor(marker.id)}
-                onFocus={() => setPreviewId(marker.id)}
-                onBlur={() => setPreviewId(null)}
-                onPointerEnter={() => setPreviewId(marker.id)}
-                onPointerDown={() => setPreviewId(marker.id)}
+                onFocus={() => focusPreview(marker.id)}
+                onBlur={clearPreview}
+                onPointerEnter={() => focusPreview(marker.id)}
+                onPointerMove={() => focusPreview(marker.id)}
+                onPointerDown={() => focusPreview(marker.id)}
               >
                 <span className="user-turn-nav-trim-dot" />
               </button>
@@ -777,14 +1002,23 @@ export const UserTurnNavigator = memo(function UserTurnNavigator({
               label.compact ? "is-compact" : "",
               label.short ? "is-short" : "",
               label.active ? "is-search-active" : "",
+              label.expanded ? "is-expanded" : "",
+              label.pinned ? "is-pinned-expanded" : "",
             ]
               .filter(Boolean)
               .join(" ")}
             style={{ top: `${label.topPx}px` }}
-            onClick={() => handleJump(label.id)}
+            aria-label={label.text}
+            title={label.text}
+            onClick={() => handleAnchorClick(label.id, label.targetId)}
+            onMouseDown={keepSearchFocusOnMouseDown}
+            onFocus={() => focusPreview(label.id)}
+            onBlur={clearPreview}
+            onPointerEnter={() => focusPreview(label.id)}
+            onPointerMove={() => focusPreview(label.id)}
           >
-            {hasSearchMatches && searchState
-              ? renderHighlightedText(label.text, searchState.query)
+            {hasSearchMatches
+              ? renderPreviewLabelText(label, searchState)
               : label.text}
           </button>
         ))}

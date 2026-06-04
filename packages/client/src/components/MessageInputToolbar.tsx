@@ -67,6 +67,29 @@ import { SpeechControlMenu } from "./SpeechControlMenu";
 import { RenderModeGlyph } from "./ui/RenderModeGlyph";
 import { VoiceInputButton, type VoiceInputButtonRef } from "./VoiceInputButton";
 
+function getIsearchPreviousKeys(scope: SessionIsearchScope): string[] {
+  if (scope === "full") {
+    return ["Ctrl", "Alt", "S"];
+  }
+  if (scope === "all") {
+    return ["Ctrl", "S"];
+  }
+  return ["Ctrl", "R"];
+}
+
+function getIsearchAlternateRows(scope: SessionIsearchScope): Array<{
+  keys: string[];
+  label: string;
+}> {
+  return [
+    ...(scope === "user" ? [] : [{ keys: ["Ctrl", "R"], label: "User turns" }]),
+    ...(scope === "all" ? [] : [{ keys: ["Ctrl", "S"], label: "All turns" }]),
+    ...(scope === "full"
+      ? []
+      : [{ keys: ["Ctrl", "Alt", "S"], label: "Full session" }]),
+  ];
+}
+
 export interface MessageInputToolbarProps {
   // Mode selector
   mode?: PermissionMode;
@@ -716,8 +739,7 @@ export function MessageInputToolbarView({
   shortcutsControl,
   actionsControl,
 }: MessageInputToolbarViewProps) {
-  const shortcutsPopoverOpen =
-    shortcutsControl.open || shortcutsControl.isearchScope !== null;
+  const shortcutsPopoverOpen = shortcutsControl.open;
   const showToolbarStatus =
     visibility.sessionStatus && (statusControl?.showToolbarStatus ?? false);
   const showLivenessChip = statusControl?.showLivenessChip ?? false;
@@ -984,9 +1006,7 @@ export function MessageInputToolbarView({
           <div
             className="session-shortcuts-help"
             onMouseLeave={() => {
-              if (shortcutsControl.isearchScope === null) {
-                shortcutsControl.setOpen(false);
-              }
+              shortcutsControl.setOpen(false);
             }}
           >
             <button
@@ -998,7 +1018,6 @@ export function MessageInputToolbarView({
               onFocus={() => shortcutsControl.setOpen(true)}
               onBlur={(event) => {
                 if (
-                  shortcutsControl.isearchScope === null &&
                   !event.currentTarget.parentElement?.contains(
                     event.relatedTarget as Node | null,
                   )
@@ -1023,10 +1042,11 @@ export function MessageInputToolbarView({
                   <>
                     <div className="session-shortcuts-row">
                       <span className="session-shortcuts-keys">
-                        <kbd>Ctrl</kbd>
-                        <kbd>
-                          {shortcutsControl.isearchScope === "all" ? "S" : "R"}
-                        </kbd>
+                        {getIsearchPreviousKeys(
+                          shortcutsControl.isearchScope,
+                        ).map((key) => (
+                          <kbd key={key}>{key}</kbd>
+                        ))}
                         {shortcutsControl.isearchScope === "user" && (
                           <>
                             <span>or</span>
@@ -1046,6 +1066,17 @@ export function MessageInputToolbarView({
                     </div>
                     <div className="session-shortcuts-row">
                       <span className="session-shortcuts-keys">
+                        <kbd>↑</kbd>
+                        <kbd>↓</kbd>
+                      </span>
+                      <span>Previous / next match</span>
+                    </div>
+                    <div className="session-shortcuts-row">
+                      <span className="session-shortcuts-keys">Click</span>
+                      <span>Match preview / rail mark jumps</span>
+                    </div>
+                    <div className="session-shortcuts-row">
+                      <span className="session-shortcuts-keys">
                         <kbd>Esc</kbd>
                       </span>
                       <span>Cancel / restore focus</span>
@@ -1057,27 +1088,26 @@ export function MessageInputToolbarView({
                       </span>
                       <span>Scroll to current</span>
                     </div>
-                    <div className="session-shortcuts-row">
-                      <span className="session-shortcuts-keys">
-                        <kbd>Ctrl</kbd>
-                        <kbd>
-                          {shortcutsControl.isearchScope === "all" ? "R" : "S"}
-                        </kbd>
-                        {shortcutsControl.isearchScope === "all" && (
-                          <>
-                            <span>or</span>
-                            <kbd>Ctrl</kbd>
-                            <kbd>Alt</kbd>
-                            <kbd>R</kbd>
-                          </>
-                        )}
-                      </span>
-                      <span>
-                        {shortcutsControl.isearchScope === "all"
-                          ? "User turns"
-                          : "All turns"}
-                      </span>
-                    </div>
+                    {getIsearchAlternateRows(shortcutsControl.isearchScope).map(
+                      (row) => (
+                        <div key={row.label} className="session-shortcuts-row">
+                          <span className="session-shortcuts-keys">
+                            {row.keys.map((key) => (
+                              <kbd key={key}>{key}</kbd>
+                            ))}
+                            {row.label === "User turns" && (
+                              <>
+                                <span>or</span>
+                                <kbd>Ctrl</kbd>
+                                <kbd>Alt</kbd>
+                                <kbd>R</kbd>
+                              </>
+                            )}
+                          </span>
+                          <span>{row.label}</span>
+                        </div>
+                      ),
+                    )}
                   </>
                 ) : (
                   <>
@@ -1098,6 +1128,14 @@ export function MessageInputToolbarView({
                         <kbd>S</kbd>
                       </span>
                       <span>All-turn reverse search</span>
+                    </div>
+                    <div className="session-shortcuts-row">
+                      <span className="session-shortcuts-keys">
+                        <kbd>Ctrl</kbd>
+                        <kbd>Alt</kbd>
+                        <kbd>S</kbd>
+                      </span>
+                      <span>Full-session reverse search</span>
                     </div>
                     <div className="session-shortcuts-row">
                       <span className="session-shortcuts-keys">

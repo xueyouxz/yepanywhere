@@ -1,4 +1,4 @@
-export type SessionIsearchScope = "user" | "all";
+export type SessionIsearchScope = "user" | "all" | "full";
 
 export interface SessionIsearchGuideState {
   active: boolean;

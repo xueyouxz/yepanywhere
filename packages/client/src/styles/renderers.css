@@ -5028,6 +5028,91 @@ pre.code-highlighter-plain code {
   height: auto;
 }
 
+/* Fixed-font output appearance */
+.code-block,
+.fixed-font-rendered__content code,
+.streaming-blocks code,
+.streaming-block code,
+.streaming-pending code,
+.streaming-blocks pre,
+.streaming-block pre,
+.local-file-text code,
+.text-block code,
+.text-block pre,
+.thinking-inline-code,
+.thinking-code-block,
+.tool-fallback,
+.fallback-content,
+.bash-preview-command,
+.bash-preview-output pre,
+.bash-modal-code,
+.diff-view,
+.highlighted-diff,
+.file-content-with-lines,
+.file-link-button,
+.file-link-inline,
+.file-path,
+.file-viewer-path,
+.file-viewer-code,
+.markdown-preview .markdown-rendered code,
+.markdown-preview .markdown-rendered pre,
+pre.code-highlighter-plain {
+  font-family: var(--font-mono);
+}
+
+.code-block,
+.tool-fallback,
+.fallback-content,
+.bash-preview-command,
+.bash-preview-output pre,
+.bash-modal-code,
+.diff-view,
+.highlighted-diff,
+.file-content-with-lines,
+.file-link-button,
+.file-path,
+.file-viewer-path {
+  font-size: var(--fixed-font-size-base);
+}
+
+.streaming-blocks pre,
+.streaming-block pre,
+.local-file-text code,
+.text-block pre,
+.file-viewer-code,
+pre.code-highlighter-plain,
+.markdown-preview .markdown-rendered pre {
+  font-size: var(--fixed-font-size-sm);
+}
+
+.file-viewer-code {
+  font-size: max(
+    9px,
+    calc(
+      var(--font-size-sm) + var(--source-font-size-offset, 0px) +
+        var(--fixed-font-size-offset)
+    )
+  );
+}
+
+.fixed-font-rendered__content code,
+.streaming-blocks code,
+.streaming-block code,
+.streaming-pending code,
+.text-block code,
+.thinking-inline-code,
+.thinking-code-block,
+.markdown-preview .markdown-rendered code {
+  font-size: var(--fixed-font-size-inline);
+}
+
+.streaming-blocks pre code,
+.streaming-block pre code,
+.text-block pre code,
+.markdown-preview .markdown-rendered pre code {
+  font-size: inherit;
+}
+
 /* Note: When "Show full context" is clicked in the diff modal, JS automatically
    scrolls to the first .line-deleted or .line-inserted element. This uses
    scrollIntoView({ block: "center" }) in EditRenderer.tsx. */

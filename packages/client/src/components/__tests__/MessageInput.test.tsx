@@ -494,7 +494,7 @@ describe("MessageInput", () => {
     expect(onRecallLastSubmission).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the isearch key guide from the shortcut help while search is active", async () => {
+  it("shows the isearch key guide on shortcut help hover while search is active", async () => {
     renderMessageInput();
 
     act(() => {
@@ -505,14 +505,28 @@ describe("MessageInput", () => {
       );
     });
 
+    const shortcutsButton = screen.getByRole("button", {
+      name: "Session keyboard shortcuts",
+    });
+    expect(screen.queryByText("Previous match")).toBeNull();
+    expect(shortcutsButton.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.mouseEnter(shortcutsButton);
+
     expect(await screen.findByText("Previous match")).toBeTruthy();
+    expect(screen.getByText("Previous / next match")).toBeTruthy();
+    expect(screen.getByText("Match preview / rail mark jumps")).toBeTruthy();
     expect(screen.getByText("Cancel / restore focus")).toBeTruthy();
     expect(screen.getByText("User turns")).toBeTruthy();
-    expect(
-      screen
-        .getByRole("button", { name: "Session keyboard shortcuts" })
-        .getAttribute("aria-expanded"),
-    ).toBe("true");
+    expect(screen.getByText("Full session")).toBeTruthy();
+    expect(shortcutsButton.getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.mouseLeave(shortcutsButton.parentElement as Element);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Previous match")).toBeNull();
+    });
+    expect(shortcutsButton.getAttribute("aria-expanded")).toBe("false");
 
     act(() => {
       window.dispatchEvent(
@@ -525,11 +539,7 @@ describe("MessageInput", () => {
     await waitFor(() => {
       expect(screen.queryByText("Previous match")).toBeNull();
     });
-    expect(
-      screen
-        .getByRole("button", { name: "Session keyboard shortcuts" })
-        .getAttribute("aria-expanded"),
-    ).toBe("false");
+    expect(shortcutsButton.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("shows the Chrome-safe user search fallback in shortcut help", async () => {
@@ -547,6 +557,23 @@ describe("MessageInput", () => {
     );
 
     expect(keys).toEqual(["Ctrl", "R", "Ctrl", "Alt", "R"]);
+  });
+
+  it("shows the full-session search shortcut in shortcut help", async () => {
+    renderMessageInput();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Session keyboard shortcuts" }),
+    );
+
+    const row = screen
+      .getByText("Full-session reverse search")
+      .closest(".session-shortcuts-row");
+    const keys = Array.from(row?.querySelectorAll("kbd") ?? []).map(
+      (key) => key.textContent,
+    );
+
+    expect(keys).toEqual(["Ctrl", "Alt", "S"]);
   });
 
   it("keeps stop available while a running composer has queued text", () => {

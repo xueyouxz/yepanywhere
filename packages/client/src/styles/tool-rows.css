@@ -631,3 +631,15 @@ button.tool-summary {
 .tool-content-json code {
   color: var(--text-primary, #ccc);
 }
+
+/* Fixed-font output appearance */
+.ran-tool-row .tool-summary,
+.tool-content-json,
+.tool-content-json code {
+  font-family: var(--font-mono);
+}
+
+.ran-tool-row .tool-summary,
+.tool-content-json {
+  font-size: var(--fixed-font-size-base);
+}

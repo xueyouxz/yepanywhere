@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
 import { planThumbnail, toUrlProjectId } from "@yep-anywhere/shared";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRemoteImage } from "../hooks/useRemoteImage";
 import { loadCachedAttachmentPreview } from "../lib/attachmentPreviewCache";
 import { Modal } from "./ui/Modal";
@@ -196,7 +196,37 @@ function useCachedAttachmentImage(
   };
 }
 
-export function AttachmentChip({
+function NonImageAttachmentChip({
+  originalName,
+  path,
+  mimeType,
+  sizeLabel,
+  onRemove,
+}: AttachmentChipProps) {
+  return (
+    <span className="attachment-chip" title={`${mimeType}, ${sizeLabel}`}>
+      <span className="attachment-chip-icon" aria-hidden="true">
+        📎
+      </span>
+      <span className="attachment-name" title={path}>
+        {formatAttachmentName(originalName)}
+      </span>
+      <span className="attachment-size">{sizeLabel}</span>
+      {onRemove && (
+        <button
+          type="button"
+          className="attachment-remove"
+          onClick={onRemove}
+          aria-label={`Remove ${originalName}`}
+        >
+          x
+        </button>
+      )}
+    </span>
+  );
+}
+
+function ImageAttachmentChip({
   attachmentId,
   originalName,
   path,
@@ -208,7 +238,6 @@ export function AttachmentChip({
   onRemove,
 }: AttachmentChipProps) {
   const [showModal, setShowModal] = useState(false);
-  const isImage = isImageMimeType(mimeType);
   const cacheKey = attachmentId ?? path;
   const {
     previewUrl: imagePreviewUrl,
@@ -230,30 +259,6 @@ export function AttachmentChip({
         height: `${previewPlan.height}px`,
       }
     : undefined;
-
-  if (!isImage) {
-    return (
-      <span className="attachment-chip" title={`${mimeType}, ${sizeLabel}`}>
-        <span className="attachment-chip-icon" aria-hidden="true">
-          📎
-        </span>
-        <span className="attachment-name" title={path}>
-          {formatAttachmentName(originalName)}
-        </span>
-        <span className="attachment-size">{sizeLabel}</span>
-        {onRemove && (
-          <button
-            type="button"
-            className="attachment-remove"
-            onClick={onRemove}
-            aria-label={`Remove ${originalName}`}
-          >
-            x
-          </button>
-        )}
-      </span>
-    );
-  }
 
   return (
     <>
@@ -306,4 +311,12 @@ export function AttachmentChip({
       )}
     </>
   );
+}
+
+export function AttachmentChip(props: AttachmentChipProps) {
+  if (!isImageMimeType(props.mimeType)) {
+    return <NonImageAttachmentChip {...props} />;
+  }
+
+  return <ImageAttachmentChip {...props} />;
 }

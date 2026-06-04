@@ -2,12 +2,19 @@ import { useCallback, useEffect, useState } from "react";
 import { UI_KEYS } from "../lib/storageKeys";
 
 export type OutputProseFont = "system" | "source-serif-4";
+export type OutputFixedFont = "system" | "iosevka" | "ibm-plex-mono";
 
 export const OUTPUT_APPEARANCE_CHANGE_EVENT = "yep-output-appearance-change";
 
 export const OUTPUT_PROSE_FONTS: OutputProseFont[] = [
   "system",
   "source-serif-4",
+];
+
+export const OUTPUT_FIXED_FONTS: OutputFixedFont[] = [
+  "system",
+  "iosevka",
+  "ibm-plex-mono",
 ];
 
 export const OUTPUT_FONT_SIZE_MIN_PX = 11;
@@ -33,6 +40,11 @@ export const OUTPUT_MATH_FONT_SIZE_OFFSET_MAX_PX = 4;
 export const OUTPUT_MATH_FONT_SIZE_OFFSET_STEP_PX = 0.5;
 export const DEFAULT_OUTPUT_MATH_FONT_SIZE_OFFSET_PX = 1;
 
+export const OUTPUT_FIXED_FONT_SIZE_OFFSET_MIN_PX = -3;
+export const OUTPUT_FIXED_FONT_SIZE_OFFSET_MAX_PX = 3;
+export const OUTPUT_FIXED_FONT_SIZE_OFFSET_STEP_PX = 0.5;
+export const DEFAULT_OUTPUT_FIXED_FONT_SIZE_OFFSET_PX = 0;
+
 export const OUTPUT_LINE_SPACING_MIN_PERCENT = -30;
 export const OUTPUT_LINE_SPACING_MAX_PERCENT = 50;
 export const OUTPUT_LINE_SPACING_STEP_PERCENT = 1;
@@ -52,6 +64,8 @@ const SOURCE_SERIF_4_OUTPUT_OPSZ_MAX = 20;
 interface OutputAppearance {
   font: OutputProseFont;
   fontSizePx: number;
+  fixedFont: OutputFixedFont;
+  fixedFontSizeOffsetPx: number;
   thinkingFontSizeOffsetPx: number;
   mathFontSizeOffsetPx: number;
   lineSpacingPercent: number;
@@ -62,6 +76,12 @@ interface OutputAppearance {
 const outputFontStacks: Record<OutputProseFont, string> = {
   system: "var(--font-sans)",
   "source-serif-4": "var(--font-output-serif)",
+};
+
+const outputFixedFontStacks: Record<OutputFixedFont, string> = {
+  system: "var(--font-mono-system)",
+  iosevka: "var(--font-mono-iosevka)",
+  "ibm-plex-mono": "var(--font-mono-ibm-plex)",
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -75,6 +95,12 @@ function roundToStep(value: number, step: number): number {
 function normalizeOutputFont(value: string | null): OutputProseFont {
   return value && OUTPUT_PROSE_FONTS.includes(value as OutputProseFont)
     ? (value as OutputProseFont)
+    : "system";
+}
+
+function normalizeOutputFixedFont(value: string | null): OutputFixedFont {
+  return value && OUTPUT_FIXED_FONTS.includes(value as OutputFixedFont)
+    ? (value as OutputFixedFont)
     : "system";
 }
 
@@ -103,6 +129,15 @@ function normalizeMathFontSizeOffset(value: number): number {
     roundToStep(value, OUTPUT_MATH_FONT_SIZE_OFFSET_STEP_PX),
     OUTPUT_MATH_FONT_SIZE_OFFSET_MIN_PX,
     OUTPUT_MATH_FONT_SIZE_OFFSET_MAX_PX,
+  );
+}
+
+function normalizeFixedFontSizeOffset(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_OUTPUT_FIXED_FONT_SIZE_OFFSET_PX;
+  return clamp(
+    roundToStep(value, OUTPUT_FIXED_FONT_SIZE_OFFSET_STEP_PX),
+    OUTPUT_FIXED_FONT_SIZE_OFFSET_MIN_PX,
+    OUTPUT_FIXED_FONT_SIZE_OFFSET_MAX_PX,
   );
 }
 
@@ -205,6 +240,15 @@ function loadOutputAppearance(): OutputAppearance {
   return {
     font: normalizeOutputFont(localStorage.getItem(UI_KEYS.outputProseFont)),
     fontSizePx,
+    fixedFont: normalizeOutputFixedFont(
+      localStorage.getItem(UI_KEYS.outputFixedFont),
+    ),
+    fixedFontSizeOffsetPx: normalizeFixedFontSizeOffset(
+      readStoredNumber(
+        UI_KEYS.outputFixedFontSizeOffset,
+        DEFAULT_OUTPUT_FIXED_FONT_SIZE_OFFSET_PX,
+      ),
+    ),
     thinkingFontSizeOffsetPx: normalizeThinkingFontSizeOffset(
       readStoredNumber(
         UI_KEYS.outputProseThinkingFontSizeOffset,
@@ -250,6 +294,14 @@ function applyOutputAppearance(appearance: OutputAppearance) {
   root.style.setProperty(
     "--output-prose-font-size",
     `${appearance.fontSizePx}px`,
+  );
+  root.style.setProperty(
+    "--font-mono",
+    outputFixedFontStacks[appearance.fixedFont],
+  );
+  root.style.setProperty(
+    "--fixed-font-size-offset",
+    `${appearance.fixedFontSizeOffsetPx}px`,
   );
   root.style.setProperty(
     "--output-prose-vspace-offset",
@@ -336,6 +388,21 @@ export function useOutputAppearance() {
     setAppearance((current) => ({ ...current, fontSizePx: normalized }));
   }, []);
 
+  const setOutputFixedFont = useCallback((font: OutputFixedFont) => {
+    const normalized = normalizeOutputFixedFont(font);
+    localStorage.setItem(UI_KEYS.outputFixedFont, normalized);
+    setAppearance((current) => ({ ...current, fixedFont: normalized }));
+  }, []);
+
+  const setOutputFixedFontSizeOffsetPx = useCallback((offsetPx: number) => {
+    const normalized = normalizeFixedFontSizeOffset(offsetPx);
+    localStorage.setItem(UI_KEYS.outputFixedFontSizeOffset, String(normalized));
+    setAppearance((current) => ({
+      ...current,
+      fixedFontSizeOffsetPx: normalized,
+    }));
+  }, []);
+
   const setOutputThinkingFontSizeOffsetPx = useCallback((offsetPx: number) => {
     const normalized = normalizeThinkingFontSizeOffset(offsetPx);
     localStorage.setItem(
@@ -407,6 +474,8 @@ export function useOutputAppearance() {
   return {
     outputFont: appearance.font,
     outputFontSizePx: appearance.fontSizePx,
+    outputFixedFont: appearance.fixedFont,
+    outputFixedFontSizeOffsetPx: appearance.fixedFontSizeOffsetPx,
     outputThinkingFontSizeOffsetPx: appearance.thinkingFontSizeOffsetPx,
     outputMathFontSizeOffsetPx: appearance.mathFontSizeOffsetPx,
     outputLineSpacingPercent: appearance.lineSpacingPercent,
@@ -414,6 +483,8 @@ export function useOutputAppearance() {
     outputToolPreviewLineCount: appearance.toolPreviewLineCount,
     setOutputFont,
     setOutputFontSizePx,
+    setOutputFixedFont,
+    setOutputFixedFontSizeOffsetPx,
     setOutputThinkingFontSizeOffsetPx,
     setOutputMathFontSizeOffsetPx,
     setOutputLineSpacingPercent,

@@ -13,12 +13,17 @@ import { FONT_SIZES, useFontSize } from "../../hooks/useFontSize";
 import { useFunPhrases } from "../../hooks/useFunPhrases";
 import { useInlineMedia } from "../../hooks/useInlineMedia";
 import {
+  DEFAULT_OUTPUT_FIXED_FONT_SIZE_OFFSET_PX,
   DEFAULT_OUTPUT_FONT_SIZE_PX,
   DEFAULT_OUTPUT_LINE_SPACING_PERCENT,
   DEFAULT_OUTPUT_MATH_FONT_SIZE_OFFSET_PX,
   DEFAULT_OUTPUT_THINKING_FONT_SIZE_OFFSET_PX,
   DEFAULT_OUTPUT_TOOL_PREVIEW_LINE_COUNT,
   DEFAULT_OUTPUT_VERTICAL_SPACING_PERCENT,
+  OUTPUT_FIXED_FONT_SIZE_OFFSET_MAX_PX,
+  OUTPUT_FIXED_FONT_SIZE_OFFSET_MIN_PX,
+  OUTPUT_FIXED_FONT_SIZE_OFFSET_STEP_PX,
+  OUTPUT_FIXED_FONTS,
   OUTPUT_FONT_SIZE_MAX_PX,
   OUTPUT_FONT_SIZE_MIN_PX,
   OUTPUT_FONT_SIZE_PRESETS,
@@ -54,6 +59,7 @@ import { SUPPORTED_LOCALES, useI18n } from "../../i18n";
 import {
   getFontSizeLabel,
   getLocaleLabel,
+  getOutputFixedFontLabel,
   getOutputProseFontLabel,
   getTabSizeLabel,
   getThemeLabel,
@@ -69,6 +75,8 @@ export function AppearanceSettings() {
   const {
     outputFont,
     outputFontSizePx,
+    outputFixedFont,
+    outputFixedFontSizeOffsetPx,
     outputThinkingFontSizeOffsetPx,
     outputMathFontSizeOffsetPx,
     outputLineSpacingPercent,
@@ -76,6 +84,8 @@ export function AppearanceSettings() {
     outputToolPreviewLineCount,
     setOutputFont,
     setOutputFontSizePx,
+    setOutputFixedFont,
+    setOutputFixedFontSizeOffsetPx,
     setOutputThinkingFontSizeOffsetPx,
     setOutputMathFontSizeOffsetPx,
     setOutputLineSpacingPercent,
@@ -90,6 +100,8 @@ export function AppearanceSettings() {
   const [outputFontSizeDraft, setOutputFontSizeDraft] = useState(() =>
     formatNumberSetting(outputFontSizePx),
   );
+  const [outputFixedFontSizeOffsetDraft, setOutputFixedFontSizeOffsetDraft] =
+    useState(() => formatNumberSetting(outputFixedFontSizeOffsetPx));
   const [
     outputThinkingFontSizeOffsetDraft,
     setOutputThinkingFontSizeOffsetDraft,
@@ -198,6 +210,12 @@ export function AppearanceSettings() {
   }, [outputFontSizePx]);
 
   useEffect(() => {
+    setOutputFixedFontSizeOffsetDraft(
+      formatNumberSetting(outputFixedFontSizeOffsetPx),
+    );
+  }, [outputFixedFontSizeOffsetPx]);
+
+  useEffect(() => {
     setOutputThinkingFontSizeOffsetDraft(
       formatNumberSetting(outputThinkingFontSizeOffsetPx),
     );
@@ -236,6 +254,15 @@ export function AppearanceSettings() {
     const parsed = Number(outputFontSizeDraft);
     setOutputFontSizePx(
       Number.isFinite(parsed) ? parsed : DEFAULT_OUTPUT_FONT_SIZE_PX,
+    );
+  };
+
+  const commitOutputFixedFontSizeOffset = () => {
+    const parsed = Number(outputFixedFontSizeOffsetDraft);
+    setOutputFixedFontSizeOffsetPx(
+      Number.isFinite(parsed)
+        ? parsed
+        : DEFAULT_OUTPUT_FIXED_FONT_SIZE_OFFSET_PX,
     );
   };
 
@@ -417,6 +444,68 @@ export function AppearanceSettings() {
                   />
                 ))}
               </datalist>
+
+              <div className="output-appearance-control">
+                <span className="output-appearance-label">
+                  {t("appearanceOutputFixedFontLabel")}
+                </span>
+                <div className="font-size-selector output-font-selector">
+                  {OUTPUT_FIXED_FONTS.map((font) => (
+                    <button
+                      key={font}
+                      type="button"
+                      className={`font-size-option output-font-option output-fixed-font-option-${font} ${outputFixedFont === font ? "active" : ""}`}
+                      onClick={() => setOutputFixedFont(font)}
+                    >
+                      {getOutputFixedFontLabel(font, translate)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <label
+                className="output-appearance-control"
+                htmlFor="output-fixed-size-offset"
+              >
+                <span className="output-appearance-label">
+                  {t("appearanceOutputFixedSizeOffsetLabel")}
+                </span>
+                <span className="output-appearance-slider-row">
+                  <input
+                    id="output-fixed-size-offset"
+                    type="range"
+                    min={OUTPUT_FIXED_FONT_SIZE_OFFSET_MIN_PX}
+                    max={OUTPUT_FIXED_FONT_SIZE_OFFSET_MAX_PX}
+                    step={OUTPUT_FIXED_FONT_SIZE_OFFSET_STEP_PX}
+                    value={outputFixedFontSizeOffsetPx}
+                    onChange={(e) =>
+                      setOutputFixedFontSizeOffsetPx(Number(e.target.value))
+                    }
+                  />
+                  <span className="output-appearance-number-wrap">
+                    <input
+                      type="number"
+                      className="settings-input-small output-appearance-number"
+                      min={OUTPUT_FIXED_FONT_SIZE_OFFSET_MIN_PX}
+                      max={OUTPUT_FIXED_FONT_SIZE_OFFSET_MAX_PX}
+                      step={OUTPUT_FIXED_FONT_SIZE_OFFSET_STEP_PX}
+                      value={outputFixedFontSizeOffsetDraft}
+                      onChange={(e) =>
+                        setOutputFixedFontSizeOffsetDraft(e.target.value)
+                      }
+                      onBlur={commitOutputFixedFontSizeOffset}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          commitOutputFixedFontSizeOffset();
+                          e.currentTarget.blur();
+                        }
+                      }}
+                      aria-label={t("appearanceOutputFixedSizeOffsetLabel")}
+                    />
+                    <span className="output-appearance-unit">px</span>
+                  </span>
+                </span>
+              </label>
 
               <label
                 className="output-appearance-control"
@@ -664,6 +753,13 @@ export function AppearanceSettings() {
                     spacing, and Markdown rendering can be judged after a
                     natural line wrap.
                   </p>
+                  <pre className="output-preview-fixed">
+                    <code>
+                      {
+                        '> grep -n "needle" packages/client/src\n+ fixed-width ASCII stays aligned'
+                      }
+                    </code>
+                  </pre>
                   <p>
                     Inline math:{" "}
                     <span className="output-preview-math">f(x) = 100%</span>
