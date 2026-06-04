@@ -5051,6 +5051,7 @@ pre.code-highlighter-plain code {
 .file-content-with-lines,
 .file-link-button,
 .file-link-inline,
+.file-path-link,
 .file-path,
 .file-viewer-path,
 .file-viewer-code,
@@ -5070,6 +5071,7 @@ pre.code-highlighter-plain {
 .highlighted-diff,
 .file-content-with-lines,
 .file-link-button,
+.file-link-inline,
 .file-path,
 .file-viewer-path {
   font-size: var(--fixed-font-size-base);

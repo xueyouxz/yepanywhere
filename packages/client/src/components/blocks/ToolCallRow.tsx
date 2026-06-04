@@ -719,7 +719,13 @@ export const ToolCallRow = memo(function ToolCallRow({
       )}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: interactive header has role, tabIndex, and keyboard handlers when enabled */}
       <div
-        className={`tool-row-header ${isNonExpandable ? "non-expandable" : ""}`}
+        className={[
+          "tool-row-header",
+          isNonExpandable ? "non-expandable" : "",
+          showBashCommandTarget ? "has-command-preview" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
         onClick={
           hasDeferredInteractiveShell
             ? hydrateNow
@@ -822,7 +828,13 @@ export const ToolCallRow = memo(function ToolCallRow({
         ) : showBashCommandTarget ? (
           <button
             type="button"
-            className={`tool-summary tool-summary-command${bashCommandExpanded ? " is-expanded" : ""}`}
+            className={[
+              "tool-summary",
+              "tool-summary-command",
+              bashCommandExpanded ? "is-expanded" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
             title={headerCommand}
             aria-label={
               bashCommandExpanded ? "Collapse command" : "Show full command"

@@ -167,16 +167,12 @@
   background: color-mix(in srgb, var(--bg-code, #1f1f1f) 52%, transparent);
 }
 
-.ran-tool-row.timeline-item::before {
-  top: 9px;
-}
-
-.ran-tool-row.timeline-item::after {
-  top: 15px;
-}
-
 .ran-tool-row .tool-row-header:hover {
   background: color-mix(in srgb, var(--bg-hover, #2a2a2a) 72%, transparent);
+}
+
+.tool-row-header.has-command-preview {
+  align-items: baseline;
 }
 
 .tool-row-header:focus {
@@ -269,9 +265,10 @@ button.tool-summary {
 
 .tool-summary-command {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 0.45rem;
   cursor: pointer;
+  line-height: 1.35;
   white-space: normal;
   text-overflow: clip;
 }
@@ -297,6 +294,7 @@ button.tool-summary {
 .tool-summary-command-text {
   min-width: 0;
   overflow: hidden;
+  line-height: inherit;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -313,7 +311,7 @@ button.tool-summary {
   font-family: var(--font-sans);
   font-size: var(--font-size-xs);
   font-weight: 700;
-  line-height: 1.25;
+  line-height: 1.15;
   white-space: nowrap;
 }
 
