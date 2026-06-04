@@ -37,8 +37,8 @@
   font-display: swap;
   src: url("../assets/fonts/ibm-plex-mono/ibm-plex-mono-cyrillic-ext-400-normal.woff2")
     format("woff2");
-  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F,
-    U+FE2E-FE2F;
+  unicode-range:
+    U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
 @font-face {
@@ -58,7 +58,8 @@
   font-display: swap;
   src: url("../assets/fonts/ibm-plex-mono/ibm-plex-mono-vietnamese-400-normal.woff2")
     format("woff2");
-  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169,
+  unicode-range:
+    U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169,
     U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323,
     U+0329, U+1EA0-1EF9, U+20AB;
 }
@@ -70,7 +71,8 @@
   font-display: swap;
   src: url("../assets/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-400-normal.woff2")
     format("woff2");
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7,
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7,
     U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
     U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
     U+A720-A7FF;
@@ -83,7 +85,8 @@
   font-display: swap;
   src: url("../assets/fonts/ibm-plex-mono/ibm-plex-mono-latin-400-normal.woff2")
     format("woff2");
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
     U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
     U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
@@ -111,13 +114,14 @@
   --thinking-color: var(--app-claude-orange);
 
   /* Typography */
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto",
-    sans-serif;
-  --font-brand: "Iowan Old Style", "Palatino Linotype", "Book Antiqua",
-    Baskerville, Georgia, "Times New Roman", ui-serif, serif;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", sans-serif;
+  --font-brand:
+    "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Baskerville,
+    Georgia, "Times New Roman", ui-serif, serif;
   --font-output-serif: "Source Serif 4", Georgia, ui-serif, serif;
-  --font-math: "KaTeX_Main", "STIX Two Math", "Cambria Math",
-    "Times New Roman", serif;
+  --font-math:
+    "KaTeX_Main", "STIX Two Math", "Cambria Math", "Times New Roman", serif;
   --brand-wordmark-yep-full: color-mix(
     in srgb,
     var(--app-yep-green) 76%,
@@ -163,7 +167,8 @@
   --fixed-inline-code-baseline-shift: 0.04em;
   --thinking-prose-line-height-offset: 0px;
   --thinking-prose-line-height: calc(
-    1.5em + var(--thinking-prose-line-height-offset)
+    1.5em +
+    var(--thinking-prose-line-height-offset)
   );
   --thinking-prose-font-variation-settings: var(
     --output-prose-font-variation-settings
@@ -171,7 +176,8 @@
   --output-prose-vspace-offset: 0px;
   --output-prose-line-height-offset: 0px;
   --output-prose-line-height: calc(
-    1.5em + var(--output-prose-line-height-offset)
+    1.5em +
+    var(--output-prose-line-height-offset)
   );
   --output-prose-paragraph-gap: max(
     0px,
@@ -631,7 +637,9 @@ h2 {
   color: var(--text-muted);
   padding: var(--space-2);
   border-radius: var(--radius-md);
-  transition: color 0.15s, background 0.15s;
+  transition:
+    color 0.15s,
+    background 0.15s;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -973,7 +981,10 @@ h2 {
   border-radius: 8px;
   color: var(--text-muted);
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    color 0.15s,
+    background 0.15s;
   box-sizing: border-box;
   flex-shrink: 0;
 }
@@ -1072,7 +1083,9 @@ h2 {
   background: transparent;
   border: none;
   cursor: pointer;
-  transition: color 0.15s, background 0.15s;
+  transition:
+    color 0.15s,
+    background 0.15s;
 }
 
 .sidebar-toggle:hover {
@@ -1260,7 +1273,9 @@ h2 {
   background: transparent;
   border: none;
   cursor: pointer;
-  transition: color 0.15s, background 0.15s;
+  transition:
+    color 0.15s,
+    background 0.15s;
 }
 
 .sidebar-close:hover {
@@ -1391,7 +1406,10 @@ a.sidebar-nav-item {
   font-size: var(--font-size-sm);
   font-weight: 600;
   line-height: 1;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background 0.15s;
 }
 
 .sidebar-section-toggle:hover {
@@ -1941,10 +1959,7 @@ a.sidebar-nav-item {
   appearance: none;
   position: absolute;
   right: 34px;
-  width: var(
-    --user-turn-nav-preview-max-width,
-    min(340px, calc(100vw - 72px))
-  );
+  width: var(--user-turn-nav-preview-max-width, min(340px, calc(100vw - 72px)));
   max-height: 4.4em;
   margin: 0;
   padding: 6px 8px;
@@ -1984,7 +1999,11 @@ a.sidebar-nav-item {
   display: block;
   max-height: 10.4em;
   padding: 8px 9px;
-  border-color: color-mix(in srgb, var(--primary-color) 78%, var(--border-color));
+  border-color: color-mix(
+    in srgb,
+    var(--primary-color) 78%,
+    var(--border-color)
+  );
   background: color-mix(in srgb, var(--bg-secondary) 98%, var(--bg-input));
   box-shadow:
     0 10px 30px rgb(0 0 0 / 0.3),
@@ -2081,7 +2100,8 @@ a.sidebar-nav-item {
 
 @keyframes user-turn-nav-preview-pulse {
   0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary-color) 46%, transparent);
+    box-shadow: 0 0 0 0
+      color-mix(in srgb, var(--primary-color) 46%, transparent);
   }
   42% {
     box-shadow:
@@ -2306,11 +2326,7 @@ a.sidebar-nav-item {
 }
 
 .btw-aside-card.is-stopped {
-  border-color: color-mix(
-    in srgb,
-    var(--text-muted) 45%,
-    var(--border-color)
-  );
+  border-color: color-mix(in srgb, var(--text-muted) 45%, var(--border-color));
   border-left-color: var(--text-muted);
 }
 
@@ -2837,7 +2853,10 @@ a.sidebar-nav-item {
 
 .user-prompt-container {
   --user-prompt-actions-space: calc(
-    102px + var(--space-1) + var(--space-1) + var(--space-1)
+    102px +
+    var(--space-1) +
+    var(--space-1) +
+    var(--space-1)
   );
 
   display: flex;
@@ -2924,17 +2943,17 @@ a.sidebar-nav-item {
 
 @media (min-width: 701px) {
   .message-user-prompt {
-    max-width: min(
-      88%,
-      calc(100% - var(--user-prompt-actions-space))
-    );
+    max-width: min(88%, calc(100% - var(--user-prompt-actions-space)));
   }
 }
 
 @media (max-width: 700px) {
   .user-prompt-container {
     --user-prompt-actions-space: calc(
-      90px + var(--space-1) + var(--space-1) + var(--space-1)
+      90px +
+      var(--space-1) +
+      var(--space-1) +
+      var(--space-1)
     );
   }
 
@@ -3079,7 +3098,9 @@ a.sidebar-nav-item {
   border: 1px solid var(--border-color);
   border-radius: 4px;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .show-more-btn:hover {
@@ -3130,7 +3151,8 @@ a.sidebar-nav-item {
   padding: 1px 4px;
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border-subtle) 65%, transparent);
+  box-shadow: 0 0 0 1px
+    color-mix(in srgb, var(--border-subtle) 65%, transparent);
   color: var(--text-dimmed);
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
@@ -3181,7 +3203,10 @@ a.sidebar-nav-item {
   border-radius: var(--radius-md);
   color: var(--text-muted);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .message-input-toggle:hover {
@@ -3216,7 +3241,10 @@ a.sidebar-nav-item {
   cursor: pointer;
   font-size: var(--font-size-xs);
   font-weight: 600;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .message-follow-toggle:hover,
@@ -3576,7 +3604,9 @@ a.sidebar-nav-item {
   color: var(--status-badge-input-text);
   font-size: var(--font-size-xs);
   cursor: pointer;
-  transition: background 0.15s, transform 0.1s;
+  transition:
+    background 0.15s,
+    transform 0.1s;
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -3613,7 +3643,9 @@ a.sidebar-nav-item {
   color: var(--text-muted);
   font-size: var(--font-size-sm);
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3631,7 +3663,11 @@ a.sidebar-nav-item {
 }
 
 .mode-button-next-turn {
-  border-color: color-mix(in srgb, var(--warning-color) 55%, var(--border-color));
+  border-color: color-mix(
+    in srgb,
+    var(--warning-color) 55%,
+    var(--border-color)
+  );
 }
 
 .mode-button:disabled {
@@ -4136,7 +4172,9 @@ a.sidebar-nav-item {
   color: var(--text-muted);
   font-size: var(--font-size-sm);
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
   position: relative;
   flex-shrink: 0;
   box-sizing: border-box;
@@ -4516,7 +4554,10 @@ a.sidebar-nav-item {
   border-radius: var(--radius-md);
   color: var(--text-muted);
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
   flex-shrink: 0;
   box-sizing: border-box;
 }
@@ -4657,9 +4698,9 @@ a.sidebar-nav-item {
   --thinking-effort-control-size: 34px;
   display: grid;
   grid-template-columns: repeat(
-    var(--thinking-effort-option-count),
-    minmax(0, 1fr)
-  );
+      var(--thinking-effort-option-count),
+      minmax(0, 1fr)
+    );
   width: 100%;
   max-width: 100%;
   margin-top: var(--space-2);
@@ -4776,13 +4817,21 @@ a.sidebar-nav-item {
 
 .render-mode-toolbar-button.is-rendered {
   color: var(--app-yep-green);
-  border-color: color-mix(in srgb, var(--app-yep-green) 45%, var(--border-color));
+  border-color: color-mix(
+    in srgb,
+    var(--app-yep-green) 45%,
+    var(--border-color)
+  );
   background: color-mix(in srgb, var(--app-yep-green) 12%, transparent);
 }
 
 .render-mode-toolbar-button.is-mixed {
   color: var(--attention-color);
-  border-color: color-mix(in srgb, var(--attention-color) 45%, var(--border-color));
+  border-color: color-mix(
+    in srgb,
+    var(--attention-color) 45%,
+    var(--border-color)
+  );
   background: color-mix(in srgb, var(--attention-color) 14%, transparent);
 }
 
@@ -4809,7 +4858,10 @@ a.sidebar-nav-item {
   border-radius: var(--radius-md);
   color: var(--text-muted);
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
   flex-shrink: 0;
   box-sizing: border-box;
 }
@@ -4870,7 +4922,10 @@ a.sidebar-nav-item {
   font-size: var(--font-size-xs);
   font-weight: 700;
   line-height: 1;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
   flex-shrink: 0;
   box-sizing: border-box;
 }
@@ -4936,7 +4991,10 @@ a.sidebar-nav-item {
   border-radius: var(--radius-md);
   color: var(--text-muted);
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
   flex-shrink: 0;
   box-sizing: border-box;
 }
@@ -5086,7 +5144,10 @@ a.sidebar-nav-item {
   border-radius: var(--radius-md);
   color: var(--text-muted);
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
   min-width: 0;
   flex-shrink: 0;
   box-sizing: border-box;
@@ -5267,7 +5328,9 @@ a.sidebar-nav-item {
   color: var(--text-dimmed);
   font-size: var(--font-size-sm);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .attachment-remove:hover {
@@ -5541,7 +5604,9 @@ a.sidebar-nav-item {
   color: var(--text-muted);
   font-size: var(--font-size-sm);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .load-older-button:hover:not(:disabled) {
@@ -5728,7 +5793,10 @@ a.sidebar-nav-item {
   border-radius: var(--radius-md);
   color: var(--text-muted);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .tool-approval-toggle:hover {
@@ -5854,7 +5922,9 @@ a.sidebar-nav-item {
   font-size: var(--font-size-sm);
   color: var(--text-primary);
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
   text-align: left;
   width: 100%;
 }
@@ -5980,7 +6050,10 @@ a.sidebar-nav-item {
   border-radius: var(--radius-md);
   color: var(--text-muted);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .question-panel-toggle:hover {
@@ -6182,7 +6255,9 @@ a.sidebar-nav-item {
   font-size: var(--font-size-sm);
   font-weight: 500;
   cursor: pointer;
-  transition: opacity 0.15s, background 0.15s;
+  transition:
+    opacity 0.15s,
+    background 0.15s;
   min-width: 90px;
 }
 
@@ -7267,7 +7342,10 @@ a.sidebar-nav-item {
 
 .helper-target-editor {
   display: grid;
-  grid-template-columns: minmax(120px, 0.8fr) minmax(180px, 1.1fr) minmax(240px, 1fr);
+  grid-template-columns: minmax(120px, 0.8fr) minmax(180px, 1.1fr) minmax(
+      240px,
+      1fr
+    );
   gap: var(--space-2);
 }
 
@@ -7380,7 +7458,11 @@ a.sidebar-nav-item {
 }
 
 .settings-warning-box {
-  background: color-mix(in srgb, var(--warning-color, #f59e0b) 15%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--warning-color, #f59e0b) 15%,
+    transparent
+  );
   border: 1px solid var(--warning-color, #f59e0b);
   border-radius: var(--radius-md);
   padding: var(--space-3);
@@ -7639,11 +7721,7 @@ a.sidebar-nav-item {
 }
 
 .session-heartbeat-force-section--active {
-  background: color-mix(
-    in srgb,
-    var(--error-color) 14%,
-    var(--bg-code) 86%
-  );
+  background: color-mix(in srgb, var(--error-color) 14%, var(--bg-code) 86%);
   border-color: var(--heartbeat-force-outline-color);
   border-radius: var(--radius-md);
 }
@@ -7657,7 +7735,8 @@ a.sidebar-nav-item {
   color: color-mix(in srgb, var(--text-muted) 75%, transparent);
 }
 
-.session-heartbeat-force-section--active .session-heartbeat-preset-button.active {
+.session-heartbeat-force-section--active
+  .session-heartbeat-preset-button.active {
   box-shadow: inset 0 0 0 1px
     color-mix(in srgb, var(--error-color) 38%, transparent);
 }
@@ -7776,7 +7855,11 @@ a.sidebar-nav-item {
 
 .session-heartbeat-preset-button.active {
   background: color-mix(in srgb, var(--accent-color) 16%, var(--bg-secondary));
-  border-color: color-mix(in srgb, var(--accent-color) 78%, var(--border-color));
+  border-color: color-mix(
+    in srgb,
+    var(--accent-color) 78%,
+    var(--border-color)
+  );
   color: var(--text-primary);
   box-shadow: inset 0 0 0 1px
     color-mix(in srgb, var(--accent-color) 18%, transparent);
@@ -7788,7 +7871,11 @@ a.sidebar-nav-item {
 }
 
 .session-heartbeat-preset-input.active {
-  border-color: color-mix(in srgb, var(--accent-color) 78%, var(--border-color));
+  border-color: color-mix(
+    in srgb,
+    var(--accent-color) 78%,
+    var(--border-color)
+  );
   box-shadow: inset 0 0 0 1px
     color-mix(in srgb, var(--accent-color) 22%, transparent);
 }
@@ -7863,7 +7950,9 @@ a.sidebar-nav-item {
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
   text-align: left;
   width: 100%;
 }
@@ -7965,7 +8054,9 @@ a.sidebar-nav-item {
   color: var(--text-muted);
   font-size: var(--font-size-sm);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
   white-space: nowrap;
 }
 
@@ -8017,7 +8108,10 @@ a.sidebar-nav-item {
   border-radius: var(--radius-sm);
   cursor: pointer;
   opacity: 0.6;
-  transition: opacity 0.15s, color 0.15s, background 0.15s;
+  transition:
+    opacity 0.15s,
+    color 0.15s,
+    background 0.15s;
 }
 
 .session-menu-trigger:hover {
@@ -8219,7 +8313,9 @@ a.sidebar-nav-item {
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
   color: var(--text-muted);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
 .filter-search-button:hover {
@@ -8235,7 +8331,8 @@ a.sidebar-nav-item {
   margin-bottom: var(--space-4);
   padding: var(--space-3);
   background: color-mix(in srgb, var(--app-yep-green) 10%, var(--bg-secondary));
-  border: 1px solid color-mix(in srgb, var(--app-yep-green) 25%, var(--border-color));
+  border: 1px solid
+    color-mix(in srgb, var(--app-yep-green) 25%, var(--border-color));
   border-radius: var(--radius-lg);
 }
 
@@ -8284,7 +8381,10 @@ a.sidebar-nav-item {
   font-size: var(--font-size-sm);
   color: var(--text-muted);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .filter-clear-button:hover {
@@ -8645,7 +8745,6 @@ a.sidebar-nav-item {
   .session-shortcuts-help {
     display: none;
   }
-
 }
 
 @media (max-width: 480px) {
@@ -8954,7 +9053,9 @@ a.sidebar-nav-item {
   border-radius: var(--radius-md);
   cursor: pointer;
   text-align: left;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 
 .new-session-project-option:hover {
@@ -9009,7 +9110,10 @@ a.sidebar-nav-item {
   font-size: var(--font-size-sm);
   font-weight: 500;
   white-space: nowrap;
-  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    color 0.15s;
 }
 
 .new-session-defaults-button:hover:not(:disabled) {
@@ -9162,7 +9266,9 @@ a.sidebar-nav-item {
   border-radius: 50%;
   color: var(--text-dimmed);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
   flex-shrink: 0;
 }
 
@@ -9200,7 +9306,9 @@ a.sidebar-nav-item {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
   text-align: left;
 }
 
@@ -9500,7 +9608,9 @@ a.sidebar-nav-item {
   cursor: pointer;
   font-size: var(--font-size-sm);
   font-weight: 500;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 
 .new-session-helper-option:hover:not(:disabled) {
@@ -9566,7 +9676,9 @@ a.sidebar-nav-item {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
   text-align: left;
   width: 100%;
 }
@@ -9672,7 +9784,9 @@ a.sidebar-nav-item {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
   text-align: left;
   width: 100%;
 }
@@ -10376,7 +10490,10 @@ a.sidebar-nav-item {
   color: var(--text-muted);
   font-size: var(--font-size-sm);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .inbox-refresh-button:hover:not(:disabled) {
@@ -10743,7 +10860,9 @@ a.sidebar-nav-item {
   background: var(--bg-elevated);
   cursor: pointer;
   text-align: left;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
 
 .login-mode-option:hover {
@@ -10836,7 +10955,9 @@ a.sidebar-nav-item {
   border: 1px solid var(--border-muted);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: border-color 0.15s, background-color 0.15s;
+  transition:
+    border-color 0.15s,
+    background-color 0.15s;
   text-align: left;
   width: 100%;
   position: relative;
@@ -10910,7 +11031,10 @@ a.sidebar-nav-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-left: calc(8px + var(--space-2)); /* Align with name after status dot */
+  padding-left: calc(
+    8px +
+    var(--space-2)
+  ); /* Align with name after status dot */
 }
 
 .host-picker-last-connected {
@@ -10928,7 +11052,10 @@ a.sidebar-nav-item {
   line-height: 1;
   border-radius: var(--radius-sm);
   opacity: 0;
-  transition: opacity 0.15s, color 0.15s, background-color 0.15s;
+  transition:
+    opacity 0.15s,
+    color 0.15s,
+    background-color 0.15s;
 }
 
 .host-picker-item:hover .host-picker-delete {
@@ -11019,7 +11146,11 @@ a.sidebar-nav-item {
   color: var(--warning-color, #f59e0b);
   font-size: var(--font-size-sm);
   padding: var(--space-2);
-  background: color-mix(in srgb, var(--warning-color, #f59e0b) 10%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--warning-color, #f59e0b) 10%,
+    transparent
+  );
   border-radius: var(--radius-md);
 }
 
@@ -11099,7 +11230,11 @@ a.sidebar-nav-item {
 }
 
 .codex-update-prompt__checkbox:hover {
-  border-color: color-mix(in srgb, var(--provider-codex) 55%, var(--border-input));
+  border-color: color-mix(
+    in srgb,
+    var(--provider-codex) 55%,
+    var(--border-input)
+  );
 }
 
 .codex-update-prompt__checkbox:checked {
@@ -11112,8 +11247,7 @@ a.sidebar-nav-item {
 }
 
 .codex-update-prompt__checkbox:focus-visible {
-  outline: 2px solid
-    color-mix(in srgb, var(--provider-codex) 55%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--provider-codex) 55%, transparent);
   outline-offset: 2px;
 }
 
@@ -11792,7 +11926,9 @@ a.sidebar-nav-item {
   color: var(--text-muted);
   cursor: pointer;
   white-space: nowrap;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
 
 .filter-dropdown-button-label {
@@ -11938,7 +12074,9 @@ a.sidebar-nav-item {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
 
 .filter-dropdown-checkbox.checked {
@@ -12090,7 +12228,10 @@ a.sidebar-nav-item {
   align-items: center;
   justify-content: center;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    background 0.15s ease;
   flex-shrink: 0;
 }
 
@@ -12432,7 +12573,9 @@ a.sidebar-nav-item {
   border: 2px solid var(--border-color);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 
 .onboarding-theme-option:hover {
