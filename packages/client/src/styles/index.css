@@ -11552,12 +11552,14 @@ a.sidebar-nav-item {
   align-items: center;
   justify-content: space-between;
   flex: 1;
-  padding: var(--space-2) var(--space-3);
+  min-height: 1.5rem;
+  padding: 2px var(--space-3);
   padding-left: calc(var(--space-3) + 4px);
   border-radius: var(--radius-sm);
   text-decoration: none;
   color: var(--text-primary);
   overflow: hidden;
+  line-height: 1.2;
 }
 
 .session-list-item--compact .session-list-item__link:hover {
