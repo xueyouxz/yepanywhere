@@ -8,7 +8,11 @@ import { usePwaInstall } from "../../hooks/usePwaInstall";
 import { useVersion } from "../../hooks/useVersion";
 import { useI18n } from "../../i18n";
 import { activityBus } from "../../lib/activityBus";
-import { getRemoteCompatibilityNotices } from "../../lib/remoteCompatibilityNotices";
+import {
+  formatRemoteServerVersion,
+  getRemoteCompatibilityNotices,
+  parseSemver,
+} from "../../lib/remoteCompatibilityNotices";
 
 export function AboutSettings() {
   const { t } = useI18n();
@@ -134,15 +138,21 @@ export function AboutSettings() {
                 {t("aboutServerVersion")}{" "}
                 {versionInfo ? (
                   <>
-                    v{versionInfo.current}
-                    {versionInfo.updateAvailable && versionInfo.latest ? (
+                    {formatRemoteServerVersion(
+                      versionInfo.current,
+                      versionInfo.installSource,
+                    )}
+                    {parseSemver(versionInfo.current) &&
+                    versionInfo.updateAvailable &&
+                    versionInfo.latest ? (
                       <span className="settings-update-available">
                         {" "}
                         {t("aboutVersionAvailable", {
                           version: versionInfo.latest,
                         })}
                       </span>
-                    ) : versionInfo.latest ? (
+                    ) : parseSemver(versionInfo.current) &&
+                      versionInfo.latest ? (
                       <span className="settings-up-to-date">
                         {" "}
                         {t("aboutUpToDate")}

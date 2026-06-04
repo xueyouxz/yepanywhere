@@ -64,6 +64,8 @@ export function RemoteCompatibilityNoticeCard({
   onRestore,
 }: RemoteCompatibilityNoticeCardProps) {
   const action = notice.action;
+  const dismissLabel =
+    notice.severity === "info" ? "Dismiss" : "Remind me later";
   const commandField = action?.command
     ? {
         command: action.command,
@@ -149,7 +151,7 @@ export function RemoteCompatibilityNoticeCard({
             className="remote-compatibility-notice__button remote-compatibility-notice__button-primary"
             onClick={onRestore}
           >
-            Show banner
+            Show reminder
           </button>
         )}
         {onDismiss && (
@@ -158,7 +160,7 @@ export function RemoteCompatibilityNoticeCard({
             className="remote-compatibility-notice__button"
             onClick={onDismiss}
           >
-            Dismiss
+            {dismissLabel}
           </button>
         )}
       </div>

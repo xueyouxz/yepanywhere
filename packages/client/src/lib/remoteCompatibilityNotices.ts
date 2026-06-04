@@ -106,7 +106,11 @@ export function getRemoteCompatibilityNotices(
       title: "Server update required",
       body: "This hosted client requires current relay session-resume server verification. Update the local server, or use localhost, a tunnel, or a VPN with the old server.",
       guidance: guidance.text,
-      versionSummary: buildVersionSummary(input.currentVersion, target.label),
+      versionSummary: buildVersionSummary(
+        input.currentVersion,
+        target.label,
+        input.installSource,
+      ),
       action: guidance.action,
       dismissKey: buildDismissKey(
         input,
@@ -131,7 +135,11 @@ export function getRemoteCompatibilityNotices(
       title: "Server update required soon",
       body: "This server uses the older relay session-resume protocol. Remote login still works during the compatibility window, but update the YA server soon; future hosted clients will require the newer server-verification protocol for security.",
       guidance: guidance.text,
-      versionSummary: buildVersionSummary(input.currentVersion, target.label),
+      versionSummary: buildVersionSummary(
+        input.currentVersion,
+        target.label,
+        input.installSource,
+      ),
       action: guidance.action,
       dismissKey: buildDismissKey(
         input,
@@ -153,7 +161,11 @@ export function getRemoteCompatibilityNotices(
       title: "Update recommended",
       body: "This hosted client includes backend/API compatibility changes. Basic remote use should still work, but updating the local server is recommended for this release.",
       guidance: guidance.text,
-      versionSummary: buildVersionSummary(input.currentVersion, target.label),
+      versionSummary: buildVersionSummary(
+        input.currentVersion,
+        target.label,
+        input.installSource,
+      ),
       action: guidance.action,
       dismissKey: buildDismissKey(
         input,
@@ -185,6 +197,7 @@ export function getRemoteCompatibilityNotices(
       versionSummary: buildVersionSummary(
         input.currentVersion,
         target,
+        input.installSource,
         "latest",
       ),
       action: guidance.action,
@@ -221,12 +234,24 @@ function chooseTargetVersion(
 function buildVersionSummary(
   currentVersion: string | null,
   targetVersion: string,
+  installSource?: RemoteInstallSource,
   targetLabel: "recommended" | "latest" = "recommended",
 ): string {
-  const current = parseSemver(currentVersion)
-    ? formatVersion(currentVersion ?? "")
-    : "version unknown";
+  const current = formatRemoteServerVersion(currentVersion, installSource);
   return `Server ${current}; ${targetLabel} ${targetVersion}`;
+}
+
+export function formatRemoteServerVersion(
+  currentVersion: string | null | undefined,
+  installSource?: RemoteInstallSource,
+): string {
+  if (parseSemver(currentVersion)) {
+    return formatVersion(currentVersion ?? "");
+  }
+  if (installSource === "source") {
+    return "source checkout (version unknown)";
+  }
+  return "version unknown";
 }
 
 function buildUpdateGuidance(

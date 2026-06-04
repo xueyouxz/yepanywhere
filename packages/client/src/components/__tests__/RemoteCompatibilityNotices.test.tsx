@@ -60,7 +60,7 @@ describe("RemoteCompatibilityNotices", () => {
     );
     expect(screen.getByText(/compatibility window/i)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remind me later" }));
 
     expect(screen.queryByTestId("remote-compatibility-notice")).toBeNull();
     const keys = Array.from(
@@ -154,7 +154,7 @@ describe("RemoteCompatibilityNotices", () => {
     };
     const view = render(<RemoteCompatibilityNotices {...props} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remind me later" }));
     expect(screen.queryByTestId("remote-compatibility-notice")).toBeNull();
 
     view.unmount();
@@ -174,7 +174,7 @@ describe("RemoteCompatibilityNotices", () => {
     };
     render(<RemoteCompatibilityNotices {...props} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remind me later" }));
     expect(screen.queryByTestId("remote-compatibility-notice")).toBeNull();
 
     act(() => {

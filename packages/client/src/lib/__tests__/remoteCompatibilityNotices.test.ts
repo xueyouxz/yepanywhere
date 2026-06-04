@@ -53,7 +53,7 @@ describe("remoteCompatibilityNotices", () => {
       "relay-resume-v3-grace",
     ]);
     expect(notices[0]?.versionSummary).toBe(
-      "Server version unknown; recommended v0.5.1+",
+      "Server source checkout (version unknown); recommended v0.5.1+",
     );
     expect(notices[0]?.guidance).toContain("Source checkout detected");
   });
