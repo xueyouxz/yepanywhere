@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { I18nProvider } from "../../i18n";
 import { BtwAsidePane, type BtwAsidePaneItem } from "../BtwAsidePane";
 
 function renderPane(
@@ -42,7 +43,11 @@ function renderPane(
     );
   }
 
-  render(<Harness />);
+  render(
+    <I18nProvider>
+      <Harness />
+    </I18nProvider>,
+  );
   return { onSendFollowup, onHide, onDone, onTransferToComposer };
 }
 

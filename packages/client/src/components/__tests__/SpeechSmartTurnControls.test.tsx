@@ -3,8 +3,9 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import { SpeechSmartTurnControls } from "../SpeechSmartTurnControls";
+import { I18nProvider } from "../../i18n";
 import type { SpeechSmartTurnSettings } from "../../lib/speechProviders/SpeechProvider";
+import { SpeechSmartTurnControls } from "../SpeechSmartTurnControls";
 
 afterEach(() => {
   cleanup();
@@ -24,7 +25,11 @@ function SmartTurnHarness() {
 
 describe("SpeechSmartTurnControls", () => {
   it("enables Smart Turn when the threshold slider is adjusted", () => {
-    render(<SmartTurnHarness />);
+    render(
+      <I18nProvider>
+        <SmartTurnHarness />
+      </I18nProvider>,
+    );
 
     const checkbox = screen.getByRole<HTMLInputElement>("checkbox", {
       name: /Smart Turn/,

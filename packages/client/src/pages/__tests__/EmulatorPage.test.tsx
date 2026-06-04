@@ -6,6 +6,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { I18nProvider } from "../../i18n";
 import { BridgeRuntimePrompt } from "../EmulatorPage";
 
 const { mockDownloadDeviceBridge } = vi.hoisted(() => ({
@@ -31,12 +32,14 @@ describe("BridgeRuntimePrompt", () => {
 
   it("renders update copy with version details", () => {
     render(
-      <BridgeRuntimePrompt
-        mode="update"
-        installedVersion="0.1.0"
-        latestVersion="0.2.0"
-        onDownloaded={() => {}}
-      />,
+      <I18nProvider>
+        <BridgeRuntimePrompt
+          mode="update"
+          installedVersion="0.1.0"
+          latestVersion="0.2.0"
+          onDownloaded={() => {}}
+        />
+      </I18nProvider>,
     );
 
     expect(
@@ -51,7 +54,11 @@ describe("BridgeRuntimePrompt", () => {
   it("calls the shared download endpoint for updates", async () => {
     const onDownloaded = vi.fn();
 
-    render(<BridgeRuntimePrompt mode="update" onDownloaded={onDownloaded} />);
+    render(
+      <I18nProvider>
+        <BridgeRuntimePrompt mode="update" onDownloaded={onDownloaded} />
+      </I18nProvider>,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Update Bridge" }));
 

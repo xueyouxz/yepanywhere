@@ -42,18 +42,20 @@ describe("SessionListItem links", () => {
 
   function renderItem(onNavigate = vi.fn()) {
     render(
-      <MemoryRouter>
-        <ul>
-          <SessionListItem
-            sessionId="session-1"
-            projectId="project-1"
-            title="Build logs"
-            mode="compact"
-            onNavigate={onNavigate}
-            basePath="/remote/test"
-          />
-        </ul>
-      </MemoryRouter>,
+      <I18nProvider>
+        <MemoryRouter>
+          <ul>
+            <SessionListItem
+              sessionId="session-1"
+              projectId="project-1"
+              title="Build logs"
+              mode="compact"
+              onNavigate={onNavigate}
+              basePath="/remote/test"
+            />
+          </ul>
+        </MemoryRouter>
+      </I18nProvider>,
     );
     return {
       link: screen.getByRole("link", { name: /Build logs/ }),
@@ -96,16 +98,18 @@ describe("SessionListItem links", () => {
 
   it("labels /btw aside sessions separately from their truncated title text", () => {
     render(
-      <MemoryRouter>
-        <ul>
-          <SessionListItem
-            sessionId="aside-1"
-            projectId="project-1"
-            title="/btw check the side path"
-            mode="compact"
-          />
-        </ul>
-      </MemoryRouter>,
+      <I18nProvider>
+        <MemoryRouter>
+          <ul>
+            <SessionListItem
+              sessionId="aside-1"
+              projectId="project-1"
+              title="/btw check the side path"
+              mode="compact"
+            />
+          </ul>
+        </MemoryRouter>
+      </I18nProvider>,
     );
 
     expect(screen.getByText("/btw")).toBeTruthy();
@@ -116,22 +120,24 @@ describe("SessionListItem links", () => {
     const onNavigate = vi.fn();
 
     render(
-      <MemoryRouter
-        initialEntries={["/remote/test/projects/project-1/sessions/aside-1"]}
-      >
-        <ul>
-          <SessionListItem
-            sessionId="aside-1"
-            projectId="project-1"
-            title="/btw check the side path"
-            parentSessionId="parent-1"
-            mode="compact"
-            onNavigate={onNavigate}
-            basePath="/remote/test"
-          />
-        </ul>
-        <LocationProbe />
-      </MemoryRouter>,
+      <I18nProvider>
+        <MemoryRouter
+          initialEntries={["/remote/test/projects/project-1/sessions/aside-1"]}
+        >
+          <ul>
+            <SessionListItem
+              sessionId="aside-1"
+              projectId="project-1"
+              title="/btw check the side path"
+              parentSessionId="parent-1"
+              mode="compact"
+              onNavigate={onNavigate}
+              basePath="/remote/test"
+            />
+          </ul>
+          <LocationProbe />
+        </MemoryRouter>
+      </I18nProvider>,
     );
 
     fireEvent.click(screen.getByText("/btw"));
@@ -146,19 +152,21 @@ describe("SessionListItem links", () => {
     const onNavigate = vi.fn();
 
     render(
-      <MemoryRouter>
-        <ul>
-          <SessionListItem
-            sessionId="aside-1"
-            projectId="project-1"
-            title="/btw check the side path"
-            parentSessionId="parent-1"
-            mode="compact"
-            onNavigate={onNavigate}
-            basePath="/remote/test"
-          />
-        </ul>
-      </MemoryRouter>,
+      <I18nProvider>
+        <MemoryRouter>
+          <ul>
+            <SessionListItem
+              sessionId="aside-1"
+              projectId="project-1"
+              title="/btw check the side path"
+              parentSessionId="parent-1"
+              mode="compact"
+              onNavigate={onNavigate}
+              basePath="/remote/test"
+            />
+          </ul>
+        </MemoryRouter>
+      </I18nProvider>,
     );
 
     fireEvent.click(screen.getByText("/btw"), { ctrlKey: true });
