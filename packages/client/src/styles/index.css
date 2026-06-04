@@ -11554,14 +11554,14 @@ a.sidebar-nav-item {
   align-items: center;
   justify-content: space-between;
   flex: 1;
-  min-height: 1.5rem;
-  padding: 2px var(--space-3);
+  min-height: 34px;
+  padding: var(--space-1) var(--space-3);
   padding-left: calc(var(--space-3) + 4px);
   border-radius: var(--radius-sm);
   text-decoration: none;
   color: var(--text-primary);
   overflow: hidden;
-  line-height: 1.2;
+  line-height: 1.3;
 }
 
 .session-list-item--compact .session-list-item__link:hover {
@@ -11582,6 +11582,14 @@ a.sidebar-nav-item {
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: var(--font-size-sm);
+}
+
+@media (pointer: coarse) {
+  .session-list-item--compact .session-list-item__link {
+    min-height: 40px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
 }
 
 /* Project name in compact mode */

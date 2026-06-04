@@ -17,6 +17,20 @@ import { buildCorrectionText } from "../../lib/correctionText";
 import type { Message } from "../../types";
 import { MessageList } from "../MessageList";
 
+vi.mock("../../i18n", () => ({
+  useI18n: () => ({
+    t: (key: string) =>
+      ({
+        processingThinkingTranscriptHide:
+          "Hide thinking transcript rows (display only; the agent keeps working)",
+        processingThinkingTranscriptShowHidden:
+          "Show hidden thinking transcript rows",
+        processingThinkingTranscriptShowWhenAvailable:
+          "Show thinking transcript rows when available",
+      })[key] ?? key,
+  }),
+}));
+
 const originalClipboard = navigator.clipboard;
 
 function userMessage(
@@ -405,7 +419,9 @@ describe("MessageList", () => {
     );
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Hide thinking transcript" }),
+      screen.getByRole("button", {
+        name: "Hide thinking transcript rows (display only; the agent keeps working)",
+      }),
     );
 
     expect(container.querySelectorAll("details.thinking-block")).toHaveLength(
@@ -414,7 +430,7 @@ describe("MessageList", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "Show hidden thinking transcript",
+        name: "Show hidden thinking transcript rows",
       }),
     );
 

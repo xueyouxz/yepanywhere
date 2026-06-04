@@ -42,6 +42,10 @@ dependencies. Before adding a runtime dep:
   provider SDKs. Use the audited/canonical implementation.
 - **Client bundle**: mobile-first — anything entering the client bundle must
   justify its payload. Prefer server-side rendering.
+- **Mobile interaction**: visible controls and list rows must remain practical
+  touch targets. Compact desktop density is acceptable only if mobile users can
+  still tap the intended item without precision aiming; verify spacing-sensitive
+  UI on a narrow viewport before landing.
 - **Client rendering**: rich renderers should operate on block/tool-sized input
   and return cheap metadata they already know, such as whether output changed.
   Reuse a first completed scan for both control decisions and display instead

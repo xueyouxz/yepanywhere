@@ -8,6 +8,20 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProcessingIndicator } from "../ProcessingIndicator";
 
+vi.mock("../../i18n", () => ({
+  useI18n: () => ({
+    t: (key: string) =>
+      ({
+        processingThinkingTranscriptHide:
+          "Hide thinking transcript rows (display only; the agent keeps working)",
+        processingThinkingTranscriptShowHidden:
+          "Show hidden thinking transcript rows",
+        processingThinkingTranscriptShowWhenAvailable:
+          "Show thinking transcript rows when available",
+      })[key] ?? key,
+  }),
+}));
+
 describe("ProcessingIndicator", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -82,7 +96,7 @@ describe("ProcessingIndicator", () => {
     );
 
     const button = screen.getByRole("button", {
-      name: "Show hidden thinking transcript",
+      name: "Show hidden thinking transcript rows",
     });
     expect(button.getAttribute("aria-pressed")).toBe("false");
 

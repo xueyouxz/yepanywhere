@@ -26,6 +26,24 @@ Examples:
 - new session toolbar controls (`new-session-form-toolbar-left`, submit and
   auxiliary buttons).
 
+## Mobile hit targets
+
+Compact rows and controls still need to be friendly to tap on phones. A dense
+desktop layout is not acceptable if a mobile user has to make a precision tap or
+risks opening the adjacent item.
+
+For spacing changes that affect clickable rows or controls:
+
+1. Keep an explicit touch-target metric for mobile/coarse-pointer layouts.
+2. Verify narrow viewports, not only desktop screenshots.
+3. Prefer slightly fewer visible rows over rows that are too easy to mistap.
+4. Treat session sidebar rows as touch controls, not just text list items.
+
+The recent sidebar session-list tightening is the cautionary case: reducing the
+row to a visually neat desktop density made session titles too hard to tap on
+mobile. Future sidebar row changes should choose a compromise height that keeps
+the list scannable while preserving reliable touch selection.
+
 ## Anti-hack rule
 
 Ad-hoc `translateY()` and similar transforms that exist solely to make a control

@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { getFunPhrasesEnabled } from "../hooks/useFunPhrases";
+import { useI18n } from "../i18n";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 
 const PROCESSING_PHRASES = [
@@ -78,6 +79,7 @@ export const ProcessingIndicator = memo(function ProcessingIndicator({
   hasThinkingItems = false,
   onToggleThinkingItemsVisible,
 }: Props) {
+  const { t } = useI18n();
   const [phraseIndex, setPhraseIndex] = useState(0);
   const [displayedText, setDisplayedText] = useState("");
   const [isTyping, setIsTyping] = useState(true);
@@ -133,10 +135,10 @@ export const ProcessingIndicator = memo(function ProcessingIndicator({
   }
 
   const thinkingToggleTitle = thinkingItemsVisible
-    ? "Hide thinking transcript"
+    ? t("processingThinkingTranscriptHide")
     : hasThinkingItems
-      ? "Show hidden thinking transcript"
-      : "Show thinking transcript";
+      ? t("processingThinkingTranscriptShowHidden")
+      : t("processingThinkingTranscriptShowWhenAvailable");
 
   return (
     <div
