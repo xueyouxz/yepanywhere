@@ -288,6 +288,10 @@ export type WebFetchResultValidated = z.infer<typeof WebFetchResultSchema>;
 const QuestionOptionSchema = z.object({
   label: z.string().optional(),
   description: z.string().optional(),
+  // Optional rich preview shown when the option is focused/selected; kept here
+  // so Zod does not strip it from validated results (the interactive panel
+  // reads it off the raw tool input, where it already survives).
+  preview: z.string().optional(),
 });
 
 const QuestionSchema = z.object({

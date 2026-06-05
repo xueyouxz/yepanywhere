@@ -94,4 +94,50 @@ describe("QuestionAnswerPanel", () => {
       });
     });
   });
+
+  it("hides the tab bar for a single question and reveals an option preview on select", () => {
+    const request: InputRequest = {
+      id: "req-2",
+      sessionId: "sess-2",
+      type: "question",
+      prompt: "Pick one",
+      toolName: "AskUserQuestion",
+      toolInput: {
+        questions: [
+          {
+            question: "Pick one",
+            header: "OnlyTab",
+            options: [
+              { label: "Alpha", description: "first", preview: "PREVIEW-ALPHA" },
+              { label: "Beta", description: "second" },
+            ],
+            multiSelect: false,
+          },
+        ],
+      },
+      timestamp: "2026-06-05T00:00:00.000Z",
+    };
+
+    render(
+      <QuestionAnswerPanel
+        request={request}
+        sessionId="sess-2"
+        onSubmit={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+
+    // A lone question renders no tab bar (the header is not shown as a tab).
+    expect(screen.queryByRole("button", { name: /OnlyTab/ })).toBeNull();
+
+    // Preview stays hidden until its option is selected (focused).
+    expect(screen.queryByText("PREVIEW-ALPHA")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Alpha/ }));
+    expect(screen.getByText("PREVIEW-ALPHA")).toBeTruthy();
+
+    // Switching to an option without a preview hides the previous one.
+    fireEvent.click(screen.getByRole("button", { name: /Beta/ }));
+    expect(screen.queryByText("PREVIEW-ALPHA")).toBeNull();
+  });
 });

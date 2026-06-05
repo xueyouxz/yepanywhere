@@ -266,28 +266,33 @@ export function QuestionAnswerPanel({
 
       {!collapsed && (
         <div className="question-panel">
-          {/* Tab bar */}
-          <div className="question-tabs">
-            {questions.map((q, idx) => {
-              const isActive = idx === currentTab;
-              const isAnswered = isQuestionAnswered(
-                q.question,
-                getSelections(answers, q.question),
-                otherTexts,
-              );
-              return (
-                <button
-                  key={q.question}
-                  type="button"
-                  className={`question-tab ${isActive ? "active" : ""} ${isAnswered ? "answered" : ""}`}
-                  onClick={() => setCurrentTab(idx)}
-                >
-                  {isAnswered && <span className="question-tab-check">✓</span>}
-                  {q.header}
-                </button>
-              );
-            })}
-          </div>
+          {/* Tab bar — only meaningful with more than one question; a lone
+              tab is just noise (and an awkward "active" pill), so hide it. */}
+          {questions.length > 1 && (
+            <div className="question-tabs">
+              {questions.map((q, idx) => {
+                const isActive = idx === currentTab;
+                const isAnswered = isQuestionAnswered(
+                  q.question,
+                  getSelections(answers, q.question),
+                  otherTexts,
+                );
+                return (
+                  <button
+                    key={q.question}
+                    type="button"
+                    className={`question-tab ${isActive ? "active" : ""} ${isAnswered ? "answered" : ""}`}
+                    onClick={() => setCurrentTab(idx)}
+                  >
+                    {isAnswered && (
+                      <span className="question-tab-check">✓</span>
+                    )}
+                    {q.header}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* Current question */}
           {currentQuestion && (
@@ -301,7 +306,9 @@ export function QuestionAnswerPanel({
                     <button
                       key={option.label}
                       type="button"
-                      className={`question-option-btn ${isSelected ? "selected" : ""}`}
+                      className={`question-option-btn ${isSelected ? "selected" : ""} ${
+                        isSelected && option.preview ? "has-preview" : ""
+                      }`}
                       aria-pressed={isSelected}
                       onClick={() => handleSelectOption(option.label)}
                     >
@@ -324,6 +331,17 @@ export function QuestionAnswerPanel({
                           </span>
                         )}
                       </div>
+                      {/* Preview is revealed for the focused (selected) option.
+                          stopPropagation lets the user select/copy its text
+                          without toggling the option off. */}
+                      {isSelected && option.preview && (
+                        <div
+                          className="question-option-preview"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {option.preview}
+                        </div>
+                      )}
                     </button>
                   );
                 })}
