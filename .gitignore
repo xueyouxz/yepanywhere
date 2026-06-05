@@ -71,3 +71,4 @@ packages/server/bundled/
 # Reference repos (cloned for source reading)
 references/
 start.sh
+scripts/reyep-detached.sh
