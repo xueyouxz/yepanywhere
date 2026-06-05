@@ -182,6 +182,16 @@ interface DeliveredUserEcho {
 const CONCATENATED_USER_TURN_SEPARATOR = "\n\n--------\n\n";
 const USER_ECHO_CLOCK_SKEW_MS = 60_000;
 
+// When several queued chunks are delivered as one turn, each chunk can carry a
+// leading relative-time marker, e.g. "(343s ago)" or "(13s later)" (optionally
+// preceded by a "---" rule). That prefix is not part of the user's typed text,
+// so strip it before matching a delivered turn against a queued message.
+const QUEUED_TURN_TIME_MARKER = /^(?:-{2,}\s*)?\(\d+\w* (?:ago|later)\)\s*/;
+
+function stripQueuedTurnTimeMarker(text: string): string {
+  return text.replace(QUEUED_TURN_TIME_MARKER, "");
+}
+
 function parseMessageTimestampMs(value: unknown): number | null {
   if (typeof value !== "string") {
     return null;
@@ -229,22 +239,24 @@ function userTextContainsDeferredContent(
     return false;
   }
 
-  if (
-    normalizedUserText === normalizedDeferredContent ||
-    normalizedUserText.startsWith(`${normalizedDeferredContent}\n\n`)
-  ) {
+  // A delivered chunk matches when, after dropping any leading time marker, it
+  // equals the queued text or begins with it (a queued message may itself be
+  // multi-paragraph, hence the trailing "\n\n" prefix form).
+  const partMatches = (part: string): boolean => {
+    const normalizedPart = stripQueuedTurnTimeMarker(part.trim());
+    return (
+      normalizedPart === normalizedDeferredContent ||
+      normalizedPart.startsWith(`${normalizedDeferredContent}\n\n`)
+    );
+  };
+
+  if (partMatches(normalizedUserText)) {
     return true;
   }
 
   return normalizedUserText
     .split(CONCATENATED_USER_TURN_SEPARATOR)
-    .some((part) => {
-      const normalizedPart = part.trim();
-      return (
-        normalizedPart === normalizedDeferredContent ||
-        normalizedPart.startsWith(`${normalizedDeferredContent}\n\n`)
-      );
-    });
+    .some(partMatches);
 }
 
 const DEFERRED_DRAFT_KEY_PREFIX = "queued-message-";
@@ -507,10 +519,19 @@ function userTurnMatchesDeferred(
     return true;
   }
   const text = extractUserMessageText(message as Record<string, unknown>);
-  if (!text) {
+  if (!text || !userTextContainsDeferredContent(text, deferred.content)) {
     return false;
   }
-  return userTextContainsDeferredContent(text, deferred.content);
+  // Guard a full-history scan against an unrelated identical turn from earlier
+  // in the session: the delivered turn must not clearly predate when the
+  // message was queued. If either timestamp is unparseable, trust the content
+  // match (some provider turns arrive without a usable timestamp).
+  const messageTimestampMs = parseMessageTimestampMs(message.timestamp);
+  const deferredTimestampMs = parseMessageTimestampMs(deferred.timestamp);
+  if (messageTimestampMs !== null && deferredTimestampMs !== null) {
+    return messageTimestampMs + USER_ECHO_CLOCK_SKEW_MS >= deferredTimestampMs;
+  }
+  return true;
 }
 
 function deliveredEchoMatchesDeferred(
@@ -538,10 +559,14 @@ function removeDeliveredDeferredMessages(
   ) {
     return deferredMessages;
   }
-  const recentMessages = messages.slice(-30);
+  // Scan the full transcript rather than only the tail: a queued chip can be
+  // reconciled long after delivery — e.g. when restored from storage on reload,
+  // by which point the delivered turn has scrolled past any fixed-size window.
+  // The timestamp guard in userTurnMatchesDeferred keeps the full scan from
+  // matching an unrelated older turn, and this only runs while chips exist.
   const filtered = deferredMessages.filter(
     (deferred) =>
-      !recentMessages.some((message) =>
+      !messages.some((message) =>
         userTurnMatchesDeferred(message, deferred),
       ) &&
       !deliveredEchoes.some((echo) =>

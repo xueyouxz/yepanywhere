@@ -101,6 +101,17 @@ Suggested reconciliation contract:
 - when neither path has confirmed, mark as `Queued (verifying)` in UI copy.
 - if a row remains unverified across compact/turn boundaries, trigger a snapshot
   refresh before user-visible "stability" assumptions.
+- the content-match fallback must tolerate provider-merged turns: split on the
+  `\n\n--------\n\n` concatenation separator and strip any leading per-chunk
+  `(Ns ago)` / `(Ns later)` time marker before comparing, because a multi-chunk
+  queued send is delivered as a single turn carrying those prefixes. Without
+  this, a chip stays stuck on `Sending queued message...` and persists across
+  reload (queued chips live in `localStorage` under `queued-message-<id>`).
+- match against the full loaded transcript, not just a recent tail, so a chip
+  restored from storage on reload still reconciles after its delivered turn has
+  scrolled back; guard the full scan with the queue timestamp (delivered turn
+  must not predate the queue time beyond clock skew) so an unrelated older
+  identical turn cannot false-match.
 
 ## Action matrix by readiness
 

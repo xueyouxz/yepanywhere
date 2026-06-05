@@ -890,6 +890,84 @@ describe("useSession completion reconciliation", () => {
     expect(window.localStorage.getItem("queued-message-sess-1")).toBeNull();
   });
 
+  it("prunes persisted deferred chips from a time-marked concatenated turn", () => {
+    window.localStorage.setItem(
+      "queued-message-sess-1",
+      JSON.stringify([
+        {
+          tempId: "temp-1",
+          content: "could you rename the label",
+          timestamp: "2026-04-24T00:00:00.000Z",
+        },
+        {
+          tempId: "temp-2",
+          content: "e.g. Asking then Asked?",
+          timestamp: "2026-04-24T00:00:01.000Z",
+        },
+      ]),
+    );
+    // Delivered as one turn with per-chunk "(Ns ago/later)" markers plus the
+    // "--------" separator, exactly as a multi-chunk queued send arrives.
+    sessionMessagesMock.messages = [
+      {
+        type: "user",
+        uuid: "uuid-combined",
+        timestamp: "2026-04-24T00:01:00.000Z",
+        message: {
+          role: "user",
+          content:
+            "(60s ago)\n\ncould you rename the label\n\n--------\n\n(1s later)\n\ne.g. Asking then Asked?",
+        },
+      },
+    ];
+
+    const { result } = renderHook(() =>
+      useSession(PROJECT_ID, "sess-1", {
+        owner: "self",
+        processId: "proc-1",
+      }),
+    );
+
+    expect(result.current.deferredMessages).toEqual([]);
+    expect(window.localStorage.getItem("queued-message-sess-1")).toBeNull();
+  });
+
+  it("prunes a deferred chip whose delivered turn scrolled past the recent window", () => {
+    window.localStorage.setItem(
+      "queued-message-sess-1",
+      JSON.stringify([
+        {
+          tempId: "temp-1",
+          content: "old queued message",
+          timestamp: "2026-04-24T00:00:00.000Z",
+        },
+      ]),
+    );
+    const deliveredTurn = {
+      type: "user",
+      uuid: "uuid-delivered",
+      timestamp: "2026-04-24T00:00:05.000Z",
+      message: { role: "user", content: "old queued message" },
+    };
+    // 40 later turns push the delivered turn out of any fixed -30 tail window.
+    const filler = Array.from({ length: 40 }, (_, i) => ({
+      type: "assistant",
+      uuid: `uuid-filler-${i}`,
+      timestamp: "2026-04-24T00:10:00.000Z",
+      message: { role: "assistant", content: `filler ${i}` },
+    }));
+    sessionMessagesMock.messages = [deliveredTurn, ...filler];
+
+    const { result } = renderHook(() =>
+      useSession(PROJECT_ID, "sess-1", {
+        owner: "self",
+        processId: "proc-1",
+      }),
+    );
+
+    expect(result.current.deferredMessages).toEqual([]);
+  });
+
   it("uses server queue order when a REST sync inserts an edited message", () => {
     const { result } = renderHook(() =>
       useSession(PROJECT_ID, "sess-1", {
