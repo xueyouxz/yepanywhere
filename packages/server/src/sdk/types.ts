@@ -95,6 +95,12 @@ export interface UserMessage {
   uuid?: string;
   /** Client-generated temp ID for optimistic UI tracking. Echoed back in SSE. */
   tempId?: string;
+  /**
+   * Temp IDs of every chunk merged into this message (set by concatUserMessages
+   * when a queued batch is bundled into one turn). Echoed back so the client can
+   * clear all delivered queued chips by identity, not by re-matching turn text.
+   */
+  tempIds?: string[];
   /** YA-internal submission timing and delivery-intent metadata. */
   metadata?: UserMessageMetadata;
 }

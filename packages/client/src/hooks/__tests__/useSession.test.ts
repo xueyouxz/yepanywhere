@@ -303,6 +303,49 @@ describe("useSession completion reconciliation", () => {
     expect(result.current.deferredMessages).toEqual([]);
   });
 
+  it("clears every bundled chip by tempIds on the merged-turn echo", () => {
+    sessionMessagesMock.messages = [];
+    const { result } = renderHook(() =>
+      useSession(PROJECT_ID, "sess-1", {
+        owner: "self",
+        processId: "proc-1",
+      }),
+    );
+
+    act(() => {
+      result.current.addDeferredMessage({
+        tempId: "temp-a",
+        content: "alpha message",
+        timestamp: "2026-04-24T00:00:00.000Z",
+      });
+      result.current.addDeferredMessage({
+        tempId: "temp-b",
+        content: "beta message",
+        timestamp: "2026-04-24T00:00:01.000Z",
+      });
+    });
+    expect(result.current.deferredMessages).toHaveLength(2);
+
+    // The delivered turn echoes back every bundled id. Its text is the
+    // time-marked merge and intentionally does NOT contain the original chip
+    // text, so only the tempIds list can clear both chips.
+    act(() => {
+      sessionStreamHandler?.({
+        eventType: "message",
+        type: "user",
+        uuid: "uuid-bundle",
+        tempId: "temp-a",
+        tempIds: ["temp-a", "temp-b"],
+        message: {
+          role: "user",
+          content: "(60s ago)\n\nrewritten\n\n--------\n\n(1s later)\n\nrewritten",
+        },
+      });
+    });
+
+    expect(result.current.deferredMessages).toEqual([]);
+  });
+
   it("clears all deferred chips contained in a merged provider user turn", () => {
     const { result } = renderHook(() =>
       useSession(PROJECT_ID, "sess-1", {

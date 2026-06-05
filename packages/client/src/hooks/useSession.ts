@@ -357,10 +357,13 @@ function saveDeferredMessages(
 
 function removeEchoedQueueMessage<
   T extends { tempId?: string; content: string },
->(messages: T[], tempId?: string, incomingText?: string | null): T[] {
+>(messages: T[], tempIds?: string[], incomingText?: string | null): T[] {
   let next = messages;
-  if (tempId) {
-    next = next.filter((message) => message.tempId !== tempId);
+  if (tempIds && tempIds.length) {
+    const ids = new Set(tempIds);
+    next = next.filter(
+      (message) => !(message.tempId && ids.has(message.tempId)),
+    );
   }
 
   if (!incomingText) {
@@ -1711,13 +1714,29 @@ export function useSession(
         // Deferred promotion should also be reflected by a deferred-queue event,
         // but this reconciles clients that miss that event across reconnects.
         const tempId = sdkMessage.tempId as string | undefined;
+        // A delivered queued bundle echoes back every merged chunk's id; an
+        // unbundled turn carries just the single tempId. Clearing by this id set
+        // is what lets all chips of a time-marked merged turn resolve without
+        // re-matching their original text.
+        const echoedTempIds = Array.isArray(sdkMessage.tempIds)
+          ? (sdkMessage.tempIds as string[]).filter(
+              (id): id is string => typeof id === "string",
+            )
+          : tempId
+            ? [tempId]
+            : [];
         if (msgType === "user") {
           setPromptSuggestion(null);
           const incomingText = extractUserMessageText(sdkMessage);
-          if (tempId || incomingText) {
+          if (echoedTempIds.length || incomingText) {
+            const echoContent = incomingText ?? "";
+            const idEchoes: DeliveredUserEcho[] = echoedTempIds.map((id) => ({
+              tempId: id,
+              content: echoContent,
+            }));
             deliveredUserEchoesRef.current = [
               ...deliveredUserEchoesRef.current,
-              { ...(tempId ? { tempId } : {}), content: incomingText ?? "" },
+              ...(idEchoes.length ? idEchoes : [{ content: echoContent }]),
             ].slice(-50);
           }
           logSessionUiTrace("user-echo", {
@@ -1725,10 +1744,12 @@ export function useSession(
             tempId: tempId ?? null,
             textLength: incomingText?.length ?? 0,
           });
-          if (tempId) {
-            removePendingMessage(tempId);
+          if (echoedTempIds.length) {
+            for (const id of echoedTempIds) {
+              removePendingMessage(id);
+            }
             setDeferredMessages((prev) =>
-              removeEchoedQueueMessage(prev, tempId, incomingText),
+              removeEchoedQueueMessage(prev, echoedTempIds, incomingText),
             );
           } else if (incomingText) {
             // Fallback for providers that omit tempId on user echo:

@@ -43,6 +43,13 @@ export function concatUserMessages(
     uuid: first.uuid,
     tempId: first.tempId,
   };
+  // Record every chunk's temp id so the delivered-turn echo can clear all of
+  // the queued chips by identity (the merged text is time-marked and would not
+  // match the originally-typed chunk text).
+  const tempIds = messages
+    .map((msg) => msg.tempId)
+    .filter((id): id is string => Boolean(id));
+  if (tempIds.length) combined.tempIds = tempIds;
   if (allImages.length) combined.images = allImages;
   if (allDocs.length) combined.documents = allDocs;
   if (allAttachments.length) combined.attachments = allAttachments;

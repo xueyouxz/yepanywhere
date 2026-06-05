@@ -97,6 +97,13 @@ rather than implying a firm `"sent"` or `"queued"` terminal state.
 Suggested reconciliation contract:
 
 - prefer `tempId` match to mark definitive delivery,
+- a bundled delivery is reconciled by identity, not text: when a queued batch is
+  merged into one provider turn, the bundle records every chunk's `tempId`
+  (`concatUserMessages` -> `UserMessage.tempIds`) and the delivered-turn echo
+  carries that whole list (`tempIds` on the emitted user message). The client
+  clears all of those chips by id on the echo — O(chips), and independent of the
+  merged/time-marked turn text. This keeps the optimistic `sending` state intact
+  (chips clear on the echo, i.e. proven delivery, not at promote time).
 - fallback to content match only when no identifier is available,
 - when neither path has confirmed, mark as `Queued (verifying)` in UI copy.
 - if a row remains unverified across compact/turn boundaries, trigger a snapshot

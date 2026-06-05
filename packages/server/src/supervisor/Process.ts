@@ -1447,6 +1447,11 @@ export class Process {
       type: "user",
       uuid,
       tempId: providerMessage.tempId,
+      // Carry every bundled chunk id so the client clears all delivered queued
+      // chips by identity (a merged turn keeps only first.tempId otherwise).
+      ...(providerMessage.tempIds && providerMessage.tempIds.length
+        ? { tempIds: providerMessage.tempIds }
+        : {}),
       messageMetadata: providerMessage.metadata,
       message: { role: "user", content },
     } as SDKMessage);
