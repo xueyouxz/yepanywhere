@@ -346,6 +346,13 @@ export interface ToolRenderer<TInput = unknown, TResult = unknown> {
   tool: string;
   /** Display name shown in UI (defaults to tool name) */
   displayName?: string;
+  /**
+   * Display name shown while the call is still in progress (status "pending"),
+   * so the verb can read in the present tense live and past tense once
+   * finished (e.g. Bash "Running" -> "Ran", AskUserQuestion "Asking" ->
+   * "Asked"). Falls back to `displayName` when unset.
+   */
+  pendingDisplayName?: string;
   /** Render the tool_use block (what Claude wants to do) */
   renderToolUse(input: TInput, context: RenderContext): ReactNode;
   /** Render the tool_result block (what happened) */

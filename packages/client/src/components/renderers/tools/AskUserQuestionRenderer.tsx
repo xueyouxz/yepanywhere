@@ -177,6 +177,8 @@ export const askUserQuestionRenderer: ToolRenderer<
   AskUserQuestionResult
 > = {
   tool: "AskUserQuestion",
+  displayName: "Asked",
+  pendingDisplayName: "Asking",
 
   renderToolUse(input, _context) {
     return <AskUserQuestionToolUse input={input as AskUserQuestionInput} />;

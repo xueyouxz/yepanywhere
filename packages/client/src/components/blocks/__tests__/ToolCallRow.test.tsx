@@ -37,7 +37,9 @@ describe("ToolCallRow", () => {
       />,
     );
 
-    expect(screen.getByText("Ran")).toBeDefined();
+    // Pending rows read in the present tense ("Running"), past tense ("Ran")
+    // only once the command has finished.
+    expect(screen.getByText("Running")).toBeDefined();
     expect(screen.getByText("npm run test:e2e:pipeline-v2")).toBeDefined();
     expect(container.querySelector(".tool-row-collapsed-preview")).toBeNull();
     expect(container.querySelector(".tool-use-expanded")).toBeNull();

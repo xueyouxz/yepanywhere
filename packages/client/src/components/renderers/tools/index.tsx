@@ -120,8 +120,11 @@ class ToolRendererRegistry {
     return null;
   }
 
-  getDisplayName(toolName: string): string {
+  getDisplayName(toolName: string, status?: ToolCallItem["status"]): string {
     const renderer = this.get(toolName);
+    if (status === "pending" && renderer.pendingDisplayName) {
+      return renderer.pendingDisplayName;
+    }
     return renderer.displayName || toolName;
   }
 }

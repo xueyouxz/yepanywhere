@@ -816,7 +816,7 @@ export const ToolCallRow = memo(function ToolCallRow({
         )}
 
         <span className="tool-name">
-          {toolRegistry.getDisplayName(toolName)}
+          {toolRegistry.getDisplayName(toolName, status)}
         </span>
 
         {hasInteractiveSummary && canRenderInteractiveSummary ? (
