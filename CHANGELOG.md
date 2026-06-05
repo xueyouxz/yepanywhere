@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-06-05
+
+### Added
+- Shared file viewer and Markdown media handling across session, public share,
+  and remote file links, including line-range views.
+- Output appearance controls for fixed-width rendering, typography, and Grep
+  preview line counts.
+- Session search, explicit thinking controls, and broader localized client UI
+  coverage for German, Spanish, French, Japanese, and Chinese.
+- OpenCode session recovery from CLI exports and vLLM response rendering.
+
+### Changed
+- Move speech options into the microphone menu and share thinking effort controls
+  across composer surfaces.
+- Tighten transcript, tool-row, sidebar, settings, and mobile spacing and
+  typography.
+- Default heartbeat turns to continue and bind queued "when done" prompts to
+  Ctrl+Enter.
+- Document relay protocol grace policy and local CI gating expectations.
+
+### Fixed
+- Clear stale relay resume sessions before login.
+- Reap idle Claude sessions so closed tabs do not leave provider sessions alive
+  indefinitely.
+- Fix public share copy, edit previews, file media, and Read links.
+- Stabilize thinking transcript rendering and Grep summary previews.
+- Improve OpenCode provider session recovery, provider resolution, and session
+  reading.
+
+### Security
+- Add relay SRP v2-to-v3 grace handling and hosted-client compatibility
+  warnings for stronger resume verification.
+
 ## [0.5.1] - 2026-06-03
 
 ### Added

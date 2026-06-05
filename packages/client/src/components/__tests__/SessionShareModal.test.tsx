@@ -105,13 +105,19 @@ describe("SessionShareModal", () => {
         title: "Build logs",
       });
     });
-    expect(writeText).toHaveBeenCalledWith(
-      "https://ya.graehl.org/share/secret?h=test-host",
-    );
-    expect(
-      screen.getByDisplayValue("https://ya.graehl.org/share/secret?h=test-host"),
-    ).toBeTruthy();
-    expect(screen.getByText("Read-only link copied to clipboard.")).toBeTruthy();
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(
+        "https://ya.graehl.org/share/secret?h=test-host",
+      );
+      expect(
+        screen.getByDisplayValue(
+          "https://ya.graehl.org/share/secret?h=test-host",
+        ),
+      ).toBeTruthy();
+      expect(
+        screen.getByText("Read-only link copied to clipboard."),
+      ).toBeTruthy();
+    });
   });
 
   it("creates and copies a live read-only public share in one click", async () => {

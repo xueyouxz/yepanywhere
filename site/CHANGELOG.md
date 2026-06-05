@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [site-v1.6.2] - 2026-06-05
+
+### Added
+- Session search, fixed-font and output appearance controls, explicit thinking
+  controls, and Grep preview line settings for hosted remote sessions.
+- Localized remote UI coverage for German, Spanish, French, Japanese, and
+  Chinese.
+- Shared Markdown media and file viewer support for remote and public share file
+  links.
+
+### Changed
+- Move speech controls into the microphone menu, hide the composer model chip by
+  default, and polish transcript, tool-row, sidebar, and settings typography.
+- Show daily-snoozed remote compatibility notices and ignore `site-v*` tags in
+  YA server version displays.
+- Keep relay SRP v2 resume available during the v3 grace window with visible
+  compatibility guidance.
+
+### Fixed
+- Clear stale relay resume sessions before login.
+- Fix public share file media and Read links.
+- Stabilize thinking transcript and Grep preview rendering.
+- Improve mobile sidebar tap targets and mid-width settings layout.
+
 ## [site-v1.6.1] - 2026-06-03
 
 ### Added

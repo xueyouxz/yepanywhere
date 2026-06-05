@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { type FileContentResponse, toUrlProjectId } from "@yep-anywhere/shared";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setInlineMediaExpandedPreference } from "../../hooks/useInlineMedia";
 import { I18nProvider } from "../../i18n";
 import {
   fetchPublicShareBlobViaRelay,
@@ -39,11 +40,13 @@ function installObjectUrlMock() {
 
 describe("PublicShareFilePage", () => {
   beforeEach(() => {
+    setInlineMediaExpandedPreference(false);
     installObjectUrlMock();
   });
 
   afterEach(() => {
     cleanup();
+    setInlineMediaExpandedPreference(false);
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -95,7 +98,7 @@ describe("PublicShareFilePage", () => {
 
     expect(await screen.findByRole("heading", { name: "Guide" })).toBeTruthy();
     expect(screen.queryByAltText("diagram.png")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Expand image" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand image" }));
 
     const inlineImage = await screen.findByAltText("diagram.png");
     expect(inlineImage.getAttribute("src")).toBe("blob:embedded-media");

@@ -21,6 +21,10 @@ const originalScrollHeightDescriptor = Object.getOwnPropertyDescriptor(
   HTMLElement.prototype,
   "scrollHeight",
 );
+const originalScrollTopDescriptor = Object.getOwnPropertyDescriptor(
+  HTMLElement.prototype,
+  "scrollTop",
+);
 
 function restorePrototypeProperty(
   name: keyof HTMLElement,
@@ -62,9 +66,11 @@ describe("FileViewer", () => {
     });
     restorePrototypeProperty("clientHeight", originalClientHeightDescriptor);
     restorePrototypeProperty("scrollHeight", originalScrollHeightDescriptor);
+    restorePrototypeProperty("scrollTop", originalScrollTopDescriptor);
   });
 
   it("marks and scrolls a line range 10% below the viewer top", async () => {
+    let scrollTop = 0;
     Object.defineProperty(HTMLElement.prototype, "clientHeight", {
       configurable: true,
       get() {
@@ -75,6 +81,17 @@ describe("FileViewer", () => {
       configurable: true,
       get() {
         return this.classList.contains("file-viewer-body") ? 1000 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollTop", {
+      configurable: true,
+      get() {
+        return this.classList.contains("file-viewer-body") ? scrollTop : 0;
+      },
+      set(value) {
+        if (this.classList.contains("file-viewer-body")) {
+          scrollTop = Number(value);
+        }
       },
     });
     Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
@@ -145,9 +162,11 @@ describe("FileViewer", () => {
     ).toBe(false);
     expect(container.querySelector(".highlighted-line")).toBeNull();
     expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
-    expect(
-      container.querySelector<HTMLElement>(".file-viewer-body")?.scrollTop,
-    ).toBe(190);
+    await waitFor(() => {
+      expect(
+        container.querySelector<HTMLElement>(".file-viewer-body")?.scrollTop,
+      ).toBe(190);
+    });
   });
 
   it("paints a single highlighted line", async () => {
