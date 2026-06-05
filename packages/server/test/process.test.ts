@@ -1,9 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { UrlProjectId } from "@yep-anywhere/shared";
-import {
-  CONCAT_SEPARATOR,
-  MessageQueue,
-} from "../src/sdk/messageQueue.js";
+import { CONCAT_SEPARATOR, MessageQueue } from "../src/sdk/messageQueue.js";
+import { getLogger } from "../src/logging/logger.js";
 import type { AgentProvider } from "../src/sdk/providers/types.js";
 import type { SDKMessage } from "../src/sdk/types.js";
 import { Process } from "../src/supervisor/Process.js";
@@ -27,8 +25,7 @@ function createControllableIterator(): {
   finish: () => void;
 } {
   const queue: IteratorResult<SDKMessage>[] = [];
-  let resolveNext: ((result: IteratorResult<SDKMessage>) => void) | null =
-    null;
+  let resolveNext: ((result: IteratorResult<SDKMessage>) => void) | null = null;
 
   const pushResult = (result: IteratorResult<SDKMessage>) => {
     if (resolveNext) {
@@ -181,6 +178,25 @@ describe("Process", () => {
       expect(process.state.type).toBe("idle");
     });
 
+    it("publishes the provider session id for agentctl-active shells", async () => {
+      const publishAgentctlSessionIdFn = vi.fn();
+      const iterator = createMockIterator([
+        { type: "system", subtype: "init", session_id: "sess-real" },
+      ]);
+
+      new Process(iterator, {
+        projectPath: "/test",
+        projectId: "proj-1" as UrlProjectId,
+        sessionId: "temp-session",
+        idleTimeoutMs: 100,
+        publishAgentctlSessionIdFn,
+      });
+
+      await waitFor(() =>
+        expect(publishAgentctlSessionIdFn).toHaveBeenCalledWith("sess-real"),
+      );
+    });
+
     it("emits state-change events", async () => {
       const messages: SDKMessage[] = [
         { type: "system", subtype: "init", session_id: "sess-1" },
@@ -211,6 +227,112 @@ describe("Process", () => {
       if (lastChange?.type === "state-change") {
         expect(lastChange.state.type).toBe("idle");
       }
+    });
+
+    it("uses Claude session_state_changed idle as a turn boundary", async () => {
+      const controller = createControllableIterator();
+      const process = new Process(controller.iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        provider: "claude",
+        idleTimeoutMs: 10_000,
+      });
+
+      controller.push({
+        type: "system",
+        subtype: "init",
+        session_id: "sess-1",
+      });
+      controller.push({
+        type: "system",
+        subtype: "session_state_changed",
+        state: "idle",
+        session_id: "sess-1",
+        uuid: "11111111-1111-4111-8111-111111111111",
+      });
+
+      await waitFor(() => expect(process.state.type).toBe("idle"));
+    });
+
+    it("treats Claude requires_action as non-idle evidence without fabricating input", async () => {
+      const controller = createControllableIterator();
+      const process = new Process(controller.iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        provider: "claude",
+        idleTimeoutMs: 10_000,
+      });
+
+      controller.push({
+        type: "system",
+        subtype: "init",
+        session_id: "sess-1",
+      });
+      controller.push({
+        type: "system",
+        subtype: "session_state_changed",
+        state: "idle",
+        session_id: "sess-1",
+        uuid: "11111111-1111-4111-8111-111111111111",
+      });
+      await waitFor(() => expect(process.state.type).toBe("idle"));
+
+      controller.push({
+        type: "system",
+        subtype: "session_state_changed",
+        state: "requires_action",
+        session_id: "sess-1",
+        uuid: "22222222-2222-4222-8222-222222222222",
+      });
+
+      await waitFor(() => expect(process.state.type).toBe("in-turn"));
+      expect(process.getPendingInputRequest()).toBeNull();
+    });
+
+    it("logs listener failures without blocking other listeners", async () => {
+      const warnSpy = vi
+        .spyOn(getLogger(), "warn")
+        .mockImplementation(() => undefined);
+      const controller = createControllableIterator();
+      const process = new Process(controller.iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        provider: "claude",
+        idleTimeoutMs: 10_000,
+      });
+      const received: ProcessEvent[] = [];
+
+      process.subscribe(() => {
+        throw new Error("broken listener");
+      });
+      process.subscribe((event) => {
+        if (event.type === "message") {
+          received.push(event);
+        }
+      });
+
+      controller.push({
+        type: "system",
+        subtype: "init",
+        session_id: "sess-1",
+      });
+
+      await waitFor(() => expect(received).toHaveLength(1));
+      await waitFor(() =>
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            event: "process_listener_error",
+            emittedEventType: "message",
+            error: "broken listener",
+          }),
+          "Process listener failed",
+        ),
+      );
+
+      warnSpy.mockRestore();
     });
   });
 
@@ -559,7 +681,11 @@ describe("Process", () => {
         }
       });
 
-      controller.push({ type: "system", subtype: "init", session_id: "sess-1" });
+      controller.push({
+        type: "system",
+        subtype: "init",
+        session_id: "sess-1",
+      });
       controller.push({ type: "assistant", message: { content: "before" } });
       await waitFor(() =>
         expect(process.getRecentAssistantText()).toEqual(["before"]),
@@ -608,7 +734,11 @@ describe("Process", () => {
       });
 
       const sinceMs = Date.now() - 1;
-      controller.push({ type: "system", subtype: "init", session_id: "sess-1" });
+      controller.push({
+        type: "system",
+        subtype: "init",
+        session_id: "sess-1",
+      });
       controller.push({ type: "assistant", message: { content: "during" } });
       await waitFor(() =>
         expect(process.getRecentAssistantText()).toEqual(["during"]),
@@ -652,7 +782,11 @@ describe("Process", () => {
         model: "sonnet",
       });
 
-      controller.push({ type: "system", subtype: "init", session_id: "sess-1" });
+      controller.push({
+        type: "system",
+        subtype: "init",
+        session_id: "sess-1",
+      });
       controller.push({ type: "assistant", message: { content: "after" } });
       controller.push({ type: "result", session_id: "sess-1" });
       await waitFor(() => expect(process.state.type).toBe("idle"));
@@ -1100,7 +1234,9 @@ describe("Process", () => {
       });
 
       controller.finish();
-      await waitFor(() => expect(process.getDeferredQueueSummary()).toEqual([]));
+      await waitFor(() =>
+        expect(process.getDeferredQueueSummary()).toEqual([]),
+      );
       await process.abort();
     });
 
@@ -1127,7 +1263,9 @@ describe("Process", () => {
         session_id: "sess-1",
       });
 
-      await waitFor(() => expect(process.getDeferredQueueSummary()).toEqual([]));
+      await waitFor(() =>
+        expect(process.getDeferredQueueSummary()).toEqual([]),
+      );
 
       const userMessages = events.flatMap((event) =>
         event.type === "message" && event.message.type === "user"
@@ -1200,7 +1338,9 @@ describe("Process", () => {
         session_id: "sess-1",
       });
 
-      await waitFor(() => expect(process.getDeferredQueueSummary()).toEqual([]));
+      await waitFor(() =>
+        expect(process.getDeferredQueueSummary()).toEqual([]),
+      );
 
       const userContents = events.flatMap((event) =>
         event.type === "message" && event.message.type === "user"
@@ -1812,7 +1952,7 @@ describe("Process", () => {
       expect(process.permissionMode).toBe("default");
     });
 
-    it("handleToolApproval prompts user for AskUserQuestion in plan mode (not auto-deny)", async () => {
+    it("surfaces AskUserQuestion as a user question in plan mode", async () => {
       const iterator = createMockIterator([]);
       const process = new Process(iterator, {
         projectPath: "/test",
@@ -1823,32 +1963,82 @@ describe("Process", () => {
       });
 
       const abortController = new AbortController();
+      const input = {
+        questions: [{ question: "test?", header: "Test", options: [] }],
+      };
 
-      // AskUserQuestion should NOT auto-deny - it should prompt the user
       const approvalPromise = process.handleToolApproval(
         "AskUserQuestion",
-        { questions: [{ question: "test?", header: "Test", options: [] }] },
+        input,
         { signal: abortController.signal },
       );
 
-      // Should be in waiting-input state (prompting user)
       expect(process.state.type).toBe("waiting-input");
 
-      // Simulate user approving with answers
       const pendingRequest = process.getPendingInputRequest();
       expect(pendingRequest).not.toBeNull();
       expect(pendingRequest?.toolName).toBe("AskUserQuestion");
+      expect(pendingRequest?.type).toBe("question");
+      expect(pendingRequest?.prompt).toBe("test?");
       process.respondToInput(pendingRequest?.id, "approve", { "test?": "Yes" });
 
       const result = await approvalPromise;
       expect(result.behavior).toBe("allow");
-      // Should have updated input with answers
       expect(result.updatedInput).toEqual({
-        questions: [{ question: "test?", header: "Test", options: [] }],
+        ...input,
         answers: { "test?": "Yes" },
       });
-      // Should still be in plan mode (AskUserQuestion doesn't exit plan mode)
       expect(process.permissionMode).toBe("plan");
+    });
+
+    it("does not let permission rules answer AskUserQuestion", async () => {
+      const iterator = createMockIterator([]);
+      const process = new Process(iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        idleTimeoutMs: 100,
+        permissions: { deny: ["AskUserQuestion(*)"] },
+      });
+
+      const abortController = new AbortController();
+      const input = {
+        questions: [
+          {
+            question: "Which checks?",
+            header: "Checks",
+            options: [
+              { label: "Unit", description: "Run unit tests" },
+              { label: "Types", description: "Run typecheck" },
+            ],
+            multiSelect: true,
+          },
+        ],
+      };
+      const approvalPromise = process.handleToolApproval(
+        "AskUserQuestion",
+        input,
+        {
+          signal: abortController.signal,
+        },
+      );
+
+      const pendingRequest = process.getPendingInputRequest();
+      expect(pendingRequest?.type).toBe("question");
+      expect(pendingRequest?.toolName).toBe("AskUserQuestion");
+
+      process.respondToInput(pendingRequest?.id ?? "", "approve", {
+        "Which checks?": ["Unit", "Types"],
+      });
+
+      const result = await approvalPromise;
+      expect(result).toEqual({
+        behavior: "allow",
+        updatedInput: {
+          ...input,
+          answers: { "Which checks?": ["Unit", "Types"] },
+        },
+      });
     });
 
     it("handleToolApproval auto-approves Edit tools in acceptEdits mode", async () => {

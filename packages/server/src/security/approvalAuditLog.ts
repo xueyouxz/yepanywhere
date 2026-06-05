@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { InputRequest } from "@yep-anywhere/shared";
+import type { InputRequest, UserQuestionAnswers } from "@yep-anywhere/shared";
 import { enforceOwnerReadWriteFilePermissions } from "../utils/filePermissions.js";
 
 export interface ApprovalAuditEntry {
@@ -12,7 +12,7 @@ export interface ApprovalAuditEntry {
   request: InputRequest | null;
   response: string;
   normalizedResponse: "approve" | "deny";
-  answers?: Record<string, string>;
+  answers?: UserQuestionAnswers;
   feedback?: string;
   accepted: boolean;
   failure?: string;

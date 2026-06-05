@@ -59,6 +59,11 @@ Related topic: [heartbeat ownership and timers](heartbeat.md).
   liveness. A valid native session that survives a YA restart must be readable
   through the provider's current durable export/list surface, not only through
   an older on-disk layout that happened to exist when the adapter was written.
+- Provider child-process session-id propagation for `agentctl` active-session
+  upkeep is coordination metadata, not liveness evidence. A `BASH_ENV` bridge
+  can make future provider-spawned Bash tool shells inherit
+  `AGENTCTL_SESSION_ID`, but it does not mutate an already-running process
+  environment and must not upgrade a silent turn to progress or idle.
 - OpenCode `/session/status` is a real active-turn status signal for that
   provider. `busy` and `retry` entries are active evidence, `idle` and missing
   entries mean no active OpenCode work is reported for that session, and

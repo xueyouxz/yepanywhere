@@ -13,6 +13,7 @@ import {
   type SessionOwnership,
   type ThinkingOption,
   type UploadedFile,
+  type UserQuestionAnswers,
   type UserMessageDeliveryIntent,
   type UserMessageMetadata,
   type UrlProjectId,
@@ -66,7 +67,12 @@ import type {
   Supervisor,
 } from "../supervisor/Supervisor.js";
 import type { QueuedResponse } from "../supervisor/WorkerQueue.js";
-import type { ContentBlock, Message, Project, Session } from "../supervisor/types.js";
+import type {
+  ContentBlock,
+  Message,
+  Project,
+  Session,
+} from "../supervisor/types.js";
 import {
   isValidSshHostAlias,
   normalizeSshHostAlias,
@@ -192,9 +198,7 @@ function normalizeOptionalServiceTier(
     return undefined;
   }
   const serviceTier = rawServiceTier.trim();
-  return /^[A-Za-z0-9_-]{1,64}$/.test(serviceTier)
-    ? serviceTier
-    : undefined;
+  return /^[A-Za-z0-9_-]{1,64}$/.test(serviceTier) ? serviceTier : undefined;
 }
 
 function parseOptionalRecapMode(rawMode: unknown): {
@@ -243,7 +247,10 @@ function parseOptionalHelperSideModel(rawModel: unknown): {
     return { helperSideModel: undefined };
   }
   if (typeof rawModel !== "string") {
-    return { helperSideModel: undefined, error: "helperSideModel must be a string" };
+    return {
+      helperSideModel: undefined,
+      error: "helperSideModel must be a string",
+    };
   }
   const trimmed = rawModel.trim();
   if (!trimmed) {
@@ -372,7 +379,10 @@ function parseDeliveryIntent(
     : undefined;
 }
 
-function parseShortString(value: unknown, maxLength: number): string | undefined {
+function parseShortString(
+  value: unknown,
+  maxLength: number,
+): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed.slice(0, maxLength) : undefined;
@@ -392,7 +402,9 @@ function buildUserMessageMetadata(
   serverTimestamp: number,
   fallbackIntent: UserMessageDeliveryIntent,
 ): UserMessageMetadata {
-  const rawMetadata = isRecord(body.messageMetadata) ? body.messageMetadata : {};
+  const rawMetadata = isRecord(body.messageMetadata)
+    ? body.messageMetadata
+    : {};
   const rawComposition = isRecord(rawMetadata.composition)
     ? rawMetadata.composition
     : {};
@@ -406,7 +418,8 @@ function buildUserMessageMetadata(
     Object.entries(composition).filter(([, value]) => value !== undefined),
   ) as NonNullable<UserMessageMetadata["composition"]>;
   const clientTimestamp =
-    typeof body.clientTimestamp === "number" && Number.isFinite(body.clientTimestamp)
+    typeof body.clientTimestamp === "number" &&
+    Number.isFinite(body.clientTimestamp)
       ? body.clientTimestamp
       : undefined;
   const rawSpeech = isRecord(rawMetadata.speech) ? rawMetadata.speech : {};
@@ -419,9 +432,7 @@ function buildUserMessageMetadata(
   const speech =
     speechClientTurnId || speechTranscriptionIds
       ? {
-          ...(speechClientTurnId
-            ? { clientTurnId: speechClientTurnId }
-            : {}),
+          ...(speechClientTurnId ? { clientTurnId: speechClientTurnId } : {}),
           ...(speechTranscriptionIds
             ? { transcriptionIds: speechTranscriptionIds }
             : {}),
@@ -523,7 +534,7 @@ interface CreateSessionBody {
 interface InputResponseBody {
   requestId: string;
   response: "approve" | "approve_accept_edits" | "deny" | string;
-  answers?: Record<string, string>;
+  answers?: UserQuestionAnswers;
   feedback?: string;
 }
 
@@ -595,7 +606,9 @@ function renderRestartContent(content: unknown): string {
         case "text":
           return typed.text ?? "";
         case "thinking":
-          return typed.thinking ? `[thinking]\n${typed.thinking}` : "[thinking]";
+          return typed.thinking
+            ? `[thinking]\n${typed.thinking}`
+            : "[thinking]";
         case "tool_use":
           return `[tool_use ${typed.name ?? "unknown"}]\n${stringifyForRestart(
             typed.input,
@@ -698,7 +711,10 @@ async function tryQueueTargetedAutoCompact(params: {
   process: Process;
   model: string | undefined;
   message: string;
-  resolveContextWindow: (model: string | undefined, provider?: ProviderName) => number;
+  resolveContextWindow: (
+    model: string | undefined,
+    provider?: ProviderName,
+  ) => number;
 }): Promise<AutoCompactQueueResult> {
   if (params.process.state.type !== "idle") {
     return { queued: false, reason: "process-not-idle" };
@@ -741,7 +757,8 @@ async function tryQueueTargetedAutoCompact(params: {
     return { queued: false, reason: "compact-command-list-unavailable" };
   }
 
-  const command = commands.find((candidate) => candidate.name === "compact")?.name ??
+  const command =
+    commands.find((candidate) => candidate.name === "compact")?.name ??
     commands.find((candidate) => candidate.name === "compress")?.name;
   if (!command) {
     return { queued: false, reason: "compact-command-unavailable" };
@@ -848,10 +865,9 @@ function formatRestartMessage(message: Message): string | null {
 
   const role = messageRole(message);
   const timestamp = messageTimestampSuffix(message);
-  const content =
-    isHumanUserMessage(message)
-      ? renderRestartContent(messageContent(message))
-      : renderRestartActivityContent(message);
+  const content = isHumanUserMessage(message)
+    ? renderRestartContent(messageContent(message))
+    : renderRestartActivityContent(message);
   const subtype =
     typeof message.subtype === "string" ? `:${message.subtype}` : "";
   const trimmed = content.trim();
@@ -921,9 +937,7 @@ function isCompactBoundaryMessage(message: SDKMessage | Message): boolean {
   return message.type === "system" && message.subtype === "compact_boundary";
 }
 
-function describeRestartCompactAttempt(
-  attempt: RestartCompactAttempt,
-): string {
+function describeRestartCompactAttempt(attempt: RestartCompactAttempt): string {
   switch (attempt.status) {
     case "completed":
       return `completed with /${attempt.command}`;
@@ -1169,7 +1183,10 @@ function isHumanUserMessage(message: Message): boolean {
 }
 
 function messageTitleCandidate(message: Message): string | undefined {
-  if (!isHumanUserMessage(message) || isRestartInternalCompactCommand(message)) {
+  if (
+    !isHumanUserMessage(message) ||
+    isRestartInternalCompactCommand(message)
+  ) {
     return undefined;
   }
 
@@ -1687,7 +1704,10 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     };
 
     unsubscribe = replacement.subscribe((event) => {
-      if (event.type === "message" && isRestartReplacementActivity(event.message)) {
+      if (
+        event.type === "message" &&
+        isRestartReplacementActivity(event.message)
+      ) {
         cleanup();
         void deps.supervisor.abortProcess(oldProcess.id).catch((error) => {
           console.warn(
@@ -2426,10 +2446,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
 
     // Check if request was queued
     if (isQueuedResponse(result)) {
-      return c.json(
-        { ...result, serverTimestamp },
-        202,
-      ); // 202 Accepted - queued for processing
+      return c.json({ ...result, serverTimestamp }, 202); // 202 Accepted - queued for processing
     }
 
     await persistLaunchMetadata(
@@ -2521,10 +2538,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
 
     // Check if request was queued
     if (isQueuedResponse(result)) {
-      return c.json(
-        { ...result, serverTimestamp: Date.now() },
-        202,
-      ); // 202 Accepted - queued for processing
+      return c.json({ ...result, serverTimestamp: Date.now() }, 202); // 202 Accepted - queued for processing
     }
 
     await persistLaunchMetadata(result.sessionId, body.provider, executor);
@@ -2608,10 +2622,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     }
 
     if (isQueuedResponse(result)) {
-      return c.json(
-        { ...result, serverTimestamp: Date.now() },
-        202,
-      );
+      return c.json({ ...result, serverTimestamp: Date.now() }, 202);
     }
 
     await persistLaunchMetadata(
@@ -2659,23 +2670,19 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       body.model && body.model !== "default" ? body.model : undefined;
     const serviceTier = normalizeOptionalServiceTier(body.serviceTier);
 
-    const result = await deps.supervisor.createSession(
-      projectPath,
-      body.mode,
-      {
-        model,
-        serviceTier,
-        thinking,
-        effort,
-        providerName: body.provider,
-        executor,
-        globalInstructions: getGlobalInstructions(),
-        permissions: body.permissions,
-        recapMode: helperSettings.recapMode,
-        promptSuggestionMode: helperSettings.promptSuggestionMode,
-        helperSideModel: helperSettings.helperSideModel,
-      },
-    );
+    const result = await deps.supervisor.createSession(projectPath, body.mode, {
+      model,
+      serviceTier,
+      thinking,
+      effort,
+      providerName: body.provider,
+      executor,
+      globalInstructions: getGlobalInstructions(),
+      permissions: body.permissions,
+      recapMode: helperSettings.recapMode,
+      promptSuggestionMode: helperSettings.promptSuggestionMode,
+      helperSideModel: helperSettings.helperSideModel,
+    });
 
     if (isQueueFullResponse(result)) {
       return c.json(
@@ -2685,10 +2692,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     }
 
     if (isQueuedResponse(result)) {
-      return c.json(
-        { ...result, serverTimestamp: Date.now() },
-        202,
-      );
+      return c.json({ ...result, serverTimestamp: Date.now() }, 202);
     }
 
     await persistLaunchMetadata(result.sessionId, body.provider, executor);
@@ -2902,10 +2906,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
 
     // Check if request was queued
     if (isQueuedResponse(result)) {
-      return c.json(
-        { ...result, serverTimestamp: Date.now() },
-        202,
-      ); // 202 Accepted - queued for processing
+      return c.json({ ...result, serverTimestamp: Date.now() }, 202); // 202 Accepted - queued for processing
     }
 
     return c.json({
@@ -2981,7 +2982,8 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
 
     const sourceProvider = sourceSession.provider ?? preferredSourceProvider;
     const providerName = body.provider ?? sourceProvider;
-    const originalMetadata = deps.sessionMetadataService?.getMetadata(sessionId);
+    const originalMetadata =
+      deps.sessionMetadataService?.getMetadata(sessionId);
     const handoffTitle = deriveRestartTitle({
       preferredTitle: originalMetadata?.customTitle,
       sourceSession,
@@ -3131,9 +3133,10 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       ); // 410 Gone
     }
 
-    const resolvedModel = body.model && body.model !== "default"
-      ? body.model
-      : process.resolvedModel ?? process.model;
+    const resolvedModel =
+      body.model && body.model !== "default"
+        ? body.model
+        : (process.resolvedModel ?? process.model);
     const modelInfoService = deps.modelInfoService;
     const resolveContextWindow = modelInfoService
       ? (model: string | undefined, provider?: ProviderName) =>
@@ -3598,8 +3601,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     ) {
       return c.json(
         {
-          error:
-            "At least one session metadata field must be provided",
+          error: "At least one session metadata field must be provided",
         },
         400,
       );
@@ -3670,7 +3672,10 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       body.heartbeatTurnText !== "" &&
       typeof body.heartbeatTurnText !== "string"
     ) {
-      return c.json({ error: "heartbeatTurnText must be a string or null" }, 400);
+      return c.json(
+        { error: "heartbeatTurnText must be a string or null" },
+        400,
+      );
     }
 
     if (

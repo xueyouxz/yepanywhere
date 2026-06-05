@@ -111,6 +111,11 @@ export interface AgentSession {
   /** Session ID if available immediately (some providers provide later via messages) */
   sessionId?: string;
   /**
+   * Publish the provider's canonical session id into any child-process
+   * environment bridge the provider installed before startup.
+   */
+  publishAgentctlSessionId?: (sessionId: string) => void | Promise<void>;
+  /**
    * Steer an active turn with additional user input.
    * Returns true when steered immediately, false when caller should enqueue instead.
    */

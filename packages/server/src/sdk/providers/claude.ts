@@ -35,6 +35,7 @@ import type {
   ProviderLivenessProbeResult,
   SDKMessage,
 } from "../types.js";
+import { createAgentctlSessionEnvBridge } from "./agentctl-session-env.js";
 import { filterEnvForChildProcess } from "./env-filter.js";
 import type {
   AgentProvider,
@@ -148,6 +149,17 @@ function resolveLocalClaudeCodeExecutable(): string | undefined {
 
   cachedLocalClaudeCodeExecutable = executable ?? null;
   return executable;
+}
+
+async function* withCleanup<T>(
+  iterator: AsyncIterableIterator<T>,
+  cleanup: () => void,
+): AsyncIterableIterator<T> {
+  try {
+    yield* iterator;
+  } finally {
+    cleanup();
+  }
 }
 
 /** Static fallback list of Claude models (used if probe fails) */
@@ -772,6 +784,19 @@ export class ClaudeProvider implements AgentProvider {
     const log = getLogger();
     const queue = new MessageQueue();
     const abortController = new AbortController();
+    const agentctlSessionEnvBridge = options.executor
+      ? null
+      : createAgentctlSessionEnvBridge(options.resumeSessionId);
+    const claudeEnv = agentctlSessionEnvBridge
+      ? agentctlSessionEnvBridge.extendEnv(this.getEnv())
+      : this.getEnv();
+    const remoteEnv =
+      options.executor && options.resumeSessionId
+        ? {
+            ...options.remoteEnv,
+            AGENTCTL_SESSION_ID: options.resumeSessionId,
+          }
+        : options.remoteEnv;
 
     // Effective cwd for the session (may be translated for remote executors)
     let effectiveCwd = options.cwd;
@@ -878,7 +903,7 @@ export class ClaudeProvider implements AgentProvider {
     if (options.executor) {
       spawnClaudeCodeProcess = createRemoteSpawn({
         host: options.executor,
-        remoteEnv: options.remoteEnv,
+        remoteEnv,
       });
     } else if (USE_SPAWN_WRAPPER) {
       // Local spawn wrapper: delegates to child_process.spawn but captures the
@@ -1023,12 +1048,13 @@ export class ClaudeProvider implements AgentProvider {
           effort: options.effort,
           pathToClaudeCodeExecutable,
           // Filter env to exclude npm_*, yep-anywhere specific, and other irrelevant vars
-          env: this.getEnv(),
+          env: claudeEnv,
           // Remote execution via SSH
           spawnClaudeCodeProcess,
         },
       });
     } catch (error) {
+      agentctlSessionEnvBridge?.cleanup();
       // Handle common SDK initialization errors
       if (error instanceof Error) {
         if (error.message.includes("Claude Code executable not found")) {
@@ -1054,8 +1080,11 @@ export class ClaudeProvider implements AgentProvider {
     const wrappedIterator = this.wrapIterator(sdkQuery, {
       executor: options.executor,
       cwd: effectiveCwd,
-      remoteEnv: options.remoteEnv,
+      remoteEnv,
     });
+    const iterator = agentctlSessionEnvBridge
+      ? withCleanup(wrappedIterator, () => agentctlSessionEnvBridge.cleanup())
+      : wrappedIterator;
     const isCapturedProcessAlive =
       USE_SPAWN_WRAPPER && !options.executor
         ? () =>
@@ -1065,9 +1094,12 @@ export class ClaudeProvider implements AgentProvider {
         : undefined;
 
     return {
-      iterator: wrappedIterator,
+      iterator,
       queue,
-      abort: () => abortController.abort(),
+      abort: () => {
+        abortController.abort();
+        agentctlSessionEnvBridge?.cleanup();
+      },
       isProcessAlive: isCapturedProcessAlive,
       probeLiveness: () =>
         probeClaudeControlLiveness(sdkQuery, {
@@ -1075,6 +1107,9 @@ export class ClaudeProvider implements AgentProvider {
         }),
       get pid() {
         return (capturedProcess as ChildProcess | null)?.pid;
+      },
+      publishAgentctlSessionId: (sessionId: string) => {
+        agentctlSessionEnvBridge?.publishSessionId(sessionId);
       },
       setMaxThinkingTokens: (tokens: number | null) =>
         sdkQuery.setMaxThinkingTokens(tokens),

@@ -198,6 +198,8 @@ export type {
   AgentStatus,
   AgentSession,
   // Input request types
+  UserQuestionAnswer,
+  UserQuestionAnswers,
   InputRequest,
   // Recents types
   EnrichedRecentEntry,

@@ -576,6 +576,7 @@ export class Supervisor {
       supportedModels,
       supportedCommands,
       setModel,
+      publishAgentctlSessionId,
     } = result;
 
     const tempSessionId = resumeSessionId ?? randomUUID();
@@ -600,6 +601,7 @@ export class Supervisor {
       supportedModelsFn: supportedModels,
       supportedCommandsFn: supportedCommands,
       setModelFn: setModel,
+      publishAgentctlSessionIdFn: publishAgentctlSessionId,
       permissionMode: effectiveMode,
       provider: "claude", // Real SDK is always Claude
       model: modelSettings?.model,
@@ -699,6 +701,7 @@ export class Supervisor {
       supportedModels,
       supportedCommands,
       setModel,
+      publishAgentctlSessionId,
     } = result;
 
     const options: ProcessConstructorOptions = {
@@ -722,6 +725,7 @@ export class Supervisor {
       supportedModelsFn: supportedModels,
       supportedCommandsFn: supportedCommands,
       setModelFn: setModel,
+      publishAgentctlSessionIdFn: publishAgentctlSessionId,
       permissionMode: effectiveMode,
       provider: "claude", // Real SDK is always Claude
       model: modelSettings?.model,
@@ -820,6 +824,7 @@ export class Supervisor {
       supportedModels,
       supportedCommands,
       setModel,
+      publishAgentctlSessionId,
     } = result;
 
     const tempSessionId = resumeSessionId ?? randomUUID();
@@ -845,6 +850,7 @@ export class Supervisor {
       supportedModelsFn: supportedModels,
       supportedCommandsFn: supportedCommands,
       setModelFn: setModel,
+      publishAgentctlSessionIdFn: publishAgentctlSessionId,
       permissionMode: effectiveMode,
       provider: activeProvider.name,
       model: modelSettings?.model,
@@ -935,6 +941,7 @@ export class Supervisor {
       supportedModels,
       supportedCommands,
       setModel,
+      publishAgentctlSessionId,
     } = result;
 
     const tempSessionId = resumeSessionId ?? randomUUID();
@@ -960,6 +967,7 @@ export class Supervisor {
       supportedModelsFn: supportedModels,
       supportedCommandsFn: supportedCommands,
       setModelFn: setModel,
+      publishAgentctlSessionIdFn: publishAgentctlSessionId,
       permissionMode: effectiveMode,
       provider: activeProvider.name,
       model: modelSettings?.model,

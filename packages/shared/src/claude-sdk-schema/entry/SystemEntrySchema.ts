@@ -51,6 +51,14 @@ const StatusSystemEntrySchema = BaseEntrySchema.extend({
   status: z.enum(["compacting"]).nullable(),
 });
 
+// Session state change system entry (turn/liveness state)
+const SessionStateChangedSystemEntrySchema = BaseEntrySchema.extend({
+  type: z.literal("system"),
+  subtype: z.literal("session_state_changed"),
+  session_id: z.string(),
+  state: z.enum(["idle", "running", "requires_action"]),
+});
+
 // Microcompact boundary system entry
 const MicrocompactBoundarySystemEntrySchema = BaseEntrySchema.extend({
   type: z.literal("system"),
@@ -107,6 +115,7 @@ export const SystemEntrySchema = z.union([
   MicrocompactBoundarySystemEntrySchema,
   InitSystemEntrySchema,
   StatusSystemEntrySchema,
+  SessionStateChangedSystemEntrySchema,
   ApiErrorSystemEntrySchema,
   StopHookSummarySystemEntrySchema,
   BridgeStatusSystemEntrySchema,

@@ -43,6 +43,8 @@ export type {
   AppSessionSummary,
   AppSession,
   AgentStatus,
+  UserQuestionAnswer,
+  UserQuestionAnswers,
   InputRequest,
 } from "@yep-anywhere/shared";
 

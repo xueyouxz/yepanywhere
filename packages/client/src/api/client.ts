@@ -25,6 +25,7 @@ import type {
   SlashCommand,
   ThinkingOption,
   UploadedFile,
+  UserQuestionAnswers,
   UserMessageMetadata,
 } from "@yep-anywhere/shared";
 import { authEvents } from "../lib/authEvents";
@@ -807,7 +808,7 @@ export const api = {
     sessionId: string,
     requestId: string,
     response: "approve" | "approve_accept_edits" | "deny",
-    answers?: Record<string, string>,
+    answers?: UserQuestionAnswers,
     feedback?: string,
   ) =>
     fetchJSON<{ accepted: boolean; pendingInputRequest?: InputRequest | null }>(

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { UserQuestionAnswers } from "../../../types";
 import type { ToolCallItem } from "../../../types/renderItems";
 import type { ContentBlock, RenderContext } from "../types";
 
@@ -233,13 +234,13 @@ export interface AskUserQuestionInput {
 export interface Question {
   question: string;
   header: string;
-  options: Array<{ label: string; description: string }>;
+  options: Array<{ label: string; description: string; preview?: string }>;
   multiSelect: boolean;
 }
 
 export interface AskUserQuestionResult {
   questions: Question[];
-  answers: Record<string, string>;
+  answers: UserQuestionAnswers;
 }
 
 /**

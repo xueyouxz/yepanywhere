@@ -26,3 +26,4 @@
 - opencode-backend - OpenCode provider capability and transcript-rendering parity.
 - provider-refresh - Provider upstream/source refresh triggers, probes, and due-refresh evidence.
 - graehl-ci-pre-kzahel-gate - Use graehl-push CI as a coverage/signal gate before pushing to kzahel.
+- claude - Claude provider control, restart/resume safety, interviews, and YA-owned process bridges.

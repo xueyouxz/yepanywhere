@@ -18,11 +18,17 @@ function QuestionDisplay({
   selectedAnswer,
 }: {
   question: Question;
-  selectedAnswer?: string;
+  selectedAnswer?: string | string[];
 }) {
-  const isCustomAnswer =
-    selectedAnswer &&
-    !question.options.some((opt) => opt.label === selectedAnswer);
+  const selectedAnswers = Array.isArray(selectedAnswer)
+    ? selectedAnswer
+    : selectedAnswer
+      ? [selectedAnswer]
+      : [];
+  const optionLabels = new Set(question.options.map((opt) => opt.label));
+  const customAnswers = selectedAnswers.filter(
+    (answer) => !optionLabels.has(answer),
+  );
 
   return (
     <div className="question-item">
@@ -32,7 +38,7 @@ function QuestionDisplay({
       </div>
       <ul className="question-options">
         {question.options.map((option) => {
-          const isSelected = selectedAnswer === option.label;
+          const isSelected = selectedAnswers.includes(option.label);
           return (
             <li
               key={option.label}
@@ -58,15 +64,20 @@ function QuestionDisplay({
             </li>
           );
         })}
-        {isCustomAnswer && (
-          <li className="question-option question-option-selected">
-            <span className="question-option-indicator">●</span>
+        {customAnswers.map((answer) => (
+          <li
+            key={`other-${answer}`}
+            className="question-option question-option-selected"
+          >
+            <span className="question-option-indicator">
+              {question.multiSelect ? "☑" : "●"}
+            </span>
             <div className="question-option-content">
               <span className="question-option-label">Other</span>
-              <span className="question-option-desc">{selectedAnswer}</span>
+              <span className="question-option-desc">{answer}</span>
             </div>
           </li>
-        )}
+        ))}
       </ul>
     </div>
   );

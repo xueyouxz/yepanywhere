@@ -75,6 +75,7 @@ import type {
   TurnSteerParams,
   TurnSteerResponse,
 } from "./codex-protocol/index.js";
+import { createAgentctlSessionEnvBridge } from "./agentctl-session-env.js";
 import type {
   AgentProvider,
   AgentSession,
@@ -1683,10 +1684,13 @@ export class CodexProvider implements AgentProvider {
     setActiveClient: (client: CodexAppServerClient) => void,
   ): AsyncIterableIterator<SDKMessage> {
     const codexCommand = await this.resolveCodexCommand();
+    const agentctlSessionEnvBridge = createAgentctlSessionEnvBridge(
+      options.resumeSessionId,
+    );
     const appServer = new CodexAppServerClient(
       codexCommand,
       options.cwd,
-      this.getCodexEnv(),
+      agentctlSessionEnvBridge.extendEnv(this.getCodexEnv()),
       (notification) =>
         this.shouldSuppressLiveDeltaNotification(notification, options),
     );
@@ -1735,6 +1739,7 @@ export class CodexProvider implements AgentProvider {
       );
 
       sessionId = threadResult.thread.id;
+      agentctlSessionEnvBridge.publishSessionId(sessionId);
       runtimeState.threadId = sessionId;
       failureTrace.sessionId = sessionId;
       log.info(
@@ -1952,6 +1957,7 @@ export class CodexProvider implements AgentProvider {
     } finally {
       runtimeState.activeTurnId = null;
       appServer.close();
+      agentctlSessionEnvBridge.cleanup();
     }
 
     yield {

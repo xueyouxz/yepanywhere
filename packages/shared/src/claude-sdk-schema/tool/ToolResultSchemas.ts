@@ -299,7 +299,9 @@ const QuestionSchema = z.object({
 
 const AskUserQuestionResultObjectSchema = z.object({
   questions: z.array(QuestionSchema).optional(),
-  answers: z.record(z.string(), z.string()).optional(),
+  answers: z
+    .record(z.string(), z.union([z.string(), z.array(z.string())]))
+    .optional(),
 });
 
 /**

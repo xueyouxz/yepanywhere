@@ -9,6 +9,7 @@ import type {
   SessionLivenessSnapshot,
   SlashCommand,
   ThinkingConfig,
+  UserQuestionAnswers,
   UrlProjectId,
 } from "@yep-anywhere/shared";
 import {
@@ -49,7 +50,8 @@ import type {
 } from "./types.js";
 import { DEFAULT_IDLE_TIMEOUT_MS } from "./types.js";
 
-type Listener = (event: ProcessEvent) => void;
+type Listener = (event: ProcessEvent) => void | Promise<void>;
+type ClaudeSessionState = "idle" | "running" | "requires_action";
 
 export interface DeferredMessagePlacement {
   afterTempId?: string;
@@ -73,6 +75,37 @@ type PendingRecapRequest = {
 };
 
 const CODEX_NATIVE_SLASH_COMMAND_NAMES = new Set(["goal"]);
+const ASK_USER_QUESTION_TOOL_NAME = "AskUserQuestion";
+
+function isAskUserQuestionTool(toolName: string): boolean {
+  return toolName === ASK_USER_QUESTION_TOOL_NAME;
+}
+
+function buildAskUserQuestionPrompt(input: unknown): string {
+  const questions =
+    input && typeof input === "object"
+      ? (input as { questions?: unknown }).questions
+      : undefined;
+  if (!Array.isArray(questions) || questions.length === 0) {
+    return "Answer Claude's question";
+  }
+
+  const firstQuestion = questions[0];
+  const firstQuestionText =
+    firstQuestion && typeof firstQuestion === "object"
+      ? (firstQuestion as { question?: unknown }).question
+      : undefined;
+  if (typeof firstQuestionText !== "string" || !firstQuestionText.trim()) {
+    return questions.length === 1
+      ? "Answer Claude's question"
+      : `Answer Claude's ${questions.length} questions`;
+  }
+
+  const trimmed = firstQuestionText.trim();
+  return questions.length === 1
+    ? trimmed
+    : `${trimmed} (+${questions.length - 1} more)`;
+}
 
 function getCodexSkillCommandPrefix(
   provider: ProviderName,
@@ -118,6 +151,21 @@ function isClaudeSdkApiErrorMessage(
     message.type === "assistant" &&
     message.isApiErrorMessage === true
   );
+}
+
+function getClaudeSessionStateChange(
+  message: SDKMessage,
+): ClaudeSessionState | null {
+  if (
+    message.type !== "system" ||
+    message.subtype !== "session_state_changed"
+  ) {
+    return null;
+  }
+  const state = message.state;
+  return state === "idle" || state === "running" || state === "requires_action"
+    ? state
+    : null;
 }
 
 function extractMessageText(message: SDKMessage): string | undefined {
@@ -185,6 +233,11 @@ export interface ProcessConstructorOptions extends ProcessOptions {
   supportedCommandsFn?: () => Promise<SlashCommand[]>;
   /** Function to change model mid-session (SDK 0.2.7+) */
   setModelFn?: (model?: string) => Promise<void>;
+  /**
+   * Publish the provider's real session id to environment bridges that affect
+   * future tool shells spawned by the provider child process.
+   */
+  publishAgentctlSessionIdFn?: (sessionId: string) => void | Promise<void>;
   /** Deprecated compatibility flag; prefer recapMode. */
   recapsEnabled?: boolean;
   /** How this process should answer away-recap requests. */
@@ -299,6 +352,9 @@ export class Process {
 
   /** Function to change model mid-session (SDK 0.2.7+) */
   private setModelFn: ((model?: string) => Promise<void>) | null;
+  private publishAgentctlSessionIdFn:
+    | ((sessionId: string) => void | Promise<void>)
+    | null;
 
   /** Resolvers waiting for the real session ID */
   private sessionIdResolvers: Array<(id: string) => void> = [];
@@ -367,6 +423,8 @@ export class Process {
     this.supportedCommandsFn = options.supportedCommandsFn ?? null;
     this._pidResolver = options.pid;
     this.setModelFn = options.setModelFn ?? null;
+    this.publishAgentctlSessionIdFn =
+      options.publishAgentctlSessionIdFn ?? null;
     this._isProcessAlive = options.isProcessAlive ?? null;
     this.shouldRetainIdleProcess = options.shouldRetainIdleProcess ?? null;
     this.probeLivenessFn = options.probeLivenessFn ?? null;
@@ -1823,10 +1881,16 @@ export class Process {
       };
     }
 
-    // Check permission rules (deny/allow patterns) before mode-based logic
-    const permissionResult = this.checkPermissionRules(toolName, input);
-    if (permissionResult) {
-      return permissionResult;
+    const isUserQuestion = isAskUserQuestionTool(toolName);
+
+    // Provider-native interviews are user questions, not permission decisions.
+    // Always surface them so allow/deny rules cannot silently answer them.
+    if (!isUserQuestion) {
+      // Check permission rules (deny/allow patterns) before mode-based logic
+      const permissionResult = this.checkPermissionRules(toolName, input);
+      if (permissionResult) {
+        return permissionResult;
+      }
     }
 
     // Handle based on permission mode
@@ -1834,7 +1898,7 @@ export class Process {
       case "bypassPermissions": {
         // Always prompt for user questions and plan approval, even in bypass mode
         // These are inherently interactive and shouldn't be auto-answered
-        if (toolName === "ExitPlanMode" || toolName === "AskUserQuestion") {
+        if (toolName === "ExitPlanMode" || isUserQuestion) {
           break; // Fall through to ask user
         }
         // Auto-approve all other tools
@@ -1869,7 +1933,7 @@ export class Process {
         // ExitPlanMode and AskUserQuestion should prompt the user
         // ExitPlanMode: user must approve the plan before exiting plan mode
         // AskUserQuestion: clarifying questions are valid during planning
-        if (toolName === "ExitPlanMode" || toolName === "AskUserQuestion") {
+        if (toolName === "ExitPlanMode" || isUserQuestion) {
           break; // Fall through to ask user for approval
         }
 
@@ -1927,12 +1991,14 @@ export class Process {
       }
     }
 
-    // Default behavior: ask user for approval
+    // Default behavior: ask user for approval or an interview answer.
     const request: InputRequest = {
       id: randomUUID(),
       sessionId: this._sessionId,
-      type: "tool-approval",
-      prompt: `Allow ${toolName}?`,
+      type: isUserQuestion ? "question" : "tool-approval",
+      prompt: isUserQuestion
+        ? buildAskUserQuestionPrompt(input)
+        : `Allow ${toolName}?`,
       toolName,
       toolInput: input,
       timestamp: new Date().toISOString(),
@@ -2002,7 +2068,7 @@ export class Process {
   respondToInput(
     requestId: string,
     response: "approve" | "deny",
-    answers?: Record<string, string>,
+    answers?: UserQuestionAnswers,
     feedback?: string,
   ): boolean {
     const pending = this.pendingToolApprovals.get(requestId);
@@ -2235,6 +2301,8 @@ export class Process {
             `Session ID received from SDK: ${this._sessionId}`,
           );
 
+          this.publishAgentctlSessionId(this._sessionId);
+
           // Emit session-id-changed event so Supervisor can update its mapping
           // This is critical for ExternalSessionTracker to correctly identify owned sessions
           if (oldSessionId !== this._sessionId) {
@@ -2278,7 +2346,13 @@ export class Process {
         }
 
         // Handle special message types
-        if (message.type === "system" && message.subtype === "input_request") {
+        const claudeSessionState = getClaudeSessionStateChange(message);
+        if (claudeSessionState) {
+          this.handleClaudeSessionStateChanged(claudeSessionState);
+        } else if (
+          message.type === "system" &&
+          message.subtype === "input_request"
+        ) {
           // Legacy mock SDK behavior - handle input_request message
           this.handleInputRequest(message);
         } else if (message.type === "result") {
@@ -2385,6 +2459,36 @@ export class Process {
     };
 
     this.setState({ type: "waiting-input", request });
+  }
+
+  private handleClaudeSessionStateChanged(state: ClaudeSessionState): void {
+    switch (state) {
+      case "idle":
+        if (this._state.type !== "waiting-input") {
+          this.transitionToIdle();
+        }
+        break;
+
+      case "running":
+        this.clearIdleTimer();
+        if (
+          this._state.type === "waiting-input" &&
+          this.pendingToolApprovals.size > 0
+        ) {
+          return;
+        }
+        if (this._state.type !== "in-turn") {
+          this.setState({ type: "in-turn" });
+        }
+        break;
+
+      case "requires_action":
+        this.clearIdleTimer();
+        if (this._state.type === "idle") {
+          this.setState({ type: "in-turn" });
+        }
+        break;
+    }
   }
 
   private transitionToIdle(): void {
@@ -2550,6 +2654,39 @@ export class Process {
     }
   }
 
+  private publishAgentctlSessionId(sessionId: string): void {
+    if (!this.publishAgentctlSessionIdFn) return;
+
+    try {
+      const result = this.publishAgentctlSessionIdFn(sessionId);
+      if (result && typeof result.then === "function") {
+        result.catch((error) => {
+          this.logAgentctlSessionIdPublishError(sessionId, error);
+        });
+      }
+    } catch (error) {
+      this.logAgentctlSessionIdPublishError(sessionId, error);
+    }
+  }
+
+  private logAgentctlSessionIdPublishError(
+    sessionId: string,
+    error: unknown,
+  ): void {
+    getLogger().warn(
+      {
+        event: "agentctl_session_id_publish_error",
+        sessionId,
+        processId: this.id,
+        projectId: this.projectId,
+        provider: this.provider,
+        error: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+      },
+      "Provider failed to publish AGENTCTL_SESSION_ID",
+    );
+  }
+
   private startIdleTimer(): void {
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null;
@@ -2631,10 +2768,28 @@ export class Process {
     }
     for (const listener of this.listeners) {
       try {
-        listener(event);
-      } catch {
-        // Ignore listener errors
+        void Promise.resolve(listener(event)).catch((error: unknown) => {
+          this.logListenerError(event, error);
+        });
+      } catch (error) {
+        this.logListenerError(event, error);
       }
     }
+  }
+
+  private logListenerError(event: ProcessEvent, error: unknown): void {
+    getLogger().warn(
+      {
+        event: "process_listener_error",
+        sessionId: this._sessionId,
+        processId: this.id,
+        projectId: this.projectId,
+        provider: this.provider,
+        emittedEventType: event.type,
+        error: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+      },
+      "Process listener failed",
+    );
   }
 }

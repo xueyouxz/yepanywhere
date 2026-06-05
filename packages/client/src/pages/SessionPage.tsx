@@ -5,6 +5,7 @@ import type {
   PublicSessionShareSessionStatusResponse,
   ThinkingOption,
   UploadedFile,
+  UserQuestionAnswers,
 } from "@yep-anywhere/shared";
 import {
   type MouseEvent as ReactMouseEvent,
@@ -2825,7 +2826,7 @@ function SessionPageContent({
   );
 
   const handleQuestionSubmit = useCallback(
-    async (answers: Record<string, string>) => {
+    async (answers: UserQuestionAnswers) => {
       if (pendingInputRequest) {
         try {
           const result = await api.respondToInput(

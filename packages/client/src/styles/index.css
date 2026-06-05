@@ -6179,7 +6179,13 @@ a.sidebar-nav-item {
 
 .question-option-btn.selected {
   border-color: var(--primary-color);
-  background: rgba(96, 165, 250, 0.1);
+  background: rgba(96, 165, 250, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.35);
+}
+
+.question-option-btn.selected:hover {
+  border-color: var(--primary-color);
+  background: rgba(96, 165, 250, 0.22);
 }
 
 .question-option-radio {
@@ -6191,6 +6197,10 @@ a.sidebar-nav-item {
 }
 
 .question-option-btn.selected .question-option-radio {
+  color: var(--primary-color);
+}
+
+.question-option-btn.selected .question-option-label {
   color: var(--primary-color);
 }
 

@@ -877,6 +877,99 @@ describe("Sessions metadata route", () => {
     );
   });
 
+  it("normal-resumes a safe no-owner Claude transcript after restart", async () => {
+    const project = createProject();
+    const resumeSession = vi.fn(async () => ({
+      id: "proc-1",
+      sessionId: "sess-1",
+      permissionMode: "default",
+      modeVersion: 0,
+    }));
+
+    const routes = createSessionsRoutes({
+      supervisor: {
+        resumeSession,
+      } as unknown as SessionsDeps["supervisor"],
+      scanner: {
+        getOrCreateProject: vi.fn(async () => project),
+      } as unknown as SessionsDeps["scanner"],
+      readerFactory: vi.fn(
+        () =>
+          ({
+            getSession: vi.fn(async () => ({
+              summary: {
+                ...createSummary(),
+                provider: "claude",
+                model: "claude-sonnet-4-5-20250929",
+                ownership: { owner: "none" },
+              },
+              data: {
+                provider: "claude",
+                session: {
+                  messages: [
+                    {
+                      type: "assistant",
+                      isSidechain: false,
+                      userType: "external",
+                      cwd: project.path,
+                      sessionId: "sess-1",
+                      version: "1.0.0",
+                      uuid: "11111111-1111-4111-8111-111111111111",
+                      timestamp: "2026-05-31T00:00:00.000Z",
+                      parentUuid: null,
+                      message: {
+                        id: "c7bff7ca-1111-4111-8111-111111111111",
+                        type: "message",
+                        role: "assistant",
+                        model: "claude-sonnet-4-5-20250929",
+                        content: [
+                          {
+                            type: "text",
+                            text: "Ready to continue.",
+                          },
+                        ],
+                        stop_reason: "end_turn",
+                        stop_sequence: null,
+                        usage: {
+                          input_tokens: 1,
+                          output_tokens: 2,
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            })),
+            getSessionSummary: vi.fn(async () => null),
+          }) as unknown as ISessionReader,
+      ),
+      sessionMetadataService: {
+        getProvider: vi.fn(() => "claude"),
+        getExecutor: vi.fn(() => undefined),
+      } as unknown as NonNullable<SessionsDeps["sessionMetadataService"]>,
+    });
+
+    const response = await routes.request(
+      `/projects/${project.id}/sessions/sess-1/resume`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: "continue",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(resumeSession).toHaveBeenCalledWith(
+      "sess-1",
+      project.path,
+      expect.objectContaining({ text: "continue" }),
+      undefined,
+      expect.objectContaining({ providerName: "claude" }),
+    );
+  });
+
   it("blocks Claude resume when the latest assistant is an SDK API error", async () => {
     const project = createProject();
     const resumeSession = vi.fn(async () => ({

@@ -159,11 +159,7 @@ export type AppConversationMessage =
 export type PendingInputType = "tool-approval" | "user-question";
 
 /** Agent activity - what the agent is doing */
-export type AgentActivity =
-  | "in-turn"
-  | "idle"
-  | "waiting-input"
-  | "terminated";
+export type AgentActivity = "in-turn" | "idle" | "waiting-input" | "terminated";
 
 /** Context usage information extracted from the last assistant message */
 export interface ContextUsage {
@@ -425,6 +421,9 @@ export interface AgentSession {
 /**
  * Input request for tool approval or user questions.
  */
+export type UserQuestionAnswer = string | string[];
+export type UserQuestionAnswers = Record<string, UserQuestionAnswer>;
+
 export interface InputRequest {
   id: string;
   sessionId: string;

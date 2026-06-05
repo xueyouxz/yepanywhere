@@ -283,6 +283,29 @@ Known remaining gap:
   recovery/listing works, but full Grok transcript replay after server restart
   is still Phase 2 scanner/history work.
 
+## Open Provider Work
+
+Grok provider work remains broader than modal prompt/interview handling:
+
+- **Source refresh:** the provider-refresh audit currently marks Grok ACP as
+  due. Local Grok has advanced beyond the version captured earlier in this
+  topic, the local docs/cache changed, and the visible model catalog may no
+  longer be just `grok-build`. Refresh the CLI/cache evidence before relying on
+  the model list, effort flags, or static fallback names.
+- **Model catalog drift:** YA still needs a verified strategy for any newly
+  advertised Grok Build or composer models, rather than hardcoding only the
+  older `grok-build` assumption indefinitely.
+- **Full history replay:** `updates.jsonl` replay remains incomplete; summary
+  lookup and native-id recovery are not a substitute for restart/reconnect
+  transcript visibility.
+- **ACP prompt/interview forms:** trace Grok Build's current ACP/TUI shape for
+  multiple-choice, cancel, and free-form prompts and decide whether existing
+  YA `user-question` pending-input UI is sufficient or a Grok-specific adapter
+  is needed.
+- **Default-enable decision:** keep Grok isolated behind provider gating until
+  ACP stability, history replay, model catalog refresh, and prompt behavior
+  are good enough for ordinary use.
+
 ## 0.2.3 Refresh and Steering Smoke (2026-05-28)
 
 The local Grok install was updated to `grok 0.2.3 (14d81fd87) [stable]`, and
@@ -351,6 +374,10 @@ gitignored umbrella task `tasks/015-verified-session-liveness.md`.
   and 0.2.3 live smoke passed)
 - [x] 0.2.3 CLI/docs refresh audited and recorded
 - [ ] (Phase 2) `grok-scanner.ts` + minimal schema for session listing + history — summary reader exists; full scanner/history replay not done
+- [ ] Prompt/interview forms over ACP/TUI traced and mapped to YA pending-input
+  UI
+- [ ] Model catalog/provider refresh reconciled with the current local Grok
+  binary, docs, and cache
 - [ ] Docs updates + version pinning note — topic and `CLAUDE.md` provider list updated; broader README/provider capability docs not done
 - [ ] Decision point: promote "grok" to default-enabled once ACP surface proves stable
 

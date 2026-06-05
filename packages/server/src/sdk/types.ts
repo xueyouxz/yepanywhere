@@ -209,6 +209,11 @@ export interface StartSessionResult {
    * Only supported by Claude SDK 0.2.7+.
    */
   setModel?: (model?: string) => Promise<void>;
+  /**
+   * Publish the provider's canonical session id into any child-process
+   * environment bridge the provider installed before startup.
+   */
+  publishAgentctlSessionId?: (sessionId: string) => void | Promise<void>;
 }
 
 export interface RealClaudeSDKInterface {

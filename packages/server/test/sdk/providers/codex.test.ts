@@ -150,6 +150,47 @@ describe("CodexProvider", () => {
 });
 
 describe("CodexProvider app-server lifecycle", () => {
+  it("publishes the Codex thread id to later app-server tool shells", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "codex-provider-agentctl-"));
+    const logPath = join(tempDir, "fake-codex-requests.jsonl");
+    const codexPath = join(tempDir, "fake-codex-agentctl.mjs");
+    writeFileSync(
+      codexPath,
+      buildFakeCodexAppServerWithAgentctlShellProbe(logPath),
+      "utf-8",
+    );
+    chmodSync(codexPath, 0o755);
+
+    let session: Awaited<ReturnType<CodexProvider["startSession"]>> | undefined;
+    let consume: Promise<void> | undefined;
+
+    try {
+      const testProvider = new CodexProvider({ codexPath });
+      session = await testProvider.startSession({
+        cwd: tempDir,
+        initialMessage: { text: "check the agentctl env" },
+        effort: "low",
+      });
+
+      consume = (async () => {
+        for await (const _message of session?.iterator ?? []) {
+          // drain until abort below
+        }
+      })();
+
+      await waitForFakeCodexRequest(logPath, "turn/start");
+
+      const turnStartRequest = readFakeCodexRequests(logPath).find(
+        (request) => request.method === "turn/start",
+      );
+      expect(turnStartRequest?.agentctlSessionId).toBe("thread-agentctl");
+    } finally {
+      session?.abort();
+      await consume?.catch(() => undefined);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("uses the steered turn id for soft interrupt completion", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "codex-provider-lifecycle-"));
     const logPath = join(tempDir, "fake-codex-requests.jsonl");
@@ -1269,9 +1310,93 @@ process.stdin.on("data", (chunk) => {
 `;
 }
 
+function buildFakeCodexAppServerWithAgentctlShellProbe(
+  logPath: string,
+): string {
+  return `#!/usr/bin/env node
+import { execFileSync } from "node:child_process";
+import { appendFileSync } from "node:fs";
+
+const logPath = ${JSON.stringify(logPath)};
+const agentctlProbeCommand = ${JSON.stringify(
+  'printf "%s" "$' + '{AGENTCTL_SESSION_ID-}"',
+)};
+let buffer = "";
+
+function write(payload) {
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...payload }) + "\\n");
+}
+
+function agentctlSessionIdFromBash() {
+  return execFileSync("bash", ["-c", agentctlProbeCommand], {
+    encoding: "utf-8",
+    env: process.env,
+  });
+}
+
+function logRequest(message) {
+  const record = {
+    id: message.id,
+    method: message.method,
+    params: message.params,
+  };
+  if (message.method === "turn/start") {
+    record.agentctlSessionId = agentctlSessionIdFromBash();
+  }
+  appendFileSync(logPath, JSON.stringify(record) + "\\n");
+}
+
+function respond(id, result) {
+  write({ id, result });
+}
+
+function handleMessage(message) {
+  if (!message || typeof message !== "object") return;
+  logRequest(message);
+  if (message.id === undefined) return;
+
+  switch (message.method) {
+    case "initialize":
+      respond(message.id, { userAgent: "fake-codex" });
+      break;
+    case "thread/start":
+      respond(message.id, {
+        thread: { id: "thread-agentctl" },
+        model: "gpt-5.4-mini",
+        reasoningEffort: "low",
+      });
+      break;
+    case "turn/start":
+      respond(message.id, {
+        turn: { id: "turn-start", status: "inProgress", error: null },
+      });
+      break;
+    default:
+      respond(message.id, {});
+      break;
+  }
+}
+
+process.stdin.on("data", (chunk) => {
+  buffer += chunk.toString("utf-8");
+  const lines = buffer.split("\\n");
+  buffer = lines.pop() || "";
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    handleMessage(JSON.parse(line));
+  }
+});
+`;
+}
+
 function readFakeCodexRequests(
   logPath: string,
-): Array<{ id?: number; method?: string; params?: Record<string, unknown> }> {
+): Array<{
+  id?: number;
+  method?: string;
+  params?: Record<string, unknown>;
+  agentctlSessionId?: string;
+}> {
   if (!existsSync(logPath)) return [];
   return readFileSync(logPath, "utf-8")
     .split("\n")
