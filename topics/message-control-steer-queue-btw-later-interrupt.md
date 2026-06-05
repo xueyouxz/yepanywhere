@@ -139,6 +139,11 @@ Suggested reconciliation contract:
 - Codex
   - supports steering via provider controls and exposes compact behavior; compact
     can still fail if context is already saturated.
+  - native Codex TUI evidence suggests typed mid-turn input can wait under
+    `Messages to be submitted after next tool call`, while `Esc` on that prompt
+    interrupts enough to submit the pending steer promptly. Treat YA steering as
+    active-turn input, not a stop guarantee; Stop/interrupt remains separate for
+    mistaken or slow running tools.
   - compacting is strongly non-interruptible in observed flows, so the overlay and
     no-auto-retry posture should be treated as expected behavior.
   - target-specific workaround currently validated for `gpt-5.3-codex-spark`:

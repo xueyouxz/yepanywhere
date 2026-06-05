@@ -54,6 +54,45 @@ The turn-level `effort` request was still sent. That effort mismatch is not part
 of the interrupt contract and should be investigated separately if it becomes
 user-visible.
 
+## Codex TUI Steering Observation
+
+On 2026-06-05, a user-run Codex TUI check compared typed mid-turn steering with
+the TUI `Esc` affordance while Codex was running repeated Bash `sleep 5` tool
+calls.
+
+Observed TUI behavior:
+
+- Text typed during an active turn was shown under
+  `Messages to be submitted after next tool call`, with prompt copy saying
+  `press esc to interrupt and send immediately`.
+- Pressing `Esc` while that pending-steer prompt was visible produced
+  `Model interrupted to submit steer instructions.`.
+- In one trace, after a queued `steer C` was promoted this way and later
+  `steer D` / `steer Z` were typed, Codex reported that it had received
+  steering C, D, and Z, treated Z as the latest steering, and chose not to
+  blindly continue the original five-sleep plan.
+
+Working interpretation:
+
+- Native Codex TUI mid-turn input appears to be pending steering by default. It
+  is expected to be submitted at a tool boundary, not necessarily at the instant
+  it is typed.
+- The first `Esc` while the pending-steer prompt is visible is not just a UI
+  submit key. It interrupts the active model turn enough to submit the pending
+  steering promptly. It may still be distinct from a second/no-pending-message
+  `Esc`, which is the clearer hard-interrupt/abort path.
+- YA `turn/steer` should therefore be treated as active-turn steering, not as a
+  guarantee that a currently running tool or long command will stop. When the
+  user needs to stop a mistaken, expensive, or slow tool, `turn/interrupt`/Stop
+  remains the correct separate control even if a steering message has already
+  been sent.
+
+Unverified protocol detail: this observation has not yet been backed by a raw
+TUI app-server RPC capture. The TUI's first-`Esc` path may be `turn/interrupt`
+plus steering, a distinct app-server control, or TUI-local queue policy. Do not
+change YA to call `turn/interrupt` before every `turn/steer` without that
+comparison; doing so could turn ordinary steering into unwanted aborts.
+
 ## Default-Off Verification
 
 The committed Vitest coverage does not require real Codex credentials by
