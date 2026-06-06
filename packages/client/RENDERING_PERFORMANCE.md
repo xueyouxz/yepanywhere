@@ -74,6 +74,10 @@ stable component identity, and lower update cadence.
 
 ## Transcript Layout Stability
 
+See also: [`topics/scrollback-view-stability.md`](../../topics/scrollback-view-stability.md)
+for the scrolled-back anchor target (content position, sub-item granularity, the
+~20% soft target with boundary snap) and the known regressions.
+
 A user must be able to scroll back and read or review a session transcript
 without historical rows changing height at unpredictable times.
 
