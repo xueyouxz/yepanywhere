@@ -753,6 +753,10 @@ interface Props {
   onCancelDeferred?: (tempId: string) => void;
   /** Callback to take a deferred message back into the composer */
   onEditDeferred?: (tempId: string) => void;
+  /** Callback to promote a deferred message into current-turn steering */
+  onSteerDeferred?: (tempId: string) => void;
+  /** Whether the current session can accept active-turn steering now */
+  canSteerDeferred?: boolean;
   /** Callback to correct the latest actually-sent user message */
   onCorrectLatestUserMessage?: (messageId: string, content: string) => void;
   /** Callback to aggressively reload the client transcript from a user turn */
@@ -957,6 +961,8 @@ export const MessageList = memo(function MessageList({
   onTransferBtwAsideTurn,
   onCancelDeferred,
   onEditDeferred,
+  onSteerDeferred,
+  canSteerDeferred = false,
   onCorrectLatestUserMessage,
   onTrimBeforeUserMessage,
   markdownAugments,
@@ -966,6 +972,7 @@ export const MessageList = memo(function MessageList({
   onLoadOlderMessages,
   clientTailActive = false,
 }: Props) {
+  const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
   const isInitialLoadRef = useRef(true);
@@ -2680,6 +2687,13 @@ export const MessageList = memo(function MessageList({
           const deferred = tailItem.message;
           const index = tailItem.deferredIndex;
           const canEditDeferred = !!(deferred.tempId && onEditDeferred);
+          const canSteerQueued =
+            canSteerDeferred &&
+            !!deferred.tempId &&
+            !!onSteerDeferred &&
+            !deferred.blockedByEdit &&
+            deferred.deliveryState !== "sending" &&
+            deferred.deliveryState !== "recovered";
           return (
             <div
               key={tailItem.key}
@@ -2793,6 +2807,20 @@ export const MessageList = memo(function MessageList({
                       >
                         <PencilIcon />
                         <span>Edit</span>
+                      </button>
+                    )}
+                    {canSteerQueued && (
+                      <button
+                        type="button"
+                        className="deferred-message-action deferred-message-action-steer"
+                        onClick={() =>
+                          onSteerDeferred?.(deferred.tempId as string)
+                        }
+                        aria-label={t("sessionSteerQueuedMessageNow")}
+                        title={t("sessionSteerQueuedMessageNow")}
+                      >
+                        <span className="deferred-message-steer-icon">↗</span>
+                        <span>{t("sessionSteerNow")}</span>
                       </button>
                     )}
                     {deferred.tempId && onCancelDeferred && (

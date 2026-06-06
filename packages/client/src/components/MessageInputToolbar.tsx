@@ -1454,7 +1454,7 @@ export function MessageInputToolbar({
   const queueTooltip = showPatientQueueMode
     ? t("toolbarPatientQueueTooltip")
     : t("toolbarQueueTooltip");
-  const queueShortcutLabel = t("toolbarQueueWhileAgentRuns");
+  const queueShortcutLabel = t("toolbarQueueWhenDone");
   const effectiveBtwToolbarMode =
     btwToolbarMode ??
     (btwActive ? "focused-footer" : btwHasAsides ? "focus-existing" : "start");

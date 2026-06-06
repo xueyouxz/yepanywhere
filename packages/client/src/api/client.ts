@@ -736,6 +736,17 @@ export const api = {
       method: "POST",
     }),
 
+  steerDeferredMessage: (sessionId: string, tempId: string) =>
+    fetchJSON<{
+      steered: boolean;
+      tempId?: string;
+      message: string;
+      position?: number;
+      deferredMessages?: DeferredQueueMessage[];
+    }>(`/sessions/${sessionId}/deferred/${encodeURIComponent(tempId)}/steer`, {
+      method: "POST",
+    }),
+
   releaseDeferredEditBarrier: (sessionId: string, tempId: string) =>
     fetchJSON<{ released: boolean; deferredMessages?: DeferredQueueMessage[] }>(
       `/sessions/${sessionId}/deferred/${encodeURIComponent(tempId)}/edit/release`,

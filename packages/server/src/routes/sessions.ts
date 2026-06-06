@@ -3297,6 +3297,30 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     });
   });
 
+  // POST /api/sessions/:sessionId/deferred/:tempId/steer - Send a queued message as active-turn steering
+  routes.post("/sessions/:sessionId/deferred/:tempId/steer", (c) => {
+    const sessionId = c.req.param("sessionId");
+    const tempId = c.req.param("tempId");
+
+    const process = deps.supervisor.getProcessForSession(sessionId);
+    if (!process) {
+      return c.json({ error: "No active process for session" }, 404);
+    }
+
+    const steered = process.steerDeferredMessage(tempId);
+    if (!steered) {
+      return c.json({ error: "Deferred message not found" }, 404);
+    }
+
+    return c.json({
+      steered: true,
+      tempId: steered.message.tempId,
+      message: steered.message.text,
+      position: steered.position,
+      deferredMessages: process.getDeferredQueueSummary(),
+    });
+  });
+
   // POST /api/sessions/:sessionId/deferred/:tempId/edit/release - Release a queued edit barrier
   routes.post("/sessions/:sessionId/deferred/:tempId/edit/release", (c) => {
     const sessionId = c.req.param("sessionId");

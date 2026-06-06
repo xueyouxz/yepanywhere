@@ -5,6 +5,7 @@ import type {
   UserMessageDeliveryIntent,
   UserMessageSpeechMetadata,
 } from "@yep-anywhere/shared";
+import { applyPatientQueuePrefix } from "@yep-anywhere/shared";
 import {
   type ClipboardEvent,
   type KeyboardEvent,
@@ -82,31 +83,6 @@ function createClientSpeechTurnId(): string {
     globalThis.crypto?.randomUUID?.() ??
     `speech-${Date.now()}-${Math.random().toString(36).slice(2)}`
   );
-}
-
-const PATIENT_QUEUE_PREFIX = "when done, ";
-const PATIENT_QUEUE_PREFIXES = [
-  PATIENT_QUEUE_PREFIX,
-  "when you are at a natural wrap-up point, ",
-  "as soon as previous requested requests are satisfied, ",
-  "as soon as prev. requested requests are satisfied, ",
-  "zzz:",
-  "zzz: ",
-];
-
-function hasPatientQueuePrefix(message: string): boolean {
-  const normalized = message.trimStart().toLocaleLowerCase();
-  // Any message already opening with "when done" carries the deferred
-  // semantics, so adding the prefix would read as "when done, when done …".
-  if (normalized.startsWith("when done")) return true;
-  return PATIENT_QUEUE_PREFIXES.some((prefix) =>
-    normalized.startsWith(prefix.toLocaleLowerCase()),
-  );
-}
-
-function applyPatientQueuePrefix(message: string, enabled: boolean): string {
-  if (!enabled || !message || hasPatientQueuePrefix(message)) return message;
-  return `${PATIENT_QUEUE_PREFIX}${message}`;
 }
 
 interface Props {

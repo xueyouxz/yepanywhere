@@ -290,6 +290,47 @@ describe("Sessions metadata route", () => {
     });
   });
 
+  it("steers a deferred message from its queued chip", async () => {
+    const steerDeferredMessage = vi.fn(() => ({
+      message: {
+        text: "run tests",
+        tempId: "temp-steer",
+      },
+      position: 0,
+    }));
+    const getDeferredQueueSummary = vi.fn(() => [
+      {
+        tempId: "temp-next",
+        content: "next queued",
+        timestamp: "2026-04-25T00:00:01.000Z",
+      },
+    ]);
+
+    const routes = createSessionsRoutes({
+      supervisor: {
+        getProcessForSession: vi.fn(() => ({
+          steerDeferredMessage,
+          getDeferredQueueSummary,
+        })),
+      } as unknown as SessionsDeps["supervisor"],
+    });
+
+    const response = await routes.request(
+      "/sessions/sess-1/deferred/temp-steer/steer",
+      { method: "POST" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(steerDeferredMessage).toHaveBeenCalledWith("temp-steer");
+    await expect(response.json()).resolves.toMatchObject({
+      steered: true,
+      tempId: "temp-steer",
+      message: "run tests",
+      position: 0,
+      deferredMessages: [{ tempId: "temp-next", content: "next queued" }],
+    });
+  });
+
   it("releases a queued-message edit barrier", async () => {
     const releaseDeferredEditBarrier = vi.fn(() => true);
     const getDeferredQueueSummary = vi.fn(() => [

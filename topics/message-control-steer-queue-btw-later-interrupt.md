@@ -20,8 +20,7 @@ for both client behavior and provider-specific control adapters.
   - `verified-waiting-provider` and lower-priority statuses are non-final and do
     not authorize model edits.
 - `status.owner` for action permissions (`self`, `external`, `none`).
-- message `deliveryIntent`: `direct`, `steer`, `deferred`, or experimental
-  `patient`.
+- message `deliveryIntent`: `direct`, `steer`, `deferred`, or `patient`.
 
 ## Model/indicator text contract (important)
 
@@ -44,23 +43,26 @@ Rationale:
 
 | Session condition | User action | Delivery intent / route | Why |
 |---|---|---|---|
-| `idle` | Send | `direct` | Normal turn submission into the current turn boundary.
-|
+| `idle` | Send | `direct` | Normal turn submission into the current turn boundary. |
 | `in-turn`, provider has steering | Primary action | `steer` (best effort) | User asks for immediate interrupt-style continuation; fallbacks to queue if steer unsupported at time of send. |
 | `in-turn`, provider has no steering | Queue action | `deferred` | Keep immediate turn ownership untouched; append to deferred queue. |
 | Any busy non-steering path where queue exists | Queue action | `deferred` | Keep the active turn untouched; append to the deferred queue. |
 | Any queue path | Route | `deferred` | Messages are inserted through YA-managed deferred delivery, not as direct steering. |
-| Experimental patient queue enabled | Queue action | `patient` | Expert opt-in for softer "when done" intent; normal queue remains plain `deferred`. |
+| `Ctrl+Enter` queue accelerator | Queue action | `patient` | Opt-in softer "when done" intent; normal queue remains plain `deferred`. |
+| Queued chip on steering-capable active turn | `Steer now` | `steer` | User explicitly overrides queued/patient waiting and injects the queued item into the active turn. |
 | `/btw` explicit route | Aside control | separate aside session | Not a queue path and not `steer`. |
 
 ### Queue text rule
 
 - Default queueing never rewrites the user's text.
-- Experimental patient queue mode may prepend `when done,` and attach
-  `deliveryIntent: "patient"` metadata, but only when the user has enabled the
-  experimental feature gate and selected that mode.
-- Without that opt-in, softer wording such as `when done,` must be typed
-  explicitly.
+- The `Ctrl+Enter` patient accelerator may prepend `when done,` and attach
+  `deliveryIntent: "patient"` metadata. This is provider-placeholder intent and
+  a future policy hook, not a separate scheduler today.
+- The visible queue button stays unprefixed and sends `deliveryIntent:
+  "deferred"`.
+- `Steer now` on an existing queued chip strips one recognized patient prefix
+  before steering, because the user has explicitly overridden "when done" with
+  "now".
 - Queueing does not make scheduling guarantees beyond keeping the message
   in-session and avoiding immediate active-turn injection.
 

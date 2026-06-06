@@ -291,6 +291,10 @@ function normalizeDeferredMessage(value: unknown): DeferredMessage | null {
     record.mode === "bypassPermissions"
       ? record.mode
       : undefined;
+  const metadata =
+    record.metadata && typeof record.metadata === "object"
+      ? (record.metadata as UserMessageMetadata)
+      : undefined;
   const deliveryState =
     record.deliveryState === "sending" || record.deliveryState === "recovered"
       ? record.deliveryState
@@ -309,6 +313,7 @@ function normalizeDeferredMessage(value: unknown): DeferredMessage | null {
     ...(attachmentCount ? { attachmentCount } : {}),
     ...(attachments ? { attachments } : {}),
     ...(mode ? { mode } : {}),
+    ...(metadata ? { metadata } : {}),
     ...(record.blockedByEdit === true ? { blockedByEdit: true } : {}),
     deliveryState,
   };

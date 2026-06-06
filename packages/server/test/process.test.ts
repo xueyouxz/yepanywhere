@@ -962,6 +962,67 @@ describe("Process", () => {
       });
     });
 
+    it("steers a deferred message and strips patient wording", async () => {
+      const controller = createControllableIterator();
+      const queue = new MessageQueue();
+      const steerFn = vi.fn(async () => true);
+      const process = new Process(controller.iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        idleTimeoutMs: 100,
+        queue,
+        steerFn,
+      });
+      const events: ProcessEvent[] = [];
+      process.subscribe((event) => {
+        events.push(event);
+      });
+
+      process.deferMessage({
+        text: "when done, run tests",
+        tempId: "temp-patient",
+        metadata: { deliveryIntent: "patient" },
+      });
+
+      const steered = process.steerDeferredMessage("temp-patient");
+
+      expect(steered?.message).toMatchObject({
+        text: "run tests",
+        tempId: "temp-patient",
+        metadata: { deliveryIntent: "steer" },
+      });
+      expect(steerFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: "run tests",
+          tempId: "temp-patient",
+          metadata: expect.objectContaining({ deliveryIntent: "steer" }),
+        }),
+      );
+      expect(process.getDeferredQueueSummary()).toEqual([]);
+      expect(events[events.length - 1]).toMatchObject({
+        type: "deferred-queue",
+        reason: "promoted",
+        tempId: "temp-patient",
+        messages: [],
+      });
+      expect(
+        events.find(
+          (event) => event.type === "message" && event.message.type === "user",
+        ),
+      ).toMatchObject({
+        type: "message",
+        message: {
+          tempId: "temp-patient",
+          messageMetadata: { deliveryIntent: "steer" },
+          message: { role: "user", content: "run tests" },
+        },
+      });
+
+      controller.finish();
+      await process.abort();
+    });
+
     it("reinserts an edited deferred message at its original queue position", async () => {
       const iterator = createMockIterator([
         { type: "system", session_id: "sess-1" },

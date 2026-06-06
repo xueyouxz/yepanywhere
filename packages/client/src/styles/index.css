@@ -4127,6 +4127,14 @@ a.sidebar-nav-item {
   color: var(--attention-color);
 }
 
+.deferred-message-action-steer {
+  color: var(--accent-color);
+}
+
+.deferred-message-steer-icon {
+  line-height: 1;
+}
+
 .deferred-message-action-cancel:hover,
 .deferred-message-action-cancel:focus-visible {
   color: var(--error-color);

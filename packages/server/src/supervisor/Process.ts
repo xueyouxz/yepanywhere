@@ -15,6 +15,7 @@ import type {
 import {
   HELPER_SIDE_MODEL_CHEAPEST,
   HELPER_SIDE_MODEL_SAME_AS_MAIN,
+  stripPatientQueuePrefix,
 } from "@yep-anywhere/shared";
 import { getLogger } from "../logging/logger.js";
 import { getProjectName } from "../projects/paths.js";
@@ -62,6 +63,11 @@ export interface DeferredMessagePlacement {
 export interface TakenDeferredMessage {
   message: UserMessage;
   placement: DeferredMessagePlacement;
+}
+
+export interface SteeredDeferredMessage {
+  message: UserMessage;
+  position?: number;
 }
 
 type DeferredQueueEntry = { message: UserMessage; timestamp: string };
@@ -1685,6 +1691,51 @@ export class Process {
     }
     this.emitDeferredQueueChange("cancelled", tempId);
     return true;
+  }
+
+  steerDeferredMessage(tempId: string): SteeredDeferredMessage | null {
+    const index = this.deferredQueue.findIndex(
+      (entry) => entry.message.tempId === tempId,
+    );
+    if (index === -1) return null;
+
+    const previousDeferredEditBarrier = this.deferredEditBarrier
+      ? { ...this.deferredEditBarrier }
+      : null;
+    const [entry] = this.deferredQueue.splice(index, 1);
+    if (!entry) return null;
+
+    const steeredMessage: UserMessage = {
+      ...entry.message,
+      text: stripPatientQueuePrefix(entry.message.text),
+      metadata: {
+        ...entry.message.metadata,
+        deliveryIntent: "steer",
+      },
+    };
+    const strippedEntry: DeferredQueueEntry = {
+      ...entry,
+      message: steeredMessage,
+    };
+
+    if (this.deferredEditBarrier) {
+      if (index < this.deferredEditBarrier.index) {
+        this.deferredEditBarrier.index--;
+      } else if (this.deferredQueue.length <= this.deferredEditBarrier.index) {
+        this.deferredEditBarrier.index = this.deferredQueue.length;
+      }
+    }
+
+    const result = this.queueMessage(steeredMessage, { allowSteer: true });
+    if (!result.success) {
+      this.deferredQueue.splice(index, 0, strippedEntry);
+      this.deferredEditBarrier = previousDeferredEditBarrier;
+      this.emitDeferredQueueChange("queued", tempId);
+      return null;
+    }
+
+    this.emitDeferredQueueChange("promoted", tempId);
+    return { message: steeredMessage, position: result.position };
   }
 
   /**

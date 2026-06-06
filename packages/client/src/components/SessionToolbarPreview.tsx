@@ -121,7 +121,7 @@ export function SessionToolbarPreview() {
             isearchScope: null,
             setOpen: setShortcutsOpen,
             hasDualActions: true,
-            queueShortcutLabel: t("toolbarQueueWhileAgentRuns"),
+            queueShortcutLabel: t("toolbarQueueWhenDone"),
           }}
           actionsControl={{
             contextUsage: PREVIEW_CONTEXT_USAGE,

@@ -27,6 +27,8 @@ vi.mock("../../i18n", () => ({
           "Show hidden thinking transcript rows",
         processingThinkingTranscriptShowWhenAvailable:
           "Show thinking transcript rows when available",
+        sessionSteerNow: "Steer now",
+        sessionSteerQueuedMessageNow: "Steer queued message now",
       })[key] ?? key,
   }),
 }));
@@ -503,6 +505,40 @@ describe("MessageList", () => {
 
     expect(onEditDeferred).toHaveBeenCalledWith("temp-queued");
     expect(onCancelDeferred).toHaveBeenCalledWith("temp-queued");
+  });
+
+  it("exposes a steer-now control for steerable queued messages", () => {
+    const onSteerDeferred = vi.fn();
+
+    render(
+      <MessageList
+        messages={[]}
+        deferredMessages={[
+          {
+            tempId: "temp-queued",
+            content: "when done, queued text",
+            timestamp: "2026-04-25T00:00:00.000Z",
+          },
+          {
+            tempId: "temp-blocked",
+            content: "blocked text",
+            timestamp: "2026-04-25T00:00:01.000Z",
+            blockedByEdit: true,
+          },
+        ]}
+        onSteerDeferred={onSteerDeferred}
+        canSteerDeferred
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Steer queued message now" }),
+    );
+
+    expect(onSteerDeferred).toHaveBeenCalledWith("temp-queued");
+    expect(
+      screen.getAllByRole("button", { name: "Steer queued message now" }),
+    ).toHaveLength(1);
   });
 
   it("copies sent user message text", async () => {

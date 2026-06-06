@@ -5,7 +5,7 @@
 
 This topic covers YA's provider/session liveness contract and the features
 that depend on it, especially heartbeat turns, deferred queue promotion, and
-experimental patient queue intent.
+patient queue intent.
 
 Related topic: [heartbeat ownership and timers](heartbeat.md).
 
@@ -75,9 +75,9 @@ Related topic: [heartbeat ownership and timers](heartbeat.md).
 - Queue intent is message intent, not scheduling proof. Queued messages stay in
   the parent session; they should not steer the active turn or route through
   `/btw`.
-- Patient queue intent is experimental, user-enabled message intent. It may
-  carry softer "when done" wording and `deliveryIntent: "patient"`, but it is
-  still not liveness evidence or a scheduling guarantee.
+- Patient queue intent is explicit message intent. It may carry softer
+  "when done" wording and `deliveryIntent: "patient"`, but it is still not
+  liveness evidence or a scheduling guarantee.
 - User-message composition timing and delivery intent are YA-owned metadata.
   They describe what the user did and intended, not whether the provider is
   alive, and provider adapters should forward them only through a real
@@ -112,7 +112,8 @@ Related topic: [heartbeat ownership and timers](heartbeat.md).
   path whenever possible. That keeps transcript, queue promotion, and client
   status semantics aligned.
 - Queueing, sending, and steering must preserve the user's text unless the user
-  explicitly typed a prefix or enabled the experimental patient queue mode.
+  explicitly typed a prefix, used the Ctrl+Enter patient queue accelerator, or
+  chose queued-chip `Steer now`, which strips one recognized patient prefix.
 - A raw event timestamp may explain that the provider transport is still
   emitting JSON-RPC traffic, but derived liveness still needs a normalized
   provider message, awaited tool lifecycle, or explicit active probe to claim

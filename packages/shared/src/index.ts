@@ -84,6 +84,13 @@ export type {
   UserMessageMetadata,
   UserMessageSpeechMetadata,
 } from "./user-message-metadata.js";
+export {
+  PATIENT_QUEUE_PREFIX,
+  PATIENT_QUEUE_PREFIXES,
+  applyPatientQueuePrefix,
+  hasPatientQueuePrefix,
+  stripPatientQueuePrefix,
+} from "./user-message-metadata.js";
 
 export {
   orderByParentChain,

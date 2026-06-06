@@ -1962,6 +1962,53 @@ function SessionPageContent({
     ],
   );
 
+  const handleSteerDeferred = useCallback(
+    async (tempId: string) => {
+      const localMessage = deferredMessages.find(
+        (message) => message.tempId === tempId,
+      );
+      if (!localMessage || localMessage.deliveryState === "recovered") {
+        return;
+      }
+
+      removeDeferredMessage(tempId);
+      try {
+        const result = await api.steerDeferredMessage(sessionId, tempId);
+        if (result.deferredMessages) {
+          syncDeferredMessages(result.deferredMessages, {
+            reason: "promoted",
+            tempId,
+            source: "rest",
+          });
+        }
+        if (result.message.trim()) {
+          rememberSentSubmission(result.message, result.tempId ?? tempId);
+        }
+      } catch (err) {
+        if (isMissingDeferredQueueEntryError(err)) {
+          return;
+        }
+        addDeferredMessage(localMessage);
+        console.error("Failed to steer deferred message:", err);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        showToast(
+          t("sessionDeferredSteerFailed", { message: errorMsg }),
+          "error",
+        );
+      }
+    },
+    [
+      addDeferredMessage,
+      deferredMessages,
+      rememberSentSubmission,
+      removeDeferredMessage,
+      sessionId,
+      showToast,
+      syncDeferredMessages,
+      t,
+    ],
+  );
+
   const handleRecallLastSubmission = useCallback((): boolean => {
     const lastSubmission = lastComposerSubmissionRef.current;
     if (!lastSubmission?.text.trim()) {
@@ -3746,6 +3793,8 @@ function SessionPageContent({
                   onTransferBtwAsideTurn={transferBtwTurnToMotherComposer}
                   onCancelDeferred={handleCancelDeferred}
                   onEditDeferred={handleEditDeferred}
+                  onSteerDeferred={handleSteerDeferred}
+                  canSteerDeferred={primaryComposerAction === "steer"}
                   onCorrectLatestUserMessage={handleCorrectLatestUserMessage}
                   onTrimBeforeUserMessage={trimClientFromUserMessage}
                   markdownAugments={markdownAugments}
