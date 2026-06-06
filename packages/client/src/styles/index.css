@@ -4032,45 +4032,141 @@ a.sidebar-nav-item {
   color: white;
 }
 
-.send-button.patient-queue-toggle {
-  width: auto;
-  min-width: var(--composer-primary-control-size);
-  gap: 3px;
-  padding: 0 7px;
-  border: 1px solid var(--border-color);
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
+.send-button.patient-queue-action {
+  background: var(--warning-badge-bg);
+  color: white;
 }
 
-.send-button.patient-queue-toggle.is-active {
-  border-color: color-mix(in srgb, var(--primary-color) 70%, transparent);
-  background: color-mix(in srgb, var(--accent-color) 24%, var(--bg-tertiary));
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 45%, transparent),
-    0 0 0 2px color-mix(in srgb, var(--accent-color) 14%, transparent);
-  color: var(--text-primary);
-}
-
-.patient-queue-time {
-  font-size: 10px;
+.send-patient-mark {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 13px;
+  padding: 1px 2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--warning-badge-bg);
+  font-size: 8px;
   font-weight: 700;
   line-height: 1;
+  letter-spacing: 0;
 }
 
-.patient-queue-mode-label {
-  max-width: 52px;
-  overflow: hidden;
+.patient-queue-switch-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.patient-queue-switch {
+  position: relative;
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 5px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.patient-queue-switch:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--text-muted) 55%, var(--border-color));
+}
+
+.patient-queue-switch.is-active {
+  border-color: color-mix(in srgb, var(--warning-color) 72%, transparent);
+  background: color-mix(in srgb, var(--warning-color) 24%, var(--bg-tertiary));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--warning-color) 36%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--warning-color) 14%, transparent);
   color: var(--text-primary);
-  font-size: 10px;
-  font-weight: 800;
-  line-height: 1;
-  text-transform: uppercase;
 }
 
-@media (max-width: 600px) {
-  .patient-queue-mode-label {
-    max-width: 42px;
-  }
+.patient-queue-switch:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.patient-queue-switch-track {
+  position: relative;
+  display: grid;
+  width: 42px;
+  height: 20px;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-primary) 42%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--border-color) 80%, transparent);
+}
+
+.patient-queue-switch-option {
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.patient-queue-switch-option--regular {
+  color: color-mix(in srgb, var(--attention-color) 84%, var(--text-muted));
+}
+
+.patient-queue-switch-option--patient {
+  color: color-mix(in srgb, var(--warning-color) 82%, var(--text-muted));
+}
+
+.patient-queue-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--bg-surface);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+  transition: transform 0.15s ease;
+}
+
+.patient-queue-switch.is-active .patient-queue-switch-thumb {
+  transform: translateX(22px);
+}
+
+.patient-queue-switch-time {
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.patient-queue-ack {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 7px);
+  width: max-content;
+  max-width: 180px;
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--warning-color) 45%, var(--border-color));
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.24);
+  font-size: 11px;
+  line-height: 1.2;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 130;
 }
 
 .send-button-with-help::after {

@@ -272,8 +272,7 @@ export function MessageInput({
     ? enterActionKind
     : basePrimaryActionKind;
   const showPatientQueueMode = !!(
-    (supportsSteering && onQueue) ||
-    basePrimaryActionKind === "queue"
+    supportsSteering || onQueue || basePrimaryActionKind === "queue"
   );
   const primaryActionLabel =
     effectivePrimaryActionKind === "steer"

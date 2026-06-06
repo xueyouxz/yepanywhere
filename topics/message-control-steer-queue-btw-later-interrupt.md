@@ -49,7 +49,7 @@ Rationale:
 | Any busy non-steering path where queue exists | Queue action | `deferred` | Keep the active turn untouched; append to the deferred queue. |
 | Any queue path | Route | `deferred` | Messages are inserted through YA-managed deferred delivery, not as direct steering. |
 | `Ctrl+Enter` alternate send | opposite of the visible Enter/default action | `steer` or `deferred` | In active steering sessions, Enter and `Ctrl+Enter` are complementary: one steers now, the other regular-queues. Patient is not the alternate-send shortcut. |
-| Patient queue setting enabled for a new queued item | Queue action | `patient` | Per-item patient intent waits for the quiet/verified-idle patience threshold before delivery. |
+| Patient queue setting enabled for a new queued item | Queue action | `patient` | Per-item patient intent waits for the quiet/verified-idle patience threshold before delivery. This is a super-delay queue option, independent of provider steering support. |
 | Queued chip on steering-capable active turn | `Steer now` | `steer` | User explicitly overrides queued/patient waiting and injects the queued item into the active turn. |
 | `/btw` explicit route | Aside control | separate aside session | Not a queue path and not `steer`. |
 
@@ -71,6 +71,11 @@ Rationale:
   (for example by offset, tone, status text, and age) so the display does not
   imply one strict FIFO when patient rows are waiting for the quiet threshold.
 - Queueing remains in-session and avoids immediate active-turn injection.
+- Patient mode is a persistent queue setting, not a replacement for the queue
+  action. The setting may remain visible when a steering provider is idle and
+  its extra queue action is hidden. When the visible queue action is available,
+  its icon/color should change so the click invitation reflects whether it will
+  create a regular queued item or a patient queued item.
 
 ### Queued-item navigation affordance
 

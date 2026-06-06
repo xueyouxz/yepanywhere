@@ -4018,9 +4018,7 @@ function SessionPageContent({
                         : handleSend
                 }
                 onQueue={
-                  !mainComposerForAside &&
-                  shouldDeferMessages &&
-                  generallySupportsSteering
+                  !mainComposerForAside && shouldDeferMessages
                     ? handleQueue
                     : undefined
                 }

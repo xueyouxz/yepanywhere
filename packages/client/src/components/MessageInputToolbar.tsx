@@ -792,9 +792,110 @@ export function MessageInputToolbarView({
   const showStopButton = !!actionsControl.stop;
   const selectedSpeechMethod = speechControl?.selectedMethod;
   const queueControl = actionsControl.send?.queue;
+  const canTogglePatientQueue = !!(
+    visibility.queueControls &&
+    queueControl?.showPatientQueueMode &&
+    queueControl.onTogglePatientQueue
+  );
+  const queueIsPatient = queueControl?.patientQueueEnabled ?? false;
+  const [patientQueueAck, setPatientQueueAck] = useState<string | null>(null);
   const shortcutsLongPressTimerRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+  const patientQueueAckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const queueLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const suppressQueueClickRef = useRef(false);
+
+  const clearPatientQueueAck = useCallback(() => {
+    if (patientQueueAckTimerRef.current) {
+      clearTimeout(patientQueueAckTimerRef.current);
+      patientQueueAckTimerRef.current = null;
+    }
+  }, []);
+
+  const showPatientQueueAck = useCallback(
+    (nextPatient: boolean) => {
+      clearPatientQueueAck();
+      setPatientQueueAck(
+        nextPatient
+          ? t("toolbarPatientQueueEnabledAck")
+          : t("toolbarPatientQueueDisabledAck"),
+      );
+      patientQueueAckTimerRef.current = setTimeout(() => {
+        patientQueueAckTimerRef.current = null;
+        setPatientQueueAck(null);
+      }, 1800);
+    },
+    [clearPatientQueueAck, t],
+  );
+
+  const togglePatientQueue = useCallback(() => {
+    if (!canTogglePatientQueue || !queueControl?.onTogglePatientQueue) return;
+    const nextPatient = !queueIsPatient;
+    queueControl.onTogglePatientQueue();
+    showPatientQueueAck(nextPatient);
+  }, [
+    canTogglePatientQueue,
+    queueControl,
+    queueIsPatient,
+    showPatientQueueAck,
+  ]);
+
+  const clearQueueLongPress = useCallback(() => {
+    if (queueLongPressTimerRef.current) {
+      clearTimeout(queueLongPressTimerRef.current);
+      queueLongPressTimerRef.current = null;
+    }
+  }, []);
+
+  const startQueueLongPress = useCallback(() => {
+    if (!canTogglePatientQueue) return;
+    clearQueueLongPress();
+    suppressQueueClickRef.current = false;
+    queueLongPressTimerRef.current = setTimeout(() => {
+      suppressQueueClickRef.current = true;
+      queueLongPressTimerRef.current = null;
+      togglePatientQueue();
+    }, 450);
+  }, [canTogglePatientQueue, clearQueueLongPress, togglePatientQueue]);
+
+  const handleQueueTouchEnd = useCallback(
+    (event: TouchEvent<HTMLButtonElement>) => {
+      if (suppressQueueClickRef.current) {
+        event.preventDefault();
+      }
+      clearQueueLongPress();
+    },
+    [clearQueueLongPress],
+  );
+
+  const handleQueueContextMenu = useCallback(
+    (event: MouseEvent<HTMLButtonElement>) => {
+      if (!canTogglePatientQueue) return;
+      event.preventDefault();
+      togglePatientQueue();
+    },
+    [canTogglePatientQueue, togglePatientQueue],
+  );
+
+  const handleQueueActionClick = useCallback((action?: () => void) => {
+    if (suppressQueueClickRef.current) {
+      suppressQueueClickRef.current = false;
+      return;
+    }
+    action?.();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearPatientQueueAck();
+      clearQueueLongPress();
+    };
+  }, [clearPatientQueueAck, clearQueueLongPress]);
 
   const openShortcutSettings = () => {
     shortcutsControl.setOpen(true);
@@ -1371,14 +1472,18 @@ export function MessageInputToolbarView({
         )}
         {showSendButton && actionsControl.send ? (
           <>
-            {visibility.queueControls &&
-              queueControl?.showPatientQueueMode &&
-              queueControl.onTogglePatientQueue && (
+            {canTogglePatientQueue && queueControl && (
+              <span className="patient-queue-switch-wrap">
                 <button
                   type="button"
-                  onClick={queueControl.onTogglePatientQueue}
+                  onClick={() => handleQueueActionClick(togglePatientQueue)}
+                  onContextMenu={handleQueueContextMenu}
+                  onTouchStart={startQueueLongPress}
+                  onTouchEnd={handleQueueTouchEnd}
+                  onTouchCancel={clearQueueLongPress}
+                  onTouchMove={clearQueueLongPress}
                   disabled={actionsControl.disabled}
-                  className={`send-button patient-queue-toggle ${
+                  className={`patient-queue-switch ${
                     queueControl.patientQueueEnabled ? "is-active" : ""
                   }`}
                   aria-label={
@@ -1387,43 +1492,106 @@ export function MessageInputToolbarView({
                       : t("toolbarPatientQueueEnable")
                   }
                   aria-pressed={queueControl.patientQueueEnabled}
-                  title={queueControl.patientQueueTooltip}
+                  title={`${
+                    queueControl.patientQueueEnabled
+                      ? t("toolbarPatientQueueDisable")
+                      : t("toolbarPatientQueueEnable")
+                  }\n${queueControl.patientQueueTooltip}`}
                 >
-                  <span className="send-icon patient-queue-icon">⏱</span>
+                  <span className="patient-queue-switch-track" aria-hidden>
+                    <span className="patient-queue-switch-option patient-queue-switch-option--regular">
+                      ◷
+                    </span>
+                    <span className="patient-queue-switch-option patient-queue-switch-option--patient">
+                      Zz
+                    </span>
+                    <span className="patient-queue-switch-thumb" />
+                  </span>
                   {queueControl.patientQueueTimeoutLabel && (
-                    <span className="patient-queue-time">
+                    <span className="patient-queue-switch-time" aria-hidden>
                       {queueControl.patientQueueTimeoutLabel}
                     </span>
                   )}
-                  {queueControl.patientQueueEnabled && (
-                    <span className="patient-queue-mode-label">Patient</span>
-                  )}
                 </button>
-              )}
+                {patientQueueAck && (
+                  <span className="patient-queue-ack" role="status">
+                    {patientQueueAck}
+                  </span>
+                )}
+              </span>
+            )}
             {visibility.queueControls &&
               queueControl?.hasDualActions &&
               actionsControl.send.primaryActionKind !== "queue" &&
               queueControl.onQueue && (
                 <button
                   type="button"
-                  onClick={queueControl.onQueue}
+                  onClick={() => handleQueueActionClick(queueControl.onQueue)}
+                  onContextMenu={handleQueueContextMenu}
+                  onTouchStart={startQueueLongPress}
+                  onTouchEnd={handleQueueTouchEnd}
+                  onTouchCancel={clearQueueLongPress}
+                  onTouchMove={clearQueueLongPress}
                   disabled={
                     actionsControl.disabled || !actionsControl.send.canSend
                   }
-                  className="send-button queue-button"
-                  aria-label={t("toolbarQueueLabel")}
+                  className={`send-button queue-button ${
+                    queueControl.patientQueueEnabled
+                      ? "patient-queue-action"
+                      : ""
+                  }`}
+                  aria-label={
+                    queueControl.patientQueueEnabled
+                      ? t("toolbarPatientQueueActionLabel")
+                      : t("toolbarQueueLabel")
+                  }
                   title={queueControl.queueTooltip}
                 >
                   <span className="send-icon queue-icon">→</span>
+                  {queueControl.patientQueueEnabled && (
+                    <span className="send-patient-mark" aria-hidden>
+                      Zz
+                    </span>
+                  )}
                 </button>
               )}
             <button
               type="button"
-              onClick={actionsControl.send.onSend}
+              onClick={() => handleQueueActionClick(actionsControl.send?.onSend)}
+              onContextMenu={
+                actionsControl.send.primaryActionKind === "queue"
+                  ? handleQueueContextMenu
+                  : undefined
+              }
+              onTouchStart={
+                actionsControl.send.primaryActionKind === "queue"
+                  ? startQueueLongPress
+                  : undefined
+              }
+              onTouchEnd={
+                actionsControl.send.primaryActionKind === "queue"
+                  ? handleQueueTouchEnd
+                  : undefined
+              }
+              onTouchCancel={
+                actionsControl.send.primaryActionKind === "queue"
+                  ? clearQueueLongPress
+                  : undefined
+              }
+              onTouchMove={
+                actionsControl.send.primaryActionKind === "queue"
+                  ? clearQueueLongPress
+                  : undefined
+              }
               disabled={actionsControl.disabled || !actionsControl.send.canSend}
               className={`send-button send-button-with-help ${
                 actionsControl.send.primaryActionKind === "queue"
                   ? "queue-mode"
+                  : ""
+              } ${
+                actionsControl.send.primaryActionKind === "queue" &&
+                queueControl?.patientQueueEnabled
+                  ? "patient-queue-action"
                   : ""
               }`}
               aria-label={actionsControl.send.primaryActionLabel}
@@ -1431,6 +1599,12 @@ export function MessageInputToolbarView({
               data-tooltip={actionsControl.send.tooltip}
             >
               <span className="send-icon">{actionsControl.send.icon}</span>
+              {actionsControl.send.primaryActionKind === "queue" &&
+                queueControl?.patientQueueEnabled && (
+                  <span className="send-patient-mark" aria-hidden>
+                    Zz
+                  </span>
+                )}
             </button>
           </>
         ) : null}
@@ -1588,17 +1762,17 @@ export function MessageInputToolbar({
   const patientTooltip = t("toolbarPatientQueueTooltip", {
     timeout: patientQueueTimeoutLabel ?? t("toolbarPatientQueueConfiguredTimeout"),
   });
+  const regularQueueTooltip = t("toolbarQueueTooltip");
+  const queueActionTooltip = `${
+    queueIsPatient ? patientTooltip : regularQueueTooltip
+  }\n${t("toolbarPatientQueueToggleShortcut")}`;
   const sendTooltip =
     effectivePrimaryActionKind === "steer"
       ? t("toolbarSteerTooltip")
       : effectivePrimaryActionKind === "queue"
-        ? queueIsPatient
-          ? patientTooltip
-          : t("toolbarQueueTooltip")
+        ? queueActionTooltip
         : t("toolbarSendTooltip");
-  const queueTooltip = queueIsPatient
-    ? patientTooltip
-    : t("toolbarQueueTooltip");
+  const queueTooltip = queueActionTooltip;
   const queueShortcutLabel =
     canSwapEnterAction && effectivePrimaryActionKind === "queue"
       ? t("toolbarShortcutSteerCurrentTurn")
@@ -1618,13 +1792,20 @@ export function MessageInputToolbar({
     effectivePrimaryActionKind === "steer"
       ? t("toolbarSteerTooltip")
       : effectivePrimaryActionKind === "queue"
-        ? hasDualActions
+        ? queueIsPatient
+          ? t("toolbarPatientQueueActionLabel")
+          : hasDualActions
           ? t("toolbarQueuePrimaryActionLabel")
           : t("toolbarQueueLabel")
         : t("toolbarSend");
   const stopTitle = `${t("toolbarStop")} (Esc)`;
   const showStopButton = !!(isRunning && onStop && isThinking);
-  const showSendButton = !!(onSend && (!showStopButton || canSend));
+  const showPatientQueueToggle = !!(
+    showPatientQueueMode && onTogglePatientQueue
+  );
+  const showSendButton = !!(
+    onSend && (!showStopButton || canSend || showPatientQueueToggle)
+  );
   const serverVoiceEnabled =
     versionInfo?.capabilities?.includes("voiceInput") ?? true;
   const speechMethodOptions = useMemo((): FilterOption<SpeechMethodId>[] => {
