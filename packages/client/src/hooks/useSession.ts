@@ -265,6 +265,50 @@ function getDeferredStorageKey(sessionId: string): string {
   return `${DEFERRED_DRAFT_KEY_PREFIX}${sessionId}`;
 }
 
+const PERMISSION_MODE_KEY_PREFIX = "permission-mode-";
+
+function getPermissionModeStorageKey(sessionId: string): string {
+  return `${PERMISSION_MODE_KEY_PREFIX}${sessionId}`;
+}
+
+// The UI-selected permission mode is persisted per session so a page reload or
+// server-process teardown restores the user's choice instead of silently
+// dropping to "default" — which would re-enable provider sandboxing and approval
+// prompts the user had deliberately turned off.
+function loadStoredPermissionMode(
+  sessionId: string,
+): PermissionMode | undefined {
+  if (typeof localStorage === "undefined") {
+    return undefined;
+  }
+  try {
+    const raw = localStorage.getItem(getPermissionModeStorageKey(sessionId));
+    return raw === "default" ||
+      raw === "acceptEdits" ||
+      raw === "plan" ||
+      raw === "bypassPermissions"
+      ? raw
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function saveStoredPermissionMode(
+  sessionId: string,
+  mode: PermissionMode,
+): void {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  try {
+    localStorage.setItem(getPermissionModeStorageKey(sessionId), mode);
+  } catch {
+    // localStorage may be unavailable or full; the in-memory mode still applies
+    // for the current page.
+  }
+}
+
 function normalizeDeferredMessage(value: unknown): DeferredMessage | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -834,8 +878,14 @@ export function useSession(
     Record<string, MarkdownAugment>
   >({});
 
-  // Permission mode state: localMode is UI-selected, serverMode is confirmed by server
-  const initialPermissionMode = initialStatus?.permissionMode ?? "default";
+  // Permission mode state: localMode is UI-selected, serverMode is confirmed by server.
+  // A live process's mode (from initialStatus) stays authoritative; only when there
+  // is no live-process mode do we restore the user's last choice from storage instead
+  // of dropping to "default".
+  const initialPermissionMode =
+    initialStatus?.permissionMode ??
+    loadStoredPermissionMode(sessionId) ??
+    "default";
   const initialModeVersion = initialStatus?.modeVersion ?? 0;
   const [localMode, setLocalMode] =
     useState<PermissionMode>(initialPermissionMode);
@@ -843,6 +893,17 @@ export function useSession(
   const [modeVersion, setModeVersion] =
     useState<number>(initialModeVersion);
   const localModeRef = useRef<PermissionMode>(localMode);
+  // In-place session switches reuse this hook instance (page reloads remount it and
+  // use the initializer above). Restore the switched-to session's stored mode, but
+  // skip the initial mount so a live process's authoritative mode is not clobbered.
+  const restoredModeSessionRef = useRef(sessionId);
+  useEffect(() => {
+    if (restoredModeSessionRef.current === sessionId) {
+      return;
+    }
+    restoredModeSessionRef.current = sessionId;
+    setLocalMode(loadStoredPermissionMode(sessionId) ?? "default");
+  }, [sessionId]);
   // Track whether we've already processed a stream "connected" event in this mount.
   // For Codex providers, the first connected-event catch-up fetch can duplicate
   // freshly streamed messages because JSONL and stream IDs are not yet aligned.
@@ -922,9 +983,10 @@ export function useSession(
         setModeVersion(version);
         localModeRef.current = mode;
         setLocalMode(mode);
+        saveStoredPermissionMode(sessionId, mode);
       }
     },
-    [],
+    [sessionId],
   );
 
   // Handle initial load completion from useSessionMessages
@@ -1028,6 +1090,7 @@ export function useSession(
     async (mode: PermissionMode) => {
       localModeRef.current = mode;
       setLocalMode(mode);
+      saveStoredPermissionMode(sessionId, mode);
 
       // If there's an active process, immediately sync to server
       if (status.owner === "self" || status.owner === "external") {

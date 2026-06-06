@@ -1202,3 +1202,58 @@ describe("useSession completion reconciliation", () => {
     expect(result.current.permissionMode).toBe("acceptEdits");
   });
 });
+
+describe("useSession permission mode persistence", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    apiMocks.getSessionMetadata.mockReset();
+    apiMocks.setPermissionMode.mockReset();
+    apiMocks.setPermissionMode.mockResolvedValue({
+      permissionMode: "bypassPermissions",
+      modeVersion: 1,
+    });
+    installLocalStorageMock();
+    fileActivityOptions = undefined;
+    sessionStreamHandler = null;
+    sessionMessagesMock.messages = [];
+    sessionMessagesMock.provider = "codex";
+  });
+
+  it("restores the stored mode when no live process reports one", () => {
+    window.localStorage.setItem("permission-mode-sess-1", "bypassPermissions");
+
+    const { result } = renderHook(() =>
+      useSession(PROJECT_ID, "sess-1", undefined),
+    );
+
+    expect(result.current.permissionMode).toBe("bypassPermissions");
+  });
+
+  it("prefers a live process mode over the stored mode", () => {
+    window.localStorage.setItem("permission-mode-sess-1", "bypassPermissions");
+
+    const { result } = renderHook(() =>
+      useSession(PROJECT_ID, "sess-1", {
+        owner: "self",
+        processId: "proc-1",
+        permissionMode: "plan",
+      }),
+    );
+
+    expect(result.current.permissionMode).toBe("plan");
+  });
+
+  it("persists the selected mode to storage", async () => {
+    const { result } = renderHook(() =>
+      useSession(PROJECT_ID, "sess-1", undefined),
+    );
+
+    await act(async () => {
+      await result.current.setPermissionMode("bypassPermissions");
+    });
+
+    expect(window.localStorage.getItem("permission-mode-sess-1")).toBe(
+      "bypassPermissions",
+    );
+  });
+});
