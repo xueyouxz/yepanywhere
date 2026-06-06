@@ -244,6 +244,37 @@ describe("GET /version", () => {
     });
   });
 
+  it("includes server-learned client defaults", async () => {
+    mockFetch(() => new Response(null, { status: 204 }));
+
+    const { createVersionRoutes } = await importVersion();
+    const routes = createVersionRoutes({
+      getClientDefaults: () => ({
+        speech: {
+          voiceInputEnabled: true,
+          speechMethod: "ya-grok",
+        },
+        sessionToolbarVisibility: {
+          microphone: true,
+          queueControls: true,
+        },
+      }),
+    });
+    const res = await routes.request("/");
+    const json = await res.json();
+
+    expect(json.clientDefaults).toEqual({
+      speech: {
+        voiceInputEnabled: true,
+        speechMethod: "ya-grok",
+      },
+      sessionToolbarVisibility: {
+        microphone: true,
+        queueControls: true,
+      },
+    });
+  });
+
   it("does not advertise voice backends when voice input is disabled", async () => {
     mockFetch(() => new Response(null, { status: 204 }));
 

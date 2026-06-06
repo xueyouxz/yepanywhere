@@ -1,5 +1,14 @@
-import { useCallback, useSyncExternalStore } from "react";
+import type { ClientDefaults } from "@yep-anywhere/shared";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { api } from "../api/client";
+import {
+  type DefaultedBooleanRecord,
+  normalizeDefaultedBooleanRecord,
+  resolveDefaultedBooleanRecord,
+  setDefaultedBooleanRecordValue,
+} from "../lib/defaultedStorage";
 import { UI_KEYS } from "../lib/storageKeys";
+import { useVersion } from "./useVersion";
 
 export interface SessionToolbarVisibility {
   modeSelector: boolean;
@@ -17,6 +26,9 @@ export interface SessionToolbarVisibility {
 }
 
 export type SessionToolbarVisibilityKey = keyof SessionToolbarVisibility;
+type StoredSessionToolbarVisibility =
+  DefaultedBooleanRecord<SessionToolbarVisibilityKey>;
+type SessionToolbarVisibilityDefaults = Partial<SessionToolbarVisibility>;
 
 export const DEFAULT_SESSION_TOOLBAR_VISIBILITY: SessionToolbarVisibility = {
   modeSelector: true,
@@ -35,7 +47,6 @@ export const DEFAULT_SESSION_TOOLBAR_VISIBILITY: SessionToolbarVisibility = {
 
 const MOBILE_SESSION_TOOLBAR_VISIBILITY_DEFAULTS: Partial<SessionToolbarVisibility> =
   {
-    microphone: false,
     shortcutsHelp: false,
     sessionStatus: false,
   };
@@ -51,18 +62,36 @@ function isMobileToolbarLayout(): boolean {
 }
 
 function getDefaultSessionToolbarVisibility(): SessionToolbarVisibility {
-  if (!isMobileToolbarLayout()) {
-    return DEFAULT_SESSION_TOOLBAR_VISIBILITY;
-  }
+  const layoutDefaults = isMobileToolbarLayout()
+    ? {
+        ...DEFAULT_SESSION_TOOLBAR_VISIBILITY,
+        ...MOBILE_SESSION_TOOLBAR_VISIBILITY_DEFAULTS,
+      }
+    : DEFAULT_SESSION_TOOLBAR_VISIBILITY;
   return {
-    ...DEFAULT_SESSION_TOOLBAR_VISIBILITY,
-    ...MOBILE_SESSION_TOOLBAR_VISIBILITY_DEFAULTS,
+    ...layoutDefaults,
+    ...currentClientDefaultVisibility,
   };
 }
 
 const SESSION_TOOLBAR_VISIBILITY_KEYS = Object.keys(
   DEFAULT_SESSION_TOOLBAR_VISIBILITY,
 ) as SessionToolbarVisibilityKey[];
+
+function normalizeClientDefaultVisibility(
+  value: ClientDefaults["sessionToolbarVisibility"] | undefined,
+): SessionToolbarVisibilityDefaults {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  const normalized: SessionToolbarVisibilityDefaults = {};
+  for (const key of SESSION_TOOLBAR_VISIBILITY_KEYS) {
+    if (typeof value[key] === "boolean") {
+      normalized[key] = value[key];
+    }
+  }
+  return normalized;
+}
 
 function hasLocalStorage(): boolean {
   return (
@@ -72,37 +101,48 @@ function hasLocalStorage(): boolean {
   );
 }
 
-function normalizeVisibility(value: unknown): SessionToolbarVisibility {
-  if (!value || typeof value !== "object") {
-    return getDefaultSessionToolbarVisibility();
-  }
-  const input = value as Partial<Record<SessionToolbarVisibilityKey, unknown>>;
-  const normalized = { ...getDefaultSessionToolbarVisibility() };
-  for (const key of SESSION_TOOLBAR_VISIBILITY_KEYS) {
-    if (typeof input[key] === "boolean") {
-      normalized[key] = input[key];
-    }
-  }
-  return normalized;
+function resolveVisibility(
+  stored: StoredSessionToolbarVisibility,
+): SessionToolbarVisibility {
+  return resolveDefaultedBooleanRecord(
+    stored,
+    getDefaultSessionToolbarVisibility(),
+    SESSION_TOOLBAR_VISIBILITY_KEYS,
+  );
 }
 
-function loadVisibility(): SessionToolbarVisibility {
+function normalizeStoredVisibility(
+  value: unknown,
+): StoredSessionToolbarVisibility {
+  return normalizeDefaultedBooleanRecord(
+    value,
+    SESSION_TOOLBAR_VISIBILITY_KEYS,
+  );
+}
+
+function loadStoredVisibility(): StoredSessionToolbarVisibility {
   if (!hasLocalStorage()) {
-    return getDefaultSessionToolbarVisibility();
+    return {};
   }
   const stored = localStorage.getItem(UI_KEYS.sessionToolbarVisibility);
   if (!stored) {
-    return getDefaultSessionToolbarVisibility();
+    return {};
   }
   try {
-    return normalizeVisibility(JSON.parse(stored));
+    return normalizeStoredVisibility(JSON.parse(stored));
   } catch {
-    return getDefaultSessionToolbarVisibility();
+    return {};
   }
 }
 
-function saveVisibility(visibility: SessionToolbarVisibility): void {
+function saveStoredVisibility(
+  visibility: StoredSessionToolbarVisibility,
+): void {
   if (!hasLocalStorage()) {
+    return;
+  }
+  if (Object.keys(visibility).length === 0) {
+    localStorage.removeItem(UI_KEYS.sessionToolbarVisibility);
     return;
   }
   localStorage.setItem(
@@ -111,7 +151,9 @@ function saveVisibility(visibility: SessionToolbarVisibility): void {
   );
 }
 
-let currentVisibility = loadVisibility();
+let currentStoredVisibility = loadStoredVisibility();
+let currentClientDefaultVisibility: SessionToolbarVisibilityDefaults = {};
+let currentVisibility = resolveVisibility(currentStoredVisibility);
 const listeners = new Set<() => void>();
 
 function subscribe(listener: () => void) {
@@ -123,26 +165,66 @@ function getSnapshot() {
   return currentVisibility;
 }
 
-function updateVisibility(next: SessionToolbarVisibility): void {
-  currentVisibility = normalizeVisibility(next);
-  saveVisibility(currentVisibility);
+function updateStoredVisibility(next: StoredSessionToolbarVisibility): void {
+  currentStoredVisibility = normalizeStoredVisibility(next);
+  currentVisibility = resolveVisibility(currentStoredVisibility);
+  saveStoredVisibility(currentStoredVisibility);
   for (const listener of listeners) {
     listener();
   }
 }
 
+function updateClientDefaultVisibility(
+  next: ClientDefaults["sessionToolbarVisibility"] | undefined,
+): void {
+  currentClientDefaultVisibility = normalizeClientDefaultVisibility(next);
+  currentVisibility = resolveVisibility(currentStoredVisibility);
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
+function saveClientDefaultVisibility(
+  key: SessionToolbarVisibilityKey,
+  visible: boolean,
+): void {
+  void api
+    .updateServerSettings({
+      clientDefaults: {
+        sessionToolbarVisibility: { [key]: visible },
+      },
+    })
+    .catch((err) => {
+      console.warn(
+        "[useSessionToolbarVisibility] Failed to save server client default:",
+        err instanceof Error ? err.message : String(err),
+      );
+    });
+}
+
 export function useSessionToolbarVisibility() {
+  const { version } = useVersion();
   const visibility = useSyncExternalStore(subscribe, getSnapshot);
+
+  useEffect(() => {
+    if (!version) return;
+    updateClientDefaultVisibility(
+      version?.clientDefaults?.sessionToolbarVisibility,
+    );
+  }, [version]);
 
   const setControlVisible = useCallback(
     (key: SessionToolbarVisibilityKey, visible: boolean) => {
-      updateVisibility({ ...currentVisibility, [key]: visible });
+      updateStoredVisibility(
+        setDefaultedBooleanRecordValue(currentStoredVisibility, key, visible),
+      );
+      saveClientDefaultVisibility(key, visible);
     },
     [],
   );
 
   const resetVisibility = useCallback(() => {
-    updateVisibility(getDefaultSessionToolbarVisibility());
+    updateStoredVisibility({});
   }, []);
 
   return {

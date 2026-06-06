@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSettingsRoutes } from "../../src/routes/settings.js";
+import type { PublicShareService } from "../../src/services/PublicShareService.js";
 import type {
   ServerSettings,
   ServerSettingsService,
 } from "../../src/services/ServerSettingsService.js";
 import { DEFAULT_SERVER_SETTINGS } from "../../src/services/ServerSettingsService.js";
-import type { PublicShareService } from "../../src/services/PublicShareService.js";
 
 describe("Settings Routes", () => {
   let settings: ServerSettings;
@@ -22,6 +22,10 @@ describe("Settings Routes", () => {
 
     mockServerSettingsService = {
       getSettings: vi.fn(() => settings),
+      getSetting: vi.fn(
+        <K extends keyof ServerSettings>(key: K): ServerSettings[K] =>
+          settings[key],
+      ),
       updateSettings: vi.fn(async (updates: Partial<ServerSettings>) => {
         settings = { ...settings, ...updates };
         return settings;
@@ -272,6 +276,86 @@ describe("Settings Routes", () => {
       });
 
       expect(response.status).toBe(400);
+      expect(mockServerSettingsService.updateSettings).not.toHaveBeenCalled();
+    });
+
+    it("merges server-learned client defaults", async () => {
+      settings = {
+        ...settings,
+        clientDefaults: {
+          speech: {
+            voiceInputEnabled: false,
+          },
+          sessionToolbarVisibility: {
+            microphone: false,
+            queueControls: false,
+          },
+        },
+      };
+      const routes = createSettingsRoutes({
+        serverSettingsService: mockServerSettingsService,
+      });
+
+      const response = await routes.request("/", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientDefaults: {
+            speech: {
+              speechMethod: "ya-grok",
+              speechSmartTurnSettings: {
+                enabled: true,
+                threshold: 0.91,
+                timeoutMs: 750,
+              },
+            },
+            sessionToolbarVisibility: {
+              microphone: true,
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(mockServerSettingsService.updateSettings).toHaveBeenCalledWith({
+        clientDefaults: {
+          speech: {
+            voiceInputEnabled: false,
+            speechMethod: "ya-grok",
+            speechSmartTurnSettings: {
+              enabled: true,
+              threshold: 0.91,
+              timeoutMs: 750,
+            },
+          },
+          sessionToolbarVisibility: {
+            microphone: true,
+            queueControls: false,
+          },
+        },
+      });
+    });
+
+    it("rejects invalid server-learned client defaults", async () => {
+      const routes = createSettingsRoutes({
+        serverSettingsService: mockServerSettingsService,
+      });
+
+      const response = await routes.request("/", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientDefaults: {
+            sessionToolbarVisibility: {
+              microphone: "yes",
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      const json = await response.json();
+      expect(json.error).toBe("Invalid clientDefaults setting");
       expect(mockServerSettingsService.updateSettings).not.toHaveBeenCalled();
     });
 

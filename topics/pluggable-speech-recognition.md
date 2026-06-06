@@ -109,9 +109,13 @@ Backends should implement a common `SpeechBackend` contract:
   speech-method dropdowns from the same advertised active backend list. The
   dropdown is shown only when more than one method is available.
 - `useModelSettings` persists a server-scoped `speechMethod`. When there is
-  no explicit stored choice, the effective runtime default prefers active
-  server-routed STT over browser-native, with `ya-grok` ranked before
-  `ya-deepgram`; browser-native remains the explicit local escape hatch.
+  no explicit local choice, server-learned `clientDefaults.speech` from
+  `/api/version` supplies the client default. Speech setting changes write both
+  the local explicit value and a partial server client-default update so a later
+  browser with no explicit local override inherits the most recent UI choice.
+  If neither local nor server default exists, the effective runtime default
+  prefers active server-routed STT over browser-native, with `ya-grok` ranked
+  before `ya-deepgram`; browser-native remains the explicit local escape hatch.
 - Server config parses `VOICE_INPUT`, `YA_VOICE_BACKENDS`,
   `YA_stt__DEEPGRAM_API_KEY`, `YA_stt__XAI_API_KEY`, `XAI_API_KEY`,
   `WHISPER_MODEL`, `WHISPER_DEVICE`, and `WHISPER_COMPUTE_TYPE`.
@@ -164,9 +168,10 @@ client through `fetchJSON("/speech/transcribe", ...)`.
   disappears, the current resolver falls back to browser-native rather than
   silently choosing another server backend; a one-time notice or re-pick prompt
   is still a UI follow-up.
-- The current UI setting is a global default, not a true per-session speech
-  method. The original plan's per-new-session override is not persisted as
-  session metadata or passed through message submission.
+- The current UI setting is a server-learned client default plus local override,
+  not a true per-session speech method. The original plan's per-new-session
+  override is not persisted as session metadata or passed through message
+  submission.
 - Audio retention settings exist conceptually as a global option: enable/disable
   saving, age limit, and size limit. The UI for changing those limits is a
   follow-up, but the runtime default is enabled with the eight-week / 400 MB

@@ -115,8 +115,7 @@ export const RECAP_MODES = ["off", "native", "side-session"] as const;
 export type RecapMode = (typeof RECAP_MODES)[number];
 
 export const PROMPT_SUGGESTION_MODES = ["off", "native"] as const;
-export type PromptSuggestionMode =
-  (typeof PROMPT_SUGGESTION_MODES)[number];
+export type PromptSuggestionMode = (typeof PROMPT_SUGGESTION_MODES)[number];
 
 export const HELPER_SIDE_MODEL_SAME_AS_MAIN = "same-as-main" as const;
 export const HELPER_SIDE_MODEL_CHEAPEST = "cheapest" as const;
@@ -239,6 +238,45 @@ export interface NewSessionDefaults {
   promptSuggestionMode?: PromptSuggestionMode;
   /** Provider-mapped helper side model or helper-target:<id>. */
   helperSideModel?: string;
+}
+
+export interface SpeechSmartTurnClientDefault {
+  enabled: boolean;
+  threshold: number;
+  timeoutMs: number;
+}
+
+export interface GrokSpeechAudioClientDefault {
+  uplinkMode: "pcm16" | "browser-compressed";
+}
+
+export interface SpeechClientDefaults {
+  voiceInputEnabled?: boolean;
+  speechMethod?: string;
+  speechSmartTurnSettings?: SpeechSmartTurnClientDefault;
+  grokSpeechAudioSettings?: GrokSpeechAudioClientDefault;
+}
+
+export interface SessionToolbarVisibilityClientDefaults {
+  modeSelector?: boolean;
+  attachments?: boolean;
+  slashMenu?: boolean;
+  thinkingToggle?: boolean;
+  renderMode?: boolean;
+  microphone?: boolean;
+  shortcutsHelp?: boolean;
+  contextUsage?: boolean;
+  btw?: boolean;
+  nudge?: boolean;
+  queueControls?: boolean;
+  sessionStatus?: boolean;
+}
+
+export interface ClientDefaults {
+  /** Defaults used by browser clients when local storage has no explicit value. */
+  speech?: SpeechClientDefaults;
+  /** Session toolbar visibility defaults for controls with no local override. */
+  sessionToolbarVisibility?: SessionToolbarVisibilityClientDefaults;
 }
 
 /**

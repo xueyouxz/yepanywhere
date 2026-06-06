@@ -1,14 +1,23 @@
 import type {
+  ClientDefaults,
   EffortLevel,
   ModelOption,
   ThinkingMode,
   ThinkingOption,
 } from "@yep-anywhere/shared";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { api } from "../api/client";
+import {
+  CLIENT_STORAGE_DEFAULT,
+  type DefaultedValue,
+  isClientStorageDefault,
+  resolveDefaultedValue,
+} from "../lib/defaultedStorage";
+import { EFFORT_LEVEL_OPTIONS, isEffortLevel } from "../lib/effortLevels";
 import {
   DEFAULT_SPEECH_METHOD,
-  type SpeechMethodId,
   isSpeechMethodId,
+  type SpeechMethodId,
 } from "../lib/speechProviders/methods";
 import {
   DEFAULT_GROK_SPEECH_AUDIO_SETTINGS,
@@ -17,11 +26,11 @@ import {
   type SpeechSmartTurnSettings,
 } from "../lib/speechProviders/SpeechProvider";
 import {
-  LEGACY_KEYS,
   getServerScoped,
+  LEGACY_KEYS,
   setServerScoped,
 } from "../lib/storageKeys";
-import { EFFORT_LEVEL_OPTIONS, isEffortLevel } from "../lib/effortLevels";
+import { useVersion } from "./useVersion";
 
 /**
  * Re-export shared types for convenience.
@@ -107,12 +116,20 @@ function saveThinkingMode(mode: ThinkingMode) {
 }
 
 function loadVoiceInputEnabled(): boolean {
+  return resolveDefaultedValue(
+    loadVoiceInputEnabledSetting(),
+    getBuiltInSpeechClientDefaults().voiceInputEnabled,
+  );
+}
+
+function loadVoiceInputEnabledSetting(): DefaultedValue<boolean> {
   const stored = getServerScoped(
     "voiceInputEnabled",
     LEGACY_KEYS.voiceInputEnabled,
   );
-  // Default to true (enabled) if not set
-  return stored !== "false";
+  if (stored === "true") return true;
+  if (stored === "false") return false;
+  return CLIENT_STORAGE_DEFAULT;
 }
 
 function saveVoiceInputEnabled(enabled: boolean) {
@@ -124,15 +141,23 @@ function saveVoiceInputEnabled(enabled: boolean) {
 }
 
 function loadStoredSpeechMethod(): SpeechMethodId | null {
+  const stored = loadSpeechMethodSetting();
+  return isClientStorageDefault(stored) ? null : stored;
+}
+
+function loadSpeechMethodSetting(): DefaultedValue<SpeechMethodId> {
   const stored = getServerScoped("speechMethod", LEGACY_KEYS.speechMethod);
   if (stored && isSpeechMethodId(stored)) {
     return stored;
   }
-  return null;
+  return CLIENT_STORAGE_DEFAULT;
 }
 
 function loadSpeechMethod(): SpeechMethodId {
-  return loadStoredSpeechMethod() ?? DEFAULT_SPEECH_METHOD;
+  return resolveDefaultedValue(
+    loadSpeechMethodSetting(),
+    getBuiltInSpeechClientDefaults().speechMethod,
+  );
 }
 
 function saveSpeechMethod(method: SpeechMethodId) {
@@ -162,17 +187,25 @@ function cleanSpeechSmartTurnSettings(
 }
 
 function loadSpeechSmartTurnSettings(): SpeechSmartTurnSettings {
+  return resolveDefaultedValue(
+    loadSpeechSmartTurnSettingsSetting(),
+    getBuiltInSpeechClientDefaults().speechSmartTurnSettings,
+  );
+}
+
+function loadSpeechSmartTurnSettingsSetting(): DefaultedValue<SpeechSmartTurnSettings> {
   const stored = getServerScoped(
     "speechSmartTurn",
     LEGACY_KEYS.speechSmartTurn,
   );
-  if (!stored) return { ...DEFAULT_SPEECH_SMART_TURN_SETTINGS };
+  if (!stored || stored === CLIENT_STORAGE_DEFAULT)
+    return CLIENT_STORAGE_DEFAULT;
   try {
     return cleanSpeechSmartTurnSettings(
       JSON.parse(stored) as unknown as Partial<SpeechSmartTurnSettings>,
     );
   } catch {
-    return { ...DEFAULT_SPEECH_SMART_TURN_SETTINGS };
+    return CLIENT_STORAGE_DEFAULT;
   }
 }
 
@@ -196,17 +229,25 @@ function cleanGrokSpeechAudioSettings(
 }
 
 function loadGrokSpeechAudioSettings(): GrokSpeechAudioSettings {
+  return resolveDefaultedValue(
+    loadGrokSpeechAudioSettingsSetting(),
+    getBuiltInSpeechClientDefaults().grokSpeechAudioSettings,
+  );
+}
+
+function loadGrokSpeechAudioSettingsSetting(): DefaultedValue<GrokSpeechAudioSettings> {
   const stored = getServerScoped(
     "grokSpeechAudio",
     LEGACY_KEYS.grokSpeechAudio,
   );
-  if (!stored) return { ...DEFAULT_GROK_SPEECH_AUDIO_SETTINGS };
+  if (!stored || stored === CLIENT_STORAGE_DEFAULT)
+    return CLIENT_STORAGE_DEFAULT;
   try {
     return cleanGrokSpeechAudioSettings(
       JSON.parse(stored) as unknown as Partial<GrokSpeechAudioSettings>,
     );
   } catch {
-    return { ...DEFAULT_GROK_SPEECH_AUDIO_SETTINGS };
+    return CLIENT_STORAGE_DEFAULT;
   }
 }
 
@@ -218,27 +259,114 @@ function saveGrokSpeechAudioSettings(settings: GrokSpeechAudioSettings) {
   );
 }
 
+function getBuiltInSpeechClientDefaults(): Required<
+  NonNullable<ClientDefaults["speech"]>
+> {
+  return {
+    voiceInputEnabled: true,
+    speechMethod: DEFAULT_SPEECH_METHOD,
+    speechSmartTurnSettings: { ...DEFAULT_SPEECH_SMART_TURN_SETTINGS },
+    grokSpeechAudioSettings: { ...DEFAULT_GROK_SPEECH_AUDIO_SETTINGS },
+  };
+}
+
+function getSpeechClientDefaults(
+  clientDefaults: ClientDefaults | undefined,
+): Required<NonNullable<ClientDefaults["speech"]>> {
+  const builtInDefaults = getBuiltInSpeechClientDefaults();
+  return {
+    ...builtInDefaults,
+    ...clientDefaults?.speech,
+    speechSmartTurnSettings: {
+      ...builtInDefaults.speechSmartTurnSettings,
+      ...clientDefaults?.speech?.speechSmartTurnSettings,
+    },
+    grokSpeechAudioSettings: {
+      ...builtInDefaults.grokSpeechAudioSettings,
+      ...clientDefaults?.speech?.grokSpeechAudioSettings,
+    },
+  };
+}
+
+function saveSpeechClientDefaults(
+  speech: NonNullable<ClientDefaults["speech"]>,
+): void {
+  void api.updateServerSettings({ clientDefaults: { speech } }).catch((err) => {
+    console.warn(
+      "[useModelSettings] Failed to save server client defaults:",
+      err instanceof Error ? err.message : String(err),
+    );
+  });
+}
+
 /**
  * Hook to manage model and thinking preferences.
  */
 export function useModelSettings() {
+  const { version } = useVersion();
+  const speechDefaults = useMemo(
+    () => getSpeechClientDefaults(version?.clientDefaults),
+    [version?.clientDefaults],
+  );
+  const hasServerSpeechMethodDefault = Boolean(
+    version?.clientDefaults?.speech?.speechMethod,
+  );
   const [model, setModelState] = useState<ModelOption>(loadModel);
   const [effortLevel, setEffortLevelState] =
     useState<EffortLevel>(loadEffortLevel);
   const [thinkingMode, setThinkingModeState] =
     useState<ThinkingMode>(loadThinkingMode);
-  const [voiceInputEnabled, setVoiceInputEnabledState] = useState<boolean>(
-    loadVoiceInputEnabled,
+  const [voiceInputEnabled, setVoiceInputEnabledState] = useState<boolean>(() =>
+    resolveDefaultedValue(
+      loadVoiceInputEnabledSetting(),
+      speechDefaults.voiceInputEnabled,
+    ),
   );
-  const [speechMethod, setSpeechMethodState] =
-    useState<SpeechMethodId>(loadSpeechMethod);
+  const [speechMethod, setSpeechMethodState] = useState<SpeechMethodId>(() =>
+    resolveDefaultedValue(
+      loadSpeechMethodSetting(),
+      speechDefaults.speechMethod,
+    ),
+  );
   const [hasStoredSpeechMethod, setHasStoredSpeechMethod] = useState<boolean>(
-    () => loadStoredSpeechMethod() !== null,
+    () => !isClientStorageDefault(loadSpeechMethodSetting()),
   );
   const [speechSmartTurnSettings, setSpeechSmartTurnSettingsState] =
-    useState<SpeechSmartTurnSettings>(loadSpeechSmartTurnSettings);
+    useState<SpeechSmartTurnSettings>(() =>
+      resolveDefaultedValue(
+        loadSpeechSmartTurnSettingsSetting(),
+        speechDefaults.speechSmartTurnSettings,
+      ),
+    );
   const [grokSpeechAudioSettings, setGrokSpeechAudioSettingsState] =
-    useState<GrokSpeechAudioSettings>(loadGrokSpeechAudioSettings);
+    useState<GrokSpeechAudioSettings>(() =>
+      resolveDefaultedValue(
+        loadGrokSpeechAudioSettingsSetting(),
+        speechDefaults.grokSpeechAudioSettings,
+      ),
+    );
+
+  useEffect(() => {
+    if (isClientStorageDefault(loadVoiceInputEnabledSetting())) {
+      setVoiceInputEnabledState(speechDefaults.voiceInputEnabled);
+    }
+    if (isClientStorageDefault(loadSpeechMethodSetting())) {
+      setSpeechMethodState(speechDefaults.speechMethod);
+      setHasStoredSpeechMethod(hasServerSpeechMethodDefault);
+    }
+    if (isClientStorageDefault(loadSpeechSmartTurnSettingsSetting())) {
+      setSpeechSmartTurnSettingsState(speechDefaults.speechSmartTurnSettings);
+    }
+    if (isClientStorageDefault(loadGrokSpeechAudioSettingsSetting())) {
+      setGrokSpeechAudioSettingsState(speechDefaults.grokSpeechAudioSettings);
+    }
+  }, [
+    speechDefaults.voiceInputEnabled,
+    speechDefaults.speechMethod,
+    speechDefaults.speechSmartTurnSettings,
+    speechDefaults.grokSpeechAudioSettings,
+    hasServerSpeechMethodDefault,
+  ]);
 
   const setModel = useCallback((m: ModelOption) => {
     setModelState(m);
@@ -265,18 +393,21 @@ export function useModelSettings() {
   const setVoiceInputEnabled = useCallback((enabled: boolean) => {
     setVoiceInputEnabledState(enabled);
     saveVoiceInputEnabled(enabled);
+    saveSpeechClientDefaults({ voiceInputEnabled: enabled });
   }, []);
 
   const toggleVoiceInput = useCallback(() => {
     const newEnabled = !voiceInputEnabled;
     setVoiceInputEnabledState(newEnabled);
     saveVoiceInputEnabled(newEnabled);
+    saveSpeechClientDefaults({ voiceInputEnabled: newEnabled });
   }, [voiceInputEnabled]);
 
   const setSpeechMethod = useCallback((method: SpeechMethodId) => {
     setSpeechMethodState(method);
     setHasStoredSpeechMethod(true);
     saveSpeechMethod(method);
+    saveSpeechClientDefaults({ speechMethod: method });
   }, []);
 
   const setSpeechSmartTurnSettings = useCallback(
@@ -284,6 +415,7 @@ export function useModelSettings() {
       const clean = cleanSpeechSmartTurnSettings(settings);
       setSpeechSmartTurnSettingsState(clean);
       saveSpeechSmartTurnSettings(clean);
+      saveSpeechClientDefaults({ speechSmartTurnSettings: clean });
     },
     [],
   );
@@ -293,6 +425,7 @@ export function useModelSettings() {
       const clean = cleanGrokSpeechAudioSettings(settings);
       setGrokSpeechAudioSettingsState(clean);
       saveGrokSpeechAudioSettings(clean);
+      saveSpeechClientDefaults({ grokSpeechAudioSettings: clean });
     },
     [],
   );

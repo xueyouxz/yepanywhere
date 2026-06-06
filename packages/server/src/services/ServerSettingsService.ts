@@ -8,6 +8,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type {
+  ClientDefaults,
   HelperTargetConfig,
   NewSessionDefaults,
 } from "@yep-anywhere/shared";
@@ -69,6 +70,8 @@ export interface ServerSettings {
   deviceBridgeEnabled?: boolean;
   /** Defaults applied when opening the new session form */
   newSessionDefaults?: NewSessionDefaults;
+  /** Defaults applied by browser clients when their local value is unset. */
+  clientDefaults?: ClientDefaults;
   /** Server-routed speech audio retention policy. */
   speechAudioRetention: SpeechAudioRetentionSettings;
   /** OpenAI-compatible helper endpoints for side-session helper work */

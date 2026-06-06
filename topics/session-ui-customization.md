@@ -16,6 +16,12 @@ Visibility state is held by `useSessionToolbarVisibility` and currently covers
 `nudge`, `microphone`, `sessionStatus`, `shortcutsHelp`, `contextUsage`, `btw`,
 and `queueControls`. Toggling a control updates the
 preview immediately.
+Controls are three-valued in client storage: missing/`default` follows the
+current client default, while booleans are explicit local choices. The server
+also persists `clientDefaults.sessionToolbarVisibility` so the last selected
+toolbar value becomes the default for devices with no explicit local override.
+Resetting the toolbar visibility clears local overrides and returns that
+browser to following the server client default.
 
 The former composer model indicator chip is removed from the customizable
 toolbar. The top-right provider badge remains the model/effort status surface
@@ -56,7 +62,7 @@ Relative to the landed surface:
   control interaction.
 - Visibility is binary show/hide; there is no "visible but disabled" treatment
   (dimmed / crossed-out) that keeps a removed control legible in the real UI.
-- No global-defaults vs per-session-override distinction yet.
+- No per-session override distinct from the browser-local explicit choice yet.
 - Hidden controls do not guarantee a surviving keyboard-accelerator hint on a
   hover/tooltip surface.
 

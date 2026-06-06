@@ -1,6 +1,7 @@
 import type {
   AgentActivity,
   BrowserProfilesResponse,
+  ClientDefaults,
   ConnectionsResponse,
   CreatePublicSessionShareRequest,
   CreatePublicSessionShareResponse,
@@ -320,6 +321,8 @@ export interface VersionInfo {
   deviceBridgeVersion?: string | null;
   /** Latest bridge release version when known. */
   latestDeviceBridgeVersion?: string | null;
+  /** Server-learned browser defaults used when local storage has no explicit value. */
+  clientDefaults?: ClientDefaults;
 }
 
 export interface ServerInfo {
@@ -1419,6 +1422,8 @@ export interface ServerSettings {
   deviceBridgeEnabled?: boolean;
   /** Defaults applied when opening the new session form */
   newSessionDefaults?: NewSessionDefaults;
+  /** Browser-client defaults used when local storage has no explicit value */
+  clientDefaults?: ClientDefaults;
   /** Server-routed speech audio retention policy */
   speechAudioRetention?: {
     enabled: boolean;

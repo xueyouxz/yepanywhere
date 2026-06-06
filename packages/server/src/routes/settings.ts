@@ -5,22 +5,27 @@
 import {
   ALL_PERMISSION_MODES,
   ALL_PROVIDERS,
+  type ClientDefaults,
+  type GrokSpeechAudioClientDefault,
   HELPER_SIDE_MODEL_CHEAPEST,
   HELPER_SIDE_MODEL_SAME_AS_MAIN,
-  PROMPT_SUGGESTION_MODES,
-  RECAP_MODES,
   type HelperTargetConfig,
   type ModelInfo,
   type NewSessionDefaults,
-  type PermissionMode,
-  type PromptSuggestionMode,
-  type ProviderName,
-  type RecapMode,
   normalizeYaClientBaseUrl,
   normalizeYaClientBaseUrlFromShareViewerUrl,
+  type PermissionMode,
+  PROMPT_SUGGESTION_MODES,
+  type PromptSuggestionMode,
+  type ProviderName,
+  RECAP_MODES,
+  type RecapMode,
+  type SessionToolbarVisibilityClientDefaults,
+  type SpeechSmartTurnClientDefault,
 } from "@yep-anywhere/shared";
 import { Hono } from "hono";
 import { testSSHConnection } from "../sdk/remote-spawn.js";
+import type { PublicShareService } from "../services/PublicShareService.js";
 import type {
   CodexUpdatePolicy,
   ServerSettings,
@@ -33,7 +38,6 @@ import {
   DEFAULT_SPEECH_AUDIO_RETENTION_MAX_AGE_DAYS,
   DEFAULT_SPEECH_AUDIO_RETENTION_MAX_BYTES,
 } from "../services/ServerSettingsService.js";
-import type { PublicShareService } from "../services/PublicShareService.js";
 import {
   isValidSshHostAlias,
   normalizeSshHostAlias,
@@ -42,6 +46,27 @@ import {
 const HELPER_TARGET_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 const MAX_HELPER_TARGETS = 20;
 const HELPER_TARGET_MODEL_DISCOVERY_TIMEOUT_MS = 5000;
+const SESSION_TOOLBAR_VISIBILITY_CLIENT_DEFAULT_KEYS = [
+  "modeSelector",
+  "attachments",
+  "slashMenu",
+  "thinkingToggle",
+  "renderMode",
+  "microphone",
+  "shortcutsHelp",
+  "contextUsage",
+  "btw",
+  "nudge",
+  "queueControls",
+  "sessionStatus",
+] as const satisfies readonly (keyof SessionToolbarVisibilityClientDefaults)[];
+const CLIENT_DEFAULT_KEYS = ["speech", "sessionToolbarVisibility"] as const;
+const SPEECH_CLIENT_DEFAULT_KEYS = [
+  "voiceInputEnabled",
+  "speechMethod",
+  "speechSmartTurnSettings",
+  "grokSpeechAudioSettings",
+] as const;
 
 export interface SettingsRoutesDeps {
   serverSettingsService: ServerSettingsService;
@@ -334,6 +359,158 @@ function parseNewSessionDefaults(
   return Object.keys(parsed).length > 0 ? parsed : undefined;
 }
 
+function parseSpeechSmartTurnClientDefault(
+  raw: unknown,
+): SpeechSmartTurnClientDefault | null {
+  if (!isRecord(raw)) return null;
+  if (
+    typeof raw.enabled !== "boolean" ||
+    typeof raw.threshold !== "number" ||
+    typeof raw.timeoutMs !== "number" ||
+    !Number.isFinite(raw.threshold) ||
+    !Number.isFinite(raw.timeoutMs) ||
+    raw.threshold < 0 ||
+    raw.threshold > 1 ||
+    raw.timeoutMs < 0 ||
+    raw.timeoutMs > 5000
+  ) {
+    return null;
+  }
+  return {
+    enabled: raw.enabled,
+    threshold: raw.threshold,
+    timeoutMs: Math.round(raw.timeoutMs),
+  };
+}
+
+function parseGrokSpeechAudioClientDefault(
+  raw: unknown,
+): GrokSpeechAudioClientDefault | null {
+  if (!isRecord(raw)) return null;
+  if (raw.uplinkMode !== "pcm16" && raw.uplinkMode !== "browser-compressed") {
+    return null;
+  }
+  return { uplinkMode: raw.uplinkMode };
+}
+
+function parseSessionToolbarVisibilityClientDefaults(
+  raw: unknown,
+): SessionToolbarVisibilityClientDefaults | undefined | null {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  if (!isRecord(raw)) return null;
+
+  const allowedKeys = new Set<string>(
+    SESSION_TOOLBAR_VISIBILITY_CLIENT_DEFAULT_KEYS,
+  );
+  for (const key of Object.keys(raw)) {
+    if (!allowedKeys.has(key)) return null;
+  }
+
+  const parsed: SessionToolbarVisibilityClientDefaults = {};
+  for (const key of SESSION_TOOLBAR_VISIBILITY_CLIENT_DEFAULT_KEYS) {
+    if (!(key in raw)) continue;
+    const value = raw[key];
+    if (typeof value !== "boolean") return null;
+    parsed[key] = value;
+  }
+  return Object.keys(parsed).length > 0 ? parsed : null;
+}
+
+function parseClientDefaults(raw: unknown): ClientDefaults | undefined | null {
+  if (raw === undefined) return null;
+  if (raw === null || raw === "") return undefined;
+  if (!isRecord(raw)) return null;
+
+  const allowedKeys = new Set<string>(CLIENT_DEFAULT_KEYS);
+  for (const key of Object.keys(raw)) {
+    if (!allowedKeys.has(key)) return null;
+  }
+  if (Object.keys(raw).length === 0) return null;
+
+  const parsed: ClientDefaults = {};
+  if ("speech" in raw) {
+    if (raw.speech === undefined || raw.speech === null || raw.speech === "") {
+      parsed.speech = undefined;
+    } else if (!isRecord(raw.speech)) {
+      return null;
+    } else {
+      const allowedSpeechKeys = new Set<string>(SPEECH_CLIENT_DEFAULT_KEYS);
+      for (const key of Object.keys(raw.speech)) {
+        if (!allowedSpeechKeys.has(key)) return null;
+      }
+
+      const speech: NonNullable<ClientDefaults["speech"]> = {};
+      if ("voiceInputEnabled" in raw.speech) {
+        if (typeof raw.speech.voiceInputEnabled !== "boolean") return null;
+        speech.voiceInputEnabled = raw.speech.voiceInputEnabled;
+      }
+      if ("speechMethod" in raw.speech) {
+        if (
+          typeof raw.speech.speechMethod !== "string" ||
+          raw.speech.speechMethod.trim().length === 0
+        ) {
+          return null;
+        }
+        speech.speechMethod = raw.speech.speechMethod.trim().slice(0, 120);
+      }
+      if ("speechSmartTurnSettings" in raw.speech) {
+        const parsedSmartTurn = parseSpeechSmartTurnClientDefault(
+          raw.speech.speechSmartTurnSettings,
+        );
+        if (!parsedSmartTurn) return null;
+        speech.speechSmartTurnSettings = parsedSmartTurn;
+      }
+      if ("grokSpeechAudioSettings" in raw.speech) {
+        const parsedGrokAudio = parseGrokSpeechAudioClientDefault(
+          raw.speech.grokSpeechAudioSettings,
+        );
+        if (!parsedGrokAudio) return null;
+        speech.grokSpeechAudioSettings = parsedGrokAudio;
+      }
+      if (Object.keys(speech).length === 0) return null;
+      parsed.speech = speech;
+    }
+  }
+  if ("sessionToolbarVisibility" in raw) {
+    const parsedVisibility = parseSessionToolbarVisibilityClientDefaults(
+      raw.sessionToolbarVisibility,
+    );
+    if (parsedVisibility === null) return null;
+    parsed.sessionToolbarVisibility = parsedVisibility;
+  }
+
+  return Object.keys(parsed).length > 0 ? parsed : undefined;
+}
+
+function mergeClientDefaults(
+  current: ClientDefaults | undefined,
+  update: ClientDefaults | undefined,
+): ClientDefaults | undefined {
+  if (!update) return undefined;
+  const merged: ClientDefaults = { ...current };
+  if ("speech" in update) {
+    if (update.speech === undefined) {
+      delete merged.speech;
+    } else {
+      merged.speech = {
+        ...current?.speech,
+        ...update.speech,
+      };
+    }
+  }
+  if ("sessionToolbarVisibility" in update) {
+    if (update.sessionToolbarVisibility === undefined) {
+      delete merged.sessionToolbarVisibility;
+    } else {
+      merged.sessionToolbarVisibility = {
+        ...current?.sessionToolbarVisibility,
+        ...update.sessionToolbarVisibility,
+      };
+    }
+  }
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
 function parseSpeechAudioRetention(
   raw: unknown,
 ): SpeechAudioRetentionSettings | null {
@@ -437,8 +614,7 @@ export function createSettingsRoutes(deps: SettingsRoutesDeps): Hono {
         } catch (error) {
           return c.json(
             {
-              error:
-                error instanceof Error ? error.message : "Invalid YA URL",
+              error: error instanceof Error ? error.message : "Invalid YA URL",
             },
             400,
           );
@@ -614,6 +790,17 @@ export function createSettingsRoutes(deps: SettingsRoutesDeps): Hono {
       updates.newSessionDefaults = parsedDefaults;
     }
 
+    if ("clientDefaults" in body) {
+      const parsedDefaults = parseClientDefaults(body.clientDefaults);
+      if (parsedDefaults === null) {
+        return c.json({ error: "Invalid clientDefaults setting" }, 400);
+      }
+      updates.clientDefaults = mergeClientDefaults(
+        serverSettingsService.getSetting("clientDefaults"),
+        parsedDefaults,
+      );
+    }
+
     if ("speechAudioRetention" in body) {
       const parsedRetention = parseSpeechAudioRetention(
         body.speechAudioRetention,
@@ -717,10 +904,7 @@ export function createSettingsRoutes(deps: SettingsRoutesDeps): Hono {
         settings.ollamaUseFullSystemPrompt ?? false,
       );
     }
-    if (
-      "grokBuildUseXaiApiKey" in updates &&
-      onGrokBuildUseXaiApiKeyChanged
-    ) {
+    if ("grokBuildUseXaiApiKey" in updates && onGrokBuildUseXaiApiKeyChanged) {
       onGrokBuildUseXaiApiKeyChanged(settings.grokBuildUseXaiApiKey ?? false);
     }
     if (updates.publicSharesEnabled === false && publicShareService) {

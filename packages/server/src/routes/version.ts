@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import type { ClientDefaults } from "@yep-anywhere/shared";
 import { Hono } from "hono";
 import type { SpeechBackendCapabilities } from "../services/voice/SpeechBackend.js";
 import { isNewerSemver } from "../utils/semver.js";
@@ -203,6 +204,8 @@ export interface VersionInfo {
   deviceBridgeVersion?: string | null;
   /** Latest bridge release version when known. */
   latestDeviceBridgeVersion?: string | null;
+  /** Server-learned browser defaults used when local storage is unset. */
+  clientDefaults?: ClientDefaults;
 }
 
 /** Resume protocol version with mutual nonce challenge + server proof binding. */
@@ -243,6 +246,8 @@ export interface VersionRouteOptions {
   getEnabledVoiceBackends?: () => string[];
   /** Returns capabilities keyed by validated backend id. */
   getVoiceBackendCapabilities?: () => Record<string, SpeechBackendCapabilities>;
+  /** Browser-client defaults persisted by this server. */
+  getClientDefaults?: () => ClientDefaults | undefined;
 }
 
 export interface ServerCompatibilityInfo {
@@ -251,6 +256,7 @@ export interface ServerCompatibilityInfo {
   resumeProtocolVersion: number;
   renderProtocolVersion?: number;
   capabilities: string[];
+  clientDefaults?: ClientDefaults;
 }
 
 function getCapabilitiesForDeviceBridgeState(
@@ -312,11 +318,13 @@ export function getVoiceBackendCapabilities(
 export function getServerCompatibilityInfo(
   options?: VersionRouteOptions,
 ): Promise<ServerCompatibilityInfo> {
+  const clientDefaults = options?.getClientDefaults?.();
   return getCurrentVersionInfo().then((versionInfo) => ({
     appVersion: versionInfo.version,
     installSource: versionInfo.installSource,
     resumeProtocolVersion: RESUME_PROTOCOL_VERSION,
     capabilities: getServerCapabilities(options),
+    ...(clientDefaults ? { clientDefaults } : {}),
   }));
 }
 
@@ -339,6 +347,7 @@ export function createVersionRoutes(options?: VersionRouteOptions): Hono {
     ];
     const voiceBackends = getEnabledVoiceBackends(options);
     const voiceBackendCapabilities = getVoiceBackendCapabilities(options);
+    const clientDefaults = options?.getClientDefaults?.();
 
     // For dev versions like "v0.1.7-3-g050bfd2", extract base version "v0.1.7"
     // to compare against the update server.
@@ -360,6 +369,7 @@ export function createVersionRoutes(options?: VersionRouteOptions): Hono {
       deviceBridgeState: deviceBridgeStatus.state,
       deviceBridgeVersion: deviceBridgeStatus.installedVersion ?? null,
       latestDeviceBridgeVersion: deviceBridgeStatus.latestVersion ?? null,
+      ...(clientDefaults ? { clientDefaults } : {}),
     };
 
     return c.json(info);
