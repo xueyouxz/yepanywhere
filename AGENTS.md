@@ -31,6 +31,15 @@ translation. For a permissive advisory scan of obvious raw English copy, run
 `pnpm i18n:scan`; use `--include-info` to inspect low-priority labels and
 `--max-warnings <n>` only when intentionally ratcheting the check toward CI.
 
+## Biome Import/Export Ordering
+
+Do not apply Biome's organize-imports/exports assist as a routine cleanup.
+Keep import/export edits scoped to the symbols needed by the change. Whole-file
+ordering churn, especially in barrel files, obscures review and carries no YA
+runtime-safety benefit. Run the project lint wrapper for diagnostics, but do not
+turn a one-line import or export addition into a broad reorder solely to satisfy
+organize-imports advice.
+
 ## Hard Development Rules
 
 Follow `topics/hard-development-rules.md` for binding upstream-facing
