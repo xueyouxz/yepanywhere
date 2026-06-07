@@ -155,11 +155,11 @@ vi.mock("../../i18n", () => ({
           toolbarPatientQueueEnable: "Use patient queue",
           toolbarPatientQueueDisable: "Use regular queue",
           toolbarPatientQueueEnabledAck:
-            "Patient queue on. Click again for regular queue.",
+            `Patient queue on: new queued messages wait for ${params?.timeout ?? ""} of verified quiet. Click again for regular queue.`,
           toolbarPatientQueueDisabledAck:
-            "Regular queue on. Click again for patient queue.",
+            `Regular queue on. Click again for patient queue (${params?.timeout ?? ""}).`,
           toolbarPatientQueueActionLabel: "Queue patiently",
-          toolbarPatientQueueConfiguredTimeout: "the configured timeout",
+          toolbarPatientQueueConfiguredTimeout: `the configured ${params?.timeout ?? ""} timeout`,
           toolbarPatientQueueToggleShortcut:
             "Right-click or long-press a queue button to switch regular/patient queue.",
           toolbarPatientQueueTooltip:
@@ -1077,6 +1077,7 @@ describe("MessageInput", () => {
 
     const toggle = screen.getByRole("button", { name: "Use patient queue" });
     expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(toggle.getAttribute("title")).toContain("5m");
 
     fireEvent.click(toggle);
     expect(
@@ -1087,8 +1088,11 @@ describe("MessageInput", () => {
     expect(screen.getByRole("status").textContent).toContain(
       "Patient queue on",
     );
+    expect(screen.getByRole("status").textContent).toContain("5m");
     fireEvent.change(textarea, { target: { value: "follow up later" } });
-    fireEvent.click(screen.getByLabelText("Queue patiently"));
+    const patientQueueAction = screen.getByLabelText("Queue patiently");
+    expect(patientQueueAction.getAttribute("title")).toContain("5m");
+    fireEvent.click(patientQueueAction);
 
     expectSubmission(onQueue, "follow up later", "patient");
   });

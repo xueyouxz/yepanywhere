@@ -70,6 +70,8 @@ import { VoiceInputButton, type VoiceInputButtonRef } from "./VoiceInputButton";
 
 type ToolbarTranslate = ReturnType<typeof useI18n>["t"];
 
+const DEFAULT_PATIENT_QUEUE_TIMEOUT_MINUTES = 5;
+
 function getIsearchPreviousKeys(scope: SessionIsearchScope): string[] {
   if (scope === "full") {
     return ["Ctrl", "Alt", "S"];
@@ -798,6 +800,10 @@ export function MessageInputToolbarView({
     queueControl.onTogglePatientQueue
   );
   const queueIsPatient = queueControl?.patientQueueEnabled ?? false;
+  const patientQueueTimeoutForCopy =
+    queueControl?.patientQueueTimeoutLabel ??
+    formatPatientQueueTimeout(DEFAULT_PATIENT_QUEUE_TIMEOUT_MINUTES) ??
+    "5m";
   const [patientQueueAck, setPatientQueueAck] = useState<string | null>(null);
   const shortcutsLongPressTimerRef = useRef<ReturnType<
     typeof setTimeout
@@ -822,15 +828,19 @@ export function MessageInputToolbarView({
       clearPatientQueueAck();
       setPatientQueueAck(
         nextPatient
-          ? t("toolbarPatientQueueEnabledAck")
-          : t("toolbarPatientQueueDisabledAck"),
+          ? t("toolbarPatientQueueEnabledAck", {
+              timeout: patientQueueTimeoutForCopy,
+            })
+          : t("toolbarPatientQueueDisabledAck", {
+              timeout: patientQueueTimeoutForCopy,
+            }),
       );
       patientQueueAckTimerRef.current = setTimeout(() => {
         patientQueueAckTimerRef.current = null;
         setPatientQueueAck(null);
       }, 1800);
     },
-    [clearPatientQueueAck, t],
+    [clearPatientQueueAck, patientQueueTimeoutForCopy, t],
   );
 
   const togglePatientQueue = useCallback(() => {
@@ -1755,12 +1765,12 @@ export function MessageInputToolbar({
     primaryActionKind ?? (hasPotentialDualActions ? "steer" : "send");
   const hasDualActions =
     hasPotentialDualActions && effectivePrimaryActionKind === "steer";
-  const patientQueueTimeoutLabel = formatPatientQueueTimeout(
-    patientQueueTimeoutMinutes,
-  );
+  const patientQueueTimeoutLabel =
+    formatPatientQueueTimeout(patientQueueTimeoutMinutes) ??
+    formatPatientQueueTimeout(DEFAULT_PATIENT_QUEUE_TIMEOUT_MINUTES);
   const queueIsPatient = showPatientQueueMode && patientQueueEnabled;
   const patientTooltip = t("toolbarPatientQueueTooltip", {
-    timeout: patientQueueTimeoutLabel ?? t("toolbarPatientQueueConfiguredTimeout"),
+    timeout: patientQueueTimeoutLabel ?? "5m",
   });
   const regularQueueTooltip = t("toolbarQueueTooltip");
   const queueActionTooltip = `${
