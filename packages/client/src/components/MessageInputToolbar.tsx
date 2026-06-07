@@ -1517,11 +1517,6 @@ export function MessageInputToolbarView({
                     </span>
                     <span className="patient-queue-switch-thumb" />
                   </span>
-                  {queueControl.patientQueueTimeoutLabel && (
-                    <span className="patient-queue-switch-time" aria-hidden>
-                      {queueControl.patientQueueTimeoutLabel}
-                    </span>
-                  )}
                 </button>
                 {patientQueueAck && (
                   <span className="patient-queue-ack" role="status">

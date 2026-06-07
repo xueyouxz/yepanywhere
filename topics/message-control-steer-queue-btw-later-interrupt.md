@@ -76,6 +76,28 @@ Rationale:
   its extra queue action is hidden. When the visible queue action is available,
   its icon/color should change so the click invitation reflects whether it will
   create a regular queued item or a patient queued item.
+- The patient-mode switch should stay compact: show the active state in the
+  switch glyph/thumb, but keep the actual quiet interval in tooltip and
+  acknowledgement copy rather than widening the toggle with `Nm` text.
+- Observed on 2026-06-07: patient rows did deliver per contract after the quiet
+  threshold, while a later regular queued row passed them as intended.
+
+### Patient countdown and promotion proposal
+
+Status: proposal.
+
+- When a session is idle and patient queued rows are counting toward autosend,
+  patient rows should show a countdown to the quiet-threshold send time.
+- Patient rows should expose an explicit promote/send-now action.
+- Promoting a lower patient row should promote all patient rows above it, because
+  that preserves typed order within the patient lane and avoids sending a later
+  patient thought while earlier patient context remains delayed.
+- This is distinct from regular queued rows jumping ahead during active work:
+  promotion is a user override of patient waiting, not a change to the ordinary
+  regular-vs-patient delivery ordering.
+
+Narrow bottom-row overflow is tracked in
+[`composer-bottom-bar-overflow.md`](composer-bottom-bar-overflow.md).
 
 ### Queued-item navigation affordance
 

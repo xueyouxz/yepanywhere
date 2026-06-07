@@ -24,6 +24,7 @@
 - security - YA trust-boundary contracts for local, authenticated, relay, and public surfaces.
 - trusted-client-packaging - Signed/local client packaging and relay-only transport trust roots.
 - message-control-steer-queue-btw-later-interrupt - Steer/queue control state, ownership normalization, and metadata contract cleanup.
+- composer-bottom-bar-overflow - Narrow composer bottom-row overflow popup and control priority.
 - ui-architecture - Shared rendering boundaries and anti-DOM-rewrite discipline.
 - opencode-backend - OpenCode provider capability and transcript-rendering parity.
 - provider-refresh - Provider upstream/source refresh triggers, probes, and due-refresh evidence.

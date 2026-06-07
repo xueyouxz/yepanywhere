@@ -4061,10 +4061,12 @@ a.sidebar-nav-item {
 .patient-queue-switch {
   position: relative;
   display: inline-flex;
-  height: 28px;
+  box-sizing: border-box;
+  height: var(--composer-primary-control-size);
   align-items: center;
   gap: 4px;
-  padding: 2px 6px;
+  justify-content: center;
+  padding: 0 6px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   background: var(--bg-tertiary);
@@ -4150,13 +4152,6 @@ a.sidebar-nav-item {
     0 0 0 1px color-mix(in srgb, var(--warning-color) 68%, transparent),
     0 1px 4px rgba(0, 0, 0, 0.28);
   transform: translateX(24px);
-}
-
-.patient-queue-switch-time {
-  font-size: 10px;
-  font-weight: 650;
-  line-height: 1;
-  letter-spacing: 0;
 }
 
 .patient-queue-ack {

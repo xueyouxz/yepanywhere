@@ -80,6 +80,15 @@ messages, it should be reconciled with the preamble rather than stacked on top.
   turns — is a client-package concern and is tracked independently of this
   server-side delivery contract.
 
+## Observed UI Edge Case
+
+- Observed on 2026-06-07: a queued/compose-age UI tag could show `1h ago` in a
+  session where the active owner had not typed in that window. Hypothesis: the
+  displayed relative-age tag is using the stale compose/source timestamp from a
+  possible TUI owner or restored draft rather than the relevant YA composition
+  event for this client. This is a UI timestamp-source bug candidate, not a
+  change to the server-side delivery-anchor contract above.
+
 ## Implementation
 
 - `packages/server/src/supervisor/composeTimeAnchor.ts` — pure
