@@ -3803,6 +3803,11 @@ a.sidebar-nav-item {
   height: 8px;
 }
 
+.composer-bottom-overflow-menu-group .composer-bottom-overflow-medium,
+.composer-bottom-overflow-menu-group .composer-bottom-overflow-late {
+  display: none;
+}
+
 @media (max-width: 430px) {
   .session-shortcuts-help.composer-bottom-overflow-inline {
     display: contents;
@@ -9250,7 +9255,7 @@ a.sidebar-nav-item {
     display: inline-flex;
   }
 
-  .composer-bottom-overflow-inline {
+  .composer-bottom-overflow-inline.composer-bottom-overflow-early {
     display: none;
   }
 }
@@ -9263,6 +9268,26 @@ a.sidebar-nav-item {
   .session-shortcuts-help.composer-bottom-overflow-inline
     > .session-shortcuts-help-button {
     display: none;
+  }
+}
+
+@media (max-width: 360px) {
+  .composer-bottom-overflow-inline.composer-bottom-overflow-late {
+    display: none;
+  }
+
+  .composer-bottom-overflow-menu-group .composer-bottom-overflow-late {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 390px) {
+  .composer-bottom-overflow-inline.composer-bottom-overflow-medium {
+    display: none;
+  }
+
+  .composer-bottom-overflow-menu-group .composer-bottom-overflow-medium {
+    display: inline-flex;
   }
 }
 

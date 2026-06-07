@@ -39,6 +39,9 @@ they can reach a control.
   touch spacing remains a usability constraint.
 - Lower-priority controls can vanish into the popup while the left and right
   anchor groups stay visually stable.
+- Collapse should be progressive. Introducing `...` does not mean every
+  eligible control disappears at once; hide only the controls needed for the
+  current width, then move additional controls behind `...` at tighter widths.
 - Hidden controls must remain reachable by tap/click from the popup menu, not
   disappear.
 - The eligible set should include controls from both the left and right toolbar
@@ -81,9 +84,10 @@ they can reach a control.
 
 ## Landed Surface
 
-- First pass landed on 2026-06-07: at narrow widths, permission mode,
-  attachment, slash, thinking, render/formula, heartbeat/pulse, and shortcut
-  help collapse behind a stable `...` affordance.
+- First pass landed on 2026-06-07: at narrow widths, controls collapse behind a
+  stable `...` affordance in tiers. Permission mode and attachment hide first;
+  slash and thinking hide at a tighter width; render/formula, heartbeat/pulse,
+  and shortcut help hide only at the tightest tier.
   Tapping `...` opens one absolute bottom-row menu attached directly to the
   selected `...` button: mode and attachment use the available left side, while
   slash, thinking, render/formula, heartbeat/pulse, and shortcut help spill to

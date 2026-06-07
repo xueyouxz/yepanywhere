@@ -942,7 +942,7 @@ export function MessageInputToolbarView({
     >
       <div ref={refs?.left} className="message-input-left">
         {visibility.modeSelector && modeControl && (
-          <span className="composer-bottom-overflow-inline">
+          <span className="composer-bottom-overflow-inline composer-bottom-overflow-early">
             <ModeSelector
               mode={modeControl.mode}
               onModeChange={modeControl.onModeChange}
@@ -953,7 +953,7 @@ export function MessageInputToolbarView({
         {visibility.attachments && (
           <button
             type="button"
-            className="attach-button composer-bottom-overflow-inline"
+            className="attach-button composer-bottom-overflow-inline composer-bottom-overflow-early"
             onClick={attachmentControl.onAttachClick}
             disabled={!attachmentControl.canAttach}
             title={
@@ -981,7 +981,7 @@ export function MessageInputToolbarView({
           </button>
         )}
         {visibility.slashMenu && slashControl && (
-          <span className="composer-bottom-overflow-inline">
+          <span className="composer-bottom-overflow-inline composer-bottom-overflow-medium">
             <SlashCommandButton
               commands={slashControl.commands}
               onSelectCommand={slashControl.onSelectCommand}
@@ -990,14 +990,14 @@ export function MessageInputToolbarView({
           </span>
         )}
         {visibility.thinkingToggle && thinkingControl && (
-          <span className="composer-bottom-overflow-inline">
+          <span className="composer-bottom-overflow-inline composer-bottom-overflow-medium">
             <ThinkingToolbarControl control={thinkingControl} t={t} />
           </span>
         )}
         {visibility.renderMode && renderModeControl && (
           <button
             type="button"
-            className={`render-mode-toolbar-button composer-bottom-overflow-inline ${
+            className={`render-mode-toolbar-button composer-bottom-overflow-inline composer-bottom-overflow-late ${
               renderModeControl.state === "rendered"
                 ? "is-rendered"
                 : renderModeControl.state === "mixed"
@@ -1019,7 +1019,7 @@ export function MessageInputToolbarView({
         {visibility.nudge && nudgeControl && (
           <button
             type="button"
-            className={`heartbeat-toolbar-button composer-bottom-overflow-inline ${nudgeControl.enabled ? "active" : ""}`}
+            className={`heartbeat-toolbar-button composer-bottom-overflow-inline composer-bottom-overflow-late ${nudgeControl.enabled ? "active" : ""}`}
             onClick={nudgeControl.onClick}
             onContextMenu={nudgeControl.onContextMenu}
             onTouchStart={nudgeControl.onTouchStart}
@@ -1244,19 +1244,23 @@ export function MessageInputToolbarView({
                 className="composer-bottom-overflow-menu-group composer-bottom-overflow-menu-right"
               >
                 {visibility.slashMenu && slashControl && (
-                  <SlashCommandButton
-                    commands={slashControl.commands}
-                    onSelectCommand={slashControl.onSelectCommand}
-                    disabled={slashControl.disabled}
-                  />
+                  <span className="composer-bottom-overflow-medium">
+                    <SlashCommandButton
+                      commands={slashControl.commands}
+                      onSelectCommand={slashControl.onSelectCommand}
+                      disabled={slashControl.disabled}
+                    />
+                  </span>
                 )}
                 {visibility.thinkingToggle && thinkingControl && (
-                  <ThinkingToolbarControl control={thinkingControl} t={t} />
+                  <span className="composer-bottom-overflow-medium">
+                    <ThinkingToolbarControl control={thinkingControl} t={t} />
+                  </span>
                 )}
                 {visibility.renderMode && renderModeControl && (
                   <button
                     type="button"
-                    className={`render-mode-toolbar-button ${
+                    className={`render-mode-toolbar-button composer-bottom-overflow-late ${
                       renderModeControl.state === "rendered"
                         ? "is-rendered"
                         : renderModeControl.state === "mixed"
@@ -1279,7 +1283,7 @@ export function MessageInputToolbarView({
                 {visibility.nudge && nudgeControl && (
                   <button
                     type="button"
-                    className={`heartbeat-toolbar-button ${nudgeControl.enabled ? "active" : ""}`}
+                    className={`heartbeat-toolbar-button composer-bottom-overflow-late ${nudgeControl.enabled ? "active" : ""}`}
                     onClick={nudgeControl.onClick}
                     onContextMenu={nudgeControl.onContextMenu}
                     onTouchStart={nudgeControl.onTouchStart}
@@ -1314,7 +1318,7 @@ export function MessageInputToolbarView({
                 {visibility.shortcutsHelp && (
                   <button
                     type="button"
-                    className="session-shortcuts-help-button"
+                    className="session-shortcuts-help-button composer-bottom-overflow-late"
                     aria-label={t("toolbarKeyboardShortcutsAria")}
                     aria-expanded={shortcutsPopoverOpen}
                     onClick={() => shortcutsControl.setOpen((open) => !open)}
@@ -1359,7 +1363,7 @@ export function MessageInputToolbarView({
         {visibility.shortcutsHelp && (
           // biome-ignore lint/a11y/noStaticElementInteractions: pointer leave only hides the adjacent shortcuts popover
           <div
-            className="session-shortcuts-help composer-bottom-overflow-inline"
+            className="session-shortcuts-help composer-bottom-overflow-inline composer-bottom-overflow-late"
             onMouseLeave={() => {
               shortcutsControl.setOpen(false);
               shortcutsControl.setSettingsOpen(false);
