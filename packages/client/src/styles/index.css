@@ -4105,26 +4105,6 @@ a.sidebar-nav-item {
   isolation: isolate;
 }
 
-.patient-queue-switch-track::before {
-  position: absolute;
-  top: 50%;
-  right: 7px;
-  left: 7px;
-  z-index: 0;
-  border-top: 2px dashed
-    color-mix(in srgb, var(--border-color) 74%, var(--text-muted));
-  content: "";
-  transform: translateY(-50%);
-}
-
-.patient-queue-switch.is-active .patient-queue-switch-track::before {
-  border-top-color: color-mix(
-    in srgb,
-    var(--warning-color) 62%,
-    var(--border-color)
-  );
-}
-
 .patient-queue-switch-option {
   z-index: 2;
   display: inline-flex;
@@ -4138,8 +4118,9 @@ a.sidebar-nav-item {
 }
 
 .patient-queue-switch-option--regular {
-  color: color-mix(in srgb, var(--attention-color) 84%, var(--text-muted));
-  font-size: 13px;
+  color: color-mix(in srgb, var(--attention-color) 92%, var(--text-primary));
+  font-size: 15px;
+  font-weight: 800;
 }
 
 .patient-queue-switch-option--patient {
@@ -4182,8 +4163,9 @@ a.sidebar-nav-item {
   position: absolute;
   right: 0;
   bottom: calc(100% + 7px);
+  box-sizing: border-box;
   width: max-content;
-  max-width: 180px;
+  max-width: min(300px, calc(100vw - 24px));
   padding: 4px 7px;
   border: 1px solid color-mix(in srgb, var(--warning-color) 45%, var(--border-color));
   border-radius: var(--radius-sm);
@@ -4193,7 +4175,7 @@ a.sidebar-nav-item {
   font-size: 11px;
   line-height: 1.2;
   pointer-events: none;
-  white-space: nowrap;
+  white-space: normal;
   z-index: 130;
 }
 
