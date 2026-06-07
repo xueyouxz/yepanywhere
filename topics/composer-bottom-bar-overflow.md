@@ -17,19 +17,38 @@ they can reach a control.
 
 ## Contract
 
+- Bottom-row controls should be represented as one ordered responsive control
+  list with shared spacing and collapse rules, including shortcut help (`?`) and
+  context percentage circle/text. The visual layout may still have left and
+  right anchor groups, but splitting controls across unrelated containers with
+  different spacing logic makes priority collapse fragile.
 - Use a stable, tappable overflow (`...`) affordance, likely near the middle of
   the composer bottom row.
-- Tapping `...` opens a popup/fold-out menu; tapping `...` again dismisses it.
-- The popup is constrained to the composer bottom-row interaction zone. It can
-  expand both left and right from the `...` anchor and may cover the composer
-  if that is the cleanest narrow layout.
+- Tapping `...` opens a popup/fold-out row; tapping `...` again dismisses it.
+- The opened state is still one bottom-row control strip, not a detached
+  explanatory panel: the `...` affordance remains selected at its stable anchor,
+  and the hidden icon buttons unfold left and right around it. The strip can
+  cover the composer if that is the cleanest narrow layout. Far-left and
+  far-right controls may remain visible outside or behind the popup outline.
 - Lower-priority controls can vanish into the popup while the left and right
   anchor groups stay visually stable.
 - Hidden controls must remain reachable by tap/click from the popup menu, not
   disappear.
+- The eligible set should include controls from both the left and right toolbar
+  containers. Permission mode, attachment, slash, thinking, render/formula,
+  heartbeat/pulse, and shortcut help may all collapse when space is tight; the
+  exact priority order can be refined later.
+- At squeeze widths, permission mode should use a pure icon/dot presentation
+  rather than carrying text such as `Bypass` inline.
 - Overflow priority does not require arbitrary reshuffling of the normal
   toolbar order. Prefer stable positions where possible; controls near the
   overflow affordance can collapse into it as space tightens.
+- The overflow decision must be recomputed when conditional high-priority
+  controls appear or disappear, including activity-dependent queue/patient
+  controls while a turn is streaming. Adding or removing one of these controls
+  should cause the lower-priority middle controls consumed by `...` to be
+  recalculated from the current rendered state, not frozen from an earlier
+  toolbar membership snapshot.
 
 ## Priority Notes
 
@@ -48,3 +67,17 @@ they can reach a control.
 - This topic is about responsive reachability. It does not replace the separate
   session-toolbar visibility customization surface, which controls whether a
   user wants a control available at all.
+- Appearance/settings previews on mobile may need a friendlier multi-row or
+  horizontally scrollable treatment. A temporary landscape-rotation hint is an
+  acceptable fallback, but arbitrary user-controlled toolbar reordering is not a
+  preferred direction unless a stronger need appears.
+
+## Landed Surface
+
+- First pass landed on 2026-06-07: at narrow widths, permission mode,
+  attachment, slash, thinking, render/formula, heartbeat/pulse, and shortcut
+  help collapse behind a stable `...` affordance.
+  Tapping `...` opens one absolute bottom-row strip that unfolds those icon
+  controls around the selected anchor without reflowing the composer row.
+- Context percentage, microphone, queue/patient controls, Stop, and send remain
+  inline in that first pass.

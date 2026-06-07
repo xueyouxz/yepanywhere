@@ -164,6 +164,7 @@ vi.mock("../../i18n", () => ({
             "Right-click or long-press a queue button to switch regular/patient queue.",
           toolbarPatientQueueTooltip:
             `Patient queue waits for ${params?.timeout ?? ""} of verified quiet before delivery. Regular queued messages may pass patient messages.`,
+          toolbarOverflowMenu: "More toolbar controls",
           toolbarQueuePrimaryActionLabel: "Queue from primary action",
           toolbarLivenessVerifiedProgress: "Verified progress",
           toolbarLivenessVerifiedIdle: "Verified idle",
@@ -334,6 +335,8 @@ const toolbarT = ((key: string, params?: Record<string, string>) => {
     newSessionThinkingOff: "Thinking: off",
     newSessionThinkingOn: `Thinking: on (${params?.level ?? ""})`,
     toolbarThinkingTitle: `${params?.current ?? ""}. Click to choose; right-click or long-press to toggle off/on. Applies next turn.`,
+    toolbarKeyboardShortcutsAria: "Session keyboard shortcuts",
+    toolbarOverflowMenu: "More toolbar controls",
   };
   return translations[key] ?? key;
 }) as MessageInputToolbarViewProps["t"];
@@ -1310,5 +1313,82 @@ describe("MessageInput", () => {
 
     expect(onSend).not.toHaveBeenCalled();
     expectSubmission(onQueue, "queue from primary", "deferred");
+  });
+
+  it("opens a bottom-row overflow strip for lower-priority controls", () => {
+    const onRenderToggle = vi.fn();
+    const onNudgeClick = vi.fn();
+    const setShortcutsOpen = vi.fn();
+
+    render(
+      <MessageInputToolbarView
+        t={toolbarT}
+        visibility={{
+          ...toolbarVisibility,
+          thinkingToggle: false,
+          renderMode: true,
+          shortcutsHelp: true,
+          nudge: true,
+        }}
+        attachmentControl={{ attachmentCount: 0 }}
+        renderModeControl={{
+          state: "mixed",
+          title: "Toggle rendered output",
+          onToggle: onRenderToggle,
+        }}
+        nudgeControl={{
+          enabled: true,
+          title: "Pulse after quiet",
+          onClick: onNudgeClick,
+          onContextMenu: vi.fn(),
+          onTouchStart: vi.fn(),
+          onTouchEnd: vi.fn(),
+          onClearTouch: vi.fn(),
+        }}
+        shortcutsControl={{
+          open: false,
+          isearchScope: null,
+          setOpen:
+            setShortcutsOpen as unknown as MessageInputToolbarViewProps["shortcutsControl"]["setOpen"],
+          settingsOpen: false,
+          setSettingsOpen:
+            vi.fn() as unknown as MessageInputToolbarViewProps["shortcutsControl"]["setSettingsOpen"],
+          hasDualActions: false,
+          enterActionKind: "send",
+          canSwapEnterAction: false,
+          queueShortcutLabel: "Queue while agent runs",
+        }}
+        actionsControl={{
+          send: {
+            onSend: vi.fn(),
+            canSend: true,
+            primaryActionKind: "send",
+            primaryActionLabel: "Send",
+            tooltip: "Send",
+            icon: "↑",
+          },
+        }}
+      />,
+    );
+
+    const overflow = screen.getByRole("button", {
+      name: "More toolbar controls",
+    });
+    expect(overflow.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    fireEvent.click(overflow);
+
+    expect(overflow.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("menu")).toBeTruthy();
+    fireEvent.click(screen.getAllByLabelText("Toggle rendered output").at(-1)!);
+    fireEvent.click(screen.getAllByLabelText("Pulse after quiet").at(-1)!);
+    fireEvent.click(
+      screen.getAllByLabelText("Session keyboard shortcuts").at(-1)!,
+    );
+
+    expect(onRenderToggle).toHaveBeenCalledTimes(1);
+    expect(onNudgeClick).toHaveBeenCalledTimes(1);
+    expect(setShortcutsOpen).toHaveBeenCalledTimes(1);
   });
 });

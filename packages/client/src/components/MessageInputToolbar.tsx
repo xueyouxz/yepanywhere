@@ -804,7 +804,17 @@ export function MessageInputToolbarView({
     queueControl?.patientQueueTimeoutLabel ??
     formatPatientQueueTimeout(DEFAULT_PATIENT_QUEUE_TIMEOUT_MINUTES) ??
     "5m";
+  const hasBottomOverflowControls = !!(
+    (visibility.modeSelector && modeControl) ||
+    visibility.attachments ||
+    (visibility.slashMenu && slashControl) ||
+    (visibility.thinkingToggle && thinkingControl) ||
+    (visibility.renderMode && renderModeControl) ||
+    (visibility.nudge && nudgeControl) ||
+    visibility.shortcutsHelp
+  );
   const [patientQueueAck, setPatientQueueAck] = useState<string | null>(null);
+  const [bottomOverflowOpen, setBottomOverflowOpen] = useState(false);
   const shortcutsLongPressTimerRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
@@ -932,16 +942,18 @@ export function MessageInputToolbarView({
     >
       <div ref={refs?.left} className="message-input-left">
         {visibility.modeSelector && modeControl && (
-          <ModeSelector
-            mode={modeControl.mode}
-            onModeChange={modeControl.onModeChange}
-            changesApplyNextTurn={modeControl.changesApplyNextTurn}
-          />
+          <span className="composer-bottom-overflow-inline">
+            <ModeSelector
+              mode={modeControl.mode}
+              onModeChange={modeControl.onModeChange}
+              changesApplyNextTurn={modeControl.changesApplyNextTurn}
+            />
+          </span>
         )}
         {visibility.attachments && (
           <button
             type="button"
-            className="attach-button"
+            className="attach-button composer-bottom-overflow-inline"
             onClick={attachmentControl.onAttachClick}
             disabled={!attachmentControl.canAttach}
             title={
@@ -969,19 +981,23 @@ export function MessageInputToolbarView({
           </button>
         )}
         {visibility.slashMenu && slashControl && (
-          <SlashCommandButton
-            commands={slashControl.commands}
-            onSelectCommand={slashControl.onSelectCommand}
-            disabled={slashControl.disabled}
-          />
+          <span className="composer-bottom-overflow-inline">
+            <SlashCommandButton
+              commands={slashControl.commands}
+              onSelectCommand={slashControl.onSelectCommand}
+              disabled={slashControl.disabled}
+            />
+          </span>
         )}
         {visibility.thinkingToggle && thinkingControl && (
-          <ThinkingToolbarControl control={thinkingControl} t={t} />
+          <span className="composer-bottom-overflow-inline">
+            <ThinkingToolbarControl control={thinkingControl} t={t} />
+          </span>
         )}
         {visibility.renderMode && renderModeControl && (
           <button
             type="button"
-            className={`render-mode-toolbar-button ${
+            className={`render-mode-toolbar-button composer-bottom-overflow-inline ${
               renderModeControl.state === "rendered"
                 ? "is-rendered"
                 : renderModeControl.state === "mixed"
@@ -1003,7 +1019,7 @@ export function MessageInputToolbarView({
         {visibility.nudge && nudgeControl && (
           <button
             type="button"
-            className={`heartbeat-toolbar-button ${nudgeControl.enabled ? "active" : ""}`}
+            className={`heartbeat-toolbar-button composer-bottom-overflow-inline ${nudgeControl.enabled ? "active" : ""}`}
             onClick={nudgeControl.onClick}
             onContextMenu={nudgeControl.onContextMenu}
             onTouchStart={nudgeControl.onTouchStart}
@@ -1165,6 +1181,153 @@ export function MessageInputToolbarView({
           )}
         </div>
       )}
+      {hasBottomOverflowControls && (
+        <div
+          className={`composer-bottom-overflow ${
+            bottomOverflowOpen ? "is-open" : ""
+          }`}
+        >
+          <button
+            type="button"
+            className="composer-bottom-overflow-button"
+            aria-label={t("toolbarOverflowMenu")}
+            aria-expanded={bottomOverflowOpen}
+            onClick={() => setBottomOverflowOpen((open) => !open)}
+          >
+            ...
+          </button>
+          {bottomOverflowOpen && (
+            <div className="composer-bottom-overflow-menu" role="menu">
+              {visibility.modeSelector && modeControl && (
+                <ModeSelector
+                  mode={modeControl.mode}
+                  onModeChange={modeControl.onModeChange}
+                  changesApplyNextTurn={modeControl.changesApplyNextTurn}
+                />
+              )}
+              {visibility.attachments && (
+                <button
+                  type="button"
+                  className="attach-button"
+                  onClick={attachmentControl.onAttachClick}
+                  disabled={!attachmentControl.canAttach}
+                  title={
+                    attachmentControl.canAttach
+                      ? t("toolbarAttachFiles")
+                      : t("toolbarAttachDisabled")
+                  }
+                  role="menuitem"
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    aria-hidden="true"
+                  >
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                  </svg>
+                  {attachmentControl.attachmentCount > 0 && (
+                    <span className="attach-count">
+                      {attachmentControl.attachmentCount}
+                    </span>
+                  )}
+                </button>
+              )}
+              {visibility.slashMenu && slashControl && (
+                <SlashCommandButton
+                  commands={slashControl.commands}
+                  onSelectCommand={slashControl.onSelectCommand}
+                  disabled={slashControl.disabled}
+                />
+              )}
+              {visibility.thinkingToggle && thinkingControl && (
+                <ThinkingToolbarControl control={thinkingControl} t={t} />
+              )}
+              {visibility.renderMode && renderModeControl && (
+                <button
+                  type="button"
+                  className={`render-mode-toolbar-button ${
+                    renderModeControl.state === "rendered"
+                      ? "is-rendered"
+                      : renderModeControl.state === "mixed"
+                        ? "is-mixed"
+                        : ""
+                  }`}
+                  onClick={renderModeControl.onToggle}
+                  title={renderModeControl.title}
+                  aria-label={renderModeControl.title}
+                  aria-pressed={
+                    renderModeControl.state === "mixed"
+                      ? "mixed"
+                      : renderModeControl.state === "rendered"
+                  }
+                  role="menuitem"
+                >
+                  <RenderModeGlyph />
+                </button>
+              )}
+              {visibility.nudge && nudgeControl && (
+                <button
+                  type="button"
+                  className={`heartbeat-toolbar-button ${nudgeControl.enabled ? "active" : ""}`}
+                  onClick={nudgeControl.onClick}
+                  onContextMenu={nudgeControl.onContextMenu}
+                  onTouchStart={nudgeControl.onTouchStart}
+                  onTouchEnd={nudgeControl.onTouchEnd}
+                  onTouchCancel={nudgeControl.onClearTouch}
+                  onTouchMove={nudgeControl.onClearTouch}
+                  title={nudgeControl.title}
+                  aria-label={nudgeControl.title}
+                  aria-pressed={nudgeControl.enabled}
+                  role="menuitem"
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="miter"
+                    aria-hidden="true"
+                  >
+                    <path className="heartbeat-baseline" d="M0.75 15H7" />
+                    <path
+                      className="heartbeat-excursion"
+                      d="M7 15l2-5 2 9 4-16 3 12"
+                    />
+                    <path className="heartbeat-baseline" d="M18 15h5.25" />
+                  </svg>
+                </button>
+              )}
+              {visibility.shortcutsHelp && (
+                <button
+                  type="button"
+                  className="session-shortcuts-help-button"
+                  aria-label={t("toolbarKeyboardShortcutsAria")}
+                  aria-expanded={shortcutsPopoverOpen}
+                  onClick={() => shortcutsControl.setOpen((open) => !open)}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    openShortcutSettings();
+                  }}
+                  onTouchStart={startShortcutsLongPress}
+                  onTouchEnd={clearShortcutsLongPress}
+                  onTouchCancel={clearShortcutsLongPress}
+                  onTouchMove={clearShortcutsLongPress}
+                  role="menuitem"
+                >
+                  ?
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <div ref={refs?.actions} className="message-input-actions">
         {pendingApproval && (
           <button
@@ -1188,7 +1351,7 @@ export function MessageInputToolbarView({
         {visibility.shortcutsHelp && (
           // biome-ignore lint/a11y/noStaticElementInteractions: pointer leave only hides the adjacent shortcuts popover
           <div
-            className="session-shortcuts-help"
+            className="session-shortcuts-help composer-bottom-overflow-inline"
             onMouseLeave={() => {
               shortcutsControl.setOpen(false);
               shortcutsControl.setSettingsOpen(false);

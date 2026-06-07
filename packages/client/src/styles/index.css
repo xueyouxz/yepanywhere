@@ -246,6 +246,7 @@
   --success-color: #74c991;
   --warning-color: #e1c08d;
   --warning-badge-bg: #c2410c;
+  --patient-queue-action-bg: #b8860b;
   --attention-color: #4daafc;
   --focus-border: #007acc;
   --primary-color: #60a5fa;
@@ -319,6 +320,7 @@
   --success-color: #7dd39a;
   --warning-color: #ebd09d;
   --warning-badge-bg: #c2410c;
+  --patient-queue-action-bg: #b8860b;
   --attention-color: #5db5ff;
   --focus-border: #007acc;
   --primary-color: #60a5fa;
@@ -392,6 +394,7 @@
   --success-color: #1a7f37;
   --warning-color: #9a6700;
   --warning-badge-bg: #c2410c;
+  --patient-queue-action-bg: #b8860b;
   --attention-color: #0066cc;
   --focus-border: #0066cc;
   --primary-color: #2563eb;
@@ -462,6 +465,7 @@
   --success-color: #7dd39a;
   --warning-color: #ebd09d;
   --warning-badge-bg: #c2410c;
+  --patient-queue-action-bg: #b8860b;
   --attention-color: #5db5ff;
   --focus-border: #007acc;
   --primary-color: #60a5fa;
@@ -528,6 +532,7 @@
     --success-color: #1a7f37;
     --warning-color: #9a6700;
     --warning-badge-bg: #c2410c;
+    --patient-queue-action-bg: #b8860b;
     --attention-color: #0066cc;
     --focus-border: #0066cc;
     --primary-color: #2563eb;
@@ -3688,8 +3693,105 @@ a.sidebar-nav-item {
   outline: none;
 }
 
+.composer-bottom-overflow {
+  position: relative;
+  display: none;
+  width: var(--composer-control-size);
+  height: var(--composer-control-size);
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.composer-bottom-overflow-button {
+  position: relative;
+  z-index: 72;
+  display: inline-flex;
+  width: var(--composer-control-size);
+  height: var(--composer-control-size);
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.composer-bottom-overflow-button:hover,
+.composer-bottom-overflow-button:focus-visible,
+.composer-bottom-overflow-button[aria-expanded="true"] {
+  border-color: var(--focus-border);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.composer-bottom-overflow-menu {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  z-index: 70;
+  display: flex;
+  min-width: max-content;
+  height: var(--composer-primary-control-size);
+  align-items: center;
+  gap: 0.3rem;
+  padding: 2px calc(var(--composer-control-size) + 0.45rem) 2px 0.45rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-surface) 98%, transparent);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.26);
+  transform: translateX(-42%);
+}
+
+.composer-bottom-overflow-menu .mode-selector-container,
+.composer-bottom-overflow-menu .slash-command-container,
+.composer-bottom-overflow-menu .thinking-toolbar-control {
+  flex: 0 0 auto;
+}
+
+.composer-bottom-overflow-menu .mode-button,
+.composer-bottom-overflow-menu .attach-button,
+.composer-bottom-overflow-menu .slash-command-button,
+.composer-bottom-overflow-menu .thinking-toggle-button,
+.composer-bottom-overflow-menu .render-mode-toolbar-button,
+.composer-bottom-overflow-menu .heartbeat-toolbar-button,
+.composer-bottom-overflow-menu .session-shortcuts-help-button {
+  width: var(--composer-control-size);
+  height: var(--composer-control-size);
+  min-width: var(--composer-control-size);
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.composer-bottom-overflow-menu .mode-button {
+  justify-content: center;
+}
+
+.composer-bottom-overflow-menu .mode-button-label,
+.composer-bottom-overflow-menu .mode-button-badge,
+.composer-bottom-overflow-menu .thinking-toggle-label {
+  display: none;
+}
+
+.composer-bottom-overflow-menu .mode-button .mode-dot {
+  width: 8px;
+  height: 8px;
+}
+
 @media (max-width: 430px) {
-  .session-shortcuts-help {
+  .session-shortcuts-help.composer-bottom-overflow-inline {
+    display: contents;
+  }
+
+  .session-shortcuts-help.composer-bottom-overflow-inline
+    > .session-shortcuts-help-button {
     display: none;
   }
 }
@@ -4033,7 +4135,7 @@ a.sidebar-nav-item {
 }
 
 .send-button.patient-queue-action {
-  background: var(--warning-badge-bg);
+  background: var(--patient-queue-action-bg);
   color: white;
 }
 
@@ -4045,7 +4147,7 @@ a.sidebar-nav-item {
   padding: 1px 2px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.9);
-  color: var(--warning-badge-bg);
+  color: var(--patient-queue-action-bg);
   font-size: 8px;
   font-weight: 700;
   line-height: 1;
@@ -9009,6 +9111,14 @@ a.sidebar-nav-item {
     --composer-primary-control-size: 36px;
   }
 
+  .composer-bottom-overflow {
+    display: inline-flex;
+  }
+
+  .composer-bottom-overflow-inline {
+    display: none;
+  }
+
   .message-input-wrapper .message-input-toolbar {
     position: static;
   }
@@ -9020,6 +9130,11 @@ a.sidebar-nav-item {
 
   .message-input-left {
     flex: 0 1 auto;
+    overflow: visible;
+  }
+
+  .composer-bottom-overflow-menu {
+    max-width: calc(100vw - 1rem);
     overflow: visible;
   }
 
@@ -9109,7 +9224,12 @@ a.sidebar-nav-item {
 }
 
 @media (max-width: 520px) {
-  .session-shortcuts-help {
+  .session-shortcuts-help.composer-bottom-overflow-inline {
+    display: contents;
+  }
+
+  .session-shortcuts-help.composer-bottom-overflow-inline
+    > .session-shortcuts-help-button {
     display: none;
   }
 }
