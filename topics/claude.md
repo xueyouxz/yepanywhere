@@ -7,8 +7,9 @@ Topic: claude
 
 Related topics: [session liveness and queue intent](session-liveness.md),
 [emulated slash commands](emulated-slash-commands.md),
-[provider refresh](provider-refresh.md), and
-[provider state machine](provider-state-machine.md).
+[provider refresh](provider-refresh.md),
+[provider state machine](provider-state-machine.md), and
+[thinking configurability](claude-thinking-config.md).
 
 ## Contracts
 
