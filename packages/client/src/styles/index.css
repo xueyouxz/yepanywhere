@@ -4064,9 +4064,9 @@ a.sidebar-nav-item {
   height: 28px;
   align-items: center;
   gap: 4px;
-  padding: 2px 5px;
+  padding: 2px 6px;
   border: 1px solid var(--border-color);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--bg-tertiary);
   color: var(--text-secondary);
   cursor: pointer;
@@ -4098,21 +4098,39 @@ a.sidebar-nav-item {
 .patient-queue-switch-track {
   position: relative;
   display: grid;
-  width: 42px;
-  height: 20px;
+  width: 46px;
+  height: 22px;
   grid-template-columns: 1fr 1fr;
   align-items: center;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-primary) 42%, transparent);
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--border-color) 80%, transparent);
+  isolation: isolate;
+}
+
+.patient-queue-switch-track::before {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  left: 7px;
+  z-index: 0;
+  border-top: 2px dashed
+    color-mix(in srgb, var(--border-color) 74%, var(--text-muted));
+  content: "";
+  transform: translateY(-50%);
+}
+
+.patient-queue-switch.is-active .patient-queue-switch-track::before {
+  border-top-color: color-mix(
+    in srgb,
+    var(--warning-color) 62%,
+    var(--border-color)
+  );
 }
 
 .patient-queue-switch-option {
-  z-index: 1;
+  z-index: 2;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  min-width: 0;
   font-size: 10px;
   font-weight: 650;
   line-height: 1;
@@ -4121,26 +4139,36 @@ a.sidebar-nav-item {
 
 .patient-queue-switch-option--regular {
   color: color-mix(in srgb, var(--attention-color) 84%, var(--text-muted));
+  font-size: 13px;
 }
 
 .patient-queue-switch-option--patient {
   color: color-mix(in srgb, var(--warning-color) 82%, var(--text-muted));
+  font-size: 9px;
 }
 
 .patient-queue-switch-thumb {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 16px;
-  height: 16px;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
   border-radius: 999px;
   background: var(--bg-surface);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
-  transition: transform 0.15s ease;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--attention-color) 64%, transparent),
+    0 1px 4px rgba(0, 0, 0, 0.28);
+  transition:
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
 }
 
 .patient-queue-switch.is-active .patient-queue-switch-thumb {
-  transform: translateX(22px);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--warning-color) 68%, transparent),
+    0 1px 4px rgba(0, 0, 0, 0.28);
+  transform: translateX(24px);
 }
 
 .patient-queue-switch-time {

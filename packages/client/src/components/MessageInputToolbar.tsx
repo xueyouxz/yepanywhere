@@ -1500,7 +1500,7 @@ export function MessageInputToolbarView({
                 >
                   <span className="patient-queue-switch-track" aria-hidden>
                     <span className="patient-queue-switch-option patient-queue-switch-option--regular">
-                      ◷
+                      →
                     </span>
                     <span className="patient-queue-switch-option patient-queue-switch-option--patient">
                       Zz
