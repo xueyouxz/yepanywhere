@@ -7,7 +7,7 @@ import type {
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useI18n } from "../i18n";
-import { writeClipboardText } from "../lib/clipboard";
+import { writeClipboardTextLater } from "../lib/clipboard";
 import { Modal, type ModalAnchorRect } from "./ui/Modal";
 import { ViewerCountIndicator } from "./ViewerCountIndicator";
 
@@ -51,6 +51,12 @@ export function SessionShareModal({
   const urlInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (status) {
+      onStatusChange?.(status);
+    }
+  }, [onStatusChange, status]);
+
+  useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -62,7 +68,6 @@ export function SessionShareModal({
         );
         if (!cancelled) {
           setStatus(nextStatus);
-          onStatusChange?.(nextStatus);
         }
       } catch {
         if (!cancelled) {
@@ -85,33 +90,36 @@ export function SessionShareModal({
     };
   }, [onStatusChange, projectId, sessionId]);
 
-  const copyUrl = async (nextUrl: string) => {
-    const copied = await writeClipboardText(nextUrl);
-    if (copied) {
-      setResult(t("sessionShareCopiedReadOnly"));
-      return;
-    }
-    window.setTimeout(() => {
-      urlInputRef.current?.focus();
-      urlInputRef.current?.select();
-    }, 0);
-    setResult(t("sessionShareManualCopy"));
-  };
-
   const createAndCopyShare = async (mode: PublicSessionShareMode) => {
     setIsWorking(mode);
     setError(null);
     setResult(null);
+    // Kick off the create and the clipboard write together, synchronously within
+    // this click, so the browser captures the user-activation now. Awaiting the
+    // create first (relay hop, large frozen snapshot) can outlive the activation
+    // window and the copy then fails as a permission error.
+    const sharePromise = api.createPublicSessionShare({
+      projectId: projectId as UrlProjectId,
+      sessionId,
+      mode,
+      initialPrompt: initialPrompt ?? undefined,
+      title: title ?? undefined,
+    });
+    const copyPromise = writeClipboardTextLater(
+      sharePromise.then((created) => created.url),
+    );
     try {
-      const result = await api.createPublicSessionShare({
-        projectId: projectId as UrlProjectId,
-        sessionId,
-        mode,
-        initialPrompt: initialPrompt ?? undefined,
-        title: title ?? undefined,
-      });
+      const result = await sharePromise;
       setUrl(result.url);
-      await copyUrl(result.url);
+      if (await copyPromise) {
+        setResult(t("sessionShareCopiedReadOnly"));
+      } else {
+        window.setTimeout(() => {
+          urlInputRef.current?.focus();
+          urlInputRef.current?.select();
+        }, 0);
+        setResult(t("sessionShareManualCopy"));
+      }
       setStatus((current) => {
         const frozenDelta = mode === "frozen" ? 1 : 0;
         const liveDelta = mode === "live" ? 1 : 0;
@@ -122,7 +130,6 @@ export function SessionShareModal({
           activeViewerCount: current?.activeViewerCount ?? 0,
           viewers: current?.viewers ?? [],
         };
-        onStatusChange?.(nextStatus);
         return nextStatus;
       });
     } catch (err) {
@@ -142,7 +149,6 @@ export function SessionShareModal({
         sessionId,
       );
       setStatus(response);
-      onStatusChange?.(response);
       setUrl(null);
       setResult(t("sessionShareRevoked", { count: response.revokedCount }));
     } catch (err) {
@@ -164,7 +170,6 @@ export function SessionShareModal({
         sessionId,
       );
       setStatus(response);
-      onStatusChange?.(response);
       setResult(
         t("sessionShareFrozenLiveLinks", {
           count: response.convertedCount,
@@ -190,7 +195,6 @@ export function SessionShareModal({
         viewer.viewerId,
       );
       setStatus(response);
-      onStatusChange?.(response);
       setResult(t("sessionShareViewerFrozen", { token: viewer.shortId }));
     } catch (err) {
       setError(
@@ -214,7 +218,6 @@ export function SessionShareModal({
         viewer.viewerId,
       );
       setStatus(response);
-      onStatusChange?.(response);
       setResult(t("sessionShareViewerDisconnected", { token: viewer.shortId }));
     } catch (err) {
       setError(

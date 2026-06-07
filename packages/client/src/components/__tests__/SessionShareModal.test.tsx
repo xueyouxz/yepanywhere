@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api/client";
 import { I18nProvider } from "../../i18n";
@@ -77,6 +83,69 @@ describe("SessionShareModal", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    delete (globalThis as { ClipboardItem?: unknown }).ClipboardItem;
+  });
+
+  it("writes to the clipboard before the slow share request resolves", async () => {
+    // Defer the create so we can observe that the clipboard write is initiated
+    // from the click's user-activation rather than after the round-trip.
+    let resolveCreate: (value: {
+      url: string;
+      mode: "frozen";
+      createdAt: string;
+      secretBits: number;
+    }) => void = () => {};
+    vi.mocked(api.createPublicSessionShare).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+    const write = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { write, writeText },
+    });
+    class FakeClipboardItem {
+      constructor(public items: Record<string, Promise<Blob>>) {}
+    }
+    Object.defineProperty(globalThis, "ClipboardItem", {
+      configurable: true,
+      value: FakeClipboardItem,
+    });
+
+    render(
+      <I18nProvider>
+        <SessionShareModal
+          projectId="cHJvamVjdA"
+          sessionId="session-1"
+          title="Build logs"
+          onClose={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Copy Read-Only Snapshot Link/ }),
+    );
+
+    // The promise-valued write is dispatched before the share URL exists, so the
+    // activation is captured even when the create is slow.
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    expect(writeText).not.toHaveBeenCalled();
+
+    resolveCreate({
+      url: "https://ya.graehl.org/share/secret?h=test-host",
+      mode: "frozen",
+      createdAt: "2026-05-01T00:00:00.000Z",
+      secretBits: 512,
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Read-only link copied to clipboard."),
+      ).toBeTruthy();
+    });
   });
 
   it("creates and copies a frozen read-only public share in one click", async () => {
@@ -186,7 +255,9 @@ describe("SessionShareModal", () => {
     expect(execCommand).not.toHaveBeenCalled();
     expect(screen.queryByText("Document is not focused")).toBeNull();
     expect(
-      screen.getByDisplayValue("https://ya.graehl.org/share/secret?h=test-host"),
+      screen.getByDisplayValue(
+        "https://ya.graehl.org/share/secret?h=test-host",
+      ),
     ).toBeTruthy();
   });
 
@@ -213,7 +284,9 @@ describe("SessionShareModal", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("Read-only link copied to clipboard.")).toBeTruthy();
+      expect(
+        screen.getByText("Read-only link copied to clipboard."),
+      ).toBeTruthy();
     });
     expect(writeText).toHaveBeenCalledWith(
       "https://ya.graehl.org/share/secret?h=test-host",
@@ -279,9 +352,11 @@ describe("SessionShareModal", () => {
       </I18nProvider>,
     );
 
-    fireEvent.click(await screen.findByRole("button", {
-      name: "Stop live updates",
-    }));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Stop live updates",
+      }),
+    );
 
     await waitFor(() => {
       expect(api.freezePublicSessionLiveShares).toHaveBeenCalledWith(
