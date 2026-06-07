@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [site-v1.6.3] - 2026-06-07
+
+### Fixed
+- Hide the remote Switch Host label in the collapsed hosted sidebar.
+
 ## [site-v1.6.2] - 2026-06-05
 
 ### Added
