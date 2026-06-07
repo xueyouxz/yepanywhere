@@ -42,6 +42,8 @@ they can reach a control.
 - Collapse should be progressive. Introducing `...` does not mean every
   eligible control disappears at once; hide only the controls needed for the
   current width, then move additional controls behind `...` at tighter widths.
+- A control must not be hidden for overflow before the `...` affordance is
+  visible and able to reveal it.
 - Hidden controls must remain reachable by tap/click from the popup menu, not
   disappear.
 - The eligible set should include controls from both the left and right toolbar
@@ -87,7 +89,8 @@ they can reach a control.
 - First pass landed on 2026-06-07: at narrow widths, controls collapse behind a
   stable `...` affordance in tiers. Permission mode and attachment hide first;
   slash and thinking hide at a tighter width; render/formula, heartbeat/pulse,
-  and shortcut help hide only at the tightest tier.
+  and shortcut help hide only at the tightest tier. No overflow-eligible toolbar
+  control hides before `...` is visible.
   Tapping `...` opens one absolute bottom-row menu attached directly to the
   selected `...` button: mode and attachment use the available left side, while
   slash, thinking, render/formula, heartbeat/pulse, and shortcut help spill to

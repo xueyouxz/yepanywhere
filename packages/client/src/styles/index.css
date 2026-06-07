@@ -3808,17 +3808,6 @@ a.sidebar-nav-item {
   display: none;
 }
 
-@media (max-width: 430px) {
-  .session-shortcuts-help.composer-bottom-overflow-inline {
-    display: contents;
-  }
-
-  .session-shortcuts-help.composer-bottom-overflow-inline
-    > .session-shortcuts-help-button {
-    display: none;
-  }
-}
-
 /* Pending approval indicator button in toolbar */
 .pending-approval-indicator {
   display: flex;
@@ -9250,7 +9239,7 @@ a.sidebar-nav-item {
   }
 }
 
-@media (max-width: 460px) {
+@media (max-width: 390px) {
   .composer-bottom-overflow {
     display: inline-flex;
   }
@@ -9260,18 +9249,7 @@ a.sidebar-nav-item {
   }
 }
 
-@media (max-width: 520px) {
-  .session-shortcuts-help.composer-bottom-overflow-inline {
-    display: contents;
-  }
-
-  .session-shortcuts-help.composer-bottom-overflow-inline
-    > .session-shortcuts-help-button {
-    display: none;
-  }
-}
-
-@media (max-width: 360px) {
+@media (max-width: 330px) {
   .composer-bottom-overflow-inline.composer-bottom-overflow-late {
     display: none;
   }
@@ -9281,7 +9259,7 @@ a.sidebar-nav-item {
   }
 }
 
-@media (max-width: 390px) {
+@media (max-width: 360px) {
   .composer-bottom-overflow-inline.composer-bottom-overflow-medium {
     display: none;
   }
