@@ -71,6 +71,41 @@ import { VoiceInputButton, type VoiceInputButtonRef } from "./VoiceInputButton";
 type ToolbarTranslate = ReturnType<typeof useI18n>["t"];
 
 const DEFAULT_PATIENT_QUEUE_TIMEOUT_MINUTES = 5;
+type ComposerOverflowTier = "none" | "early" | "medium" | "late";
+const COMPOSER_OVERFLOW_TIERS: ComposerOverflowTier[] = [
+  "none",
+  "early",
+  "medium",
+  "late",
+];
+
+function getFlexGapPx(element: HTMLElement): number {
+  const style = getComputedStyle(element);
+  return Number.parseFloat(style.columnGap || style.gap) || 0;
+}
+
+function getVisibleControlWidth(element: HTMLElement): number {
+  const style = getComputedStyle(element);
+  if (style.display === "none" || style.position === "absolute") {
+    return 0;
+  }
+  return element.getBoundingClientRect().width;
+}
+
+function getControlListWidth(element: HTMLElement): number {
+  const childWidths = Array.from(element.children)
+    .filter((child): child is HTMLElement => child instanceof HTMLElement)
+    .map(getVisibleControlWidth)
+    .filter((width) => width > 0);
+  if (childWidths.length === 0) {
+    return 0;
+  }
+  const gap = getFlexGapPx(element);
+  return (
+    childWidths.reduce((total, width) => total + width, 0) +
+    gap * (childWidths.length - 1)
+  );
+}
 
 function getIsearchPreviousKeys(scope: SessionIsearchScope): string[] {
   if (scope === "full") {
@@ -815,6 +850,12 @@ export function MessageInputToolbarView({
   );
   const [patientQueueAck, setPatientQueueAck] = useState<string | null>(null);
   const [bottomOverflowOpen, setBottomOverflowOpen] = useState(false);
+  const [bottomOverflowTier, setBottomOverflowTier] =
+    useState<ComposerOverflowTier>(() =>
+      typeof ResizeObserver === "undefined" ? "late" : "none",
+    );
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const lastToolbarWidthRef = useRef(0);
   const shortcutsLongPressTimerRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
@@ -825,6 +866,16 @@ export function MessageInputToolbarView({
     null,
   );
   const suppressQueueClickRef = useRef(false);
+
+  const setToolbarRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      toolbarRef.current = node;
+      if (refs?.toolbar) {
+        refs.toolbar.current = node;
+      }
+    },
+    [refs?.toolbar],
+  );
 
   const clearPatientQueueAck = useCallback(() => {
     if (patientQueueAckTimerRef.current) {
@@ -917,6 +968,100 @@ export function MessageInputToolbarView({
     };
   }, [clearPatientQueueAck, clearQueueLongPress]);
 
+  useLayoutEffect(() => {
+    const toolbar = toolbarRef.current;
+    if (!toolbar || !hasBottomOverflowControls) {
+      if (bottomOverflowTier !== "none") {
+        setBottomOverflowTier("none");
+      }
+      return;
+    }
+
+    let frameId: number | null = null;
+    const measure = () => {
+      frameId = null;
+      const left =
+        refs?.left?.current ?? toolbar.querySelector(".message-input-left");
+      const actions =
+        refs?.actions?.current ?? toolbar.querySelector(".message-input-actions");
+      if (!(left instanceof HTMLElement) || !(actions instanceof HTMLElement)) {
+        return;
+      }
+      const leftRect = left.getBoundingClientRect();
+      const actionsRect = actions.getBoundingClientRect();
+      if (leftRect.width === 0 && actionsRect.width === 0) {
+        setBottomOverflowTier("late");
+        return;
+      }
+      const leftWidth = getControlListWidth(left);
+      const actionsWidth = getControlListWidth(actions);
+      const overflow = toolbar.querySelector(".composer-bottom-overflow");
+      const overflowWidth =
+        overflow instanceof HTMLElement ? getVisibleControlWidth(overflow) : 0;
+      const visibleSectionCount = [leftWidth, overflowWidth, actionsWidth].filter(
+        (width) => width > 0,
+      ).length;
+      const totalWidth =
+        leftWidth +
+        overflowWidth +
+        actionsWidth +
+        getFlexGapPx(toolbar) * Math.max(0, visibleSectionCount - 1);
+      const availableWidth = toolbar.getBoundingClientRect().width;
+      if (totalWidth <= availableWidth + 0.5) {
+        return;
+      }
+      setBottomOverflowTier((tier) => {
+        const tierIndex = COMPOSER_OVERFLOW_TIERS.indexOf(tier);
+        return (
+          COMPOSER_OVERFLOW_TIERS[
+          Math.min(tierIndex + 1, COMPOSER_OVERFLOW_TIERS.length - 1)
+          ] ?? "late"
+        );
+      });
+    };
+    const scheduleMeasure = () => {
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+      }
+      frameId = requestAnimationFrame(measure);
+    };
+    const handleResize: ResizeObserverCallback = (entries) => {
+      const toolbarEntry = entries.find((entry) => entry.target === toolbar);
+      if (toolbarEntry) {
+        const nextWidth = toolbarEntry.contentRect.width;
+        if (nextWidth > lastToolbarWidthRef.current + 1) {
+          setBottomOverflowTier("none");
+        }
+        lastToolbarWidthRef.current = nextWidth;
+      }
+      scheduleMeasure();
+    };
+
+    scheduleMeasure();
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(handleResize);
+      resizeObserver.observe(toolbar);
+      if (refs?.left?.current) {
+        resizeObserver.observe(refs.left.current);
+      }
+      if (refs?.actions?.current) {
+        resizeObserver.observe(refs.actions.current);
+      }
+    }
+    return () => {
+      resizeObserver?.disconnect();
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+      }
+    };
+  }, [
+    bottomOverflowTier,
+    hasBottomOverflowControls,
+    refs?.actions,
+    refs?.left,
+  ]);
+
   const openShortcutSettings = () => {
     shortcutsControl.setOpen(true);
     shortcutsControl.setSettingsOpen(true);
@@ -937,8 +1082,8 @@ export function MessageInputToolbarView({
 
   return (
     <div
-      ref={refs?.toolbar}
-      className={`message-input-toolbar${isCompactStatusMode ? " status-floats" : ""}`}
+      ref={setToolbarRef}
+      className={`message-input-toolbar${isCompactStatusMode ? " status-floats" : ""} overflow-tier-${bottomOverflowTier}`}
     >
       <div ref={refs?.left} className="message-input-left">
         {visibility.modeSelector && modeControl && (
@@ -1181,7 +1326,7 @@ export function MessageInputToolbarView({
           )}
         </div>
       )}
-      {hasBottomOverflowControls && (
+      {hasBottomOverflowControls && bottomOverflowTier !== "none" && (
         <div
           className={`composer-bottom-overflow ${
             bottomOverflowOpen ? "is-open" : ""

@@ -48,6 +48,10 @@ they can reach a control.
   current width, then move additional controls behind `...` at tighter widths.
 - A control must not be hidden for overflow before the `...` affordance is
   visible and able to reveal it.
+- The collapse tier should be based on measured rendered control widths, not
+  viewport breakpoints. Sum the visible child widths and gaps for the left
+  control list, overflow affordance, and right control list, then advance tiers
+  only until that total fits the toolbar width.
 - Hidden controls must remain reachable by tap/click from the popup menu, not
   disappear.
 - The eligible set should include controls from both the left and right toolbar
@@ -94,7 +98,8 @@ they can reach a control.
   stable `...` affordance in tiers. Permission mode and attachment hide first;
   slash and thinking hide at a tighter width; render/formula, heartbeat/pulse,
   and shortcut help hide only at the tightest tier. No overflow-eligible toolbar
-  control hides before `...` is visible.
+  control hides before `...` is visible. The active tier is now chosen from
+  measured rendered widths rather than hard viewport cutoffs.
   Tapping `...` opens one absolute bottom-row menu attached directly to the
   selected `...` button: mode and attachment use the available left side, while
   slash, thinking, render/formula, heartbeat/pulse, and shortcut help spill to

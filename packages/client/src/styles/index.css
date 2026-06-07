@@ -3808,8 +3808,53 @@ a.sidebar-nav-item {
 }
 
 .composer-bottom-overflow-menu-group .composer-bottom-overflow-medium,
-.composer-bottom-overflow-menu-group .composer-bottom-overflow-late {
+.composer-bottom-overflow-menu-group .composer-bottom-overflow-late,
+.message-input-toolbar:not(.overflow-tier-medium):not(.overflow-tier-late)
+  .composer-bottom-overflow-menu-group
+  .composer-bottom-overflow-medium,
+.message-input-toolbar:not(.overflow-tier-late)
+  .composer-bottom-overflow-menu-group
+  .composer-bottom-overflow-late {
   display: none;
+}
+
+.message-input-toolbar.overflow-tier-early .composer-bottom-overflow,
+.message-input-toolbar.overflow-tier-medium .composer-bottom-overflow,
+.message-input-toolbar.overflow-tier-late .composer-bottom-overflow {
+  display: inline-flex;
+}
+
+.message-input-toolbar.overflow-tier-early
+  .composer-bottom-overflow-inline.composer-bottom-overflow-early,
+.message-input-toolbar.overflow-tier-medium
+  .composer-bottom-overflow-inline.composer-bottom-overflow-early,
+.message-input-toolbar.overflow-tier-late
+  .composer-bottom-overflow-inline.composer-bottom-overflow-early {
+  display: none;
+}
+
+.message-input-toolbar.overflow-tier-medium
+  .composer-bottom-overflow-inline.composer-bottom-overflow-medium,
+.message-input-toolbar.overflow-tier-late
+  .composer-bottom-overflow-inline.composer-bottom-overflow-medium {
+  display: none;
+}
+
+.message-input-toolbar.overflow-tier-late
+  .composer-bottom-overflow-inline.composer-bottom-overflow-late {
+  display: none;
+}
+
+.message-input-toolbar.overflow-tier-medium
+  .composer-bottom-overflow-menu-group
+  .composer-bottom-overflow-medium,
+.message-input-toolbar.overflow-tier-late
+  .composer-bottom-overflow-menu-group
+  .composer-bottom-overflow-medium,
+.message-input-toolbar.overflow-tier-late
+  .composer-bottom-overflow-menu-group
+  .composer-bottom-overflow-late {
+  display: inline-flex;
 }
 
 /* Pending approval indicator button in toolbar */
@@ -9239,36 +9284,6 @@ a.sidebar-nav-item {
   .message-input-wrapper .message-input-actions .context-usage-indicator {
     right: auto;
     bottom: auto;
-  }
-}
-
-@media (max-width: 390px) {
-  .composer-bottom-overflow {
-    display: inline-flex;
-  }
-
-  .composer-bottom-overflow-inline.composer-bottom-overflow-early {
-    display: none;
-  }
-}
-
-@media (max-width: 330px) {
-  .composer-bottom-overflow-inline.composer-bottom-overflow-late {
-    display: none;
-  }
-
-  .composer-bottom-overflow-menu-group .composer-bottom-overflow-late {
-    display: inline-flex;
-  }
-}
-
-@media (max-width: 360px) {
-  .composer-bottom-overflow-inline.composer-bottom-overflow-medium {
-    display: none;
-  }
-
-  .composer-bottom-overflow-menu-group .composer-bottom-overflow-medium {
-    display: inline-flex;
   }
 }
 
