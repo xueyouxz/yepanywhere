@@ -1,6 +1,7 @@
 import type {
   ProviderName,
   SessionLivenessSnapshot,
+  ShowThinking,
 } from "@yep-anywhere/shared";
 import type { MouseEvent, RefObject, TouchEvent } from "react";
 import {
@@ -64,7 +65,7 @@ import { MessageAge } from "./MessageAge";
 import { ModeSelector } from "./ModeSelector";
 import { SlashCommandButton } from "./SlashCommandButton";
 import { SpeechControlMenu } from "./SpeechControlMenu";
-import { ThinkingIcon } from "./ThinkingControls";
+import { ThinkingControlsPanel, ThinkingIcon } from "./ThinkingControls";
 import { RenderModeGlyph } from "./ui/RenderModeGlyph";
 import { VoiceInputButton, type VoiceInputButtonRef } from "./VoiceInputButton";
 
@@ -431,6 +432,9 @@ interface ToolbarThinkingControl {
   onSetMode: (mode: ThinkingMode) => void;
   onSetEffort: (level: EffortLevel) => void;
   onToggleEnabled: () => void;
+  /** "Show thinking" preference (default/on/off); all providers. */
+  showThinking: ShowThinking;
+  onSetShowThinking: (value: ShowThinking) => void;
 }
 
 interface ToolbarRenderModeControl {
@@ -696,17 +700,6 @@ function ThinkingToolbarControl({
     [clearLongPress],
   );
 
-  const selectMode = (mode: ThinkingMode) => {
-    control.onSetMode(mode);
-    setOpen(false);
-  };
-
-  const selectEffort = (level: EffortLevel) => {
-    control.onSetEffort(level);
-    control.onSetMode("on");
-    setOpen(false);
-  };
-
   return (
     <div className="thinking-toolbar-control" ref={rootRef}>
       <button
@@ -737,62 +730,18 @@ function ThinkingToolbarControl({
       </button>
       {open && (
         <div className="thinking-toolbar-menu" role="menu">
-          <div className="thinking-toolbar-menu-section">
-            <div className="thinking-toolbar-menu-label">
-              {t("modelSettingsThinkingTitle")}
-            </div>
-            <div className="thinking-toolbar-menu-options">
-              {(["off", "auto", "on"] as ThinkingMode[]).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={control.mode === mode}
-                  className={`thinking-toolbar-option ${control.mode === mode ? "active" : ""}`}
-                  onClick={() => selectMode(mode)}
-                >
-                  <span className={`mode-option-dot thinking-${mode}`} />
-                  <span>
-                    {mode === "off"
-                      ? t("modelSettingsThinkingOffLabel")
-                      : mode === "auto"
-                        ? t("modelSettingsThinkingAutoLabel")
-                        : t("modelSettingsThinkingOnLabel")}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="thinking-toolbar-menu-section">
-            <div className="thinking-toolbar-menu-label">
-              {t("modelSettingsEffortTitle")}
-            </div>
-            <div className="thinking-toolbar-menu-options effort-options">
-              {control.effortOptions.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={
-                    control.mode === "on" && control.level === option.value
-                  }
-                  className={`thinking-toolbar-option ${
-                    control.mode === "on" && control.level === option.value
-                      ? "active"
-                      : ""
-                  }`}
-                  title={option.description}
-                  onClick={() => selectEffort(option.value)}
-                >
-                  <span
-                    className={`model-switch-indicator-dot tone-${option.value}`}
-                    aria-hidden="true"
-                  />
-                  <span>{option.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+          <ThinkingControlsPanel
+            mode={control.mode}
+            onSetMode={control.onSetMode}
+            level={control.level}
+            effortOptions={control.effortOptions}
+            onSetEffort={control.onSetEffort}
+            showThinking={control.showThinking}
+            onSetShowThinking={control.onSetShowThinking}
+            t={t}
+            onSelect={close}
+            optionRole="menuitemradio"
+          />
           <div className="thinking-toolbar-menu-hint">
             {t("toolbarThinkingAppliesNextTurn")}
           </div>
@@ -983,7 +932,8 @@ export function MessageInputToolbarView({
       const left =
         refs?.left?.current ?? toolbar.querySelector(".message-input-left");
       const actions =
-        refs?.actions?.current ?? toolbar.querySelector(".message-input-actions");
+        refs?.actions?.current ??
+        toolbar.querySelector(".message-input-actions");
       if (!(left instanceof HTMLElement) || !(actions instanceof HTMLElement)) {
         return;
       }
@@ -998,9 +948,11 @@ export function MessageInputToolbarView({
       const overflow = toolbar.querySelector(".composer-bottom-overflow");
       const overflowWidth =
         overflow instanceof HTMLElement ? getVisibleControlWidth(overflow) : 0;
-      const visibleSectionCount = [leftWidth, overflowWidth, actionsWidth].filter(
-        (width) => width > 0,
-      ).length;
+      const visibleSectionCount = [
+        leftWidth,
+        overflowWidth,
+        actionsWidth,
+      ].filter((width) => width > 0).length;
       const totalWidth =
         leftWidth +
         overflowWidth +
@@ -1014,7 +966,7 @@ export function MessageInputToolbarView({
         const tierIndex = COMPOSER_OVERFLOW_TIERS.indexOf(tier);
         return (
           COMPOSER_OVERFLOW_TIERS[
-          Math.min(tierIndex + 1, COMPOSER_OVERFLOW_TIERS.length - 1)
+            Math.min(tierIndex + 1, COMPOSER_OVERFLOW_TIERS.length - 1)
           ] ?? "late"
         );
       });
@@ -1343,9 +1295,7 @@ export function MessageInputToolbarView({
           </button>
           {bottomOverflowOpen && (
             <div className="composer-bottom-overflow-menu" role="menu">
-              <div
-                className="composer-bottom-overflow-menu-group composer-bottom-overflow-menu-left"
-              >
+              <div className="composer-bottom-overflow-menu-group composer-bottom-overflow-menu-left">
                 {visibility.modeSelector && modeControl && (
                   <ModeSelector
                     mode={modeControl.mode}
@@ -1385,9 +1335,7 @@ export function MessageInputToolbarView({
                   </button>
                 )}
               </div>
-              <div
-                className="composer-bottom-overflow-menu-group composer-bottom-overflow-menu-right"
-              >
+              <div className="composer-bottom-overflow-menu-group composer-bottom-overflow-menu-right">
                 {visibility.slashMenu && slashControl && (
                   <span className="composer-bottom-overflow-medium">
                     <SlashCommandButton
@@ -1415,12 +1363,12 @@ export function MessageInputToolbarView({
                     onClick={renderModeControl.onToggle}
                     title={renderModeControl.title}
                     aria-label={renderModeControl.title}
-                    aria-pressed={
+                    role="menuitemcheckbox"
+                    aria-checked={
                       renderModeControl.state === "mixed"
                         ? "mixed"
                         : renderModeControl.state === "rendered"
                     }
-                    role="menuitem"
                   >
                     <RenderModeGlyph />
                   </button>
@@ -1437,8 +1385,8 @@ export function MessageInputToolbarView({
                     onTouchMove={nudgeControl.onClearTouch}
                     title={nudgeControl.title}
                     aria-label={nudgeControl.title}
-                    aria-pressed={nudgeControl.enabled}
-                    role="menuitem"
+                    role="menuitemcheckbox"
+                    aria-checked={nudgeControl.enabled}
                   >
                     <svg
                       width="16"
@@ -1607,23 +1555,23 @@ export function MessageInputToolbarView({
                       shortcutsControl.isearchScope,
                       t,
                     ).map((row) => (
-                        <div key={row.label} className="session-shortcuts-row">
-                          <span className="session-shortcuts-keys">
-                            {row.keys.map((key) => (
-                              <kbd key={key}>{key}</kbd>
-                            ))}
-                            {row.scope === "user" && (
-                              <>
-                                <span>{t("commonOr")}</span>
-                                <kbd>Ctrl</kbd>
-                                <kbd>Alt</kbd>
-                                <kbd>R</kbd>
-                              </>
-                            )}
-                          </span>
-                          <span>{row.label}</span>
-                        </div>
-                      ))}
+                      <div key={row.label} className="session-shortcuts-row">
+                        <span className="session-shortcuts-keys">
+                          {row.keys.map((key) => (
+                            <kbd key={key}>{key}</kbd>
+                          ))}
+                          {row.scope === "user" && (
+                            <>
+                              <span>{t("commonOr")}</span>
+                              <kbd>Ctrl</kbd>
+                              <kbd>Alt</kbd>
+                              <kbd>R</kbd>
+                            </>
+                          )}
+                        </span>
+                        <span>{row.label}</span>
+                      </div>
+                    ))}
                   </>
                 ) : (
                   <>
@@ -1651,7 +1599,9 @@ export function MessageInputToolbarView({
                         <kbd>Alt</kbd>
                         <kbd>S</kbd>
                       </span>
-                      <span>{t("toolbarShortcutFullSessionReverseSearch")}</span>
+                      <span>
+                        {t("toolbarShortcutFullSessionReverseSearch")}
+                      </span>
                     </div>
                     <div className="session-shortcuts-row">
                       <span className="session-shortcuts-keys">
@@ -1731,14 +1681,18 @@ export function MessageInputToolbarView({
                         <kbd>Ctrl</kbd>
                         <kbd>K</kbd>
                       </span>
-                      <span>{t("toolbarShortcutCancelLatestQueuedMessage")}</span>
+                      <span>
+                        {t("toolbarShortcutCancelLatestQueuedMessage")}
+                      </span>
                     </div>
                     <div className="session-shortcuts-row">
                       <span className="session-shortcuts-keys">
                         <kbd>Ctrl</kbd>
                         <kbd>O</kbd>
                       </span>
-                      <span>{t("toolbarShortcutToggleThinkingTranscript")}</span>
+                      <span>
+                        {t("toolbarShortcutToggleThinkingTranscript")}
+                      </span>
                     </div>
                     <div className="session-shortcuts-row">
                       <span className="session-shortcuts-keys">
@@ -1882,7 +1836,9 @@ export function MessageInputToolbarView({
               )}
             <button
               type="button"
-              onClick={() => handleQueueActionClick(actionsControl.send?.onSend)}
+              onClick={() =>
+                handleQueueActionClick(actionsControl.send?.onSend)
+              }
               onContextMenu={
                 actionsControl.send.primaryActionKind === "queue"
                   ? handleQueueContextMenu
@@ -1990,6 +1946,8 @@ export function MessageInputToolbar({
     thinkingLevel,
     setThinkingMode,
     setEffortLevel,
+    showThinking = "default",
+    setShowThinking,
     voiceInputEnabled = true,
     speechMethod = "browser-native",
     hasStoredSpeechMethod = false,
@@ -2120,8 +2078,8 @@ export function MessageInputToolbar({
         ? queueIsPatient
           ? t("toolbarPatientQueueActionLabel")
           : hasDualActions
-          ? t("toolbarQueuePrimaryActionLabel")
-          : t("toolbarQueueLabel")
+            ? t("toolbarQueuePrimaryActionLabel")
+            : t("toolbarQueueLabel")
         : t("toolbarSend");
   const stopTitle = `${t("toolbarStop")} (Esc)`;
   const showStopButton = !!(isRunning && onStop && isThinking);
@@ -2129,7 +2087,8 @@ export function MessageInputToolbar({
     showPatientQueueMode && onTogglePatientQueue
   );
   const showSendButton = !!(
-    onSend && (!showStopButton || canSend || showPatientQueueToggle)
+    onSend &&
+    (!showStopButton || canSend || showPatientQueueToggle)
   );
   const serverVoiceEnabled =
     versionInfo?.capabilities?.includes("voiceInput") ?? true;
@@ -2374,6 +2333,8 @@ export function MessageInputToolbar({
               onSetMode: setThinkingMode,
               onSetEffort: setEffortLevel,
               onToggleEnabled: toggleThinkingEnabled,
+              showThinking,
+              onSetShowThinking: setShowThinking ?? (() => {}),
             }
           : null
       }

@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import {
   forwardRef,
   useCallback,
@@ -108,9 +114,10 @@ const {
 }));
 
 vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-router-dom")>(
-    "react-router-dom",
-  );
+  const actual =
+    await vi.importActual<typeof import("react-router-dom")>(
+      "react-router-dom",
+    );
 
   return {
     ...actual,
@@ -140,7 +147,10 @@ vi.mock("../../hooks/useDraftPersistence", () => ({
     draftKeys.push(key);
     const [value, setValue] = useState("");
     const getDraft = useCallback(() => value, [value]);
-    const setDraft = useCallback((nextValue: string) => setValue(nextValue), []);
+    const setDraft = useCallback(
+      (nextValue: string) => setValue(nextValue),
+      [],
+    );
     const flushDraft = useCallback(() => {}, []);
     const clearInput = useCallback(() => setValue(""), []);
     const clearDraft = useCallback(() => setValue(""), []);
@@ -175,7 +185,10 @@ vi.mock("../../hooks/useModelSettings", () => ({
     setEffortLevel: mockSetEffortLevel,
     thinkingMode: modelSettingsState.thinkingMode,
     cycleThinkingMode: mockCycleThinkingMode,
+    setThinkingMode: vi.fn(),
     thinkingLevel: modelSettingsState.effortLevel,
+    showThinking: "default",
+    setShowThinking: vi.fn(),
     voiceInputEnabled: modelSettingsState.voiceInputEnabled,
     speechMethod: modelSettingsState.speechMethod,
     hasStoredSpeechMethod: modelSettingsState.hasStoredSpeechMethod,
@@ -192,6 +205,7 @@ vi.mock("../../hooks/useModelSettings", () => ({
         ? "auto"
         : `on:${modelSettingsState.effortLevel}`,
   getModelSetting: () => "opus",
+  getShowThinkingSetting: () => "default",
   EFFORT_LEVEL_OPTIONS: [
     { value: "low", label: "Low", description: "Fastest responses" },
     { value: "medium", label: "Medium", description: "Moderate thinking" },
@@ -203,9 +217,13 @@ vi.mock("../../hooks/useModelSettings", () => ({
 vi.mock("../../hooks/useProviders", () => ({
   useProviders: () => providersState,
   getAvailableProviders: (providers: typeof providersState.providers) =>
-    providers.filter((provider) => provider.installed && provider.authenticated),
+    providers.filter(
+      (provider) => provider.installed && provider.authenticated,
+    ),
   getDefaultProvider: (providers: typeof providersState.providers) =>
-    providers.find((provider) => provider.name === "claude") ?? providers[0] ?? null,
+    providers.find((provider) => provider.name === "claude") ??
+    providers[0] ??
+    null,
 }));
 
 vi.mock("../../hooks/useRemoteBasePath", () => ({
@@ -250,7 +268,7 @@ vi.mock("../../i18n", () => ({
   useI18n: () => ({
     t: (key: string) =>
       (
-        {
+        ({
           effortLevelLowLabel: "Low",
           effortLevelMediumLabel: "Medium",
           effortLevelHighLabel: "High",
@@ -263,7 +281,7 @@ vi.mock("../../i18n", () => ({
           effortLevelExtraDescription: "For your hardest tasks",
           effortLevelExtraHighDescription: "Extra-high reasoning",
           effortLevelMaxDescription: "Maximum effort",
-        } satisfies Record<string, string>
+        }) satisfies Record<string, string>
       )[key] ?? key,
   }),
 }));
@@ -457,9 +475,9 @@ describe("NewSessionForm", () => {
       expect(
         screen.getByRole("button", { name: "Claude" }).className,
       ).toContain("selected");
-      expect(screen.getByRole("button", { name: "Codex" }).className).not.toContain(
-        "selected",
-      );
+      expect(
+        screen.getByRole("button", { name: "Codex" }).className,
+      ).not.toContain("selected");
       expect(screen.getByTestId("filter-selected").textContent).toBe("opus");
     });
   });
@@ -508,7 +526,9 @@ describe("NewSessionForm", () => {
     fireEvent.change(screen.getByPlaceholderText("newSessionPlaceholder"), {
       target: { value: "hello" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "newSessionStartAction" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "newSessionStartAction" }),
+    );
 
     await waitFor(() => {
       expect(mockStartSession).toHaveBeenCalledTimes(1);
@@ -553,14 +573,10 @@ describe("NewSessionForm", () => {
       />,
     );
 
-    const medium = screen.getByRole("button", {
-      name: "modelSettingsEffortTitle: Medium",
-    });
+    const medium = screen.getByRole("radio", { name: "Medium" });
     expect(medium.className).toContain("active");
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "modelSettingsEffortTitle: Low" }),
-    );
+    fireEvent.click(screen.getByRole("radio", { name: "Low" }));
 
     expect(mockSetEffortLevel).toHaveBeenCalledWith("low");
   });
@@ -714,7 +730,9 @@ describe("NewSessionForm", () => {
 
     await waitFor(() => {
       expect(screen.getByText("newSessionRecapTitle")).toBeDefined();
-      expect(screen.getByText("newSessionPromptSuggestionsTitle")).toBeDefined();
+      expect(
+        screen.getByText("newSessionPromptSuggestionsTitle"),
+      ).toBeDefined();
     });
 
     const headings = Array.from(
@@ -758,7 +776,9 @@ describe("NewSessionForm", () => {
   });
 
   it("keeps the same draft storage key when project selection changes", () => {
-    const { rerender } = render(<NewSessionForm projects={[...chooserProjects]} />);
+    const { rerender } = render(
+      <NewSessionForm projects={[...chooserProjects]} />,
+    );
 
     rerender(
       <NewSessionForm
@@ -783,7 +803,9 @@ describe("NewSessionForm", () => {
     fireEvent.change(screen.getByPlaceholderText("newSessionPlaceholder"), {
       target: { value: "hello" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "newSessionStartAction" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "newSessionStartAction" }),
+    );
 
     await waitFor(() => {
       expect(mockAddProject).toHaveBeenCalledWith("/tmp/added-project");
@@ -803,7 +825,9 @@ describe("NewSessionForm", () => {
     fireEvent.change(screen.getByPlaceholderText("newSessionPlaceholder"), {
       target: { value: "hello" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "newSessionStartAction" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "newSessionStartAction" }),
+    );
 
     await waitFor(() => {
       expect(mockStartDetachedSession).toHaveBeenCalledWith(
@@ -899,7 +923,9 @@ describe("NewSessionForm", () => {
     fireEvent.change(screen.getByPlaceholderText("newSessionPlaceholder"), {
       target: { value: "hello" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "newSessionStartAction" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "newSessionStartAction" }),
+    );
 
     await waitFor(() => {
       expect(mockStartSession).toHaveBeenCalledWith(
@@ -942,7 +968,9 @@ describe("NewSessionForm", () => {
     fireEvent.change(screen.getByPlaceholderText("newSessionPlaceholder"), {
       target: { value: "hello" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "newSessionStartAction" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "newSessionStartAction" }),
+    );
 
     await waitFor(() => {
       expect(mockStartSession).toHaveBeenCalledWith(
@@ -981,12 +1009,16 @@ describe("NewSessionForm", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /recapModeSideSession/ }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /recapModeSideSession/ }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Local vLLM" }));
     fireEvent.change(screen.getByPlaceholderText("newSessionPlaceholder"), {
       target: { value: "hello" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "newSessionStartAction" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "newSessionStartAction" }),
+    );
 
     await waitFor(() => {
       expect(mockStartSession).toHaveBeenCalledWith(

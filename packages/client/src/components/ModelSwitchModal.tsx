@@ -5,7 +5,10 @@ import type {
 } from "@yep-anywhere/shared";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
-import { useModelSettings } from "../hooks/useModelSettings";
+import {
+  getShowThinkingSetting,
+  useModelSettings,
+} from "../hooks/useModelSettings";
 import { useI18n } from "../i18n";
 import {
   getEffortLevelLabel,
@@ -180,6 +183,7 @@ export function ModelSwitchModal({
       const result = await api.setProcessConfig(processId, {
         model: selectedModel,
         thinking,
+        showThinking: getShowThinkingSetting(),
       });
       setThinkingMode(thinkingMode);
       setEffortLevel(effectiveEffortLevel);

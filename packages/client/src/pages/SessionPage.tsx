@@ -62,7 +62,11 @@ import { useDeveloperMode } from "../hooks/useDeveloperMode";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import type { DraftControls } from "../hooks/useDraftPersistence";
 import { useEngagementTracking } from "../hooks/useEngagementTracking";
-import { getModelSetting, getThinkingSetting } from "../hooks/useModelSettings";
+import {
+  getModelSetting,
+  getThinkingSetting,
+  getShowThinkingSetting,
+} from "../hooks/useModelSettings";
 import { useProject } from "../hooks/useProjects";
 import { useProviders } from "../hooks/useProviders";
 import { usePublicShareStatus } from "../hooks/usePublicShareStatus";
@@ -1285,6 +1289,10 @@ function SessionPageContent({
     }
     const { outgoingText, slashCommand } = prepared;
     const thinking = prepared.thinking ?? getThinkingSetting();
+    // "Show thinking" preference (default/on/off), sent for all providers;
+    // server maps it where the provider has a request knob, client render
+    // gate honors it regardless.
+    const showThinking = getShowThinkingSetting();
     const queuedEditDraftAtSubmit = queuedEditDraft;
     const actionAtMs = Date.now();
     const clientTimestamp = getServerClockTimestamp(actionAtMs);
@@ -1358,6 +1366,7 @@ function SessionPageContent({
             mode: permissionMode,
             model,
             thinking,
+            showThinking,
             provider: effectiveProvider,
             executor: session?.executor,
           },
@@ -1406,6 +1415,8 @@ function SessionPageContent({
           undefined,
           clientTimestamp,
           metadata,
+          undefined,
+          showThinking,
         );
         const responseReceivedAtMs = Date.now();
         const timing = recordServerClockSample({
@@ -1558,6 +1569,10 @@ function SessionPageContent({
     }
     const { outgoingText, slashCommand } = prepared;
     const thinking = prepared.thinking ?? getThinkingSetting();
+    // "Show thinking" preference (default/on/off), sent for all providers;
+    // server maps it where the provider has a request knob, client render
+    // gate honors it regardless.
+    const showThinking = getShowThinkingSetting();
     const actionAtMs = Date.now();
     const clientTimestamp = getServerClockTimestamp(actionAtMs);
     const clientTimestampIso = new Date(clientTimestamp).toISOString();
@@ -1626,6 +1641,8 @@ function SessionPageContent({
         queuedEditPlacement,
         clientTimestamp,
         metadata,
+        undefined,
+        showThinking,
       );
       const responseReceivedAtMs = Date.now();
       const timing = recordServerClockSample({
@@ -2267,6 +2284,7 @@ function SessionPageContent({
             model:
               liveModelConfig?.model ?? session?.model ?? getModelSetting(),
             thinking: getThinkingSetting(),
+            showThinking: getShowThinkingSetting(),
             provider: providerName,
             executor: session?.executor,
           },

@@ -149,21 +149,18 @@ vi.mock("../../i18n", () => ({
   useI18n: () => ({
     t: (key: string, params?: Record<string, string>) =>
       (
-        {
+        ({
           commonOr: "or",
           toolbarKeyboardShortcutsAria: "Session keyboard shortcuts",
           toolbarPatientQueueEnable: "Use patient queue",
           toolbarPatientQueueDisable: "Use regular queue",
-          toolbarPatientQueueEnabledAck:
-            `Patient queue on: new queued messages wait for ${params?.timeout ?? ""} of verified quiet. Click again for regular queue.`,
-          toolbarPatientQueueDisabledAck:
-            `Regular queue on. Click again for patient queue (${params?.timeout ?? ""}).`,
+          toolbarPatientQueueEnabledAck: `Patient queue on: new queued messages wait for ${params?.timeout ?? ""} of verified quiet. Click again for regular queue.`,
+          toolbarPatientQueueDisabledAck: `Regular queue on. Click again for patient queue (${params?.timeout ?? ""}).`,
           toolbarPatientQueueActionLabel: "Queue patiently",
           toolbarPatientQueueConfiguredTimeout: `the configured ${params?.timeout ?? ""} timeout`,
           toolbarPatientQueueToggleShortcut:
             "Right-click or long-press a queue button to switch regular/patient queue.",
-          toolbarPatientQueueTooltip:
-            `Patient queue waits for ${params?.timeout ?? ""} of verified quiet before delivery. Regular queued messages may pass patient messages.`,
+          toolbarPatientQueueTooltip: `Patient queue waits for ${params?.timeout ?? ""} of verified quiet before delivery. Regular queued messages may pass patient messages.`,
           toolbarOverflowMenu: "More toolbar controls",
           toolbarQueuePrimaryActionLabel: "Queue from primary action",
           toolbarLivenessVerifiedProgress: "Verified progress",
@@ -191,12 +188,10 @@ vi.mock("../../i18n", () => ({
           toolbarShortcutJump: "Jump",
           toolbarShortcutPreviousNextMatch: "Previous / next match",
           toolbarShortcutClick: "Click",
-          toolbarShortcutPreviewRailJumps:
-            "Match preview / rail mark jumps",
+          toolbarShortcutPreviewRailJumps: "Match preview / rail mark jumps",
           toolbarShortcutCancelRestoreFocus: "Cancel / restore focus",
           toolbarShortcutScrollToCurrent: "Scroll to current",
-          toolbarShortcutUserTurnReverseSearch:
-            "User-turn reverse search",
+          toolbarShortcutUserTurnReverseSearch: "User-turn reverse search",
           toolbarShortcutAllTurnReverseSearch: "All-turn reverse search",
           toolbarShortcutFullSessionReverseSearch:
             "Full-session reverse search",
@@ -208,14 +203,13 @@ vi.mock("../../i18n", () => ({
           toolbarShortcutChangeKeys: "Change keys",
           toolbarShortcutSwapEnterCtrlEnter: "Swap Enter and Ctrl+Enter",
           toolbarShortcutStartBtwAside: "Start /btw aside",
-          toolbarShortcutStopAgentCancelOverlay:
-            "Stop agent / cancel overlay",
+          toolbarShortcutStopAgentCancelOverlay: "Stop agent / cancel overlay",
           toolbarShortcutRecallLastSentText: "Recall last sent text",
           toolbarShortcutCancelLatestQueuedMessage:
             "Cancel latest queued message",
           toolbarShortcutClearComposer: "Clear composer",
           toolbarShortcutRenderedSourceMode: "Rendered/source mode",
-        } satisfies Record<string, string>
+        }) satisfies Record<string, string>
       )[key] ?? key,
   }),
 }));
@@ -342,14 +336,23 @@ const toolbarT = ((key: string, params?: Record<string, string>) => {
 }) as MessageInputToolbarViewProps["t"];
 
 function renderToolbarView(
-  thinkingControl: MessageInputToolbarViewProps["thinkingControl"],
+  thinkingControl: Omit<
+    NonNullable<MessageInputToolbarViewProps["thinkingControl"]>,
+    "showThinking" | "onSetShowThinking"
+  >,
 ) {
+  const control: NonNullable<MessageInputToolbarViewProps["thinkingControl"]> =
+    {
+      showThinking: "default",
+      onSetShowThinking: () => {},
+      ...thinkingControl,
+    };
   render(
     <MessageInputToolbarView
       t={toolbarT}
       visibility={toolbarVisibility}
       attachmentControl={{ attachmentCount: 0 }}
-      thinkingControl={thinkingControl}
+      thinkingControl={control}
       shortcutsControl={{
         open: false,
         isearchScope: null,
@@ -1127,9 +1130,7 @@ describe("MessageInput", () => {
       },
     );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Use patient queue" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Use patient queue" }));
     fireEvent.change(textarea, {
       target: { value: "When done please run tests" },
     });
@@ -1149,7 +1150,9 @@ describe("MessageInput", () => {
     );
 
     const primaryButton = screen.getByLabelText("toolbarQueueLabel");
-    expect(primaryButton.getAttribute("title")).toContain("toolbarQueueTooltip");
+    expect(primaryButton.getAttribute("title")).toContain(
+      "toolbarQueueTooltip",
+    );
 
     fireEvent.change(textarea, { target: { value: "claude queue click" } });
     fireEvent.click(primaryButton);
@@ -1202,9 +1205,7 @@ describe("MessageInput", () => {
       { onQueue },
     );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Use patient queue" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Use patient queue" }));
     fireEvent.change(textarea, { target: { value: "claude patient queue" } });
     fireEvent.click(screen.getByLabelText("Queue patiently"));
 
@@ -1221,9 +1222,7 @@ describe("MessageInput", () => {
       },
     );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Use patient queue" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Use patient queue" }));
     fireEvent.change(textarea, { target: { value: "single patient action" } });
 
     const patientAction = screen.getByLabelText("Queue patiently");
@@ -1273,8 +1272,9 @@ describe("MessageInput", () => {
     expect(
       screen.getByRole("button", { name: "Use patient queue" }),
     ).toBeTruthy();
-    expect(screen.getByLabelText("toolbarQueueLabel").hasAttribute("disabled"))
-      .toBe(true);
+    expect(
+      screen.getByLabelText("toolbarQueueLabel").hasAttribute("disabled"),
+    ).toBe(true);
   });
 
   it("keeps queue available when the primary steer action downgrades", () => {

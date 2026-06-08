@@ -11,6 +11,7 @@ import {
   type RecapMode,
   type SessionMetadataResponse,
   type SessionOwnership,
+  type ShowThinking,
   type ThinkingOption,
   type UploadedFile,
   type UserQuestionAnswers,
@@ -488,6 +489,8 @@ interface StartSessionBody {
   model?: string;
   serviceTier?: string;
   thinking?: ThinkingOption;
+  /** Request-side "Show thinking" preference (default/on/off). */
+  showThinking?: ShowThinking;
   provider?: ProviderName;
   /** Browser-side timestamp for request latency tracking (epoch ms) */
   clientTimestamp?: number;
@@ -518,6 +521,8 @@ interface CreateSessionBody {
   model?: string;
   serviceTier?: string;
   thinking?: ThinkingOption;
+  /** Request-side "Show thinking" preference (default/on/off). */
+  showThinking?: ShowThinking;
   provider?: ProviderName;
   /** SSH host alias for remote execution (undefined = local) */
   executor?: string;
@@ -2401,7 +2406,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
 
     // Convert thinking option to SDK config
     const { thinking, effort } = body.thinking
-      ? thinkingOptionToConfig(body.thinking)
+      ? thinkingOptionToConfig(body.thinking, body.showThinking)
       : { thinking: undefined, effort: undefined };
 
     // Convert model option (undefined or "default" means use CLI default)
@@ -2502,7 +2507,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
 
     // Convert thinking option to SDK config
     const { thinking, effort } = body.thinking
-      ? thinkingOptionToConfig(body.thinking)
+      ? thinkingOptionToConfig(body.thinking, body.showThinking)
       : { thinking: undefined, effort: undefined };
 
     // Convert model option (undefined or "default" means use CLI default)
@@ -2589,7 +2594,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     };
 
     const { thinking, effort } = body.thinking
-      ? thinkingOptionToConfig(body.thinking)
+      ? thinkingOptionToConfig(body.thinking, body.showThinking)
       : { thinking: undefined, effort: undefined };
     const model =
       body.model && body.model !== "default" ? body.model : undefined;
@@ -2664,7 +2669,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
 
     const projectPath = await ensureDetachedProjectPath(executor);
     const { thinking, effort } = body.thinking
-      ? thinkingOptionToConfig(body.thinking)
+      ? thinkingOptionToConfig(body.thinking, body.showThinking)
       : { thinking: undefined, effort: undefined };
     const model =
       body.model && body.model !== "default" ? body.model : undefined;
@@ -2755,7 +2760,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
 
     // Convert thinking option to SDK config
     const { thinking, effort } = body.thinking
-      ? thinkingOptionToConfig(body.thinking)
+      ? thinkingOptionToConfig(body.thinking, body.showThinking)
       : { thinking: undefined, effort: undefined };
 
     // Convert model option (undefined or "default" means use CLI default)
@@ -3005,7 +3010,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     });
 
     const { thinking, effort } = body.thinking
-      ? thinkingOptionToConfig(body.thinking)
+      ? thinkingOptionToConfig(body.thinking, body.showThinking)
       : { thinking: undefined, effort: undefined };
     const model =
       body.model && body.model !== "default" ? body.model : undefined;
@@ -3186,7 +3191,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
 
     // Convert thinking option to SDK config
     const { thinking, effort } = body.thinking
-      ? thinkingOptionToConfig(body.thinking)
+      ? thinkingOptionToConfig(body.thinking, body.showThinking)
       : { thinking: undefined, effort: undefined };
 
     const metadataProvider = deps.sessionMetadataService?.getProvider(

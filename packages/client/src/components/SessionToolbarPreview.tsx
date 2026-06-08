@@ -79,6 +79,8 @@ export function SessionToolbarPreview() {
             onSetMode: noop,
             onSetEffort: noop,
             onToggleEnabled: noop,
+            showThinking: "default",
+            onSetShowThinking: noop,
           }}
           renderModeControl={{
             state: "mixed",
@@ -122,7 +124,8 @@ export function SessionToolbarPreview() {
             isearchScope: null,
             setOpen: setShortcutsOpen,
             settingsOpen: false,
-            setSettingsOpen: noop as unknown as MessageInputToolbarViewProps["shortcutsControl"]["setSettingsOpen"],
+            setSettingsOpen:
+              noop as unknown as MessageInputToolbarViewProps["shortcutsControl"]["setSettingsOpen"],
             hasDualActions: true,
             enterActionKind: "steer",
             canSwapEnterAction: false,

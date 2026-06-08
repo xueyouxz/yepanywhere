@@ -52,6 +52,8 @@ export type {
   ThinkingMode,
   ThinkingOption,
   ThinkingConfig,
+  ThinkingDisplay,
+  ShowThinking,
   EffortLevel,
   FileMetadata,
   FileContentResponse,

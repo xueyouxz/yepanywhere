@@ -2,6 +2,7 @@ import type {
   ClientDefaults,
   EffortLevel,
   ModelOption,
+  ShowThinking,
   ThinkingMode,
   ThinkingOption,
 } from "@yep-anywhere/shared";
@@ -113,6 +114,24 @@ function loadThinkingMode(): ThinkingMode {
 
 function saveThinkingMode(mode: ThinkingMode) {
   setServerScoped("thinkingMode", mode, LEGACY_KEYS.thinkingMode);
+}
+
+const SHOW_THINKING_VALUES: ShowThinking[] = ["default", "on", "off"];
+
+/**
+ * "Show thinking" preference (default/on/off). Provider-agnostic: drives the
+ * client render gate (default show/hide of thought blocks) and the request
+ * side (summaries) where supported. Defaults to "default" (provider-native).
+ */
+function loadShowThinking(): ShowThinking {
+  const stored = getServerScoped("showThinking");
+  return stored && SHOW_THINKING_VALUES.includes(stored as ShowThinking)
+    ? (stored as ShowThinking)
+    : "default";
+}
+
+function saveShowThinking(value: ShowThinking) {
+  setServerScoped("showThinking", value);
 }
 
 function loadVoiceInputEnabled(): boolean {
@@ -316,6 +335,8 @@ export function useModelSettings() {
     useState<EffortLevel>(loadEffortLevel);
   const [thinkingMode, setThinkingModeState] =
     useState<ThinkingMode>(loadThinkingMode);
+  const [showThinking, setShowThinkingState] =
+    useState<ShowThinking>(loadShowThinking);
   const [voiceInputEnabled, setVoiceInputEnabledState] = useState<boolean>(() =>
     resolveDefaultedValue(
       loadVoiceInputEnabledSetting(),
@@ -383,6 +404,11 @@ export function useModelSettings() {
     saveThinkingMode(mode);
   }, []);
 
+  const setShowThinking = useCallback((value: ShowThinking) => {
+    setShowThinkingState(value);
+    saveShowThinking(value);
+  }, []);
+
   const cycleThinkingMode = useCallback(() => {
     const idx = THINKING_MODES.indexOf(thinkingMode);
     const next = THINKING_MODES[(idx + 1) % THINKING_MODES.length] ?? "off";
@@ -441,6 +467,8 @@ export function useModelSettings() {
     thinkingMode,
     setThinkingMode,
     cycleThinkingMode,
+    showThinking,
+    setShowThinking,
     voiceInputEnabled,
     setVoiceInputEnabled,
     toggleVoiceInput,
@@ -481,6 +509,13 @@ export function getThinkingSetting(
  */
 export function getThinkingMode(): ThinkingMode {
   return loadThinkingMode();
+}
+
+/**
+ * Get the "Show thinking" preference (default/on/off) without React state.
+ */
+export function getShowThinkingSetting(): ShowThinking {
+  return loadShowThinking();
 }
 
 /**

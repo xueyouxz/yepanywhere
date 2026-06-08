@@ -93,6 +93,7 @@ export const SERVER_SCOPED_KEYS = {
   thinkingLevel: "thinking-level",
   thinkingEnabled: "thinking-enabled",
   thinkingMode: "thinking-mode",
+  showThinking: "show-thinking",
   voiceInputEnabled: "voice-input-enabled",
   speechMethod: "speech-method",
   speechSmartTurn: "speech-smart-turn",

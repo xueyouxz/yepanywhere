@@ -23,6 +23,7 @@ import type {
   RevokePublicSessionSharesResponse,
   SessionMetadataResponse,
   SessionLivenessSnapshot,
+  ShowThinking,
   SlashCommand,
   ThinkingOption,
   UploadedFile,
@@ -157,6 +158,8 @@ export interface SessionOptions {
   /** Provider-visible service tier. Omit for provider/default behavior. */
   serviceTier?: string;
   thinking?: ThinkingOption;
+  /** Request-side "Show thinking" preference (default/on/off). */
+  showThinking?: ShowThinking;
   provider?: ProviderName;
   /** SSH host alias for remote execution (undefined = local) */
   executor?: string;
@@ -518,6 +521,7 @@ export const api = {
         model: options?.model,
         serviceTier: options?.serviceTier,
         thinking: options?.thinking,
+        showThinking: options?.showThinking,
         provider: options?.provider,
         executor: options?.executor,
         recapMode: options?.recapMode,
@@ -548,6 +552,7 @@ export const api = {
         model: options?.model,
         serviceTier: options?.serviceTier,
         thinking: options?.thinking,
+        showThinking: options?.showThinking,
         provider: options?.provider,
         executor: options?.executor,
         recapMode: options?.recapMode,
@@ -578,6 +583,7 @@ export const api = {
         model: options?.model,
         serviceTier: options?.serviceTier,
         thinking: options?.thinking,
+        showThinking: options?.showThinking,
         provider: options?.provider,
         executor: options?.executor,
         recapMode: options?.recapMode,
@@ -604,6 +610,7 @@ export const api = {
         model: options?.model,
         serviceTier: options?.serviceTier,
         thinking: options?.thinking,
+        showThinking: options?.showThinking,
         provider: options?.provider,
         executor: options?.executor,
         recapMode: options?.recapMode,
@@ -635,6 +642,7 @@ export const api = {
         model: options?.model,
         serviceTier: options?.serviceTier,
         thinking: options?.thinking,
+        showThinking: options?.showThinking,
         provider: options?.provider,
         executor: options?.executor,
         recapMode: options?.recapMode,
@@ -672,6 +680,7 @@ export const api = {
         model: options?.model,
         serviceTier: options?.serviceTier,
         thinking: options?.thinking,
+        showThinking: options?.showThinking,
         provider: options?.provider,
         executor: options?.executor,
         recapMode: options?.recapMode,
@@ -693,6 +702,7 @@ export const api = {
     clientTimestamp?: number,
     messageMetadata?: UserMessageMetadata,
     serviceTier?: string,
+    showThinking?: ShowThinking,
   ) =>
     fetchJSON<{
       queued: boolean;
@@ -712,6 +722,7 @@ export const api = {
         attachments,
         tempId,
         thinking,
+        showThinking,
         serviceTier,
         deferred,
         insertBeforeTempId: placement?.beforeTempId,
@@ -805,7 +816,11 @@ export const api = {
 
   setProcessConfig: (
     processId: string,
-    config: { model?: string; thinking?: ThinkingOption },
+    config: {
+      model?: string;
+      thinking?: ThinkingOption;
+      showThinking?: ShowThinking;
+    },
   ) =>
     fetchJSON<{
       success: boolean;

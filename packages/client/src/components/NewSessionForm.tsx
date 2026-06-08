@@ -28,6 +28,7 @@ import { useDraftPersistence } from "../hooks/useDraftPersistence";
 import {
   getModelSetting,
   getThinkingSetting,
+  getShowThinkingSetting,
   useModelSettings,
 } from "../hooks/useModelSettings";
 import {
@@ -44,7 +45,6 @@ import { useRemoteExecutors } from "../hooks/useRemoteExecutors";
 import { useServerSettings } from "../hooks/useServerSettings";
 import { useI18n } from "../i18n";
 import {
-  getEffortLevelLabel,
   getEffortLevelOptions,
   resolveSupportedEffortLevel,
 } from "../lib/effortLevels";
@@ -81,7 +81,7 @@ import { shortenPath } from "../lib/text";
 import type { PermissionMode, Project } from "../types";
 import { FilterDropdown, type FilterOption } from "./FilterDropdown";
 import { SpeechControlMenu } from "./SpeechControlMenu";
-import { ThinkingEffortSelector, ThinkingIcon } from "./ThinkingControls";
+import { ThinkingControlsPanel } from "./ThinkingControls";
 import { VoiceInputButton, type VoiceInputButtonRef } from "./VoiceInputButton";
 
 interface PendingFile {
@@ -358,7 +358,9 @@ export function NewSessionForm({
     effortLevel,
     setEffortLevel,
     thinkingMode,
-    cycleThinkingMode,
+    setThinkingMode,
+    showThinking,
+    setShowThinking,
     voiceInputEnabled,
     speechMethod,
     hasStoredSpeechMethod,
@@ -475,11 +477,6 @@ export function NewSessionForm({
   const effectiveEffortLevel = resolveSupportedEffortLevel(
     effortLevel,
     effortOptions,
-  );
-  const effectiveEffortLabel = getEffortLevelLabel(
-    effectiveEffortLevel,
-    selectedProviderInfo,
-    t,
   );
   const selectedProviderDisplayName =
     selectedProviderInfo?.displayName ?? selectedProvider ?? "";
@@ -1005,10 +1002,15 @@ export function NewSessionForm({
 
       // Get model and thinking settings
       const thinking = getThinkingSetting(effectiveEffortLevel);
+      // "Show thinking" preference (default/on/off). Sent for all providers;
+      // the server maps it to a request knob where the provider supports one,
+      // and the client render gate honors it regardless.
+      const showThinking = getShowThinkingSetting();
       const sessionOptions = {
         mode,
         model: selectedModel ?? undefined,
         thinking,
+        showThinking,
         provider: selectedProvider ?? undefined,
         executor: selectedExecutor ?? undefined,
         recapMode: selectedRecapMode,
@@ -1122,6 +1124,9 @@ export function NewSessionForm({
           undefined,
           undefined,
           clientTimestamp,
+          undefined, // messageMetadata
+          undefined, // serviceTier
+          showThinking,
         );
         const queueResponseReceivedAtMs = Date.now();
         const queueTiming = recordServerClockSample({
@@ -1497,38 +1502,6 @@ export function NewSessionForm({
               />
             }
           />
-          {supportsThinkingToggle && (
-            <>
-              <button
-                type="button"
-                className={`toolbar-button thinking-toggle-button ${thinkingMode !== "off" ? `active ${thinkingMode}` : ""}`}
-                onClick={cycleThinkingMode}
-                disabled={isStarting}
-                title={
-                  thinkingMode === "off"
-                    ? t("newSessionThinkingOff")
-                    : thinkingMode === "auto"
-                      ? t("newSessionThinkingAuto")
-                      : t("newSessionThinkingOn", {
-                          level: effectiveEffortLabel,
-                        })
-                }
-                aria-label={t("newSessionThinkingMode", { mode: thinkingMode })}
-              >
-                <ThinkingIcon mode={thinkingMode} />
-              </button>
-              {thinkingMode === "on" && (
-                <ThinkingEffortSelector
-                  options={effortOptions}
-                  value={effectiveEffortLevel}
-                  onChange={setEffortLevel}
-                  ariaLabel={t("modelSettingsEffortTitle")}
-                  disabled={isStarting}
-                  variant="toolbar"
-                />
-              )}
-            </>
-          )}
         </div>
         <button
           type="button"
@@ -1606,6 +1579,19 @@ export function NewSessionForm({
             );
           })}
         </div>
+      )}
+      {supportsThinkingToggle && (
+        <ThinkingControlsPanel
+          mode={thinkingMode}
+          onSetMode={setThinkingMode}
+          level={effectiveEffortLevel}
+          effortOptions={effortOptions}
+          onSetEffort={setEffortLevel}
+          showThinking={showThinking}
+          onSetShowThinking={setShowThinking}
+          t={t}
+          className="new-session-thinking-controls"
+        />
       )}
     </>
   );

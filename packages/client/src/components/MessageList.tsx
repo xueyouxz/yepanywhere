@@ -13,6 +13,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { getShowThinkingSetting } from "../hooks/useModelSettings";
 import { useRelativeNow } from "../hooks/useRelativeNow";
 import { useI18n } from "../i18n";
 import { markReloadPerfPhase } from "../lib/diagnostics/reloadPerfProbe";
@@ -298,7 +299,10 @@ function getFirstVisibleRenderAnchor(
       continue;
     }
     const rowRect = row.getBoundingClientRect();
-    if (rowRect.bottom > containerRect.top && rowRect.top < containerRect.bottom) {
+    if (
+      rowRect.bottom > containerRect.top &&
+      rowRect.top < containerRect.bottom
+    ) {
       return {
         id,
         topOffset: rowRect.top - containerRect.top,
@@ -729,10 +733,14 @@ function getDeferredMessageStatus({
   nowMs: number;
 }): string {
   if (deferred.deliveryState === "sending") {
-    return isPatient ? "Sending patient message..." : "Sending queued message...";
+    return isPatient
+      ? "Sending patient message..."
+      : "Sending queued message...";
   }
   if (deferred.deliveryState === "recovered") {
-    return isPatient ? "Recovered patient draft" : "Recovered draft (not queued)";
+    return isPatient
+      ? "Recovered patient draft"
+      : "Recovered draft (not queued)";
   }
   if (deferred.deliveryState === "verifying") {
     return isPatient ? "Patient (verifying)" : "Queued (verifying)";
@@ -742,7 +750,8 @@ function getDeferredMessageStatus({
   }
 
   if (isPatient) {
-    const age = timestampMs !== null ? formatQueuedAge(timestampMs, nowMs) : null;
+    const age =
+      timestampMs !== null ? formatQueuedAge(timestampMs, nowMs) : null;
     const position =
       lanePosition?.patientIndex === undefined
         ? ""
@@ -1105,15 +1114,20 @@ export const MessageList = memo(function MessageList({
   const searchArrowRepeatDirectionRef = useRef<"previous" | "next" | null>(
     null,
   );
-  const [thinkingItemsVisible, setThinkingItemsVisible] = useState(
-    loadSessionThinkingVisible,
-  );
+  const [thinkingItemsVisible, setThinkingItemsVisible] = useState(() => {
+    // "Show thinking" preference seeds the render gate's default; "default"
+    // falls back to the live eye-toggle value. The eye icon still overrides
+    // within a view.
+    const showThinking = getShowThinkingSetting();
+    if (showThinking === "on") return true;
+    if (showThinking === "off") return false;
+    return loadSessionThinkingVisible();
+  });
   const [thinkingExpansionOverrides, setThinkingExpansionOverrides] = useState<
     Record<string, boolean>
   >({});
-  const [autoExpandedThinkingItemIds, setAutoExpandedThinkingItemIds] = useState<
-    ReadonlySet<string>
-  >(() => new Set());
+  const [autoExpandedThinkingItemIds, setAutoExpandedThinkingItemIds] =
+    useState<ReadonlySet<string>>(() => new Set());
   const [navMotionCue, setNavMotionCue] = useState<UserTurnNavMotionCue | null>(
     null,
   );
@@ -1683,7 +1697,9 @@ export const MessageList = memo(function MessageList({
   useEffect(() => {
     if (
       queuedContextReturn &&
-      !composerTailItems.some((item) => item.key === queuedContextReturn.tailKey)
+      !composerTailItems.some(
+        (item) => item.key === queuedContextReturn.tailKey,
+      )
     ) {
       setQueuedContextReturn(null);
     }
@@ -1869,8 +1885,7 @@ export const MessageList = memo(function MessageList({
           if (anchorBefore && nextMessageList) {
             const row = findRenderRow(nextMessageList, anchorBefore.id);
             if (row) {
-              const containerRect =
-                nextScrollContainer.getBoundingClientRect();
+              const containerRect = nextScrollContainer.getBoundingClientRect();
               const rowRect = row.getBoundingClientRect();
               nextScrollContainer.scrollTop = Math.max(
                 0,
@@ -2928,7 +2943,9 @@ export const MessageList = memo(function MessageList({
           const isPatientDeferred = isPatientDeferredMessage(deferred);
           const lanePosition = composerTailLanePositions.get(tailItem.key);
           const contextRenderId =
-            timestampMs !== null ? findQueuedContextRenderId(timestampMs) : null;
+            timestampMs !== null
+              ? findQueuedContextRenderId(timestampMs)
+              : null;
           const deferredStatus = getDeferredMessageStatus({
             deferred,
             isPatient: isPatientDeferred,

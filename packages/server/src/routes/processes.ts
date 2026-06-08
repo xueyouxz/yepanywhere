@@ -3,6 +3,7 @@ import {
   HELPER_SIDE_MODEL_SAME_AS_MAIN,
   RECAP_MODES,
   type RecapMode,
+  type ShowThinking,
   type ThinkingOption,
   type UrlProjectId,
   getSessionDisplayTitle,
@@ -324,6 +325,7 @@ export function createProcessesRoutes(deps: ProcessesDeps): Hono {
     const body = await c.req.json<{
       model?: string;
       thinking?: ThinkingOption;
+      showThinking?: ShowThinking;
     }>();
     const updates: {
       model?: string;
@@ -339,7 +341,10 @@ export function createProcessesRoutes(deps: ProcessesDeps): Hono {
         updates.thinking = undefined;
         updates.effort = undefined;
       } else {
-        const { thinking, effort } = thinkingOptionToConfig(body.thinking);
+        const { thinking, effort } = thinkingOptionToConfig(
+          body.thinking,
+          body.showThinking,
+        );
         updates.thinking = thinking;
         updates.effort = effort;
       }

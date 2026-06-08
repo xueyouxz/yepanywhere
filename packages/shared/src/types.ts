@@ -339,35 +339,75 @@ export type ThinkingMode = "off" | "auto" | "on";
 export type ThinkingOption = "off" | "auto" | `on:${EffortLevel}` | EffortLevel;
 
 /**
+ * Whether the model is asked to return summarized thinking text.
+ * - "summarized": emit a human-readable reasoning summary (Opus 4.7/4.8).
+ * - "omitted" (default when unset): redacted thinking, no summary text.
+ */
+export type ThinkingDisplay = "summarized" | "omitted";
+
+/**
+ * User-facing "Show thinking" preference. Provider-agnostic: drives the
+ * client render gate (default show/hide of thought blocks) for every
+ * provider, and the request side (summarized thinking) where the provider
+ * supports an explicit request.
+ * - "default": provider-native behavior (least disruptive).
+ * - "on": show thoughts; request summaries where supported.
+ * - "off": hide thoughts; suppress the request where supported.
+ */
+export type ShowThinking = "default" | "on" | "off";
+
+/**
  * Thinking configuration for the SDK.
  */
 export type ThinkingConfig =
-  | { type: "adaptive" }
-  | { type: "enabled"; budgetTokens?: number }
+  | { type: "adaptive"; display?: ThinkingDisplay }
+  | { type: "enabled"; budgetTokens?: number; display?: ThinkingDisplay }
   | { type: "disabled" };
 
 /**
  * Convert thinking option to SDK thinking config + effort level.
  * On Opus 4.6+, "enabled" type is for older models and crashes the CLI.
  * Instead, "on" mode uses adaptive + explicit effort level.
+ *
+ * `showThinking` is the request-side mapping of the user preference: "on"
+ * asks the model to return summarized thinking text (`display:
+ * 'summarized'`), "off" explicitly omits it, and "default" leaves the
+ * provider-native behavior (no `display` field). Only meaningful for
+ * adaptive thinking; ignored when thinking is disabled.
  */
-export function thinkingOptionToConfig(option: ThinkingOption): {
+export function thinkingOptionToConfig(
+  option: ThinkingOption,
+  showThinking: ShowThinking = "default",
+): {
   thinking: ThinkingConfig;
   effort?: EffortLevel;
 } {
   if (option === "off") {
     return { thinking: { type: "disabled" } };
   }
+  const display: ThinkingDisplay | undefined =
+    showThinking === "on"
+      ? "summarized"
+      : showThinking === "off"
+        ? "omitted"
+        : undefined;
+  const adaptiveThinking = (): ThinkingConfig =>
+    display === undefined
+      ? { type: "adaptive" }
+      : { type: "adaptive", display };
   if (option === "auto") {
-    return { thinking: { type: "adaptive" } };
+    return { thinking: adaptiveThinking() };
   }
   // "on:high" etc. = adaptive thinking with explicit effort level
   if (option.startsWith("on:")) {
     const effort = option.slice(3) as EffortLevel;
-    return { thinking: { type: "adaptive" }, effort };
+    return { thinking: adaptiveThinking(), effort };
   }
   // Plain EffortLevel = adaptive + effort (backward compat with old clients)
-  return { thinking: { type: "adaptive" }, effort: option as EffortLevel };
+  return {
+    thinking: adaptiveThinking(),
+    effort: option as EffortLevel,
+  };
 }
 
 /**

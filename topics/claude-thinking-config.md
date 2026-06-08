@@ -71,17 +71,32 @@ layers, both real and both fixable:
   `{ type: "adaptive" }` with **no `display` field**, so it defaults to
   `'omitted'`. That alone explains seeing no thinking text — the model is
   told not to return it.
-- **Layer B — stream/render drops thinking.** Even with `'summarized'`
-  set, YA must surface the thinking content. `SDKThinkingTokensMessage`
-  (`subtype: 'thinking_tokens'`) carries only an `estimated_tokens`
-  progress estimate — its own doc string says it is "for spinners/pills,
-  not the authoritative billed output_tokens," digested from
-  `thinking_delta` during the redacted phase. The reasoning *text*
-  arrives as thinking blocks on `SDKPartialAssistantMessage` /
-  assistant-message content. Per [claude provider control](claude.md)
-  "Current Problem Areas", `Process` keeps a short replay window and
-  **excludes `stream_event`**, and catch-up does not reconstruct thinking
-  deltas — so even the progress pings are likely dropped today.
+- **Layer B — render already exists.** The thinking-block renderer is
+  built and wired: `thinkingRenderer`
+  (`packages/client/src/components/renderers/blocks/ThinkingRenderer.tsx`)
+  is registered in `renderers/index.ts` and handles
+  `type: ["thinking", "reasoning", "reasoning_text", "summary_text"]`,
+  extracting text from `block.thinking`, the `summary[]` array (the
+  summarized-thinking shape), or `block.text`. It renders a collapsed
+  "Thinking" pill that expands on click — the persistent, on-demand
+  analog of the TUI's `C-o` (and better: the TUI discards summaries when
+  thought completes; YA keeps them collapsed-but-available). So no
+  renderer needs building. The one open question is *delivery*: do
+  summarized blocks reach the client via the persisted assistant message
+  (in which case render is automatic) or only via `stream_event` deltas?
+  Per [claude provider control](claude.md) "Current Problem Areas",
+  `Process` keeps a short replay window that **excludes `stream_event`**;
+  if summaries arrive only as stream deltas they could be dropped on
+  catch-up. This is the only thing the isolating test below needs to
+  settle — and it is verify-first, not assumed-broken.
+
+Codex, for contrast, **always** requests reasoning summaries: the Codex
+provider hard-codes `summary: "auto"` (`packages/server/src/sdk/
+providers/codex.ts`), so Codex transcripts carry `summary_text` blocks
+that the shared renderer already shows. Codex's user-facing show/hide is
+the render-only transcript collapse, not a request control. Claude has no
+equivalent request control today — that is the gap this note's proposal
+closes.
 
 On Opus 4.7/4.8 the **default is to show no thinking blocks** — this is
 the documented, observed default, not an uncertainty. The Claude Code TUI
@@ -111,14 +126,30 @@ model/CLI is not honoring `display`).
 
 ## Proposal (incremental, each gated)
 
-1. **Show thinking text** (highest priority — the concrete cause of
-   "never see thinking"). Add `display: 'summarized'` to YA's adaptive
-   `ThinkingConfig` (`packages/shared/src/types.ts`), then render the
-   thinking blocks: confirm the `stream_event` / `Process` replay path no
-   longer drops `SDKPartialAssistantMessage` thinking content, and add a
-   renderer. Optionally surface the `thinking_tokens` estimate as a live
-   thinking spinner/pill regardless of `display`. Run the isolating test
-   above to separate the request layer from the render layer.
+1. **Request thinking summaries** (highest priority — the concrete cause
+   of "never see thinking"; the renderer already exists, so this is the
+   whole functional gap). A new **request-side** user setting controls
+   whether YA sends `display: 'summarized'` on the adaptive request:
+   - Add `display?: 'summarized' | 'omitted'` to YA's adaptive
+     `ThinkingConfig` (`packages/shared/src/types.ts`) and thread a
+     `summaries` flag through `thinkingOptionToConfig`.
+   - Carry a `thinkingSummaries?: boolean` request field through the
+     session/process routes to the Claude provider.
+   - Expose a toggle, **default off** (status quo; a user who wants it on
+     flips the new-session-default analog, exactly like thinking / effort
+     / model). It is configurable **mid-session** in the thinking toolbar
+     menu (`MessageInputToolbar` `ThinkingToolbarControl`, "applies next
+     turn") and present in the new-session form as the default for new
+     sessions. Per-turn semantics: it never rewrites prior turns.
+   - Capability-gate so request ⇔ display: only send `display:'summarized'`
+     for providers/models that will render it (Claude adaptive). Codex
+     already forces `summary:'auto'`, so the toggle is Claude-relevant;
+     hide or disable it where the provider already summarizes.
+   - Distinct from the **render-only** show/hide of already-produced
+     blocks (collapse/expand, the transcript toggle), which stays as-is
+     and never re-requests.
+   - Then run the isolating test above to confirm summarized blocks reach
+     the client (persisted-message vs dropped `stream_event` delivery).
 2. Surface `taskBudget.total` as an optional per-session token-budget
    control in the new-session / effort UI, default unset (let the model
    decide), behind a capability flag tied to model support and the alpha
