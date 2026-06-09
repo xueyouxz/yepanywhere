@@ -1,17 +1,31 @@
 import { useState } from "react";
-import { enable as enableAutostart } from "@tauri-apps/plugin-autostart";
-import { saveConfig, startServer, type AppConfig } from "../tauri";
+import {
+  disable as disableAutostart,
+  enable as enableAutostart,
+} from "@tauri-apps/plugin-autostart";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import {
+  getServerStatus,
+  openDashboardWindow,
+  openServerOutputWindow,
+  saveConfig,
+  startServer,
+  type AppConfig,
+  type StartupView,
+} from "../tauri";
 
 interface Props {
   agents: string[];
-  startMinimized: boolean;
+  startupView: StartupView;
+  runInBackground: boolean;
   autostart: boolean;
   onComplete: (config: AppConfig) => void;
 }
 
 export function ReadyPage({
   agents,
-  startMinimized,
+  startupView,
+  runInBackground,
   autostart,
   onComplete,
 }: Props) {
@@ -25,16 +39,32 @@ export function ReadyPage({
     const config: AppConfig = {
       setup_complete: true,
       agents,
-      start_minimized: startMinimized,
+      start_minimized: startupView === "tray_only",
+      startup_view: startupView,
+      run_in_background: runInBackground,
     };
 
     try {
       await saveConfig(config);
       if (autostart) {
         await enableAutostart();
+      } else {
+        await disableAutostart();
       }
-      await startServer();
+
+      const status = await getServerStatus();
+      if (status !== "running") {
+        await startServer();
+      }
+
+      if (startupView === "dashboard") {
+        await openDashboardWindow();
+      } else if (startupView === "server_output") {
+        await openServerOutputWindow();
+      }
+
       onComplete(config);
+      await getCurrentWindow().hide();
     } catch (e) {
       setError(String(e));
       setLaunching(false);

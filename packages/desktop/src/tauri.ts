@@ -1,12 +1,23 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+export type StartupView = "dashboard" | "server_output" | "tray_only";
+
 export interface AppConfig {
   setup_complete: boolean;
   agents: string[];
   /** User-specified port override. Undefined/null = auto-pick a free port on each launch. */
   port?: number | null;
+  /** Backwards-compatible field for configs saved before startup_view. */
   start_minimized: boolean;
+  startup_view: StartupView;
+  run_in_background: boolean;
+}
+
+export interface ServerOutputChunk {
+  sequence: number;
+  stream: "stdout" | "stderr" | "system";
+  data: string;
 }
 
 export async function getConfig(): Promise<AppConfig> {
@@ -44,6 +55,22 @@ export async function getDesktopToken(): Promise<string | null> {
 
 export async function getServerPort(): Promise<number | null> {
   return invoke("get_server_port");
+}
+
+export async function getServerOutputBuffer(): Promise<ServerOutputChunk[]> {
+  return invoke("get_server_output_buffer");
+}
+
+export async function openDashboardWindow(): Promise<void> {
+  return invoke("open_dashboard_window");
+}
+
+export async function openServerOutputWindow(): Promise<void> {
+  return invoke("open_server_output_window");
+}
+
+export async function openSetupWindow(): Promise<void> {
+  return invoke("open_setup_window");
 }
 
 export async function installYepServer(): Promise<void> {
@@ -107,4 +134,10 @@ export function onPtyOutput(callback: (data: string) => void) {
 
 export function onPtyExit(callback: () => void) {
   return listen("pty-exit", () => callback());
+}
+
+export function onServerOutput(callback: (chunk: ServerOutputChunk) => void) {
+  return listen<ServerOutputChunk>("server-output", (event) =>
+    callback(event.payload),
+  );
 }

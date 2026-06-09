@@ -2,10 +2,17 @@ import { useEffect, useState } from "react";
 import { getConfig, type AppConfig } from "./tauri";
 import { WizardLayout } from "./wizard/WizardLayout";
 import { MainLayout } from "./main/MainLayout";
+import { ServerOutputView } from "./main/ServerOutputView";
+import { LauncherView } from "./main/LauncherView";
+
+function getRequestedView() {
+  return new URLSearchParams(window.location.search).get("view");
+}
 
 export function App() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [loading, setLoading] = useState(true);
+  const requestedView = getRequestedView();
 
   useEffect(() => {
     getConfig()
@@ -28,15 +35,24 @@ export function App() {
     );
   }
 
-  if (config && config.setup_complete) {
+  if (requestedView === "server-output") {
+    return <ServerOutputView />;
+  }
+
+  if (requestedView === "dashboard") {
     return <MainLayout />;
   }
 
-  return (
-    <WizardLayout
-      onComplete={(newConfig) => {
-        setConfig(newConfig);
-      }}
-    />
-  );
+  if (requestedView === "setup" || !config?.setup_complete) {
+    return (
+      <WizardLayout
+        initialConfig={config}
+        onComplete={(newConfig) => {
+          setConfig(newConfig);
+        }}
+      />
+    );
+  }
+
+  return <LauncherView />;
 }

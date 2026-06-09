@@ -3,6 +3,7 @@ mod installer;
 mod pty;
 mod server;
 mod tray;
+mod windows;
 
 use tauri::Manager;
 
@@ -66,6 +67,7 @@ pub fn run() {
             server::get_server_status,
             server::get_desktop_token,
             server::get_server_port,
+            server::get_server_output_buffer,
             installer::install_yep_server,
             installer::install_claude,
             installer::install_codex,
@@ -75,32 +77,61 @@ pub fn run() {
             pty::write_pty,
             pty::resize_pty,
             pty::kill_pty,
+            windows::open_dashboard_window,
+            windows::open_server_output_window,
+            windows::open_setup_window,
         ])
         .setup(|app| {
+            let cfg = config::load_config();
+
             // Setup system tray
             tray::setup_tray(app.handle())?;
 
-            // Show window after setup (avoids white flash)
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
+            if !cfg.setup_complete {
+                windows::show_main_window(app.handle())?;
+                return Ok(());
             }
 
-            // Auto-start server if setup is complete
-            let cfg = config::load_config();
-            if cfg.setup_complete {
-                let handle = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    let _ = server::start_server(handle).await;
-                });
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = server::start_server(handle).await;
+            });
+
+            match cfg.startup_view {
+                config::StartupView::Dashboard => {
+                    windows::show_dashboard_window(app.handle())?;
+                }
+                config::StartupView::ServerOutput => {
+                    windows::show_server_output_window(app.handle())?;
+                }
+                config::StartupView::TrayOnly => {}
             }
 
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Close to tray instead of quitting
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                let _ = window.hide();
+                let label = window.label();
+                let is_primary_surface =
+                    matches!(label, "main" | "dashboard" | "server-output" | "setup");
+                if !is_primary_surface {
+                    return;
+                }
+
+                if config::load_config().run_in_background {
+                    // Close to tray instead of quitting.
+                    let _ = window.hide();
+                    api.prevent_close();
+                    return;
+                }
+
+                // Fully quit when background mode is disabled.
                 api.prevent_close();
+                let app = window.app_handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = server::stop_server(app.clone()).await;
+                    app.exit(0);
+                });
             }
         })
         .build(tauri::generate_context!())

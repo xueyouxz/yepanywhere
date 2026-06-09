@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { type AppConfig } from "../tauri";
+import { useEffect, useState } from "react";
+import { isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
+import { type AppConfig, type StartupView } from "../tauri";
 import { WelcomePage } from "./WelcomePage";
 import { AgentSelectPage } from "./AgentSelectPage";
 import { InstallPage } from "./InstallPage";
@@ -10,15 +11,37 @@ import { ReadyPage } from "./ReadyPage";
 const STEPS = ["Welcome", "Agents", "Install", "Sign In", "Settings", "Ready"];
 
 interface Props {
+  initialConfig?: AppConfig | null;
   onComplete: (config: AppConfig) => void;
 }
 
-export function WizardLayout({ onComplete }: Props) {
+export function WizardLayout({ initialConfig, onComplete }: Props) {
   const [step, setStep] = useState(0);
-  const [agents, setAgents] = useState<string[]>(["claude"]);
+  const [agents, setAgents] = useState<string[]>(
+    initialConfig?.agents?.length ? initialConfig.agents : ["claude"],
+  );
 
-  const [startMinimized, setStartMinimized] = useState(true);
+  const [startupView, setStartupView] = useState<StartupView>(
+    initialConfig?.startup_view ??
+      (initialConfig?.start_minimized ? "tray_only" : "dashboard"),
+  );
+  const [runInBackground, setRunInBackground] = useState(
+    initialConfig?.run_in_background ?? true,
+  );
   const [autostart, setAutostart] = useState(true);
+
+  useEffect(() => {
+    if (!initialConfig?.setup_complete) return;
+    isAutostartEnabled()
+      .then(setAutostart)
+      .catch(() => {});
+  }, [initialConfig?.setup_complete]);
+
+  useEffect(() => {
+    if (!runInBackground && startupView === "tray_only") {
+      setStartupView("dashboard");
+    }
+  }, [runInBackground, startupView]);
 
   const next = () => setStep((s) => Math.min(s + 1, STEPS.length - 1));
 
@@ -41,8 +64,10 @@ export function WizardLayout({ onComplete }: Props) {
       case 4:
         return (
           <ConfigPage
-            startMinimized={startMinimized}
-            onStartMinimizedChange={setStartMinimized}
+            startupView={startupView}
+            onStartupViewChange={setStartupView}
+            runInBackground={runInBackground}
+            onRunInBackgroundChange={setRunInBackground}
             autostart={autostart}
             onAutostartChange={setAutostart}
             onNext={next}
@@ -52,7 +77,8 @@ export function WizardLayout({ onComplete }: Props) {
         return (
           <ReadyPage
             agents={agents}
-            startMinimized={startMinimized}
+            startupView={startupView}
+            runInBackground={runInBackground}
             autostart={autostart}
             onComplete={onComplete}
           />

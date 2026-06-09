@@ -2,6 +2,18 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StartupView {
+    Dashboard,
+    ServerOutput,
+    TrayOnly,
+}
+
+fn default_startup_view() -> StartupView {
+    StartupView::Dashboard
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub setup_complete: bool,
@@ -9,7 +21,17 @@ pub struct AppConfig {
     /// User-specified port override. None = auto-pick a free port on each launch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
+    /// Backwards-compatible input for configs saved before startup_view.
+    #[serde(default)]
     pub start_minimized: bool,
+    #[serde(default = "default_startup_view")]
+    pub startup_view: StartupView,
+    #[serde(default = "default_true")]
+    pub run_in_background: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for AppConfig {
@@ -19,6 +41,8 @@ impl Default for AppConfig {
             agents: vec![],
             port: None,
             start_minimized: false,
+            startup_view: StartupView::Dashboard,
+            run_in_background: true,
         }
     }
 }
@@ -45,7 +69,11 @@ pub fn load_config() -> AppConfig {
     let path = config_path();
     if path.exists() {
         let contents = fs::read_to_string(&path).unwrap_or_default();
-        serde_json::from_str(&contents).unwrap_or_default()
+        let mut config: AppConfig = serde_json::from_str(&contents).unwrap_or_default();
+        if !contents.contains("\"startup_view\"") && config.start_minimized {
+            config.startup_view = StartupView::TrayOnly;
+        }
+        config
     } else {
         AppConfig::default()
     }
