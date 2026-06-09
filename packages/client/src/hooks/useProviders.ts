@@ -2,6 +2,43 @@ import { DEFAULT_PROVIDER, type ProviderInfo } from "@yep-anywhere/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 
+const PROVIDER_CACHE_TTL_MS = 5 * 60_000;
+
+interface ProviderCacheEntry {
+  providers: ProviderInfo[];
+  expiresAt: number;
+}
+
+let providerCache: ProviderCacheEntry | null = null;
+let providerFetchPromise: Promise<ProviderInfo[]> | null = null;
+
+async function loadProviders(forceRefresh: boolean): Promise<ProviderInfo[]> {
+  const now = Date.now();
+  if (!forceRefresh && providerCache && providerCache.expiresAt > now) {
+    return providerCache.providers;
+  }
+  if (!forceRefresh && providerFetchPromise) {
+    return providerFetchPromise;
+  }
+
+  const request = api.getProviders({ refresh: forceRefresh }).then((data) => {
+    providerCache = {
+      providers: data.providers,
+      expiresAt: Date.now() + PROVIDER_CACHE_TTL_MS,
+    };
+    return data.providers;
+  });
+  providerFetchPromise = request;
+
+  try {
+    return await request;
+  } finally {
+    if (providerFetchPromise === request) {
+      providerFetchPromise = null;
+    }
+  }
+}
+
 /**
  * Hook to fetch and cache available AI providers with their auth status.
  *
@@ -12,17 +49,21 @@ import { api } from "../api/client";
  * - refetch: Function to manually refresh provider status
  */
 export function useProviders() {
-  const [providers, setProviders] = useState<ProviderInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [providers, setProviders] = useState<ProviderInfo[]>(
+    () => providerCache?.providers ?? [],
+  );
+  const [loading, setLoading] = useState(() => !providerCache);
   const [error, setError] = useState<Error | null>(null);
   const hasFetchedRef = useRef(false);
 
-  const fetch = useCallback(async () => {
-    setLoading(true);
+  const fetch = useCallback(async (forceRefresh = false) => {
+    if (forceRefresh || !providerCache) {
+      setLoading(true);
+    }
     setError(null);
     try {
-      const data = await api.getProviders();
-      setProviders(data.providers);
+      const nextProviders = await loadProviders(forceRefresh);
+      setProviders(nextProviders);
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
     } finally {
@@ -37,7 +78,9 @@ export function useProviders() {
     fetch();
   }, [fetch]);
 
-  return { providers, loading, error, refetch: fetch };
+  const refetch = useCallback(() => fetch(true), [fetch]);
+
+  return { providers, loading, error, refetch };
 }
 
 /**

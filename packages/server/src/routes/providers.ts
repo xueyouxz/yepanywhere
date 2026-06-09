@@ -1,12 +1,26 @@
 import type { ProviderInfo, ProviderName } from "@yep-anywhere/shared";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import { getAllProviders } from "../sdk/providers/index.js";
+import type { AgentProvider } from "../sdk/providers/types.js";
 import type { ModelInfoService } from "../services/ModelInfoService.js";
+
+const PROVIDER_INFO_CACHE_TTL_MS = 5 * 60_000;
 
 interface ProviderRouteDeps {
   modelInfoService?: ModelInfoService;
   /** If non-empty, only these provider names are exposed. */
   enabledProviders?: string[];
+  /** Provider instances, injectable for route tests. */
+  providers?: AgentProvider[];
+  /** Provider info cache TTL in ms. */
+  cacheTtlMs?: number;
+}
+
+interface ProviderInfoCacheEntry {
+  expiresAt: number;
+  value?: ProviderInfo;
+  inFlight?: Promise<ProviderInfo>;
 }
 
 function getProviderImageSizing(
@@ -42,43 +56,83 @@ function getProviderImageSizing(
  */
 export function createProvidersRoutes(deps: ProviderRouteDeps = {}): Hono {
   const routes = new Hono();
+  const cache = new Map<ProviderName, ProviderInfoCacheEntry>();
+  const cacheTtlMs = deps.cacheTtlMs ?? PROVIDER_INFO_CACHE_TTL_MS;
+
+  const getProviderInfo = async (
+    provider: AgentProvider,
+    forceRefresh: boolean,
+  ): Promise<ProviderInfo> => {
+    const providerName = provider.name as ProviderName;
+    const now = Date.now();
+    const cached = cache.get(providerName);
+    if (!forceRefresh && cached?.value && cached.expiresAt > now) {
+      return cached.value;
+    }
+    if (cached?.inFlight) {
+      return cached.inFlight;
+    }
+
+    const inFlight = (async () => {
+      const [authStatus, models] = await Promise.all([
+        provider.getAuthStatus(),
+        provider.getAvailableModels(),
+      ]);
+      deps.modelInfoService?.ingestModels(providerName, models);
+      return {
+        name: provider.name,
+        displayName: provider.displayName,
+        installed: authStatus.installed,
+        authenticated: authStatus.authenticated,
+        enabled: authStatus.enabled,
+        expiresAt: authStatus.expiresAt?.toISOString(),
+        user: authStatus.user,
+        models,
+        imageSizing: getProviderImageSizing(provider.name),
+        supportsPermissionMode: provider.supportsPermissionMode,
+        supportsThinkingToggle: provider.supportsThinkingToggle,
+        supportsSlashCommands: provider.supportsSlashCommands,
+        supportsSteering: provider.supportsSteering,
+        supportsRecaps: provider.supportsRecaps,
+        supportsNativeRecaps: provider.supportsNativeRecaps,
+        supportsNativePromptSuggestions: provider.supportsNativePromptSuggestions,
+      } satisfies ProviderInfo;
+    })();
+
+    cache.set(providerName, {
+      expiresAt: cached?.expiresAt ?? 0,
+      value: forceRefresh ? undefined : cached?.value,
+      inFlight,
+    });
+
+    try {
+      const value = await inFlight;
+      cache.set(providerName, {
+        value,
+        expiresAt: Date.now() + cacheTtlMs,
+      });
+      return value;
+    } catch (error) {
+      cache.delete(providerName);
+      throw error;
+    }
+  };
+
+  const isRefreshRequest = (c: Context) =>
+    c.req.query("refresh") === "true" ||
+    c.req.query("refresh") === "1" ||
+    c.req.header("cache-control")?.toLowerCase().includes("no-cache") === true;
+
   // GET /api/providers - Get all available providers with auth status and models
   routes.get("/", async (c) => {
-    let providers = getAllProviders();
+    const forceRefresh = isRefreshRequest(c);
+    let providers = deps.providers ?? getAllProviders();
     if (deps.enabledProviders && deps.enabledProviders.length > 0) {
       const enabled = new Set(deps.enabledProviders);
       providers = providers.filter((p) => enabled.has(p.name));
     }
     const providerInfos: ProviderInfo[] = await Promise.all(
-      providers.map(async (provider) => {
-        const [authStatus, models] = await Promise.all([
-          provider.getAuthStatus(),
-          provider.getAvailableModels(),
-        ]);
-        deps.modelInfoService?.ingestModels(
-          provider.name as ProviderName,
-          models,
-        );
-        return {
-          name: provider.name,
-          displayName: provider.displayName,
-          installed: authStatus.installed,
-          authenticated: authStatus.authenticated,
-          enabled: authStatus.enabled,
-          expiresAt: authStatus.expiresAt?.toISOString(),
-          user: authStatus.user,
-          models,
-          imageSizing: getProviderImageSizing(provider.name),
-          supportsPermissionMode: provider.supportsPermissionMode,
-          supportsThinkingToggle: provider.supportsThinkingToggle,
-          supportsSlashCommands: provider.supportsSlashCommands,
-          supportsSteering: provider.supportsSteering,
-          supportsRecaps: provider.supportsRecaps,
-          supportsNativeRecaps: provider.supportsNativeRecaps,
-          supportsNativePromptSuggestions:
-            provider.supportsNativePromptSuggestions,
-        } satisfies ProviderInfo;
-      }),
+      providers.map((provider) => getProviderInfo(provider, forceRefresh)),
     );
 
     return c.json({ providers: providerInfos });
@@ -86,38 +140,16 @@ export function createProvidersRoutes(deps: ProviderRouteDeps = {}): Hono {
 
   // GET /api/providers/:name - Get specific provider status with models
   routes.get("/:name", async (c) => {
+    const forceRefresh = isRefreshRequest(c);
     const name = c.req.param("name");
-    const providers = getAllProviders();
+    const providers = deps.providers ?? getAllProviders();
     const provider = providers.find((p) => p.name === name);
 
     if (!provider) {
       return c.json({ error: "Provider not found" }, 404);
     }
 
-    const [authStatus, models] = await Promise.all([
-      provider.getAuthStatus(),
-      provider.getAvailableModels(),
-    ]);
-    deps.modelInfoService?.ingestModels(provider.name as ProviderName, models);
-    const providerInfo: ProviderInfo = {
-      name: provider.name,
-      displayName: provider.displayName,
-      installed: authStatus.installed,
-      authenticated: authStatus.authenticated,
-      enabled: authStatus.enabled,
-      expiresAt: authStatus.expiresAt?.toISOString(),
-      user: authStatus.user,
-      models,
-      imageSizing: getProviderImageSizing(provider.name),
-      supportsPermissionMode: provider.supportsPermissionMode,
-      supportsThinkingToggle: provider.supportsThinkingToggle,
-      supportsSlashCommands: provider.supportsSlashCommands,
-      supportsSteering: provider.supportsSteering,
-      supportsRecaps: provider.supportsRecaps,
-      supportsNativeRecaps: provider.supportsNativeRecaps,
-      supportsNativePromptSuggestions: provider.supportsNativePromptSuggestions,
-    };
-
+    const providerInfo = await getProviderInfo(provider, forceRefresh);
     return c.json({ provider: providerInfo });
   });
 

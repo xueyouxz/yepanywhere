@@ -414,7 +414,11 @@ export const api = {
     }),
 
   // Provider API
-  getProviders: () => fetchJSON<{ providers: ProviderInfo[] }>("/providers"),
+  getProviders: (options?: { refresh?: boolean }) =>
+    fetchJSON<{ providers: ProviderInfo[] }>(
+      options?.refresh ? "/providers?refresh=1" : "/providers",
+      options?.refresh ? { headers: { "Cache-Control": "no-cache" } } : undefined,
+    ),
 
   getProjects: () => fetchJSON<{ projects: Project[] }>("/projects"),
 
