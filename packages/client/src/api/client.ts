@@ -169,6 +169,8 @@ export interface SessionOptions {
   promptSuggestionMode?: PromptSuggestionMode;
   /** Session-level helper side model for simulated helper features. */
   helperSideModel?: string;
+  /** Existing-session resume strategy. */
+  resumeMode?: "full" | "compact-first";
 }
 
 export type { UploadedFile } from "@yep-anywhere/shared";
@@ -634,6 +636,12 @@ export const api = {
       permissionMode: PermissionMode;
       modeVersion: number;
       serverTimestamp: number;
+      resume?: {
+        requestedMode: "full" | "compact-first";
+        provider?: ProviderName;
+        outcome?: "queued" | "started";
+        compaction?: { status: string; [key: string]: unknown };
+      };
     }>(`/projects/${projectId}/sessions/${sessionId}/resume`, {
       method: "POST",
       body: JSON.stringify({
@@ -648,6 +656,7 @@ export const api = {
         recapMode: options?.recapMode,
         promptSuggestionMode: options?.promptSuggestionMode,
         helperSideModel: options?.helperSideModel,
+        resumeMode: options?.resumeMode,
         attachments,
         tempId,
         clientTimestamp,

@@ -15,10 +15,12 @@ import type { AgentActivity, PendingInputType } from "@yep-anywhere/shared";
 import { getLogger } from "../logging/logger.js";
 import { getProvider } from "../sdk/providers/index.js";
 import type { AgentProvider } from "../sdk/providers/types.js";
+import { normalizeSlashCommandName } from "../sdk/slashCommandEmulation.js";
 import type {
   ClaudeSDK,
   PermissionMode,
   RealClaudeSDKInterface,
+  SDKMessage,
   UserMessage,
 } from "../sdk/types.js";
 import type {
@@ -47,7 +49,6 @@ import {
   type SessionSummary,
   encodeProjectId,
 } from "./types.js";
-import { normalizeSlashCommandName } from "../sdk/slashCommandEmulation.js";
 
 /** Maximum number of terminated processes to retain */
 const MAX_TERMINATED_PROCESSES = 50;
@@ -107,6 +108,25 @@ export class ResumeCompactionError extends Error {
   }
 }
 
+function describeResumeCompactionAttempt(
+  attempt: ResumeCompactionAttempt,
+): string {
+  switch (attempt.status) {
+    case "completed":
+      return `Compact-first resume completed with /${attempt.command}`;
+    case "timed-out":
+      return `Compact-first resume timed out after ${attempt.timeoutMs}ms waiting for /${attempt.command}`;
+    case "failed":
+      return attempt.command
+        ? `Compact-first resume failed after /${attempt.command}: ${attempt.reason}`
+        : `Compact-first resume failed: ${attempt.reason}`;
+    case "unavailable":
+      return `Compact-first resume unavailable: ${attempt.reason}`;
+    case "skipped":
+      return `Compact-first resume skipped: ${attempt.reason}`;
+  }
+}
+
 function isCompactBoundaryMessage(message: SDKMessage): boolean {
   return message.type === "system" && message.subtype === "compact_boundary";
 }
@@ -130,25 +150,6 @@ function isCompactSuccessStatus(message: SDKMessage): boolean {
     message.subtype === "status" &&
     message.compact_result === "success"
   );
-}
-
-function describeResumeCompactionAttempt(
-  attempt: ResumeCompactionAttempt,
-): string {
-  switch (attempt.status) {
-    case "completed":
-      return `Compact-first resume completed with /${attempt.command}`;
-    case "timed-out":
-      return `Compact-first resume timed out after ${attempt.timeoutMs}ms waiting for /${attempt.command}`;
-    case "failed":
-      return attempt.command
-        ? `Compact-first resume failed after /${attempt.command}: ${attempt.reason}`
-        : `Compact-first resume failed: ${attempt.reason}`;
-    case "unavailable":
-      return `Compact-first resume unavailable: ${attempt.reason}`;
-    case "skipped":
-      return `Compact-first resume skipped: ${attempt.reason}`;
-  }
 }
 
 function getStaleInTurnThresholdMs(provider: ProviderName): number {
@@ -282,6 +283,8 @@ export interface ModelSettings {
   promptSuggestionMode?: PromptSuggestionMode;
   /** Session-level helper side model for simulated helper features. */
   helperSideModel?: string;
+  /** Resume strategy. undefined and "full" preserve existing behavior. */
+  resumeMode?: ResumeMode;
 }
 
 /** Error response when queue is full */
@@ -712,6 +715,259 @@ export class Supervisor {
   ): Promise<ReturnType<Process["queueMessage"]>> {
     await process.primeSupportedCommandsForMessage(message);
     return process.queueMessage(message, options);
+  }
+
+  private watchResumeCompaction(
+    process: Process,
+    command: string,
+    timeoutMs = RESUME_COMPACT_WAIT_MS,
+  ): {
+    promise: Promise<ResumeCompactionAttempt>;
+    cancel: () => void;
+  } {
+    let finished = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let unsubscribe: (() => void) | undefined;
+
+    const finish = (attempt: ResumeCompactionAttempt) => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      unsubscribe?.();
+      resolve(attempt);
+    };
+
+    let resolve!: (attempt: ResumeCompactionAttempt) => void;
+    const promise = new Promise<ResumeCompactionAttempt>((innerResolve) => {
+      resolve = innerResolve;
+    });
+
+    timeout = setTimeout(
+      () => finish({ status: "timed-out", command, timeoutMs }),
+      timeoutMs,
+    );
+    timeout.unref?.();
+
+    unsubscribe = process.subscribe((event: ProcessEvent) => {
+      if (event.type === "message") {
+        const failedReason = compactFailureReason(event.message);
+        if (failedReason) {
+          finish({ status: "failed", command, reason: failedReason });
+          return;
+        }
+        if (
+          isCompactBoundaryMessage(event.message) ||
+          isCompactSuccessStatus(event.message)
+        ) {
+          finish({ status: "completed", command });
+        }
+        return;
+      }
+      if (event.type === "error") {
+        finish({
+          status: "failed",
+          command,
+          reason: event.error.message,
+        });
+        return;
+      }
+      if (event.type === "terminated") {
+        finish({
+          status: "failed",
+          command,
+          reason: event.reason,
+        });
+      }
+    });
+
+    return {
+      promise,
+      cancel: () =>
+        finish({
+          status: "failed",
+          command,
+          reason: "compact command was not queued",
+        }),
+    };
+  }
+
+  private async findResumeCompactCommand(
+    process: Process,
+  ): Promise<
+    | { ok: true; command: string }
+    | { ok: false; attempt: ResumeCompactionAttempt }
+  > {
+    if (!process.supportsDynamicCommands) {
+      return {
+        ok: false,
+        attempt: {
+          status: "unavailable",
+          reason: "provider process does not advertise slash commands",
+        },
+      };
+    }
+
+    let commands: Awaited<ReturnType<Process["supportedCommands"]>>;
+    try {
+      commands = await process.supportedCommands();
+    } catch (error) {
+      return {
+        ok: false,
+        attempt: {
+          status: "failed",
+          reason: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+
+    const command = commands
+      ?.map((candidate) => normalizeSlashCommandName(candidate.name))
+      .find((name) => name === "compact" || name === "compress");
+
+    if (!command) {
+      return {
+        ok: false,
+        attempt: {
+          status: "unavailable",
+          reason: "no compact/compress slash command advertised",
+        },
+      };
+    }
+
+    return { ok: true, command };
+  }
+
+  private async tryResumeCompaction(
+    process: Process,
+    options?: { allowNonIdleStart?: boolean },
+  ): Promise<ResumeCompactionAttempt> {
+    if (process.provider !== "claude" && process.provider !== "claude-ollama") {
+      return {
+        status: "unavailable",
+        reason: `${process.provider} does not support compact-first resume`,
+      };
+    }
+
+    if (!options?.allowNonIdleStart && process.state.type !== "idle") {
+      return {
+        status: "skipped",
+        reason: `process was ${process.state.type}`,
+      };
+    }
+
+    const command = await this.findResumeCompactCommand(process);
+    if (!command.ok) {
+      return command.attempt;
+    }
+
+    const watcher = this.watchResumeCompaction(process, command.command);
+    const queued = process.queueMessage(
+      { text: `/${command.command}` },
+      { allowSteer: false },
+    );
+    if (!queued.success) {
+      watcher.cancel();
+      return {
+        status: "failed",
+        command: command.command,
+        reason: queued.error ?? "compact command was not accepted",
+      };
+    }
+
+    return watcher.promise;
+  }
+
+  private async queueAfterResumeCompaction(params: {
+    process: Process;
+    sessionId: string;
+    message: UserMessage;
+    allowNonIdleStart?: boolean;
+  }): Promise<void> {
+    const attempt = await this.tryResumeCompaction(params.process, {
+      allowNonIdleStart: params.allowNonIdleStart,
+    });
+    if (attempt.status !== "completed") {
+      throw new ResumeCompactionError({
+        sessionId: params.sessionId,
+        provider: params.process.provider,
+        attempt,
+      });
+    }
+
+    const queued = await this.queueProcessMessage(params.process, params.message, {
+      allowSteer: false,
+    });
+    if (!queued.success) {
+      throw new Error(queued.error ?? "Failed to queue message after compact");
+    }
+  }
+
+  private async startCompactFirstProviderResume(
+    projectPath: string,
+    projectId: UrlProjectId,
+    message: UserMessage,
+    resumeSessionId: string,
+    permissionMode: PermissionMode | undefined,
+    modelSettings: ModelSettings | undefined,
+    provider: AgentProvider,
+  ): Promise<Process> {
+    const process = await this.createProviderSession(
+      projectPath,
+      projectId,
+      permissionMode,
+      modelSettings,
+      provider,
+      resumeSessionId,
+    );
+
+    try {
+      await this.queueAfterResumeCompaction({
+        process,
+        sessionId: resumeSessionId,
+        message,
+        allowNonIdleStart: true,
+      });
+      return process;
+    } catch (error) {
+      await process.abort();
+      this.unregisterProcess(process);
+      throw error;
+    }
+  }
+
+  private async startCompactFirstRealResume(
+    projectPath: string,
+    projectId: UrlProjectId,
+    message: UserMessage,
+    resumeSessionId: string,
+    permissionMode: PermissionMode | undefined,
+    modelSettings: ModelSettings | undefined,
+  ): Promise<Process> {
+    const process = await this.createRealSession(
+      projectPath,
+      projectId,
+      permissionMode,
+      modelSettings,
+      resumeSessionId,
+    );
+
+    try {
+      await this.queueAfterResumeCompaction({
+        process,
+        sessionId: resumeSessionId,
+        message,
+        allowNonIdleStart: true,
+      });
+      return process;
+    } catch (error) {
+      await process.abort();
+      this.unregisterProcess(process);
+      throw error;
+    }
   }
 
   /**
@@ -1198,6 +1454,15 @@ export class Supervisor {
           }
           // Queue message to existing process (if we didn't fall through to restart)
           if (!existingProcess.isTerminated) {
+            if (modelSettings?.resumeMode === "compact-first") {
+              await this.queueAfterResumeCompaction({
+                process: existingProcess,
+                sessionId,
+                message,
+              });
+              return existingProcess;
+            }
+
             const result = await this.queueProcessMessage(
               existingProcess,
               message,
@@ -1256,9 +1521,22 @@ export class Supervisor {
     }
 
     const provider = this.resolveProvider(modelSettings);
+    const resumeMode = modelSettings?.resumeMode ?? "full";
 
     // Use provider if available (preferred)
     if (provider) {
+      if (resumeMode === "compact-first") {
+        return this.startCompactFirstProviderResume(
+          projectPath,
+          projectId,
+          message,
+          sessionId,
+          permissionMode,
+          modelSettings,
+          provider,
+        );
+      }
+
       return this.startProviderSession(
         projectPath,
         projectId,
@@ -1272,6 +1550,17 @@ export class Supervisor {
 
     // Use real SDK if available
     if (this.realSdk) {
+      if (resumeMode === "compact-first") {
+        return this.startCompactFirstRealResume(
+          projectPath,
+          projectId,
+          message,
+          sessionId,
+          permissionMode,
+          modelSettings,
+        );
+      }
+
       return this.startRealSession(
         projectPath,
         projectId,
@@ -1283,6 +1572,17 @@ export class Supervisor {
     }
 
     // Fall back to legacy mock SDK
+    if (resumeMode === "compact-first") {
+      throw new ResumeCompactionError({
+        sessionId,
+        provider: "claude",
+        attempt: {
+          status: "unavailable",
+          reason: "legacy mock SDK does not support compact-first resume",
+        },
+      });
+    }
+
     return this.startLegacySession(
       projectPath,
       projectId,

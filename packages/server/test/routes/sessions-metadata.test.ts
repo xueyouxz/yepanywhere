@@ -10,6 +10,7 @@ import {
 import type { CodexSessionReader } from "../../src/sessions/codex-reader.js";
 import type { GrokSessionReader } from "../../src/sessions/grok-reader.js";
 import type { ISessionReader } from "../../src/sessions/types.js";
+import { ResumeCompactionError } from "../../src/supervisor/Supervisor.js";
 import type { Project, SessionSummary } from "../../src/supervisor/types.js";
 
 function createProject(): Project {
@@ -1100,6 +1101,75 @@ describe("Sessions metadata route", () => {
     const json = await response.json();
     expect(json.recovery).toBe("handoff-required");
     expect(json.error).toContain("Start a handoff session");
+  });
+
+  it("returns full-resume recovery when compact-first resume fails", async () => {
+    const project = createProject();
+    const resumeSession = vi.fn(async () => {
+      throw new ResumeCompactionError({
+        sessionId: "sess-1",
+        provider: "claude",
+        attempt: {
+          status: "unavailable",
+          reason: "no compact/compress slash command advertised",
+        },
+      });
+    });
+
+    const routes = createSessionsRoutes({
+      supervisor: {
+        getProcessForSession: vi.fn(() => undefined),
+        resumeSession,
+      } as unknown as SessionsDeps["supervisor"],
+      scanner: {
+        getOrCreateProject: vi.fn(async () => project),
+      } as unknown as SessionsDeps["scanner"],
+      readerFactory: vi.fn(
+        () =>
+          ({
+            getSession: vi.fn(async () => null),
+            getSessionSummary: vi.fn(async () => null),
+          }) as unknown as ISessionReader,
+      ),
+      sessionMetadataService: {
+        getProvider: vi.fn(() => "claude"),
+        getExecutor: vi.fn(() => undefined),
+      } as unknown as NonNullable<SessionsDeps["sessionMetadataService"]>,
+    });
+
+    const response = await routes.request(
+      `/projects/${project.id}/sessions/sess-1/resume`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: "continue",
+          resumeMode: "compact-first",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(409);
+    expect(resumeSession).toHaveBeenCalledWith(
+      "sess-1",
+      project.path,
+      expect.objectContaining({ text: "continue" }),
+      undefined,
+      expect.objectContaining({
+        providerName: "claude",
+        resumeMode: "compact-first",
+      }),
+    );
+    const json = await response.json();
+    expect(json.recovery).toBe("full-resume");
+    expect(json.resume).toMatchObject({
+      requestedMode: "compact-first",
+      provider: "claude",
+      compaction: {
+        status: "unavailable",
+        reason: "no compact/compress slash command advertised",
+      },
+    });
   });
 
   it("preserves persisted provider and model when queueing a restartable message", async () => {

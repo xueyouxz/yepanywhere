@@ -3,7 +3,10 @@ import { MessageQueue } from "../src/sdk/messageQueue.js";
 import { MockClaudeSDK, createMockScenario } from "../src/sdk/mock.js";
 import type { AgentProvider } from "../src/sdk/providers/types.js";
 import type { RealClaudeSDKInterface } from "../src/sdk/types.js";
-import { Supervisor } from "../src/supervisor/Supervisor.js";
+import {
+  type ResumeCompactionError,
+  Supervisor,
+} from "../src/supervisor/Supervisor.js";
 import {
   type SessionSummary,
   encodeProjectId,
@@ -102,6 +105,194 @@ describe("Supervisor", () => {
       });
 
       expect(process1.id).not.toBe(process2.id);
+    });
+
+    it("runs Claude compact-first resume before the user turn", async () => {
+      const delivered: string[] = [];
+      const startSession = vi.fn(
+        async (options: Parameters<AgentProvider["startSession"]>[0]) => {
+          const queue = new MessageQueue();
+          let aborted = false;
+
+          async function* iterator() {
+            yield {
+              type: "system",
+              subtype: "init",
+              session_id: options.resumeSessionId ?? "new-session",
+            };
+
+            for await (const sdkMessage of queue) {
+              if (aborted) {
+                return;
+              }
+              const content = sdkMessage.message.content;
+              const text =
+                typeof content === "string"
+                  ? content
+                  : (content[0] as { text?: string } | undefined)?.text ?? "";
+              delivered.push(text);
+
+              if (text === "/compact") {
+                yield {
+                  type: "system",
+                  subtype: "status",
+                  status: "compacting",
+                  session_id: options.resumeSessionId ?? "new-session",
+                };
+                yield {
+                  type: "system",
+                  subtype: "status",
+                  status: null,
+                  compact_result: "success",
+                  session_id: options.resumeSessionId ?? "new-session",
+                };
+                yield {
+                  type: "system",
+                  subtype: "compact_boundary",
+                  session_id: options.resumeSessionId ?? "new-session",
+                };
+                continue;
+              }
+
+              yield {
+                type: "result",
+                session_id: options.resumeSessionId ?? "new-session",
+              };
+              return;
+            }
+          }
+
+          return {
+            iterator: iterator(),
+            queue,
+            abort: () => {
+              aborted = true;
+              queue.push({ text: "__abort__" });
+            },
+            supportedCommands: async () => [
+              { name: "compact", description: "Compact conversation" },
+            ],
+          };
+        },
+      );
+      const provider: AgentProvider = {
+        name: "claude",
+        displayName: "Claude",
+        supportsPermissionMode: true,
+        supportsThinkingToggle: true,
+        supportsSlashCommands: true,
+        supportsSteering: false,
+        isInstalled: async () => true,
+        isAuthenticated: async () => true,
+        getAuthStatus: async () => ({
+          installed: true,
+          authenticated: true,
+          enabled: true,
+        }),
+        getAvailableModels: async () => [],
+        startSession,
+      };
+      const supervisorWithProvider = new Supervisor({
+        provider,
+        idleTimeoutMs: 100,
+      });
+
+      const process = await supervisorWithProvider.resumeSession(
+        "claude-old",
+        "/tmp/test",
+        { text: "continue" },
+        undefined,
+        { providerName: "claude", resumeMode: "compact-first" },
+      );
+
+      if (!("id" in process)) {
+        throw new Error("expected process");
+      }
+      expect(process.sessionId).toBe("claude-old");
+      expect(startSession).toHaveBeenCalledWith(
+        expect.objectContaining({ resumeSessionId: "claude-old" }),
+      );
+      expect(startSession.mock.calls[0]?.[0].initialMessage).toBeUndefined();
+      await vi.waitFor(() => {
+        expect(delivered).toEqual(["/compact", "continue"]);
+      });
+    });
+
+    it("reports compact-first resume as unavailable without /compact", async () => {
+      const delivered: string[] = [];
+      const startSession = vi.fn(
+        async (options: Parameters<AgentProvider["startSession"]>[0]) => {
+          const queue = new MessageQueue();
+          let aborted = false;
+
+          async function* iterator() {
+            yield {
+              type: "system",
+              subtype: "init",
+              session_id: options.resumeSessionId ?? "new-session",
+            };
+            for await (const sdkMessage of queue) {
+              if (aborted) {
+                return;
+              }
+              const content = sdkMessage.message.content;
+              delivered.push(typeof content === "string" ? content : "");
+            }
+          }
+
+          return {
+            iterator: iterator(),
+            queue,
+            abort: () => {
+              aborted = true;
+              queue.push({ text: "__abort__" });
+            },
+            supportedCommands: async () => [],
+          };
+        },
+      );
+      const provider: AgentProvider = {
+        name: "claude",
+        displayName: "Claude",
+        supportsPermissionMode: true,
+        supportsThinkingToggle: true,
+        supportsSlashCommands: true,
+        supportsSteering: false,
+        isInstalled: async () => true,
+        isAuthenticated: async () => true,
+        getAuthStatus: async () => ({
+          installed: true,
+          authenticated: true,
+          enabled: true,
+        }),
+        getAvailableModels: async () => [],
+        startSession,
+      };
+      const supervisorWithProvider = new Supervisor({
+        provider,
+        idleTimeoutMs: 100,
+      });
+
+      await expect(
+        supervisorWithProvider.resumeSession(
+          "claude-old",
+          "/tmp/test",
+          { text: "continue" },
+          undefined,
+          { providerName: "claude", resumeMode: "compact-first" },
+        ),
+      ).rejects.toMatchObject({
+        name: "ResumeCompactionError",
+        recovery: "full-resume",
+        attempt: {
+          status: "unavailable",
+          reason: "no compact/compress slash command advertised",
+        },
+      } satisfies Partial<ResumeCompactionError>);
+      expect(delivered).toEqual([]);
+      expect(
+        supervisorWithProvider.getProcessForSession("claude-old"),
+      ).toBeUndefined();
     });
   });
 

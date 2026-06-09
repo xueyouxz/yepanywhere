@@ -65,8 +65,10 @@ import type {
 } from "../supervisor/Process.js";
 import type {
   QueueFullResponse,
+  ResumeMode,
   Supervisor,
 } from "../supervisor/Supervisor.js";
+import { ResumeCompactionError } from "../supervisor/Supervisor.js";
 import type { QueuedResponse } from "../supervisor/WorkerQueue.js";
 import type {
   ContentBlock,
@@ -200,6 +202,22 @@ function normalizeOptionalServiceTier(
   }
   const serviceTier = rawServiceTier.trim();
   return /^[A-Za-z0-9_-]{1,64}$/.test(serviceTier) ? serviceTier : undefined;
+}
+
+function parseOptionalResumeMode(rawMode: unknown): {
+  resumeMode: ResumeMode | undefined;
+  error?: string;
+} {
+  if (rawMode === undefined || rawMode === null || rawMode === "") {
+    return { resumeMode: undefined };
+  }
+  if (rawMode === "full" || rawMode === "compact-first") {
+    return { resumeMode: rawMode };
+  }
+  return {
+    resumeMode: undefined,
+    error: "resumeMode must be one of: full, compact-first",
+  };
 }
 
 function parseOptionalRecapMode(rawMode: unknown): {
@@ -514,6 +532,8 @@ interface StartSessionBody {
   promptSuggestionMode?: PromptSuggestionMode;
   /** Session-level helper side model for simulated helper features. */
   helperSideModel?: string;
+  /** Resume strategy for existing sessions. */
+  resumeMode?: ResumeMode;
 }
 
 interface CreateSessionBody {
@@ -2746,6 +2766,11 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     if (helperSettings.error) {
       return c.json({ error: helperSettings.error }, 400);
     }
+    const parsedResumeMode = parseOptionalResumeMode(body.resumeMode);
+    if (parsedResumeMode.error) {
+      return c.json({ error: parsedResumeMode.error }, 400);
+    }
+    const resumeMode = parsedResumeMode.resumeMode ?? "full";
 
     const serverTimestamp = Date.now();
     const userMessage: UserMessage = {
@@ -2837,6 +2862,19 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         body.provider ??
         project.provider;
     }
+    const previousProcess = deps.supervisor.getProcessForSession?.(sessionId);
+    const resumeDiagnostics = {
+      requestedMode: resumeMode,
+      provider: providerName,
+      previousProcess: previousProcess
+        ? {
+            processId: previousProcess.id,
+            state: previousProcess.state.type,
+            provider: previousProcess.provider,
+            supportsDynamicCommands: previousProcess.supportsDynamicCommands,
+          }
+        : null,
+    };
 
     if (isClaudeSdkProviderName(providerName)) {
       let blocker: ClaudeResumeApiErrorBlocker | null = null;
@@ -2875,31 +2913,64 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
           {
             error: blocker.error,
             recovery: blocker.recovery,
+            resume: {
+              ...resumeDiagnostics,
+              blockedReason: "claude-api-error-tail",
+            },
           },
           409,
         );
       }
     }
 
-    const result = await deps.supervisor.resumeSession(
-      sessionId,
-      project.path,
-      userMessage,
-      body.mode,
-      {
-        model,
-        serviceTier,
-        thinking,
-        effort,
-        providerName,
-        executor,
-        globalInstructions,
-        permissions: body.permissions,
-        recapMode: helperSettings.recapMode,
-        promptSuggestionMode: helperSettings.promptSuggestionMode,
-        helperSideModel: helperSettings.helperSideModel,
-      },
-    );
+    let result: Awaited<ReturnType<Supervisor["resumeSession"]>>;
+    try {
+      result = await deps.supervisor.resumeSession(
+        sessionId,
+        project.path,
+        userMessage,
+        body.mode,
+        {
+          model,
+          serviceTier,
+          thinking,
+          effort,
+          providerName,
+          executor,
+          globalInstructions,
+          permissions: body.permissions,
+          recapMode: helperSettings.recapMode,
+          promptSuggestionMode: helperSettings.promptSuggestionMode,
+          helperSideModel: helperSettings.helperSideModel,
+          resumeMode,
+        },
+      );
+    } catch (error) {
+      if (error instanceof ResumeCompactionError) {
+        getLogger().warn(
+          {
+            event: "resume_compaction_failed",
+            sessionId,
+            projectId,
+            providerName,
+            attempt: error.attempt,
+          },
+          "Compact-first resume failed",
+        );
+        return c.json(
+          {
+            error: error.message,
+            recovery: error.recovery,
+            resume: {
+              ...resumeDiagnostics,
+              compaction: error.attempt,
+            },
+          },
+          409,
+        );
+      }
+      throw error;
+    }
 
     // Check if queue is full
     if (isQueueFullResponse(result)) {
@@ -2911,7 +2982,14 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
 
     // Check if request was queued
     if (isQueuedResponse(result)) {
-      return c.json({ ...result, serverTimestamp: Date.now() }, 202); // 202 Accepted - queued for processing
+      return c.json(
+        {
+          ...result,
+          serverTimestamp: Date.now(),
+          resume: { ...resumeDiagnostics, outcome: "queued" },
+        },
+        202,
+      ); // 202 Accepted - queued for processing
     }
 
     return c.json({
@@ -2919,6 +2997,12 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       permissionMode: result.permissionMode,
       modeVersion: result.modeVersion,
       serverTimestamp,
+      resume: {
+        ...resumeDiagnostics,
+        outcome: "started",
+        compaction:
+          resumeMode === "compact-first" ? { status: "completed" } : undefined,
+      },
     });
   });
 

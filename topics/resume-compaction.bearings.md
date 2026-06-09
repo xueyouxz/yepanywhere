@@ -9,10 +9,10 @@
   - [ ] ‖ Gate 1: render/schema audit
     > why: The compact boundary is already the shared renderer signal;
     > initiation must not break existing continuity.
-  - [ ] ‖ Gate 2: provider contract/API
+  - [x] ‖ Gate 2: provider contract/API
     > why: YA needs a first-class resume mode before UI can offer the choice
     > coherently.
-  - [ ] ‖ Gate 3: Claude compact-first resume
+  - [x] ‖ Gate 3: Claude compact-first resume
     > why: Claude TUI behavior is the observed regression target and SDK
     > slash-command compaction is available.
   - [ ] ‖ Gate 4: old-session user choice UI
