@@ -1,7 +1,7 @@
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, SubmenuBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle,
+    AppHandle, Emitter,
 };
 use tauri_plugin_autostart::ManagerExt as _;
 
@@ -58,6 +58,13 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         None::<&str>,
     )?;
     let setup = MenuItem::with_id(app, "setup", "Setup / Repair", true, None::<&str>)?;
+    let check_updates = MenuItem::with_id(
+        app,
+        "check-updates",
+        "Check for Updates",
+        true,
+        None::<&str>,
+    )?;
     let restart = MenuItem::with_id(app, "restart", "Restart Server", true, None::<&str>)?;
     let autostart = CheckMenuItem::with_id(
         app,
@@ -119,6 +126,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             &open,
             &server_output,
             &setup,
+            &check_updates,
             &restart,
             &sep1,
             &settings,
@@ -146,6 +154,9 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             }
             "setup" => {
                 let _ = crate::windows::show_setup_window(app);
+            }
+            "check-updates" => {
+                let _ = app.emit("check-for-updates", ());
             }
             "autostart" => {
                 let was_enabled = app.autolaunch().is_enabled().unwrap_or(false);
