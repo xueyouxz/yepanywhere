@@ -274,7 +274,7 @@ async function warnIfCodexVersionMismatch(): Promise<void> {
   }
 
   console.warn(
-    `[Codex] Version mismatch: expected ${expected} (package.json yepAnywhere.codexCli.expectedVersion), detected ${actual}. Codex behavior may be unpredictable until versions align.`,
+    `[Codex] CLI version differs from YA's audited target: package.json yepAnywhere.codexCli.expectedVersion=${expected}, detected ${actual}. This is an advisory compatibility signal, not a hard requirement; YA gates known version-sensitive behavior where possible, but Codex app-server behavior may differ if the protocol changed.`,
   );
 }
 

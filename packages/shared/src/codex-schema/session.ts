@@ -117,6 +117,19 @@ export const CodexReasoningPayloadSchema = z.object({
 
 export type CodexReasoningPayload = z.infer<typeof CodexReasoningPayloadSchema>;
 
+export const CodexAgentMessagePayloadSchema = z
+  .object({
+    type: z.literal("agent_message"),
+    author: z.string().optional(),
+    recipient: z.string().optional(),
+    content: z.unknown().optional(),
+  })
+  .passthrough();
+
+export type CodexAgentMessagePayload = z.infer<
+  typeof CodexAgentMessagePayloadSchema
+>;
+
 /**
  * Function call payload.
  */
@@ -231,6 +244,7 @@ export type CodexGhostSnapshotPayload = z.infer<
  */
 export const CodexResponseItemPayloadSchema = z.discriminatedUnion("type", [
   CodexMessagePayloadSchema,
+  CodexAgentMessagePayloadSchema,
   CodexReasoningPayloadSchema,
   CodexFunctionCallPayloadSchema,
   CodexFunctionCallOutputPayloadSchema,

@@ -166,6 +166,44 @@ describe("Codex Normalization", () => {
     });
   });
 
+  it("recognizes opaque Codex agent_message response items without rendering", () => {
+    const entries: CodexSessionEntry[] = [
+      {
+        type: "response_item",
+        timestamp: "2026-06-09T00:00:00Z",
+        payload: {
+          type: "agent_message",
+          author: "agent",
+          recipient: "user",
+          content: [
+            {
+              type: "encrypted_content",
+              encrypted_content: "opaque",
+            },
+          ],
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-06-09T00:00:01Z",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "visible" }],
+        },
+      },
+    ];
+
+    const result = normalizeSession(buildLoadedSession(entries));
+
+    expect(result.messages).toHaveLength(1);
+    const content = result.messages[0]?.message?.content;
+    expect(Array.isArray(content) ? content[0] : content).toEqual({
+      type: "text",
+      text: "visible",
+    });
+  });
+
   it("marks unpaired Codex function calls orphaned at a later turn boundary", () => {
     const entries: CodexSessionEntry[] = [
       {

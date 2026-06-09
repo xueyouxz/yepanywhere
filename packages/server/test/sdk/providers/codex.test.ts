@@ -2052,14 +2052,14 @@ describe("CodexProvider Event Normalization", () => {
       approvalPolicy: "on-request",
       sandbox: "workspace-write",
       experimentalRawEvents: false,
-      persistExtendedHistory: false,
     });
     expect(bypassStart).toMatchObject({
       approvalPolicy: "never",
       sandbox: "danger-full-access",
       experimentalRawEvents: false,
-      persistExtendedHistory: false,
     });
+    expect(start.persistExtendedHistory).toBeUndefined();
+    expect(bypassStart.persistExtendedHistory).toBeUndefined();
     expect(start.permissionProfile).toBeUndefined();
     expect(bypassStart.permissionProfile).toBeUndefined();
   });
@@ -2091,9 +2091,9 @@ describe("CodexProvider Event Normalization", () => {
       threadId: "thread-1",
       approvalPolicy: "on-request",
       sandbox: "workspace-write",
-      persistExtendedHistory: false,
     });
     expect(resume.excludeTurns).toBeUndefined();
+    expect(resume.persistExtendedHistory).toBeUndefined();
     expect(resume.permissionProfile).toBeUndefined();
   });
 
@@ -2124,8 +2124,8 @@ describe("CodexProvider Event Normalization", () => {
     expect(resume).toMatchObject({
       threadId: "thread-1",
       excludeTurns: true,
-      persistExtendedHistory: false,
     });
+    expect(resume.persistExtendedHistory).toBeUndefined();
   });
 
   it("pins thread-scope reasoning effort via config when effort is requested", () => {

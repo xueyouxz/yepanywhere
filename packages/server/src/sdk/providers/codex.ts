@@ -2135,7 +2135,6 @@ export class CodexProvider implements AgentProvider {
       ...this.buildThreadPermissionParams(policy),
       config: this.buildThreadConfigOverrides(options),
       experimentalRawEvents: false,
-      persistExtendedHistory: false,
     };
   }
 
@@ -2152,7 +2151,6 @@ export class CodexProvider implements AgentProvider {
       cwd: options.cwd,
       ...this.buildThreadPermissionParams(policy),
       config: this.buildThreadConfigOverrides(options),
-      persistExtendedHistory: false,
     };
     if (experimentalApiEnabled) {
       params.excludeTurns = true;
@@ -2255,7 +2253,6 @@ export class CodexProvider implements AgentProvider {
           sandbox: "read-only",
           ephemeral: true,
           experimentalRawEvents: false,
-          persistExtendedHistory: false,
           developerInstructions:
             "You are a recap helper. Reply with the recap text only, no preamble. Do not call tools.",
         } satisfies ThreadStartParams,
@@ -2481,14 +2478,7 @@ export class CodexProvider implements AgentProvider {
     sessionId: string,
     model?: string | null,
     requestedModel?: string | null,
-    reasoningEffort?:
-      | "none"
-      | "minimal"
-      | "low"
-      | "medium"
-      | "high"
-      | "xhigh"
-      | null,
+    reasoningEffort?: string | null,
     requestedReasoningEffort?:
       | "none"
       | "minimal"
@@ -2532,15 +2522,7 @@ export class CodexProvider implements AgentProvider {
   }
 
   private describeAcknowledgedSessionReasoningEffort(
-    effort:
-      | "none"
-      | "minimal"
-      | "low"
-      | "medium"
-      | "high"
-      | "xhigh"
-      | null
-      | undefined,
+    effort: string | null | undefined,
   ): string | null {
     return effort ? `effort ${effort}` : null;
   }

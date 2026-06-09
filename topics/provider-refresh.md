@@ -117,7 +117,37 @@ Difference detectors:
 - Server startup warns that detected Codex version differs from
   `expectedVersion`; this alone is a trigger to run the checks above.
 
-Current read-only audit, 2026-06-05:
+`expectedVersion` records the Codex CLI version YA's checked-in app-server
+protocol subset was last audited against. It is not a minimum supported version:
+older installs may continue to work when YA does not need newer protocol fields,
+and version-sensitive behavior should be capability- or version-gated where
+possible.
+
+Current source refresh, 2026-06-09:
+
+- Installed Codex is `codex-cli 0.138.0`; repo expected version is `0.138.0`.
+- `pnpm codex:protocol:check` is clean after regenerating the checked-in
+  app-server subset. Notable protocol drift from the 0.135 target: generated
+  `ReasoningEffort` is now provider-defined `string`; raw `ResponseItem` gained
+  opaque `agent_message`; approval params gained `environmentId`; thread
+  metadata gained `parentThreadId`; user-message params/items gained client ids;
+  resume responses can include `initialTurnsPage`; workspace roots are typed as
+  absolute paths; `persistExtendedHistory` is no longer part of start/resume
+  params.
+- Runtime compatibility change: YA no longer sends the deprecated
+  `persistExtendedHistory` start/resume field. The field was already optional
+  and deprecated in prior Codex versions, so omitting it avoids unknown-field
+  risk on 0.138 without forcing old users to upgrade.
+- App-server `model/list` still returned the visible YA model set:
+  `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, and `gpt-5.3-codex-spark`; `priority`
+  service tier remains on `gpt-5.5` and `gpt-5.4`.
+- Startup version mismatch wording now describes the package value as an
+  advisory audited target, not a strict version requirement.
+
+Status: Codex 0.138 compatibility refresh complete in source; no new
+latest-Codex requirement was introduced.
+
+Previous read-only audit, 2026-06-05:
 
 - Installed Codex is `codex-cli 0.137.0`; repo expected version is `0.135.0`.
 - `pnpm codex:protocol:check` failed. New generated files:
@@ -130,8 +160,8 @@ Current read-only audit, 2026-06-05:
 - App-server `model/list` returned `gpt-5.5`, `gpt-5.4`,
   `gpt-5.4-mini`, and `gpt-5.3-codex-spark`.
 
-Status: Codex is due for a source refresh. Because generated protocol files
-changed, this is not a harmless higher-version case.
+Status at the time: Codex was due for a source refresh because generated
+protocol files had changed.
 
 ## Claude
 
