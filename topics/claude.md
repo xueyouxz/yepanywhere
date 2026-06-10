@@ -122,9 +122,11 @@ array).
 Open question (unverified, provider-side): whether `claude --resume`
 rebuilds model context by walking `parentUuid` from the chosen tip. If it
 does, a falsely-dead segment — the assistant's own completed work — would
-be silently absent from the resumed context, which may explain
-"model forgot work it did" reports after resume. Adjacent to the existing
-API-error unsafe-resume contract above.
+be silently absent from the resumed context; the predicted symptom would
+be a resumed session unaware of work it visibly completed before the
+resume. No such report exists yet; this is a prediction to test, not an
+observed failure. Adjacent to the existing API-error unsafe-resume
+contract above.
 
 ## Current Problem Areas
 
