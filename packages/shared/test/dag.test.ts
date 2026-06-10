@@ -56,6 +56,16 @@ describe("dag", () => {
       ];
       expect(needsReorder(items)).toBe(false);
     });
+
+    it("returns false when a parent is absent from the array entirely", () => {
+      // Normal shape of pagination windows and transcripts whose hidden
+      // connector rows (attachment/system) were never delivered.
+      const items: DagOrderable[] = [
+        { id: "b", parentUuid: "not-in-array" },
+        { id: "c", parentUuid: "b" },
+      ];
+      expect(needsReorder(items)).toBe(false);
+    });
   });
 
   describe("orderByParentChain", () => {
@@ -124,15 +134,83 @@ describe("dag", () => {
       ]);
     });
 
-    it("appends orphaned items (no parent in chain) at end", () => {
+    it("keeps items with missing parents in place", () => {
+      // A parent absent from the array gives no better position to move
+      // the child to; input position is the best available evidence.
       const items: DagOrderable[] = [
         { id: "a", parentUuid: null },
         { id: "orphan", parentUuid: "missing-parent" }, // parent doesn't exist
         { id: "b", parentUuid: "a" },
       ];
       const result = orderByParentChain(items);
-      // a, b form the chain; orphan is appended at end
-      expect(result.map((i) => i.id)).toEqual(["a", "b", "orphan"]);
+      expect(result.map((i) => i.id)).toEqual(["a", "orphan", "b"]);
+    });
+
+    it("moves only the out-of-order item, not disconnected segments", () => {
+      const items: DagOrderable[] = [
+        // Segment whose parent chain starts at a row absent from the array
+        { id: "s1", parentUuid: "missing-connector" },
+        { id: "s2", parentUuid: "s1" },
+        // Out-of-order pair: child before parent
+        { id: "late-child", parentUuid: "late-parent" },
+        { id: "late-parent", parentUuid: "s2" },
+        // Trailing row already in order
+        { id: "tail", parentUuid: "late-child" },
+      ];
+      const result = orderByParentChain(items);
+      expect(result.map((i) => i.id)).toEqual([
+        "s1",
+        "s2",
+        "late-parent",
+        "late-child",
+        "tail",
+      ]);
+    });
+
+    it("does not scramble a transcript with hidden connector rows and stream-only rows (task 024 shape)", () => {
+      // Modeled on a real Claude session: every assistant turn chains
+      // through an `attachment` connector row, a system/api_error row is a
+      // fork point, and live stream rows arrive without parentUuid. If the
+      // connector rows are missing client-side and one streamed row never
+      // received its JSONL parentUuid, the old root-walk reorder pulled the
+      // live tail to the front and dumped the dead branch at the bottom.
+      const items: DagOrderable[] = [
+        // Tail window: first row's parent predates the window
+        { id: "u183", parentUuid: "a180-outside-window" },
+        // Dead branch; parent att184 (attachment row) absent from array
+        { id: "a185", parentUuid: "att184" },
+        { id: "a198", parentUuid: "a185" },
+        // Live branch via system/api_error row, also absent
+        { id: "u202", parentUuid: "sys201" },
+        // Streamed row: real uuid, never got parentUuid from JSONL
+        { id: "a203" },
+        // Later JSONL rows chain through the streamed row
+        { id: "a204", parentUuid: "a203" },
+        { id: "a205", parentUuid: "a204" },
+      ];
+      const result = orderByParentChain(items);
+      // Nothing is out of order (no present parent appears after its
+      // child), so input order must be preserved exactly.
+      expect(result.map((i) => i.id)).toEqual([
+        "u183",
+        "a185",
+        "a198",
+        "u202",
+        "a203",
+        "a204",
+        "a205",
+      ]);
+    });
+
+    it("recovers from a parentUuid cycle without dropping rows", () => {
+      const items: DagOrderable[] = [
+        { id: "a", parentUuid: null },
+        { id: "x", parentUuid: "y" },
+        { id: "y", parentUuid: "x" },
+      ];
+      const result = orderByParentChain(items);
+      expect(result.map((i) => i.id).sort()).toEqual(["a", "x", "y"]);
+      expect(result[0]?.id).toBe("a");
     });
 
     it("handles items without parentUuid field as roots", () => {

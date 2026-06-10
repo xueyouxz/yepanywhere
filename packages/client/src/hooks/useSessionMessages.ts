@@ -174,6 +174,27 @@ function isCodexProvider(provider?: string): boolean {
   return provider === "codex" || provider === "codex-oss";
 }
 
+/**
+ * Find the id of the newest JSONL-sourced message.
+ *
+ * The incremental-fetch cursor (afterMessageId) must only advance over
+ * rows actually delivered from JSONL. Live stream rows also land in the
+ * array (and get persisted to the file), so cursoring on the array tail
+ * lets streaming advance the cursor past JSONL rows that were never
+ * fetched — permanently skipping them, including chain connector rows
+ * (attachment, system/api_error) that only exist in JSONL. Over-fetching
+ * is safe (merge dedupes by uuid); gaps are not.
+ */
+function findLastJsonlMessageId(messages: Message[]): string | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message && (message._source ?? "sdk") === "jsonl") {
+      return getMessageId(message);
+    }
+  }
+  return undefined;
+}
+
 function shouldSuppressLiveStreamingMessage(message: Message): boolean {
   return message._isStreaming === true && !getStreamingEnabled();
 }
@@ -296,11 +317,13 @@ export function useSessionMessages(
     [],
   );
 
-  // Update lastMessageIdRef when messages change
+  // Update lastMessageIdRef when messages change.
+  // Cursor on the newest JSONL-sourced row, not the array tail (see
+  // findLastJsonlMessageId).
   useEffect(() => {
-    const lastMessage = messages[messages.length - 1];
-    if (lastMessage) {
-      lastMessageIdRef.current = getMessageId(lastMessage);
+    const lastJsonlId = findLastJsonlMessageId(messages);
+    if (lastJsonlId) {
+      lastMessageIdRef.current = lastJsonlId;
     }
   }, [messages]);
 
@@ -495,9 +518,9 @@ export function useSessionMessages(
         // stream "connected" event calls fetchNewMessages() immediately, but the
         // useEffect that normally updates lastMessageIdRef runs asynchronously.
         // Without this, fetchNewMessages() would use undefined and refetch everything.
-        const lastMessage = loadedMessages[loadedMessages.length - 1];
-        if (lastMessage) {
-          lastMessageIdRef.current = getMessageId(lastMessage);
+        const lastJsonlId = findLastJsonlMessageId(loadedMessages);
+        if (lastJsonlId) {
+          lastMessageIdRef.current = lastJsonlId;
         }
 
         // Mark ready and flush buffer

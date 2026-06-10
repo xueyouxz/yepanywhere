@@ -137,18 +137,23 @@ Clarified intent (2026-06-10, from the originating request):
   disappears at delivery; per-chunk icons on the delivered turn are the
   intended extension, not yet implemented.
 
-Observed bug (2026-06-10, under investigation): the reader's scroll was
+Observed bug (2026-06-10, diagnosed and fixed): the reader's scroll was
 repeatedly pulled to the first merged send's compose context without the
-affordance being knowingly clicked. A static pass cleared the obvious
-suspects: the delivered echo is stamped and ordered at delivery time
-(verified against the affected session's transcript), nothing renders the
-sent turn at the compose position, and the only compose-context scroll
-writers are the explicit `Context` click and the one-shot return click.
-Remaining suspects are live-layout interactions: an early scroll-to-bottom
-against a transiently short transcript during promotion re-render,
-browser-native scroll anchoring (YA sets no `overflow-anchor`) reacting to
-chip unmount plus merged-turn mount, and accidental activation of the chip
-`Context` button while composing the next queued message.
+affordance being knowingly clicked. It was not a scroll-writer at all: the
+transcript content itself was being reordered on every merge. Claude
+transcripts chain conversation rows through hidden connector rows
+(`attachment`, `system`/api_error), and live stream rows arrive without
+`parentUuid`. The client's `orderByParentChain` treated rows whose parent
+chain was broken (missing connector) as orphans to append at the tail, and
+parentUuid-less stream rows as roots to pull forward — so an api_error
+fork's dead branch landed at the bottom of the transcript (directly above
+the queued chips) and stuck there across merges, which read as "scroll
+pulled to old context". Two fixes: `orderByParentChain` is now stable and
+minimal-motion (only a row whose parent appears later in the array moves,
+to just after its parent; broken-chain and parentless rows keep their
+position), and the incremental-fetch cursor now tracks the newest
+JSONL-sourced row instead of the array tail, so streaming can no longer
+advance it past never-fetched connector rows.
 
 ## Compact-aware state transitions
 

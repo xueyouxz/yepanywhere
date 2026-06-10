@@ -313,6 +313,133 @@ describe("mergeJSONLMessages", () => {
       ]);
     });
 
+    it("keeps a dead branch in file position across queued-send catch-up merges (task 024)", () => {
+      // Modeled on a real Claude session where an api_error retry forked
+      // the transcript at an `attachment` connector row: the dead branch
+      // (assistant rows 185–198) and the live branch (system/api_error row
+      // 201 → user 202 → ...) are both children of attachment row 184.
+      const user183: Message = {
+        uuid: "u183",
+        type: "user",
+        message: { role: "user", content: "queued pair delivered" },
+        parentUuid: "a180",
+      };
+      const attachment184: Message = {
+        uuid: "att184",
+        type: "attachment",
+        parentUuid: "u183",
+      };
+      const dead185: Message = {
+        uuid: "a185",
+        type: "assistant",
+        message: { role: "assistant", content: [{ type: "text", text: "…" }] },
+        parentUuid: "att184",
+      };
+      const dead198: Message = {
+        uuid: "a198",
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Restored and amended…" }],
+        },
+        parentUuid: "a185",
+      };
+      const system201: Message = {
+        uuid: "sys201",
+        type: "system",
+        subtype: "api_error",
+        parentUuid: "att184",
+      };
+      const user202: Message = {
+        uuid: "u202",
+        type: "user",
+        message: { role: "user", content: "no, 'subagent-agnostic'…" },
+        parentUuid: "sys201",
+      };
+
+      // Initial JSONL window already has the dead branch in file order
+      let messages = mergeJSONLMessages(
+        [],
+        [user183, attachment184, dead185, dead198],
+      ).messages;
+
+      // Live stream: user echo + assistant rows arrive with real uuids but
+      // no parentUuid (the stream does not carry JSONL linkage fields)
+      messages = mergeStreamMessage(messages, {
+        uuid: "u202",
+        type: "user",
+        message: { role: "user", content: "no, 'subagent-agnostic'…" },
+      }).messages;
+      messages = mergeStreamMessage(messages, {
+        uuid: "a203",
+        type: "assistant",
+        message: { role: "assistant", content: [{ type: "text", text: "ok" }] },
+      }).messages;
+
+      // JSONL catch-up that raced past sys201/u202 (cursor advanced by
+      // streaming): only later rows arrive, chaining through the
+      // stream-only row a203
+      messages = mergeJSONLMessages(messages, [
+        {
+          uuid: "a204",
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "more" }],
+          },
+          parentUuid: "a203",
+        },
+      ]).messages;
+
+      expect(messages.map((m) => m.uuid)).toEqual([
+        "u183",
+        "att184",
+        "a185",
+        "a198",
+        "u202",
+        "a203",
+        "a204",
+      ]);
+
+      // A later catch-up delivers the full contiguous file suffix,
+      // including the skipped connector row and JSONL linkage for the
+      // streamed rows. The transcript must converge to exact file order:
+      // dead branch between the attachment fork and the live branch.
+      messages = mergeJSONLMessages(messages, [
+        system201,
+        user202,
+        {
+          uuid: "a203",
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "ok" }],
+          },
+          parentUuid: "u202",
+        },
+        {
+          uuid: "a204",
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "more" }],
+          },
+          parentUuid: "a203",
+        },
+      ]).messages;
+
+      expect(messages.map((m) => m.uuid)).toEqual([
+        "u183",
+        "att184",
+        "a185",
+        "a198",
+        "sys201",
+        "u202",
+        "a203",
+        "a204",
+      ]);
+    });
+
     it("prunes sdk-only Claude sibling messages when authoritative JSONL arrives", () => {
       const existing: Message[] = [
         {

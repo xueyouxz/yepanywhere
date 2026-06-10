@@ -1,11 +1,19 @@
 /**
  * DAG (Directed Acyclic Graph) utilities for JSONL conversation parsing.
  *
- * Claude Code JSONL files are not linear logs - they form a DAG where each
- * message has a `parentUuid` pointing to its predecessor. This enables:
+ * Claude Code JSONL files are not linear logs - each message has a
+ * `parentUuid` pointing to its predecessor, and a parent may have several
+ * children. Since no row has more than one parent, the structure is a
+ * single-parent branching forest rather than a general multi-parent DAG
+ * ("dag" survives in these names for historical reasons). This enables:
  * - Conversation branching (forking from any point)
  * - Dead branches (abandoned paths remain in file but are unreachable)
  * - Clean recovery (resumption picks any node as continuation point)
+ *
+ * Note that conversation rows routinely chain THROUGH non-conversation
+ * connector rows: `attachment` rows sit between a user message and the
+ * assistant reply, and `system` rows (e.g. api_error retry bookkeeping)
+ * can be fork points. Traversals must keep such rows as chain links.
  */
 
 import {
