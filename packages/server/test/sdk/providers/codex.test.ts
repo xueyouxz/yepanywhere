@@ -10,6 +10,7 @@ import { spawn } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -20,6 +21,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { preprocessMessages } from "../../../../client/src/lib/preprocessMessages.ts";
+import { getCodexCommonPaths } from "../../../src/sdk/cli-detection.js";
 import { logSDKMessage } from "../../../src/sdk/messageLogger.js";
 import {
   CodexProvider,
@@ -67,6 +69,30 @@ describe("CodexProvider", () => {
       });
       expect(await customProvider.isInstalled()).toBe(false);
     });
+
+    it("should include OpenAI Codex desktop hashed bin paths on Windows", () => {
+      if (process.platform !== "win32") return;
+
+      const tempDir = mkdtempSync(join(tmpdir(), "codex-desktop-bin-"));
+      const oldLocalAppData = process.env.LOCALAPPDATA;
+      try {
+        const desktopBinDir = join(tempDir, "OpenAI", "Codex", "bin", "abc123");
+        mkdirSync(desktopBinDir, { recursive: true });
+        const codexPath = join(desktopBinDir, "codex.exe");
+        writeFileSync(codexPath, "", "utf-8");
+
+        process.env.LOCALAPPDATA = tempDir;
+
+        expect(getCodexCommonPaths()).toContain(codexPath);
+      } finally {
+        if (oldLocalAppData === undefined) {
+          delete process.env.LOCALAPPDATA;
+        } else {
+          process.env.LOCALAPPDATA = oldLocalAppData;
+        }
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe("getAuthStatus", () => {
@@ -109,7 +135,11 @@ describe("CodexProvider", () => {
 
   describe("startSession", () => {
     it("should return session object with required methods", async () => {
-      const session = await provider.startSession({
+      const noCliProvider = new CodexProvider({
+        codexPath: "/nonexistent/codex",
+      });
+
+      const session = await noCliProvider.startSession({
         cwd: "/tmp",
         initialMessage: { text: "test" },
       });

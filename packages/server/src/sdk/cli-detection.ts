@@ -1,6 +1,7 @@
 import { exec, execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import * as os from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 
 const isWindows = os.platform() === "win32";
@@ -85,18 +86,21 @@ export async function detectCodexCli(
 
 /**
  * Common Codex CLI installation paths (checked after PATH lookup).
- * Includes the Codex desktop app's sandbox-bin location.
+ * Includes Codex desktop app locations.
  */
 export function getCodexCommonPaths(): string[] {
   const home = os.homedir();
   const ext = isWindows ? ".exe" : "";
   const sep = isWindows ? "\\" : "/";
+  const localAppData =
+    process.env.LOCALAPPDATA ?? `${home}${sep}AppData${sep}Local`;
   return isWindows
     ? [
         `${home}${sep}.codex${sep}.sandbox-bin${sep}codex${ext}`,
+        ...getOpenAICodexDesktopPaths(localAppData),
         `${home}${sep}.cargo${sep}bin${sep}codex${ext}`,
         `${home}${sep}.codex${sep}bin${sep}codex${ext}`,
-        `${home}${sep}AppData${sep}Local${sep}bin${sep}codex${ext}`,
+        `${localAppData}${sep}bin${sep}codex${ext}`,
       ]
     : [
         `${home}/.codex/.sandbox-bin/codex`,
@@ -105,6 +109,44 @@ export function getCodexCommonPaths(): string[] {
         `${home}/.cargo/bin/codex`,
         `${home}/.codex/bin/codex`,
       ];
+}
+
+function getOpenAICodexDesktopPaths(localAppData: string): string[] {
+  if (!isWindows) return [];
+
+  const binRoot = join(localAppData, "OpenAI", "Codex", "bin");
+  try {
+    return readdirSync(binRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => {
+        const path = join(binRoot, entry.name, "codex.exe");
+        const mtimeMs = safeMtimeMs(join(binRoot, entry.name));
+        return { path, mtimeMs };
+      })
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+      .map((entry) => entry.path);
+  } catch {
+    return [];
+  }
+}
+
+function safeMtimeMs(path: string): number {
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+function parseWhichOutput(stdout: string): string[] {
+  return stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+async function isUsableCodexPath(path: string): Promise<boolean> {
+  return Boolean(await getCodexVersion(path));
 }
 
 /**
@@ -125,14 +167,15 @@ export async function findCodexCliPath(
     const { stdout } = await execAsync(whichCommand("codex"), {
       encoding: "utf-8",
     });
-    const codexPath = stdout.split("\n")[0]?.trim();
-    if (codexPath) return codexPath;
+    for (const codexPath of parseWhichOutput(stdout)) {
+      if (await isUsableCodexPath(codexPath)) return codexPath;
+    }
   } catch {
     // Not in PATH
   }
 
   for (const path of getCodexCommonPaths()) {
-    if (existsSync(path)) return path;
+    if (existsSync(path) && (await isUsableCodexPath(path))) return path;
   }
 
   return null;
