@@ -27,6 +27,7 @@ export interface ParseLocalResourceOptions {
 }
 
 const FALLBACK_BASE_URL = "http://localhost";
+const WINDOWS_DRIVE_PATHNAME_PATTERN = /^\/([A-Za-z]:[\\/].*)$/;
 const IMAGE_EXTENSIONS = new Set([
   "png",
   "jpg",
@@ -99,6 +100,10 @@ function parsePathReference(
     lineNumber: explicitLine ?? parsed.line,
     columnNumber: explicitColumn ?? parsed.column,
   };
+}
+
+export function normalizeWindowsDrivePathname(filePath: string): string {
+  return filePath.replace(WINDOWS_DRIVE_PATHNAME_PATTERN, "$1");
 }
 
 function inferLocalMediaType(path: string): LocalResourceMediaType | undefined {

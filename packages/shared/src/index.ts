@@ -24,6 +24,7 @@ export type {
   ParseLocalResourceOptions,
 } from "./local-resource.js";
 export {
+  normalizeWindowsDrivePathname,
   parseLocalResourceAttributes,
   parseLocalResourceHref,
   parseLocalResourceLink,

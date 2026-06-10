@@ -2,6 +2,7 @@ import {
   type LocalResourceAttributes,
   type LocalResourceMediaType,
   type LocalResourceRef,
+  normalizeWindowsDrivePathname,
   parseLocalResourceLink,
 } from "@yep-anywhere/shared";
 import { type MouseEvent, type RefObject, useEffect, useState } from "react";
@@ -90,7 +91,9 @@ function getFileName(path: string): string {
 }
 
 function normalizePathForProjectComparison(path: string): NormalizedPath {
-  const display = path.replaceAll("\\", "/").replace(/\/+$/, "");
+  const display = normalizeWindowsDrivePathname(
+    path.replaceAll("\\", "/"),
+  ).replace(/\/+$/, "");
   return {
     display,
     isWindowsDrive: /^[A-Za-z]:\//.test(display),

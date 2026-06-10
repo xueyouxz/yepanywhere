@@ -126,6 +126,32 @@ describe("Local file routes", () => {
     expect(html).not.toContain("Print");
   });
 
+  it.skipIf(process.platform !== "win32")(
+    "serves Windows drive paths encoded like browser URL pathnames",
+    async () => {
+      const allowedDir = path.join(tempDir, "allowed");
+      await mkdir(allowedDir, { recursive: true });
+
+      const filePath = path.join(allowedDir, "notes.md");
+      await writeFile(filePath, "# Notes\n\nText");
+      const browserPathname = `/${filePath.replaceAll("\\", "/")}`;
+
+      const routes = createLocalFileRoutes({
+        allowedPaths: [allowedDir],
+      });
+
+      const response = await routes.request(
+        `/?path=${encodeURIComponent(browserPathname)}&render=1`,
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")?.toLowerCase()).toBe(
+        "text/html; charset=utf-8",
+      );
+      expect(await response.text()).toContain("<h1>Notes</h1>");
+    },
+  );
+
   it("treats an inline markdown line suffix as a location hint", async () => {
     const allowedDir = path.join(tempDir, "allowed");
     await mkdir(allowedDir, { recursive: true });

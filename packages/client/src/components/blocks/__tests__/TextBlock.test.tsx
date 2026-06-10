@@ -378,6 +378,56 @@ describe("TextBlock", () => {
     expect(await screen.findByText("Project doc")).toBeTruthy();
   });
 
+  it("normalizes browser-style Windows drive local-file links under the active project", async () => {
+    apiMocks.getFile.mockResolvedValueOnce({
+      content: "# Queue doc\n\nRendered through FileViewer.",
+      metadata: {
+        isText: true,
+        mimeType: "text/markdown",
+        path: "topics/message-control-steer-queue-btw-later-interrupt.md",
+        size: 39,
+      },
+      rawUrl:
+        "/api/projects/project-1/files/raw?path=topics%2Fmessage-control-steer-queue-btw-later-interrupt.md",
+      renderedMarkdownHtml: "<h1>Queue doc</h1>",
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <I18nProvider>
+        <SessionMetadataProvider
+          projectId="project-1"
+          projectPath="C:/Users/user/Documents/code/yepanywhere"
+          sessionId="session-1"
+        >
+          <TextBlock
+            text="[queue doc](/C:/Users/user/Documents/code/yepanywhere/topics/message-control-steer-queue-btw-later-interrupt.md)"
+            augmentHtml={
+              '<p><a href="/api/local-file?path=%2FC%3A%2FUsers%2Fuser%2FDocuments%2Fcode%2Fyepanywhere%2Ftopics%2Fmessage-control-steer-queue-btw-later-interrupt.md&amp;render=1&amp;line=38" data-ya-resource="local-file" data-ya-path="/C:/Users/user/Documents/code/yepanywhere/topics/message-control-steer-queue-btw-later-interrupt.md" data-ya-render-markdown="true" data-ya-line="38">queue doc</a></p>'
+            }
+          />
+        </SessionMetadataProvider>
+      </I18nProvider>,
+    );
+
+    const clickAllowed = fireEvent.click(
+      screen.getByRole("link", { name: "queue doc" }),
+    );
+
+    expect(clickAllowed).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(apiMocks.getFile).toHaveBeenCalledWith(
+      "project-1",
+      "topics/message-control-steer-queue-btw-later-interrupt.md",
+      true,
+      38,
+      undefined,
+      "full",
+    );
+    expect(await screen.findByText(/Queue doc/)).toBeTruthy();
+  });
+
   it("preserves direct browser gestures for local-file links", () => {
     render(
       <TextBlock

@@ -21,6 +21,9 @@ describe("local resource path policy", () => {
     expect(isSupportedAbsoluteLocalPath("C:\\tmp\\probe.json", "win32")).toBe(
       true,
     );
+    expect(isSupportedAbsoluteLocalPath("/C:/tmp/probe.json", "win32")).toBe(
+      true,
+    );
     expect(isSupportedAbsoluteLocalPath("tmp/probe.json", "win32")).toBe(false);
   });
 

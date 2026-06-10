@@ -1,6 +1,7 @@
 import type { Stats } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import * as path from "node:path";
+import { normalizeWindowsDrivePathname } from "@yep-anywhere/shared";
 import type { ProjectScanner } from "../projects/scanner.js";
 
 type LocalResourceScanner = Pick<ProjectScanner, "listProjects">;
@@ -92,6 +93,12 @@ export function createLocalResourcePathPolicy(deps: LocalResourcePolicyDeps) {
   const platform = deps.platform ?? process.platform;
   let resolvedAllowedPaths: string[] | null = null;
 
+  function normalizePathForPlatform(filePath: string): string {
+    return platform === "win32"
+      ? normalizeWindowsDrivePathname(filePath)
+      : filePath;
+  }
+
   async function realpathOrOriginal(value: string): Promise<string> {
     try {
       return await realpath(value);
@@ -141,13 +148,14 @@ export function createLocalResourcePathPolicy(deps: LocalResourcePolicyDeps) {
   async function resolveAllowedFilePath(
     filePath: string,
   ): Promise<LocalResourceFileResult> {
-    if (!isSupportedAbsoluteLocalPath(filePath, platform)) {
+    const normalizedFilePath = normalizePathForPlatform(filePath);
+    if (!isSupportedAbsoluteLocalPath(normalizedFilePath, platform)) {
       return { error: "Path must be absolute", ok: false, status: 400 };
     }
 
     let resolvedPath: string;
     try {
-      resolvedPath = await realpath(filePath);
+      resolvedPath = await realpath(normalizedFilePath);
     } catch {
       return { error: "File not found", ok: false, status: 404 };
     }
@@ -181,7 +189,10 @@ export function createLocalResourcePathPolicy(deps: LocalResourcePolicyDeps) {
   return {
     getAllowedPaths,
     isAbsolutePath(filePath: string) {
-      return isSupportedAbsoluteLocalPath(filePath, platform);
+      return isSupportedAbsoluteLocalPath(
+        normalizePathForPlatform(filePath),
+        platform,
+      );
     },
     resolveAllowedFilePath,
   };

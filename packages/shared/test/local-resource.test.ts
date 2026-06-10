@@ -1,11 +1,27 @@
 import { describe, expect, it } from "vitest";
 import {
+  normalizeWindowsDrivePathname,
   parseLocalResourceAttributes,
   parseLocalResourceHref,
   parseLocalResourceLink,
 } from "../src/local-resource.js";
 
 describe("local resource parsing", () => {
+  it("normalizes browser-style Windows drive pathnames", () => {
+    expect(normalizeWindowsDrivePathname("/C:/tmp/probe.json")).toBe(
+      "C:/tmp/probe.json",
+    );
+    expect(normalizeWindowsDrivePathname(String.raw`/C:\tmp\probe.json`)).toBe(
+      String.raw`C:\tmp\probe.json`,
+    );
+    expect(normalizeWindowsDrivePathname("/tmp/C:/probe.json")).toBe(
+      "/tmp/C:/probe.json",
+    );
+    expect(normalizeWindowsDrivePathname("//host/share/probe.json")).toBe(
+      "//host/share/probe.json",
+    );
+  });
+
   it("parses local-file hrefs with render and location hints", () => {
     expect(
       parseLocalResourceHref(
