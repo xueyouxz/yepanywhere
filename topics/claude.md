@@ -136,9 +136,10 @@ from other live turns of the same depth), while both dead-segment needles
 were reported absent, with the model explicitly distinguishing
 reconstruction from recall. Consequence: after an api_error retry
 felicity, a resumed Claude session permanently forgets work it completed
-and the user read. This is a reportable upstream data-integrity bug;
-YA's mitigation is rendering-side only (the contract above). Adjacent to
-the existing API-error unsafe-resume contract.
+and the user read. Reported upstream:
+<https://github.com/anthropics/claude-code/issues/66824>. YA's
+mitigation is rendering-side only (the contract above). Adjacent to the
+existing API-error unsafe-resume contract.
 
 ## Current Problem Areas
 
