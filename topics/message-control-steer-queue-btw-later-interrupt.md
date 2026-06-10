@@ -117,6 +117,39 @@ timestamp.
 - The jump affordance is independent of edit/cancel/steer controls and applies
   to regular queued, patient queued, and recovered/verifying queued rows.
 
+Clarified intent (2026-06-10, from the originating request):
+
+- The affordance is navigation-only. It must not render a visible turn-like
+  row, marker, or duplicated content at the compose position — its purpose is
+  to let the reader see the agent-output context around the moment the
+  message was typed, not to relocate or mirror the sent turn there. The only
+  in-transcript artifact is the existing one-shot jump-back gutter icon
+  after an explicit jump.
+- Jumping is click-driven only. Queue promotion, merged delivery, reconnect,
+  snapshot reconciliation, and re-renders must never scroll the view to a
+  compose anchor on their own (see
+  [scrollback-view-stability](scrollback-view-stability.md) for the general
+  no-unsolicited-movement contract).
+- The affordance should survive delivery: each chunk section of a sent
+  multipart queued turn (the `--------`-separated blocks) gets its own
+  side-link jump icon, because the chunks were composed at different times.
+  Currently the affordance exists only on pre-delivery queued rows and
+  disappears at delivery; per-chunk icons on the delivered turn are the
+  intended extension, not yet implemented.
+
+Observed bug (2026-06-10, under investigation): the reader's scroll was
+repeatedly pulled to the first merged send's compose context without the
+affordance being knowingly clicked. A static pass cleared the obvious
+suspects: the delivered echo is stamped and ordered at delivery time
+(verified against the affected session's transcript), nothing renders the
+sent turn at the compose position, and the only compose-context scroll
+writers are the explicit `Context` click and the one-shot return click.
+Remaining suspects are live-layout interactions: an early scroll-to-bottom
+against a transiently short transcript during promotion re-render,
+browser-native scroll anchoring (YA sets no `overflow-anchor`) reacting to
+chip unmount plus merged-turn mount, and accidental activation of the chip
+`Context` button while composing the next queued message.
+
 ## Compact-aware state transitions
 
 - If YA triggers a pre-send compact attempt for a targeted provider/model,

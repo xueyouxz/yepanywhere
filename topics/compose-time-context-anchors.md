@@ -77,8 +77,11 @@ messages, it should be reconciled with the preamble rather than stacked on top.
   rendered user turn shows the anchor (consistent with how the harness shows the
   injected separator as part of the user turn).
 - A separate, optional UI affordance — relative-time ("ago") mouseover tags on
-  turns — is a client-package concern and is tracked independently of this
-  server-side delivery contract.
+  turns, and the queued-row compose-context jump — is a client-package concern
+  tracked independently of this server-side delivery contract; the jump
+  affordance's contract lives in
+  [message-control-steer-queue-btw-later-interrupt](message-control-steer-queue-btw-later-interrupt.md)
+  § Queued-item navigation affordance.
 
 ## Observed UI Edge Case
 
