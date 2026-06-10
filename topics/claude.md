@@ -112,10 +112,14 @@ chain of everything after them.
    observe and render sanely.
 
 Rendering contract for both cases: the server selects the active tip
-timestamp-first (`buildDag`), re-includes dead branches containing
-completed tool work as sibling branches in file order
-(`collectVisibleClaudeEntries`), and the client's `orderByParentChain`
-is stable/minimal-motion so missing connector rows can never relocate a
+timestamp-first (`buildDag`) and re-includes dead branches as sibling
+branches in file order (`collectVisibleClaudeEntries`) when they contain
+completed tool work OR are falsely dead per the discriminator — the
+active branch continues from the fork through a `system` (bookkeeping)
+row rather than a user-authored row, so the branch was not abandoned by
+user action. Deliberate rewind branches (active branch continues through
+a `user` row) stay hidden. The client's `orderByParentChain` is
+stable/minimal-motion so missing connector rows can never relocate a
 segment (a row moves only when its parent is present later in the same
 array).
 

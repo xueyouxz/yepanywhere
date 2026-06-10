@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
-  type RawSessionMessage,
   buildDag,
   collectAllToolResultIds,
   findOrphanedToolUses,
   findSiblingToolBranches,
   findSiblingToolResults,
 } from "../../src/sessions/dag.js";
+
+// Fixtures are deliberately partial rows: full schema-valid
+// ClaudeSessionEntry objects (isSidechain, cwd, sessionId, version, …)
+// would bury the parentUuid structure these tests are about. The dag
+// utilities only read type/subtype/uuid/parentUuid/timestamp/message/
+// logicalParentUuid.
+// biome-ignore lint/suspicious/noExplicitAny: loose fixture rows by design
+type RawSessionMessage = any;
 
 describe("buildDag", () => {
   it("builds linear chain correctly", () => {
@@ -1162,5 +1169,99 @@ describe("progress messages", () => {
       messages,
     );
     expect(siblingBranches).toEqual([]);
+  });
+});
+
+describe("bookkeeping-orphaned sibling branches", () => {
+  it("includes a text-only dead branch when the active branch continues through a system row", () => {
+    // Modeled on a real api_error retry felicity (topics/claude.md
+    // § Transcript Structure): the buffered api_error row is flushed at
+    // the next user turn and the new turn is parented to it, orphaning
+    // the successful retry output (here text-only, no tool work).
+    const messages: RawSessionMessage[] = [
+      { type: "user", uuid: "u1", parentUuid: null, timestamp: "T01" },
+      { type: "attachment", uuid: "att", parentUuid: "u1", timestamp: "T02" },
+      {
+        type: "assistant",
+        uuid: "dead-think",
+        parentUuid: "att",
+        timestamp: "T03",
+        message: {
+          role: "assistant",
+          content: [{ type: "thinking", thinking: "…" }],
+        },
+      },
+      {
+        type: "assistant",
+        uuid: "dead-text",
+        parentUuid: "dead-think",
+        timestamp: "T04",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Restored and amended…" }],
+        },
+      },
+      {
+        type: "system",
+        subtype: "api_error",
+        uuid: "sys-err",
+        parentUuid: "att",
+        timestamp: "T02b",
+      },
+      { type: "user", uuid: "u2", parentUuid: "sys-err", timestamp: "T05" },
+      { type: "assistant", uuid: "a2", parentUuid: "u2", timestamp: "T06" },
+    ];
+
+    const result = buildDag(messages);
+    expect(result.activeBranch.map((node) => node.uuid)).toEqual([
+      "u1",
+      "att",
+      "sys-err",
+      "u2",
+      "a2",
+    ]);
+
+    const siblingBranches = findSiblingToolBranches(
+      result.activeBranch,
+      messages,
+    );
+    expect(siblingBranches).toHaveLength(1);
+    expect(siblingBranches[0]?.branchPoint).toBe("att");
+    expect(siblingBranches[0]?.nodes.map((node) => node.uuid)).toEqual([
+      "dead-think",
+      "dead-text",
+    ]);
+    expect(siblingBranches[0]?.completedToolUseIds).toEqual([]);
+  });
+
+  it("keeps a text-only branch abandoned by user rewind hidden", () => {
+    // Deliberate rewind: the active branch continues from the fork
+    // through a user-authored row, so the abandoned tail stays hidden.
+    const messages: RawSessionMessage[] = [
+      { type: "user", uuid: "u1", parentUuid: null, timestamp: "T01" },
+      { type: "assistant", uuid: "a1", parentUuid: "u1", timestamp: "T02" },
+      {
+        type: "assistant",
+        uuid: "abandoned",
+        parentUuid: "a1",
+        timestamp: "T03",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "old direction" }],
+        },
+      },
+      { type: "user", uuid: "u2", parentUuid: "a1", timestamp: "T04" },
+      { type: "assistant", uuid: "a2", parentUuid: "u2", timestamp: "T05" },
+    ];
+
+    const result = buildDag(messages);
+    expect(result.activeBranch.map((node) => node.uuid)).toEqual([
+      "u1",
+      "a1",
+      "u2",
+      "a2",
+    ]);
+
+    expect(findSiblingToolBranches(result.activeBranch, messages)).toEqual([]);
   });
 });

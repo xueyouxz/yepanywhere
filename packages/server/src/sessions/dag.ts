@@ -477,13 +477,16 @@ export function findSiblingToolResults(
   return siblingResults;
 }
 
-/** A complete sibling branch that contains tool_use/tool_result pairs */
+/** A complete sibling branch that contains tool_use/tool_result pairs,
+ * or conversation rows orphaned by provider bookkeeping (see
+ * findSiblingToolBranches). */
 export interface SiblingToolBranch {
   /** UUID of the node on active branch where this branch diverges */
   branchPoint: string;
   /** All nodes in this branch (including tool_use and tool_result messages) */
   nodes: DagNode[];
-  /** Tool use IDs in this branch that have matching results */
+  /** Tool use IDs in this branch that have matching results
+   * (empty for bookkeeping-orphaned conversation branches) */
   completedToolUseIds: string[];
 }
 
@@ -506,6 +509,16 @@ export interface SiblingToolBranch {
  * - Sibling branch: task-2-msg → task-3-msg → result-3 (with result-2 as sub-sibling)
  *
  * This function finds task-2-msg, task-3-msg, result-2, and result-3 as siblings.
+ *
+ * It also returns "falsely dead" conversation branches orphaned by provider
+ * bookkeeping, even when they contain no tool work. Observed mechanism: an
+ * api_error retry row is buffered at error time and flushed at the NEXT user
+ * turn, which gets parented to it instead of to the real conversation tip —
+ * orphaning the successful retry output (see topics/claude.md § Transcript
+ * Structure). Discriminator: the active branch continues from the fork
+ * through a `system` row (bookkeeping), not through a user-authored row. A
+ * deliberate rewind/fork continues through a `user` row, and its abandoned
+ * branch stays hidden unless the existing completed-tool rule applies.
  *
  * @param activeBranch - The active conversation branch
  * @param allMessages - All raw messages from the session
@@ -543,6 +556,17 @@ export function findSiblingToolBranches(
 
   // Collect all tool_result IDs for checking if tool_uses are completed
   const allToolResultIds = collectAllToolResultIds(allMessages);
+
+  // Map each active-branch node to its successor's row type, to recognize
+  // forks where the conversation continued through a bookkeeping row
+  const activeSuccessorTypeByUuid = new Map<string, string>();
+  for (let i = 0; i + 1 < activeBranch.length; i++) {
+    const node = activeBranch[i];
+    const successor = activeBranch[i + 1];
+    if (node && successor) {
+      activeSuccessorTypeByUuid.set(node.uuid, successor.raw.type);
+    }
+  }
 
   // Find sibling branch starting points: children of active branch nodes that are not on active branch
   const siblingStarts: Array<{ branchPoint: string; startUuid: string }> = [];
@@ -608,8 +632,15 @@ export function findSiblingToolBranches(
       }
     }
 
-    // Only include branches that have at least one completed tool_use
-    if (completedToolUseIds.length > 0) {
+    // Include branches that have at least one completed tool_use, or
+    // conversation rows the provider orphaned behind a bookkeeping fork
+    // (active branch continues through a system row, not a user-authored
+    // row — see the function doc)
+    const orphanedByBookkeeping =
+      activeSuccessorTypeByUuid.get(branchPoint) === "system" &&
+      subtreeNodes.some((node) => CONVERSATION_TYPES.has(node.raw.type));
+
+    if (completedToolUseIds.length > 0 || orphanedByBookkeeping) {
       // Sort nodes by lineIndex for consistent ordering
       subtreeNodes.sort((a, b) => a.lineIndex - b.lineIndex);
       siblingBranches.push({
