@@ -37,3 +37,19 @@ Dynamic-scope or explicit snapshot/live link adaptation is acceptable for public
 shares when the adaptation is attached to the shared rendering context or file
 viewer source. It is not a license for arbitrary `onclick` URL surgery after
 the UI has already been generated.
+
+## Settings Pane Conventions
+
+Settings panes apply changes immediately on interaction — the house style
+for toggles, sliders, and selects (Notifications, Model, Appearance,
+Development). A deferred Save/`hasChanges` flow is acceptable only for
+free-text panes where partial input should not hit the server (Agent
+Context, Lifecycle Webhooks, Providers, Local Access); continuous controls
+like sliders debounce their saves rather than deferring them.
+
+The per-pane undo affordance has a single implementation and a single
+location: panes register their open-time snapshot revert via
+`useSettingsUndo` (`pages/settings/SettingsUndoContext.tsx`), and
+`SettingsLayout` renders the one Undo button top-right on the header row —
+never inside scrollable pane content. A pane that adopts immediate apply
+should register undo so accidental changes stay recoverable.

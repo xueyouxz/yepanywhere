@@ -41,9 +41,13 @@ The server settings are stored by `ServerSettingsService` (PUT
 delivery boundary without a restart. The client exposes both settings in
 the "Message Delivery" pane (not Appearance, not new-session defaults):
 a slider with an adjacent numeric input where 0 reads as "never batch
-consecutive queued turns". The same pane could later host the primary
-send-while-busy intent default (Claude now/next lanes — see
-[steer-queue-provider-differences](steer-queue-provider-differences.md)).
+consecutive queued turns". Changes apply immediately (no Save button);
+the header-row Undo reverts to the pane-open snapshot (see
+[ui-architecture](ui-architecture.md) § Settings Pane Conventions). The
+same pane is the agreed future home (low priority) of a per-provider
+send-while-busy intent default — e.g. Codex defaulting to immediate
+"now"/steer delivery — see
+[steer-queue-provider-differences](steer-queue-provider-differences.md).
 
 ## Opt-in: join window (`deferredJoinWindowSeconds` > 0)
 

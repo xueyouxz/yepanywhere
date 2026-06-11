@@ -18,6 +18,8 @@ interface PageHeaderProps {
   showBack?: boolean;
   /** Callback when back button is clicked */
   onBack?: () => void;
+  /** Right-aligned header actions (same row as the title) */
+  actions?: ReactNode;
 }
 
 const SidebarToggleIcon = () => (
@@ -62,6 +64,7 @@ export function PageHeader({
   isSidebarCollapsed = false,
   showBack = false,
   onBack,
+  actions,
 }: PageHeaderProps) {
   const { t } = useI18n();
   // On desktop: toggle sidebar collapse. On mobile: open sidebar overlay
@@ -111,6 +114,7 @@ export function PageHeader({
             </span>
           )}
         </div>
+        {actions && <div className="session-header-actions">{actions}</div>}
       </div>
     </header>
   );

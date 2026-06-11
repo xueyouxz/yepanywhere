@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useServerSettings } from "../../hooks/useServerSettings";
 import { useI18n } from "../../i18n";
+import { useSettingsUndo } from "./SettingsUndoContext";
 
 const JOIN_WINDOW_SLIDER_MAX_SECONDS = 120;
 const JOIN_WINDOW_MAX_SECONDS = 86400;
+const JOIN_WINDOW_SAVE_DEBOUNCE_MS = 400;
 
 function parseJoinWindowSeconds(value: string): number {
   const parsed = Number.parseInt(value, 10);
@@ -11,43 +13,91 @@ function parseJoinWindowSeconds(value: string): number {
   return Math.min(parsed, JOIN_WINDOW_MAX_SECONDS);
 }
 
+interface MessageDeliveryBaseline {
+  joinWindowSeconds: number;
+  composeAnchorsEnabled: boolean;
+}
+
+/**
+ * Message Delivery pane. Settings apply immediately on change (the house
+ * style for toggle/slider panes — no Save button); the header-row Undo
+ * (useSettingsUndo) reverts to the values from when the pane was opened.
+ */
 export function MessageDeliverySettings() {
   const { t } = useI18n();
   const { settings, isLoading, error, updateSettings } = useServerSettings();
-  const [joinWindowSeconds, setJoinWindowSeconds] = useState("0");
-  const [composeAnchorsEnabled, setComposeAnchorsEnabled] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // null drafts mirror the server value; non-null while the user is editing
+  // or a save is in flight, cleared once the server catches up.
+  const [draftJoinWindow, setDraftJoinWindow] = useState<string | null>(null);
+  const [draftAnchors, setDraftAnchors] = useState<boolean | null>(null);
+  const baselineRef = useRef<MessageDeliveryBaseline | null>(null);
 
   const serverJoinWindowSeconds = settings?.deferredJoinWindowSeconds ?? 0;
   const serverComposeAnchorsEnabled = settings?.composeAnchorsEnabled ?? false;
-  const safeJoinWindowSeconds = parseJoinWindowSeconds(joinWindowSeconds);
-  const hasChanges =
-    safeJoinWindowSeconds !== serverJoinWindowSeconds ||
-    composeAnchorsEnabled !== serverComposeAnchorsEnabled;
 
   useEffect(() => {
-    if (!settings) return;
-    setJoinWindowSeconds(String(serverJoinWindowSeconds));
-    setComposeAnchorsEnabled(serverComposeAnchorsEnabled);
-  }, [settings, serverComposeAnchorsEnabled, serverJoinWindowSeconds]);
-
-  const handleSave = useCallback(async () => {
-    setIsSaving(true);
-    setSaveError(null);
-    try {
-      await updateSettings({
-        deferredJoinWindowSeconds: safeJoinWindowSeconds,
-        composeAnchorsEnabled,
-      });
-    } catch (err) {
-      setSaveError(
-        err instanceof Error ? err.message : t("messageDeliverySaveFailed"),
-      );
-    } finally {
-      setIsSaving(false);
+    if (settings && !baselineRef.current) {
+      baselineRef.current = {
+        joinWindowSeconds: settings.deferredJoinWindowSeconds ?? 0,
+        composeAnchorsEnabled: settings.composeAnchorsEnabled ?? false,
+      };
     }
-  }, [composeAnchorsEnabled, safeJoinWindowSeconds, t, updateSettings]);
+  }, [settings]);
+
+  const shownJoinWindowText =
+    draftJoinWindow ?? String(serverJoinWindowSeconds);
+  const shownJoinWindowSeconds = parseJoinWindowSeconds(shownJoinWindowText);
+  const shownAnchors = draftAnchors ?? serverComposeAnchorsEnabled;
+
+  // Debounced auto-save for the join window (sliders fire continuously).
+  useEffect(() => {
+    if (draftJoinWindow === null) return;
+    const parsed = parseJoinWindowSeconds(draftJoinWindow);
+    if (parsed === serverJoinWindowSeconds) return;
+    const timer = setTimeout(() => {
+      void updateSettings({ deferredJoinWindowSeconds: parsed }).catch(() => {
+        // surfaced via the hook's error state
+      });
+    }, JOIN_WINDOW_SAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [draftJoinWindow, serverJoinWindowSeconds, updateSettings]);
+
+  // Drop drafts once the server reflects them.
+  useEffect(() => {
+    if (
+      draftJoinWindow !== null &&
+      parseJoinWindowSeconds(draftJoinWindow) === serverJoinWindowSeconds
+    ) {
+      setDraftJoinWindow(null);
+    }
+  }, [draftJoinWindow, serverJoinWindowSeconds]);
+  useEffect(() => {
+    if (draftAnchors !== null && draftAnchors === serverComposeAnchorsEnabled) {
+      setDraftAnchors(null);
+    }
+  }, [draftAnchors, serverComposeAnchorsEnabled]);
+
+  const baseline = baselineRef.current;
+  const canUndo =
+    !!baseline &&
+    (shownJoinWindowSeconds !== baseline.joinWindowSeconds ||
+      shownAnchors !== baseline.composeAnchorsEnabled);
+
+  const undo = useCallback(async () => {
+    const snapshot = baselineRef.current;
+    if (!snapshot) return;
+    setDraftJoinWindow(null);
+    setDraftAnchors(null);
+    await updateSettings({
+      deferredJoinWindowSeconds: snapshot.joinWindowSeconds,
+      composeAnchorsEnabled: snapshot.composeAnchorsEnabled,
+    }).catch(() => {
+      // surfaced via the hook's error state
+    });
+  }, [updateSettings]);
+
+  useSettingsUndo(canUndo, undo);
 
   if (isLoading) {
     return (
@@ -81,13 +131,10 @@ export function MessageDeliverySettings() {
               max={JOIN_WINDOW_SLIDER_MAX_SECONDS}
               step={5}
               value={Math.min(
-                safeJoinWindowSeconds,
+                shownJoinWindowSeconds,
                 JOIN_WINDOW_SLIDER_MAX_SECONDS,
               )}
-              onChange={(e) => {
-                setJoinWindowSeconds(e.target.value);
-                setSaveError(null);
-              }}
+              onChange={(e) => setDraftJoinWindow(e.target.value)}
             />
             <span className="output-appearance-number-wrap">
               <input
@@ -95,21 +142,18 @@ export function MessageDeliverySettings() {
                 className="settings-input-small output-appearance-number"
                 min={0}
                 max={JOIN_WINDOW_MAX_SECONDS}
-                value={joinWindowSeconds}
-                onChange={(e) => {
-                  setJoinWindowSeconds(e.target.value);
-                  setSaveError(null);
-                }}
+                value={shownJoinWindowText}
+                onChange={(e) => setDraftJoinWindow(e.target.value)}
                 aria-label={t("messageDeliveryJoinWindowTitle")}
               />
               <span className="output-appearance-unit">s</span>
             </span>
           </span>
           <span className="settings-hint">
-            {safeJoinWindowSeconds === 0
+            {shownJoinWindowSeconds === 0
               ? t("messageDeliveryJoinWindowOffHint")
               : t("messageDeliveryJoinWindowOnHint", {
-                  seconds: String(safeJoinWindowSeconds),
+                  seconds: String(shownJoinWindowSeconds),
                 })}
           </span>
         </div>
@@ -121,32 +165,19 @@ export function MessageDeliverySettings() {
           </div>
           <input
             type="checkbox"
-            checked={composeAnchorsEnabled}
+            checked={shownAnchors}
             onChange={(e) => {
-              setComposeAnchorsEnabled(e.target.checked);
-              setSaveError(null);
+              const next = e.target.checked;
+              setDraftAnchors(next);
+              void updateSettings({ composeAnchorsEnabled: next }).catch(() => {
+                // surfaced via the hook's error state
+              });
             }}
             aria-label={t("messageDeliveryComposeAnchorsTitle")}
           />
         </label>
 
-        <div
-          className="settings-item"
-          style={{ justifyContent: "flex-end", gap: "var(--space-2)" }}
-        >
-          <button
-            type="button"
-            className="settings-button"
-            disabled={!hasChanges || isSaving}
-            onClick={handleSave}
-          >
-            {isSaving ? t("providersSaving") : t("providersSave")}
-          </button>
-        </div>
-
-        {(saveError || error) && (
-          <p className="settings-warning">{saveError || error}</p>
-        )}
+        {error && <p className="settings-warning">{error}</p>}
       </div>
     </section>
   );

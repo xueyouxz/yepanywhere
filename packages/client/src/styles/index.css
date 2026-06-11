@@ -1046,6 +1046,13 @@ h2 {
   min-height: 44px; /* Consistent height whether toggle button is present or not */
 }
 
+.session-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
 .session-header::after {
   content: "";
   position: absolute;

@@ -26,6 +26,10 @@ import { ProvidersSettings } from "./ProvidersSettings";
 import { RemoteAccessSettings } from "./RemoteAccessSettings";
 import { RemoteExecutorsSettings } from "./RemoteExecutorsSettings";
 import { SettingsCategoryIcon } from "./SettingsCategoryIcons";
+import {
+  SettingsUndoProvider,
+  useSettingsUndoRegistration,
+} from "./SettingsUndoContext";
 import { SpeechSettings } from "./SpeechSettings";
 import type { SettingsCategory } from "./types";
 
@@ -95,6 +99,10 @@ export function SettingsLayout() {
   const { isManualReloadMode } = useReloadNotifications();
   const { version: versionInfo } = useVersion();
   const capabilities = versionInfo?.capabilities ?? [];
+  const {
+    registration: undoRegistration,
+    setRegistration: setUndoRegistration,
+  } = useSettingsUndoRegistration();
 
   // Build the list of categories, conditionally including emulator and dev
   const categories: SettingsCategory[] = [
@@ -133,6 +141,19 @@ export function SettingsLayout() {
   const CategoryComponent = effectiveCategory
     ? CATEGORY_COMPONENTS[effectiveCategory]
     : null;
+
+  // The single per-pane Undo affordance: panes register via useSettingsUndo;
+  // the button renders top-right on the header row, never in pane content.
+  const undoButton = undoRegistration?.canUndo ? (
+    <button
+      type="button"
+      className="settings-button"
+      onClick={() => void undoRegistration.undo()}
+      title={t("settingsUndoChangesTooltip")}
+    >
+      {t("settingsUndoChanges")}
+    </button>
+  ) : undefined;
 
   // Narrow settings: category list OR category detail (not both)
   if (!useTwoColumnSettings) {
@@ -174,10 +195,13 @@ export function SettingsLayout() {
           onOpenSidebar={openSidebar}
           showBack
           onBack={handleBack}
+          actions={undoButton}
         />
         <main className="page-scroll-container">
           <div className="page-content-inner">
-            {CategoryComponent && <CategoryComponent />}
+            <SettingsUndoProvider value={setUndoRegistration}>
+              {CategoryComponent && <CategoryComponent />}
+            </SettingsUndoProvider>
           </div>
         </main>
       </MainContent>
@@ -193,6 +217,7 @@ export function SettingsLayout() {
         onToggleSidebar={toggleSidebar}
         isWideScreen={isWideScreen}
         isSidebarCollapsed={isSidebarCollapsed}
+        actions={undoButton}
       />
       <main className="page-scroll-container">
         <div className="settings-two-column">
@@ -209,7 +234,9 @@ export function SettingsLayout() {
             </div>
           </nav>
           <div className="settings-content-panel">
-            {CategoryComponent && <CategoryComponent />}
+            <SettingsUndoProvider value={setUndoRegistration}>
+              {CategoryComponent && <CategoryComponent />}
+            </SettingsUndoProvider>
           </div>
         </div>
       </main>
