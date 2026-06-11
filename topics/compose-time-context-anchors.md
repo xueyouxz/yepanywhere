@@ -1,9 +1,10 @@
 # Compose-Time Context Anchors
 
 > Opt-in (default off): queued/deferred user turns are delivered verbatim,
-> one per delivery boundary; `YA_COMPOSE_ANCHORS=1` prepends `(Ns ago)` /
-> `(Ms later)` staleness anchors and `YA_DEFERRED_BATCH_FLUSH=1` flushes all
-> eligible turns as one separator-joined provider turn.
+> one per delivery boundary; a non-zero join window merges
+> consecutively-composed queued turns into one separator-joined provider
+> turn, and compose anchors prepend `(Ns ago)` / `(Ms later)` staleness
+> text.
 
 Topic: compose-time-context-anchors
 
@@ -24,16 +25,43 @@ message per turn (the maintainer-relayed upstream claim) has not been
 independently verified. If first-party queue flushing turns out to batch,
 the batch-flush default could be revisited as a product decision.
 
-## Opt-in: batched flush (`YA_DEFERRED_BATCH_FLUSH=1`)
+## Configuration and precedence
 
-All eligible deferred turns at a boundary are merged into one provider turn
-joined with `\n\n--------\n\n` separators (`concatUserMessages`). The merged
-turn carries every chunk's `tempId` so queued chips reconcile by identity
-(see
+Two knobs, resolved at each delivery boundary as: server setting (UI) when
+set, else env var, else off.
+
+| knob | server setting | env var | default |
+|---|---|---|---|
+| join window (seconds) | `deferredJoinWindowSeconds` | `YA_DEFERRED_JOIN_WINDOW_S` | `0` = never join |
+| compose anchors | `composeAnchorsEnabled` | `YA_COMPOSE_ANCHORS=1` | off |
+
+The server settings are stored by `ServerSettingsService` (PUT
+`/api/settings`), which publishes them to a live bridge
+(`supervisor/deferredDeliverySettings.ts`) so changes apply to the next
+delivery boundary without a restart. A visible settings surface is planned
+as a new "Message Delivery" pane (not Appearance, not new-session
+defaults): a slider with an adjacent numeric input where 0 reads as
+"never batch consecutive queued turns"; the same pane could later host the
+primary send-while-busy intent default (Claude now/next lanes — see
+[steer-queue-provider-differences](steer-queue-provider-differences.md)).
+The pane is deferred while concurrent client work is in flight.
+
+## Opt-in: join window (`deferredJoinWindowSeconds` > 0)
+
+The leading run of queued turns whose consecutive compose times each fall
+within the window is merged into one provider turn joined with
+`\n\n--------\n\n` separators (`concatUserMessages`). The window is
+*sliding* — each send within N seconds of the *previous* send extends the
+group, so a steady burst chains into one turn and the first real pause
+splits — rather than fixed to the first message, which would arbitrarily
+split mid-burst. A large window approximates "always join" (the original
+batched flush). The merged turn carries every chunk's `tempId` so queued
+chips reconcile by identity (see
 [message-control-steer-queue-btw-later-interrupt](message-control-steer-queue-btw-later-interrupt.md)).
+
 A proper first-class control for the "keep working through my queued
 go-aheads" intent (a slice/duration budget rather than N queued nudges)
-would be a better long-term home for the non-batched use case; nothing
+would be a better long-term home for the never-join use case; nothing
 ships for that yet.
 
 ## Opt-in: staleness anchors (`YA_COMPOSE_ANCHORS=1`)
@@ -53,7 +81,9 @@ user meant. Anchors mark that staleness:
   chunk's compose time). Under batched flush the anchors land between the
   shared `--------` separators.
 - **Threshold.** Anchors below `MIN_COMPOSE_ANCHOR_SECONDS` (10) are omitted
-  as noise.
+  as noise. A side effect: with a join window of 10s or tighter, joined
+  chunks never earn an `(Ms later)` note — only the group's initial
+  `(Ns ago)` can appear.
 - **Anti-skew.** The compose time is `metadata.serverReceivedAt` (stamped at
   the route) falling back to the queue entry's `timestamp` — both server
   clock, so differencing against server `Date.now()` has no client/server
@@ -95,22 +125,27 @@ turns produced with the opt-ins enabled.
 
 ## Implementation
 
-- `packages/server/src/config.ts` — `deferredBatchFlush` /
-  `composeAnchors` from `YA_DEFERRED_BATCH_FLUSH` / `YA_COMPOSE_ANCHORS`
+- `packages/server/src/config.ts` — `deferredJoinWindowSeconds` /
+  `composeAnchors` from `YA_DEFERRED_JOIN_WINDOW_S` / `YA_COMPOSE_ANCHORS`
   (see [ya-env-vars](ya-env-vars.md)).
-- `packages/server/src/supervisor/composeTimeAnchor.ts` — pure
-  `composeTimeAnchor` / `composeTimeAnchors` and
-  `MIN_COMPOSE_ANCHOR_SECONDS`.
+- `packages/server/src/supervisor/deferredDeliverySettings.ts` — live
+  bridge: `publishDeferredDeliverySettings` (called by
+  `ServerSettingsService` on load and update) and
+  `resolveDeferredDeliverySettings` (published settings, then env).
+- `packages/server/src/services/ServerSettingsService.ts` +
+  `packages/server/src/routes/settings.ts` — `deferredJoinWindowSeconds`
+  and `composeAnchorsEnabled` server settings with PUT validation.
 - `packages/server/src/supervisor/Process.ts` — `resolveDeferredDelivery`
-  (constructor override for tests, then server config),
-  `promoteEligibleDeferredAfterTurn` (one-per-boundary default vs batch),
-  `promoteEligiblePatientDeferredMessages` (individual verbatim messages by
-  default; merged only under batch flush), `deferredComposeAnchors`,
-  `queueMessage`'s `composeAnchor` option.
+  (constructor override for tests, then the bridge), `leadingJoinGroup`
+  (sliding window; 0 never joins), `promoteEligibleDeferredAfterTurn`
+  (one join group per boundary), `promoteEligiblePatientDeferredMessages`
+  (all join groups queued in one pass; scheduling unchanged),
+  `deferredComposeAnchors`, `queueMessage`'s `composeAnchor` option.
 - Tests: `packages/server/test/supervisor/composeTimeAnchor.test.ts` (pure)
   and the "one verbatim deferred turn per delivery boundary" /
-  "separator-joined turn when batch flush is enabled" / "compose-time
-  anchors when opted in" cases in `packages/server/test/process.test.ts`.
+  "within the join window" / "splits queued turns at compose-time gaps" /
+  "compose-time anchors when opted in" cases in
+  `packages/server/test/process.test.ts`.
 
 ## Observed UI Edge Case
 

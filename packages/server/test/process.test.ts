@@ -1170,9 +1170,9 @@ describe("Process", () => {
         idleTimeoutMs: 100,
         queue,
         steerFn,
-        // Stitched flush is the opt-in path (YA_DEFERRED_BATCH_FLUSH=1);
+        // Stitched flush is the opt-in path (YA_DEFERRED_JOIN_WINDOW_S);
         // it keeps the whole queue's order visible in one provider turn.
-        deferredDelivery: { batchFlush: true, composeAnchors: false },
+        deferredDelivery: { joinWindowSeconds: 3600, composeAnchors: false },
       });
 
       process.deferMessage({ text: "first", tempId: "temp-1" });
@@ -1404,8 +1404,8 @@ describe("Process", () => {
         sessionId: "sess-1",
         idleTimeoutMs: 100,
         queue,
-        // Stitched flush is the opt-in path (YA_DEFERRED_BATCH_FLUSH=1).
-        deferredDelivery: { batchFlush: true, composeAnchors: false },
+        // Stitched flush is the opt-in path (YA_DEFERRED_JOIN_WINDOW_S).
+        deferredDelivery: { joinWindowSeconds: 3600, composeAnchors: false },
       });
       const events: ProcessEvent[] = [];
       process.subscribe((event) => {
@@ -1701,7 +1701,7 @@ describe("Process", () => {
       await process.abort();
     });
 
-    it("flushes deferred turns as one separator-joined turn when batch flush is enabled", async () => {
+    it("flushes deferred turns as one separator-joined turn when sends fall within the join window", async () => {
       const controller = createControllableIterator();
       const queue = new MessageQueue();
       const process = new Process(controller.iterator, {
@@ -1710,7 +1710,7 @@ describe("Process", () => {
         sessionId: "sess-1",
         idleTimeoutMs: 100,
         queue,
-        deferredDelivery: { batchFlush: true, composeAnchors: false },
+        deferredDelivery: { joinWindowSeconds: 3600, composeAnchors: false },
       });
       const events: ProcessEvent[] = [];
       process.subscribe((event) => {
@@ -1758,6 +1758,87 @@ describe("Process", () => {
       await process.abort();
     });
 
+    it("splits queued turns at compose-time gaps wider than the join window", async () => {
+      const controller = createControllableIterator();
+      const queue = new MessageQueue();
+      const process = new Process(controller.iterator, {
+        projectPath: "/test",
+        projectId: "proj-1" as UrlProjectId,
+        sessionId: "sess-1",
+        idleTimeoutMs: 100,
+        queue,
+        deferredDelivery: { joinWindowSeconds: 60, composeAnchors: false },
+      });
+      const events: ProcessEvent[] = [];
+      process.subscribe((event) => {
+        events.push(event);
+      });
+
+      // Sliding window: each send within 60s of the previous send extends
+      // the group. first→second gap is 30s (joins); second→third is 68s
+      // (splits), so the third delivers at the next boundary on its own.
+      const now = Date.now();
+      process.deferMessage({
+        text: "first queued",
+        tempId: "temp-1",
+        metadata: {
+          deliveryIntent: "deferred",
+          serverReceivedAt: new Date(now - 100_000).toISOString(),
+        },
+      });
+      process.deferMessage({
+        text: "second queued",
+        tempId: "temp-2",
+        metadata: {
+          deliveryIntent: "deferred",
+          serverReceivedAt: new Date(now - 70_000).toISOString(),
+        },
+      });
+      process.deferMessage({
+        text: "third queued",
+        tempId: "temp-3",
+        metadata: {
+          deliveryIntent: "deferred",
+          serverReceivedAt: new Date(now - 2_000).toISOString(),
+        },
+      });
+
+      controller.push({
+        type: "result",
+        session_id: "sess-1",
+      });
+
+      await waitFor(() =>
+        expect(process.getDeferredQueueSummary()).toHaveLength(1),
+      );
+      const firstContents = events.flatMap((event) =>
+        event.type === "message" && event.message.type === "user"
+          ? [event.message.message.content as string]
+          : [],
+      );
+      expect(firstContents).toEqual([
+        `first queued\n\n${CONCAT_SEPARATOR}\n\nsecond queued`,
+      ]);
+
+      controller.push({
+        type: "result",
+        session_id: "sess-1",
+      });
+
+      await waitFor(() =>
+        expect(process.getDeferredQueueSummary()).toEqual([]),
+      );
+      const allContents = events.flatMap((event) =>
+        event.type === "message" && event.message.type === "user"
+          ? [event.message.message.content as string]
+          : [],
+      );
+      expect(allContents[allContents.length - 1]).toBe("third queued");
+
+      controller.finish();
+      await process.abort();
+    });
+
     it("prefixes promoted deferred turns with compose-time anchors when opted in", async () => {
       const controller = createControllableIterator();
       const queue = new MessageQueue();
@@ -1767,7 +1848,7 @@ describe("Process", () => {
         sessionId: "sess-1",
         idleTimeoutMs: 100,
         queue,
-        deferredDelivery: { batchFlush: true, composeAnchors: true },
+        deferredDelivery: { joinWindowSeconds: 3600, composeAnchors: true },
       });
       const events: ProcessEvent[] = [];
       process.subscribe((event) => {

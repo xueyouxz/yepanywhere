@@ -21,10 +21,13 @@ import {
 } from "@yep-anywhere/shared";
 import { getLogger } from "../logging/logger.js";
 import { getProjectName } from "../projects/paths.js";
-import { loadConfig } from "../config.js";
 import { concatUserMessages, INTERRUPT_PREAMBLE } from "../sdk/messageQueue.js";
 import type { MessageQueue } from "../sdk/messageQueue.js";
 import { composeTimeAnchors } from "./composeTimeAnchor.js";
+import {
+  type DeferredDeliverySettings,
+  resolveDeferredDeliverySettings,
+} from "./deferredDeliverySettings.js";
 import type { AgentProvider } from "../sdk/providers/types.js";
 import {
   expandSlashCommandEmulation,
@@ -227,17 +230,17 @@ interface PendingToolApproval {
 }
 
 /**
- * Deferred (queued-while-busy) delivery behavior toggles. Both default off —
+ * Deferred (queued-while-busy) delivery behavior overrides (tests). Unset
+ * fields resolve from server settings then env config — both default off, so
  * vanilla delivery promotes one verbatim deferred turn per delivery boundary
- * (see topics/vanilla-defaults.md). Defaults come from server config
- * (`YA_DEFERRED_BATCH_FLUSH=1`, `YA_COMPOSE_ANCHORS=1`).
+ * (see topics/vanilla-defaults.md and supervisor/deferredDeliverySettings.ts).
  */
 export interface DeferredDeliveryOptions {
   /**
-   * Flush all eligible deferred turns at a boundary as one provider turn
-   * joined with `--------` separators, instead of one turn per boundary.
+   * Max seconds between consecutive compose times for deferred turns to join
+   * into one provider turn with `--------` separators. 0 = never join.
    */
-  batchFlush?: boolean;
+  joinWindowSeconds?: number;
   /** Prepend `(Ns ago)` / `(Ms later)` compose-time staleness anchors. */
   composeAnchors?: boolean;
 }
@@ -302,10 +305,6 @@ export class Process {
   private legacyQueue: UserMessage[] = [];
   private messageQueue: MessageQueue | null;
   private deferredDeliveryOverrides: DeferredDeliveryOptions | undefined;
-  private _deferredDelivery: {
-    batchFlush: boolean;
-    composeAnchors: boolean;
-  } | null = null;
   private deferredEditBarrier: {
     originalTempId: string;
     index: number;
@@ -2686,34 +2685,53 @@ export class Process {
   }
 
   /**
-   * Deferred-delivery toggles, resolved lazily from constructor overrides then
-   * server config (`YA_DEFERRED_BATCH_FLUSH`, `YA_COMPOSE_ANCHORS`). Both
-   * default off: vanilla delivery is one verbatim deferred turn per delivery
-   * boundary (topics/vanilla-defaults.md).
+   * Deferred-delivery knobs, resolved per call (so live settings changes
+   * apply) from constructor overrides, then published server settings, then
+   * env config. Both default off: vanilla delivery is one verbatim deferred
+   * turn per delivery boundary (topics/vanilla-defaults.md).
    */
-  private resolveDeferredDelivery(): {
-    batchFlush: boolean;
-    composeAnchors: boolean;
-  } {
-    if (!this._deferredDelivery) {
-      const overrides = this.deferredDeliveryOverrides;
-      if (
-        overrides?.batchFlush !== undefined &&
-        overrides?.composeAnchors !== undefined
-      ) {
-        this._deferredDelivery = {
-          batchFlush: overrides.batchFlush,
-          composeAnchors: overrides.composeAnchors,
-        };
-      } else {
-        const config = loadConfig();
-        this._deferredDelivery = {
-          batchFlush: overrides?.batchFlush ?? config.deferredBatchFlush,
-          composeAnchors: overrides?.composeAnchors ?? config.composeAnchors,
-        };
-      }
+  private resolveDeferredDelivery(): DeferredDeliverySettings {
+    const overrides = this.deferredDeliveryOverrides;
+    if (
+      overrides?.joinWindowSeconds !== undefined &&
+      overrides?.composeAnchors !== undefined
+    ) {
+      return {
+        joinWindowSeconds: overrides.joinWindowSeconds,
+        composeAnchors: overrides.composeAnchors,
+      };
     }
-    return this._deferredDelivery;
+    const resolved = resolveDeferredDeliverySettings();
+    return {
+      joinWindowSeconds:
+        overrides?.joinWindowSeconds ?? resolved.joinWindowSeconds,
+      composeAnchors: overrides?.composeAnchors ?? resolved.composeAnchors,
+    };
+  }
+
+  /**
+   * Leading run of entries whose consecutive compose times are within the
+   * join window. With the default window of 0 the group is always a single
+   * entry, so queued turns deliver one per boundary; a large window
+   * approximates "always join".
+   */
+  private leadingJoinGroup(
+    entries: DeferredQueueEntry[],
+    joinWindowSeconds: number,
+  ): DeferredQueueEntry[] {
+    const group = [entries[0]!];
+    const windowMs = joinWindowSeconds * 1000;
+    // 0 means never join, even for sends composed in the same millisecond.
+    if (windowMs <= 0) return group;
+    for (let i = 1; i < entries.length; i++) {
+      const gapMs =
+        this.composedAtMsForEntry(entries[i]!) -
+        this.composedAtMsForEntry(entries[i - 1]!);
+      // NaN gaps (unparseable timestamps) compare false and end the group.
+      if (!(gapMs <= windowMs)) break;
+      group.push(entries[i]!);
+    }
+    return group;
   }
 
   /**
@@ -2752,11 +2770,10 @@ export class Process {
    * Promote deferred messages that may run after the completed turn.
    * Returns true when at least one message was accepted by the direct queue.
    *
-   * Default: take exactly one deferred turn off the queue per delivery
-   * boundary, delivered verbatim as its own provider turn — N queued
-   * "proceed"-style messages get N work slices. With YA_DEFERRED_BATCH_FLUSH=1
-   * all eligible turns flush as one provider turn joined with `--------`
-   * separators.
+   * One join group is promoted per delivery boundary. With the default join
+   * window of 0 that is exactly one verbatim deferred turn — N queued
+   * "proceed"-style messages get N work slices. A non-zero window joins
+   * consecutively-composed turns into one `--------`-separated provider turn.
    */
   private promoteEligibleDeferredAfterTurn(): boolean {
     if (
@@ -2774,26 +2791,10 @@ export class Process {
       return false;
     }
 
-    if (!this.resolveDeferredDelivery().batchFlush) {
-      const next = eligible[0]!;
-      const [anchor] = this.deferredComposeAnchors([next]);
-      const result = this.queuePreparedMessage(
-        this.prepareProviderMessage(next.message, anchor),
-        { allowSteer: false },
-      );
-      if (!result.success) {
-        this.emitDeferredQueueChange("queued", next.message.tempId);
-        return false;
-      }
-      this.deferredQueue = this.deferredQueue.filter(
-        (entry) => entry !== next,
-      );
-      this.emitDeferredQueueChange("promoted", next.message.tempId);
-      return true;
-    }
-
-    const anchors = this.deferredComposeAnchors(eligible);
-    const providerMessages = eligible.map((entry, index) =>
+    const { joinWindowSeconds } = this.resolveDeferredDelivery();
+    const group = this.leadingJoinGroup(eligible, joinWindowSeconds);
+    const anchors = this.deferredComposeAnchors(group);
+    const providerMessages = group.map((entry, index) =>
       this.prepareProviderMessage(entry.message, anchors[index]),
     );
     const providerTurn =
@@ -2805,13 +2806,18 @@ export class Process {
       allowSteer: false,
     });
     if (!result.success) {
-      this.emitDeferredQueueChange("queued", eligible[0]?.message.tempId);
+      this.emitDeferredQueueChange("queued", group[0]?.message.tempId);
       return false;
     }
 
-    this.deferredQueue = this.deferredQueue.filter(isPatientDeferredEntry);
-    this.deferredEditBarrier = null;
-    this.emitDeferredQueueChange("promoted");
+    const promotedEntries = new Set(group);
+    this.deferredQueue = this.deferredQueue.filter(
+      (entry) => !promotedEntries.has(entry),
+    );
+    this.emitDeferredQueueChange(
+      "promoted",
+      group.length === 1 ? group[0]!.message.tempId : undefined,
+    );
     return true;
   }
 
@@ -2902,49 +2908,38 @@ export class Process {
       return { promoted: false, nextPatienceMsRemaining };
     }
 
-    const anchors = this.deferredComposeAnchors(eligible);
-
-    if (!this.resolveDeferredDelivery().batchFlush) {
-      // Vanilla: each patient turn enters the direct queue as its own
-      // verbatim provider message — no separator-joined merge. Eligibility
-      // and quiet-window scheduling are unchanged.
-      const promotedEntries = new Set<DeferredQueueEntry>();
-      for (const [index, entry] of eligible.entries()) {
-        const result = this.queuePreparedMessage(
-          this.prepareProviderMessage(entry.message, anchors[index]),
-          { allowSteer: false },
-        );
-        if (!result.success) break;
+    // Partition the eligible entries into join groups (compose-time gaps
+    // within the window). With the default window of 0 every entry is its own
+    // verbatim provider message. All groups are queued in this same pass —
+    // unlike the after-turn path — so quiet-window scheduling is unchanged.
+    const { joinWindowSeconds } = this.resolveDeferredDelivery();
+    const promotedEntries = new Set<DeferredQueueEntry>();
+    let rest = eligible;
+    while (rest.length > 0) {
+      const group = this.leadingJoinGroup(rest, joinWindowSeconds);
+      rest = rest.slice(group.length);
+      const anchors = this.deferredComposeAnchors(group);
+      const providerMessages = group.map((entry, index) =>
+        this.prepareProviderMessage(entry.message, anchors[index]),
+      );
+      const providerTurn =
+        providerMessages.length === 1
+          ? providerMessages[0]!
+          : this.concatMessages(providerMessages);
+      const result = this.queuePreparedMessage(providerTurn, {
+        allowSteer: false,
+      });
+      if (!result.success) break;
+      for (const entry of group) {
         promotedEntries.add(entry);
       }
-      if (promotedEntries.size === 0) {
-        this.emitDeferredQueueChange("queued", eligible[0]?.message.tempId);
-        return { promoted: false, nextPatienceMsRemaining };
-      }
-      this.deferredQueue = this.deferredQueue.filter(
-        (entry) => !promotedEntries.has(entry),
-      );
-      this.emitDeferredQueueChange("promoted");
-      return { promoted: true, nextPatienceMsRemaining };
     }
 
-    const providerMessages = eligible.map((entry, index) =>
-      this.prepareProviderMessage(entry.message, anchors[index]),
-    );
-    const providerTurn =
-      providerMessages.length === 1
-        ? providerMessages[0]!
-        : this.concatMessages(providerMessages);
-
-    const result = this.queuePreparedMessage(providerTurn, {
-      allowSteer: false,
-    });
-    if (!result.success) {
+    if (promotedEntries.size === 0) {
       this.emitDeferredQueueChange("queued", eligible[0]?.message.tempId);
       return { promoted: false, nextPatienceMsRemaining };
     }
 
-    const promotedEntries = new Set(eligible);
     this.deferredQueue = this.deferredQueue.filter(
       (entry) => !promotedEntries.has(entry),
     );

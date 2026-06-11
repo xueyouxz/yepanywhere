@@ -13,6 +13,7 @@ import type {
   NewSessionDefaults,
 } from "@yep-anywhere/shared";
 import { normalizeYaClientBaseUrlFromShareViewerUrl } from "@yep-anywhere/shared";
+import { publishDeferredDeliverySettings } from "../supervisor/deferredDeliverySettings.js";
 
 const CURRENT_VERSION = 2;
 export const DEFAULT_SPEECH_AUDIO_RETENTION_MAX_AGE_DAYS = 56;
@@ -97,6 +98,18 @@ export interface ServerSettings {
    * - "off": don't check or surface updates.
    */
   codexUpdatePolicy?: "auto" | "notify" | "off";
+  /**
+   * Max seconds between consecutive compose times for queued-while-busy turns
+   * to join into one `--------`-joined provider turn at a delivery boundary.
+   * 0 = never join (the vanilla default). Unset falls back to env
+   * `YA_DEFERRED_JOIN_WINDOW_S` (topics/compose-time-context-anchors.md).
+   */
+  deferredJoinWindowSeconds?: number;
+  /**
+   * Prepend `(Ns ago)` / `(Ms later)` compose-time staleness anchors to
+   * delivered queued turns. Unset falls back to env `YA_COMPOSE_ANCHORS`.
+   */
+  composeAnchorsEnabled?: boolean;
 }
 
 export const CODEX_UPDATE_POLICIES = ["auto", "notify", "off"] as const;
@@ -242,6 +255,15 @@ export class ServerSettingsService {
     }
 
     this.initialized = true;
+    this.publishDeferredDelivery();
+  }
+
+  /** Push deferred-delivery settings to the supervisor's live bridge. */
+  private publishDeferredDelivery(): void {
+    publishDeferredDeliverySettings({
+      deferredJoinWindowSeconds: this.state.settings.deferredJoinWindowSeconds,
+      composeAnchorsEnabled: this.state.settings.composeAnchorsEnabled,
+    });
   }
 
   /**
@@ -274,6 +296,7 @@ export class ServerSettingsService {
     };
 
     await this.save();
+    this.publishDeferredDelivery();
     return { ...this.state.settings };
   }
 

@@ -596,6 +596,31 @@ export function createSettingsRoutes(deps: SettingsRoutesDeps): Hono {
     if (typeof body.publicSharesEnabled === "boolean") {
       updates.publicSharesEnabled = body.publicSharesEnabled;
     }
+    if (typeof body.composeAnchorsEnabled === "boolean") {
+      updates.composeAnchorsEnabled = body.composeAnchorsEnabled;
+    }
+    if ("deferredJoinWindowSeconds" in body) {
+      if (
+        body.deferredJoinWindowSeconds === undefined ||
+        body.deferredJoinWindowSeconds === null
+      ) {
+        updates.deferredJoinWindowSeconds = undefined;
+      } else if (
+        typeof body.deferredJoinWindowSeconds === "number" &&
+        Number.isFinite(body.deferredJoinWindowSeconds) &&
+        body.deferredJoinWindowSeconds >= 0
+      ) {
+        updates.deferredJoinWindowSeconds = body.deferredJoinWindowSeconds;
+      } else {
+        return c.json(
+          {
+            error:
+              "deferredJoinWindowSeconds must be a non-negative number of seconds (0 = never join)",
+          },
+          400,
+        );
+      }
+    }
 
     if ("yaClientBaseUrl" in body) {
       if (

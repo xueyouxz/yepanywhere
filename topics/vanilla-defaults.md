@@ -62,10 +62,12 @@ Batched deferred flush is the sibling instance: merging several queued
 turns into one `--------`-joined provider turn defeated the upstream
 usage of queueing N "good, proceed" messages to buy N work slices, and
 was claimed to differ from first-party queue delivery. Default is now
-one verbatim deferred turn per delivery boundary; the merged flush is
-preserved behind `YA_DEFERRED_BATCH_FLUSH=1`. The blind-go-ahead intent
-itself deserves a first-class control someday (a slice or duration
-budget), rather than riding on queue mechanics.
+one verbatim deferred turn per delivery boundary; joining is preserved
+behind a configurable compose-time join window
+(`deferredJoinWindowSeconds` server setting / `YA_DEFERRED_JOIN_WINDOW_S`,
+0 = never join). The blind-go-ahead intent itself deserves a first-class
+control someday (a slice or duration budget), rather than riding on
+queue mechanics.
 
 ## Related topics
 

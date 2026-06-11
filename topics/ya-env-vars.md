@@ -53,8 +53,8 @@ timings, codex rescan intervals, cache TTLs) live only in `config.ts`.
 | `ENABLED_PROVIDERS` | Comma list of exposed providers (empty = all). |
 | `VOICE_INPUT` | `false` disables the mic button server-side. |
 | `YA_VOICE_BACKENDS` | Explicit local/test speech backends (`ya-whisper`, `ya-dummy`). Cloud backends auto-enable on key presence instead. |
-| `YA_DEFERRED_BATCH_FLUSH` | `1` flushes all eligible queued-while-busy turns at a delivery boundary as one `--------`-joined provider turn. Default off: one verbatim turn per boundary ([compose-time-context-anchors](compose-time-context-anchors.md)). |
-| `YA_COMPOSE_ANCHORS` | `1` prepends `(Ns ago)` / `(Ms later)` staleness anchors to delivered queued turns. Default off: queued text reaches the provider verbatim. |
+| `YA_DEFERRED_JOIN_WINDOW_S` | Max seconds between consecutive compose times for queued-while-busy turns to join into one `--------`-joined provider turn at a delivery boundary. Default 0: never join — one verbatim turn per boundary. Server setting `deferredJoinWindowSeconds` overrides ([compose-time-context-anchors](compose-time-context-anchors.md)). |
+| `YA_COMPOSE_ANCHORS` | `1` prepends `(Ns ago)` / `(Ms later)` staleness anchors to delivered queued turns. Default off: queued text reaches the provider verbatim. Server setting `composeAnchorsEnabled` overrides. |
 
 ### Speech credentials & engine (the `stt` module)
 | Var | Meaning |
