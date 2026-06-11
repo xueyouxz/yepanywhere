@@ -73,6 +73,16 @@ export const settingsCategoryIcons: Record<string, ReactNode> = {
     </Icon>
   ),
 
+  toolbar: (
+    <Icon>
+      {/* Toolbar: a wide bar with control dots */}
+      <rect x="2" y="9" width="20" height="6" rx="2" />
+      <circle cx="7" cy="12" r="0.8" fill="currentColor" />
+      <circle cx="12" cy="12" r="0.8" fill="currentColor" />
+      <circle cx="17" cy="12" r="0.8" fill="currentColor" />
+    </Icon>
+  ),
+
   "message-delivery": (
     <Icon>
       {/* Send / paper plane */}

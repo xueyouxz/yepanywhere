@@ -31,11 +31,13 @@ import {
   useSettingsUndoRegistration,
 } from "./SettingsUndoContext";
 import { SpeechSettings } from "./SpeechSettings";
+import { ToolbarSettings } from "./ToolbarSettings";
 import type { SettingsCategory } from "./types";
 
 // Map category IDs to their components
 const CATEGORY_COMPONENTS: Record<string, React.ComponentType> = {
   appearance: AppearanceSettings,
+  toolbar: ToolbarSettings,
   model: ModelSettings,
   "message-delivery": MessageDeliverySettings,
   "agent-context": AgentContextSettings,

@@ -28,6 +28,8 @@
   "sidebarNoSessions": "No sessions yet",
   "settingsAppearanceTitle": "Appearance",
   "settingsAppearanceDescription": "Theme, font size, streaming",
+  "settingsToolbarTitle": "Toolbar",
+  "settingsToolbarDescription": "Which composer toolbar controls are shown",
   "settingsModelTitle": "Session Defaults",
   "settingsModelDescription": "Provider, model, and thinking defaults",
   "settingsMessageDeliveryTitle": "Message Delivery",

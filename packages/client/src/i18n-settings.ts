@@ -100,6 +100,11 @@ export function getSettingsCategories(
       description: t("settingsAppearanceDescription"),
     },
     {
+      id: "toolbar",
+      label: t("settingsToolbarTitle"),
+      description: t("settingsToolbarDescription"),
+    },
+    {
       id: "model",
       label: t("settingsModelTitle"),
       description: t("settingsModelDescription"),
