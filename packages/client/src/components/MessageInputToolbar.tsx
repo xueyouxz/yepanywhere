@@ -1,8 +1,9 @@
-import type {
-  ModelInfo,
-  ProviderName,
-  SessionLivenessSnapshot,
-  ShowThinking,
+import {
+  DEFAULT_PATIENT_QUEUE_PATIENCE_SECONDS,
+  type ModelInfo,
+  type ProviderName,
+  type SessionLivenessSnapshot,
+  type ShowThinking,
 } from "@yep-anywhere/shared";
 import type { MouseEvent, RefObject, TouchEvent } from "react";
 import {
@@ -76,7 +77,6 @@ import { VoiceInputButton, type VoiceInputButtonRef } from "./VoiceInputButton";
 
 type ToolbarTranslate = ReturnType<typeof useI18n>["t"];
 
-const DEFAULT_PATIENT_QUEUE_TIMEOUT_MINUTES = 5;
 type ComposerOverflowTier = "none" | "early" | "medium" | "late";
 const COMPOSER_OVERFLOW_TIERS: ComposerOverflowTier[] = [
   "none",
@@ -162,15 +162,19 @@ function getIsearchAlternateRows(
   ];
 }
 
-function formatPatientQueueTimeout(minutes?: number | null): string | null {
-  if (!Number.isFinite(minutes ?? NaN)) {
+function formatPatientQueueTimeout(seconds?: number | null): string | null {
+  if (!Number.isFinite(seconds ?? NaN)) {
     return null;
   }
-  const normalized = Math.max(1, Math.round(minutes as number));
+  const normalized = Math.max(0, Math.round(seconds as number));
   if (normalized < 60) {
-    return `${normalized}m`;
+    return `${normalized}s`;
   }
-  const hours = normalized / 60;
+  if (normalized < 60 * 60) {
+    const minutes = normalized / 60;
+    return Number.isInteger(minutes) ? `${minutes}m` : `${minutes.toFixed(1)}m`;
+  }
+  const hours = normalized / (60 * 60);
   return Number.isInteger(hours) ? `${hours}h` : `${hours.toFixed(1)}h`;
 }
 
@@ -229,7 +233,13 @@ export interface MessageInputToolbarProps {
   /** Toggle patient intent for future queue submissions. */
   onTogglePatientQueue?: () => void;
   /** Current quiet-period timeout used by patient queue mode. */
-  patientQueueTimeoutMinutes?: number | null;
+  patientQueuePatienceSeconds?: number | null;
+  /** Whether the provider exposes a soft-immediate steer lane. */
+  showSteerNowMode?: boolean;
+  /** Whether steering uses the soft-immediate lane for future sends. */
+  steerNowEnabled?: boolean;
+  /** Toggle soft-immediate steering for future steer sends. */
+  onToggleSteerNow?: () => void;
   /** The action currently bound to Enter in dual-action steering sessions. */
   enterActionKind?: "steer" | "queue";
   /** Whether Enter and Ctrl+Enter may be swapped. */
@@ -244,6 +254,8 @@ export interface MessageInputToolbarProps {
   onSend?: () => void;
   /** Queue a deferred message. Only provided when agent is running. */
   onQueue?: () => void;
+  /** Steer the current turn. Used as the alternate action when Enter queues. */
+  onSteer?: () => void;
   primaryActionKind?: "send" | "steer" | "queue";
   canSend?: boolean;
   disabled?: boolean;
@@ -530,6 +542,7 @@ interface ToolbarBtwControl {
 
 interface ToolbarQueueControl {
   onQueue?: () => void;
+  onSteer?: () => void;
   hasDualActions: boolean;
   queueTooltip: string;
   showPatientQueueMode: boolean;
@@ -541,11 +554,15 @@ interface ToolbarQueueControl {
 
 interface ToolbarSendControl {
   onSend?: () => void;
+  onSteer?: () => void;
   canSend?: boolean;
   primaryActionKind: "send" | "steer" | "queue";
   primaryActionLabel: string;
   tooltip: string;
   icon: string;
+  showSteerNowMode?: boolean;
+  steerNowEnabled?: boolean;
+  onToggleSteerNow?: () => void;
   queue?: ToolbarQueueControl;
 }
 
@@ -797,8 +814,12 @@ export function MessageInputToolbarView({
   const queueIsPatient = queueControl?.patientQueueEnabled ?? false;
   const patientQueueTimeoutForCopy =
     queueControl?.patientQueueTimeoutLabel ??
-    formatPatientQueueTimeout(DEFAULT_PATIENT_QUEUE_TIMEOUT_MINUTES) ??
-    "5m";
+    formatPatientQueueTimeout(DEFAULT_PATIENT_QUEUE_PATIENCE_SECONDS) ??
+    "30s";
+  const canToggleSteerNow = !!(
+    actionsControl.send?.showSteerNowMode &&
+    actionsControl.send.onToggleSteerNow
+  );
   const hasBottomOverflowControls = !!(
     (visibility.modeSelector && modeControl) ||
     visibility.attachments ||
@@ -1812,8 +1833,22 @@ export function MessageInputToolbarView({
                 )}
               </span>
             )}
-            {visibility.queueControls &&
-              queueControl?.hasDualActions &&
+            {canToggleSteerNow && actionsControl.send && (
+              <label
+                className="steer-now-toggle"
+                title={t("toolbarSteerNowTooltip")}
+              >
+                <input
+                  type="checkbox"
+                  checked={!!actionsControl.send.steerNowEnabled}
+                  onChange={actionsControl.send.onToggleSteerNow}
+                  disabled={actionsControl.disabled}
+                  aria-label={t("toolbarSteerNowLabel")}
+                />
+                <span>{t("toolbarSteerNowShortLabel")}</span>
+              </label>
+            )}
+            {queueControl?.hasDualActions &&
               actionsControl.send.primaryActionKind !== "queue" &&
               queueControl.onQueue && (
                 <button
@@ -1845,6 +1880,22 @@ export function MessageInputToolbarView({
                       Zz
                     </span>
                   )}
+                </button>
+              )}
+            {queueControl?.hasDualActions &&
+              actionsControl.send.primaryActionKind === "queue" &&
+              queueControl.onSteer && (
+                <button
+                  type="button"
+                  onClick={() => handleQueueActionClick(queueControl.onSteer)}
+                  disabled={
+                    actionsControl.disabled || !actionsControl.send.canSend
+                  }
+                  className="send-button steer-button"
+                  aria-label={t("toolbarSteerTooltip")}
+                  title={t("toolbarSteerTooltip")}
+                >
+                  <span className="send-icon">↗</span>
                 </button>
               )}
             <button
@@ -1939,7 +1990,10 @@ export function MessageInputToolbar({
   showPatientQueueMode = false,
   patientQueueEnabled = false,
   onTogglePatientQueue,
-  patientQueueTimeoutMinutes,
+  patientQueuePatienceSeconds,
+  showSteerNowMode = false,
+  steerNowEnabled = false,
+  onToggleSteerNow,
   enterActionKind,
   canSwapEnterAction = false,
   onSwapEnterAction,
@@ -1948,6 +2002,7 @@ export function MessageInputToolbar({
   onStop,
   onSend,
   onQueue,
+  onSteer,
   primaryActionKind,
   canSend,
   disabled,
@@ -2090,22 +2145,32 @@ export function MessageInputToolbar({
       : renderMode?.state === "source"
         ? t("toolbarRenderModeSource")
         : t("toolbarRenderModeMixed");
-  const hasPotentialDualActions = !!(onSend && onQueue);
+  const hasPotentialDualActions = !!(onSend && onQueue && onSteer);
   const effectivePrimaryActionKind =
     primaryActionKind ?? (hasPotentialDualActions ? "steer" : "send");
   const hasDualActions =
-    hasPotentialDualActions && effectivePrimaryActionKind === "steer";
+    hasPotentialDualActions &&
+    (effectivePrimaryActionKind === "steer" ||
+      effectivePrimaryActionKind === "queue");
   const patientQueueTimeoutLabel =
-    formatPatientQueueTimeout(patientQueueTimeoutMinutes) ??
-    formatPatientQueueTimeout(DEFAULT_PATIENT_QUEUE_TIMEOUT_MINUTES);
+    formatPatientQueueTimeout(patientQueuePatienceSeconds) ??
+    formatPatientQueueTimeout(DEFAULT_PATIENT_QUEUE_PATIENCE_SECONDS);
   const queueIsPatient = showPatientQueueMode && patientQueueEnabled;
+  const canShowPatientQueueToggle = !!(
+    toolbarVisibility.queueControls &&
+    showPatientQueueMode &&
+    onTogglePatientQueue
+  );
   const patientTooltip = t("toolbarPatientQueueTooltip", {
-    timeout: patientQueueTimeoutLabel ?? "5m",
+    timeout: patientQueueTimeoutLabel ?? "30s",
   });
   const regularQueueTooltip = t("toolbarQueueTooltip");
-  const queueActionTooltip = `${
-    queueIsPatient ? patientTooltip : regularQueueTooltip
-  }\n${t("toolbarPatientQueueToggleShortcut")}`;
+  const queueActionTooltip = [
+    queueIsPatient ? patientTooltip : regularQueueTooltip,
+    canShowPatientQueueToggle ? t("toolbarPatientQueueToggleShortcut") : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
   const sendTooltip =
     effectivePrimaryActionKind === "steer"
       ? t("toolbarSteerTooltip")
@@ -2140,9 +2205,7 @@ export function MessageInputToolbar({
         : t("toolbarSend");
   const stopTitle = `${t("toolbarStop")} (Esc)`;
   const showStopButton = !!(isRunning && onStop && isThinking);
-  const showPatientQueueToggle = !!(
-    showPatientQueueMode && onTogglePatientQueue
-  );
+  const showPatientQueueToggle = canShowPatientQueueToggle;
   const showSendButton = !!(
     onSend &&
     (!showStopButton || canSend || showPatientQueueToggle)
@@ -2507,13 +2570,18 @@ export function MessageInputToolbar({
         send: showSendButton
           ? {
               onSend,
+              onSteer,
               canSend,
               primaryActionKind: effectivePrimaryActionKind,
               primaryActionLabel,
               tooltip: sendTooltip,
               icon: primaryActionIcon,
+              showSteerNowMode,
+              steerNowEnabled,
+              onToggleSteerNow,
               queue: {
                 onQueue,
+                onSteer,
                 hasDualActions,
                 queueTooltip,
                 showPatientQueueMode,

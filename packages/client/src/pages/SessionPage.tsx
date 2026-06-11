@@ -891,7 +891,7 @@ function SessionPageContent({
     currentProviderInfo?.supportsPermissionMode ?? true;
   const supportsThinkingToggle =
     currentProviderInfo?.supportsThinkingToggle ?? true;
-  const { generallySupportsSteering, supportsSteeringNow } =
+  const { generallySupportsSteering, supportsSteerNow } =
     providerCapabilities;
   const currentOwnedProcessId =
     status.owner === "self" ? status.processId : undefined;
@@ -921,9 +921,7 @@ function SessionPageContent({
   const shouldDeferMessages = sessionActivityUi.shouldDeferMessages;
   const primaryComposerAction =
     shouldDeferMessages && generallySupportsSteering
-      ? supportsSteeringNow
-        ? "steer"
-        : "queue"
+      ? "steer"
       : shouldDeferMessages
         ? "queue"
         : "send";
@@ -4059,6 +4057,7 @@ function SessionPageContent({
                 supportsPermissionMode={supportsPermissionMode}
                 supportsThinkingToggle={supportsThinkingToggle}
                 supportsSteering={generallySupportsSteering}
+                supportsSteerNow={supportsSteerNow}
                 isRunning={status.owner === "self"}
                 isThinking={canStopOwnedProcess}
                 onStop={handleAbort}
@@ -4108,7 +4107,6 @@ function SessionPageContent({
                 thinkingProvider={effectiveProvider}
                 thinkingModel={liveBadgeModel}
                 heartbeatEnabled={heartbeatTurnsEnabled}
-                patientQueueTimeoutMinutes={heartbeatTurnsAfterMinutes}
                 onToggleHeartbeat={handleToggleHeartbeat}
                 onConfigureHeartbeat={() => setShowHeartbeatModal(true)}
                 promptSuggestion={

@@ -41,7 +41,7 @@ export const DEFAULT_SESSION_TOOLBAR_VISIBILITY: SessionToolbarVisibility = {
   contextUsage: true,
   btw: false,
   nudge: false,
-  queueControls: true,
+  queueControls: false,
   sessionStatus: true,
 };
 

@@ -167,6 +167,11 @@ export interface AgentProvider {
   /** Whether this provider supports active turn steering (default: false) */
   readonly supportsSteering: boolean;
   /**
+   * Whether active-turn steering can interrupt in-flight generation without
+   * ending the turn. Optional; absent means false.
+   */
+  readonly supportsSteerNow?: boolean;
+  /**
    * Whether this provider can synthesize an on-return recap of recent
    * activity. See topics/recaps.md. Optional; absent means false.
    */

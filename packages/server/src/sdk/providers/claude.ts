@@ -399,7 +399,8 @@ export class ClaudeProvider implements AgentProvider {
   readonly supportsPermissionMode = true;
   readonly supportsThinkingToggle = true;
   readonly supportsSlashCommands = true;
-  readonly supportsSteering = false;
+  readonly supportsSteering = true;
+  readonly supportsSteerNow = true;
   readonly supportsRecaps = true;
   readonly supportsNativePromptSuggestions = true;
 
@@ -1121,6 +1122,10 @@ export class ClaudeProvider implements AgentProvider {
       abort: () => {
         abortController.abort();
         agentctlSessionEnvBridge?.cleanup();
+      },
+      steer: async (message) => {
+        queue.push(message);
+        return true;
       },
       isProcessAlive: isCapturedProcessAlive,
       probeLiveness: () =>

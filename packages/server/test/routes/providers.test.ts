@@ -133,4 +133,25 @@ describe("Providers Routes", () => {
     expect(provider.getAuthStatus).toHaveBeenCalledTimes(1);
     expect(provider.getAvailableModels).toHaveBeenCalledTimes(1);
   });
+
+  it("serializes active-turn steering capability flags", async () => {
+    const provider = createProvider({
+      supportsSteering: true,
+      supportsSteerNow: true,
+    });
+    const routes = createProvidersRoutes({
+      providers: [provider],
+      cacheTtlMs: 60_000,
+    });
+
+    const response = await routes.request("/");
+    const json = (await response.json()) as { providers: Array<unknown> };
+
+    expect(json.providers).toEqual([
+      expect.objectContaining({
+        supportsSteering: true,
+        supportsSteerNow: true,
+      }),
+    ]);
+  });
 });

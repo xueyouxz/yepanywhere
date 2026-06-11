@@ -4342,6 +4342,47 @@ a.sidebar-nav-item {
   z-index: 130;
 }
 
+.steer-now-toggle {
+  display: inline-flex;
+  box-sizing: border-box;
+  height: var(--composer-primary-control-size);
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0 0.45rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.steer-now-toggle:hover {
+  border-color: color-mix(in srgb, var(--text-muted) 55%, var(--border-color));
+  color: var(--text-primary);
+}
+
+.steer-now-toggle input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--attention-color);
+}
+
+.steer-now-toggle:has(input:checked) {
+  border-color: color-mix(in srgb, var(--attention-color) 70%, transparent);
+  background: color-mix(in srgb, var(--attention-color) 20%, var(--bg-tertiary));
+  color: var(--text-primary);
+}
+
+.steer-now-toggle:has(input:disabled) {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .send-button-with-help::after {
   content: attr(data-tooltip);
   position: absolute;

@@ -5,6 +5,22 @@ import type { UserMessage } from "./types.js";
 export const CONCAT_SEPARATOR = "--------";
 export const INTERRUPT_PREAMBLE = "interrupt resumable after:";
 
+/** Claude CLI command-queue lanes, most to least urgent. */
+const PRIORITY_RANK = { now: 0, next: 1, later: 2 } as const;
+
+function mostUrgentPriority(
+  messages: UserMessage[],
+): UserMessage["priority"] {
+  let result: UserMessage["priority"];
+  for (const msg of messages) {
+    if (!msg.priority) continue;
+    if (!result || PRIORITY_RANK[msg.priority] < PRIORITY_RANK[result]) {
+      result = msg.priority;
+    }
+  }
+  return result;
+}
+
 type CancellableMessageIterator = AsyncIterator<SDKUserMessage> &
   AsyncIterable<SDKUserMessage> & {
     return(): Promise<IteratorResult<SDKUserMessage>>;
@@ -50,6 +66,8 @@ export function concatUserMessages(
     .map((msg) => msg.tempId)
     .filter((id): id is string => Boolean(id));
   if (tempIds.length) combined.tempIds = tempIds;
+  const priority = mostUrgentPriority(messages);
+  if (priority) combined.priority = priority;
   if (allImages.length) combined.images = allImages;
   if (allDocs.length) combined.documents = allDocs;
   if (allAttachments.length) combined.attachments = allAttachments;
@@ -313,6 +331,7 @@ export class MessageQueue implements AsyncIterable<SDKUserMessage> {
       return {
         type: "user",
         uuid: msg.uuid,
+        ...(msg.priority ? { priority: msg.priority } : {}),
         message: {
           role: "user",
           content,
@@ -323,6 +342,7 @@ export class MessageQueue implements AsyncIterable<SDKUserMessage> {
     return {
       type: "user",
       uuid: msg.uuid,
+      ...(msg.priority ? { priority: msg.priority } : {}),
       message: {
         role: "user",
         content: text,

@@ -8,6 +8,11 @@ session: when the composer can send directly, when it queues, how `/btw` is rout
 and how model-selection text is substituted while busy. It is a consumer contract
 for both client behavior and provider-specific control adapters.
 
+Provider-level facts behind these intents — Claude's `priority`
+(now/next/later) lanes, Codex `turn/steer` vs app-side queueing, and
+end-of-turn signals — live in
+[steer-queue-provider-differences.md](steer-queue-provider-differences.md).
+
 ## State inputs that drive UI behavior
 
 - `processState` from `Process`:
@@ -72,10 +77,14 @@ Rationale:
   imply one strict FIFO when patient rows are waiting for the quiet threshold.
 - Queueing remains in-session and avoids immediate active-turn injection.
 - Patient mode is a persistent queue setting, not a replacement for the queue
-  action. The setting may remain visible when a steering provider is idle and
-  its extra queue action is hidden. When the visible queue action is available,
-  its icon/color should change so the click invitation reflects whether it will
-  create a regular queued item or a patient queued item.
+  action. The status-bar appearance setting for queue controls gates only the
+  regular/patient switch, defaults hidden for new users, and should be labeled
+  as the patient-queue switch. It must not hide the alternate Steer/Later send
+  button: in dual-action active sessions the non-primary send option remains
+  visible whenever the provider/action state supports it.
+- When the visible queue action is available, its icon/color should change so
+  the click invitation reflects whether it will create a regular queued item or
+  a patient queued item.
 - The patient-mode switch should stay compact: show the active state in the
   switch glyph/thumb, but keep the actual quiet interval in tooltip and
   acknowledgement copy rather than widening the toggle with `Nm` text.

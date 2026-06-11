@@ -387,6 +387,14 @@ export class Supervisor {
   private heartbeatTurnInFlight = false;
   private heartbeatTurnTimer: ReturnType<typeof setInterval>;
   private livenessProbeTimer: ReturnType<typeof setInterval>;
+  /**
+   * One-shot patient-queue re-checks keyed by process id. Bounded: armed only
+   * while a process holds patient deferred entries; cleared on unregister.
+   */
+  private patientCheckTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
   private interruptTimeoutMs: number;
 
   constructor(options: SupervisorOptions) {
@@ -1886,23 +1894,22 @@ export class Supervisor {
       return false;
     }
 
-    const settings = this.getHeartbeatTurnSettings?.(process.sessionId);
-    const afterMinutes = Number.isFinite(settings?.afterMinutes)
-      ? Math.max(1, Math.min(settings?.afterMinutes ?? 0, 1440))
-      : DEFAULT_HEARTBEAT_TURNS_AFTER_MINUTES;
-    const idleThresholdMs = afterMinutes * 60 * 1000;
     const fallbackMs = process.state.since.getTime();
-    const heartbeatResetAtMs = getHeartbeatResetAtMs(liveness, fallbackMs);
-    if (!Number.isFinite(heartbeatResetAtMs)) {
+    const quietSinceMs = getHeartbeatResetAtMs(liveness, fallbackMs);
+    if (!Number.isFinite(quietSinceMs)) {
       return false;
     }
 
-    const idleMs = Math.max(0, now - heartbeatResetAtMs);
-    if (idleMs < idleThresholdMs) {
-      return false;
+    // Each patient entry carries its own patience window (seconds of
+    // verified quiet); promote the elapsed ones and schedule a precise
+    // re-check for the shortest remaining wait.
+    const { promoted, nextPatienceMsRemaining } =
+      process.promoteEligiblePatientDeferredMessages({ quietSinceMs, now });
+
+    if (nextPatienceMsRemaining !== null) {
+      this.schedulePatientDeferredCheck(process, nextPatienceMsRemaining);
     }
 
-    const promoted = process.promoteEligiblePatientDeferredMessages();
     if (!promoted) {
       return false;
     }
@@ -1913,14 +1920,42 @@ export class Supervisor {
         sessionId: process.sessionId,
         processId: process.id,
         projectId: process.projectId,
-        idleMs,
-        heartbeatResetAt: new Date(heartbeatResetAtMs).toISOString(),
-        afterMinutes,
+        quietMs: Math.max(0, now - quietSinceMs),
+        quietSince: new Date(quietSinceMs).toISOString(),
         livenessStatus: liveness.derivedStatus,
       },
       `Promoted patient deferred messages for session: ${process.sessionId}`,
     );
     return true;
+  }
+
+  /**
+   * Arm (or re-arm) the one-shot patient-queue re-check for a process. The
+   * check itself re-derives eligibility and re-arms only while patient
+   * entries remain, so the timer cannot become a standing poll.
+   */
+  private schedulePatientDeferredCheck(
+    process: Process,
+    delayMs: number,
+  ): void {
+    const existing = this.patientCheckTimers.get(process.id);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    const delay = Math.max(250, Math.min(delayMs, 60 * 60 * 1000));
+    const timer = setTimeout(() => {
+      this.patientCheckTimers.delete(process.id);
+      if (!this.processes.has(process.id)) {
+        return;
+      }
+      this.queuePatientDeferredMessagesForProcess(
+        process,
+        Date.now(),
+        getLogger(),
+      );
+    }, delay);
+    timer.unref();
+    this.patientCheckTimers.set(process.id, timer);
   }
 
   private async queueHeartbeatTurnForProcess(
@@ -2653,6 +2688,23 @@ export class Supervisor {
         }
         // Emit worker activity on any state change (affects hasActiveWork)
         this.emitWorkerActivity();
+        // A fresh idle boundary starts the patient-queue quiet clock; arm a
+        // prompt re-check so seconds-scale patience does not wait for the
+        // 30s heartbeat tick.
+        if (
+          event.state.type === "idle" &&
+          process.hasPatientDeferredMessages()
+        ) {
+          this.schedulePatientDeferredCheck(process, 250);
+        }
+      } else if (event.type === "deferred-queue") {
+        if (
+          event.reason === "queued" &&
+          process.state.type === "idle" &&
+          process.hasPatientDeferredMessages()
+        ) {
+          this.schedulePatientDeferredCheck(process, 250);
+        }
       } else if (event.type === "terminated") {
         this.emitProcessTerminated(
           process.sessionId,
@@ -2732,6 +2784,11 @@ export class Supervisor {
 
   private unregisterProcess(process: Process): void {
     this.observedProcessIds.delete(process.id);
+    const patientTimer = this.patientCheckTimers.get(process.id);
+    if (patientTimer) {
+      clearTimeout(patientTimer);
+      this.patientCheckTimers.delete(process.id);
+    }
     if (!this.processes.has(process.id)) {
       return;
     }

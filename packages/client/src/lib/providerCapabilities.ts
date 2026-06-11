@@ -7,7 +7,8 @@ export interface SessionProviderCapabilities {
   providerName?: ProviderName;
   providerInfo: ProviderInfo | null;
   generallySupportsSteering: boolean;
-  supportsSteeringNow: boolean;
+  supportsCurrentTurnSteering: boolean;
+  supportsSteerNow: boolean;
 }
 
 export function providerHasStaticSteeringFallback(
@@ -36,8 +37,9 @@ export function resolveSessionProviderCapabilities(params: {
     providerInfo,
     generallySupportsSteering:
       metadataSupportsSteering || staticSupportsSteering,
-    supportsSteeringNow: providerInfo
+    supportsCurrentTurnSteering: providerInfo
       ? metadataSupportsSteering
       : staticSupportsSteering,
+    supportsSteerNow: providerInfo?.supportsSteerNow === true,
   };
 }

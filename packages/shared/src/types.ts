@@ -198,6 +198,11 @@ export interface ProviderInfo {
   supportsSlashCommands?: boolean;
   /** Whether this provider supports active turn steering (default: false) */
   supportsSteering?: boolean;
+  /**
+   * Whether steering can additionally interrupt in-flight generation
+   * (Claude `priority: "now"`). Default: false.
+   */
+  supportsSteerNow?: boolean;
   /** Whether this provider can generate YA-triggered recap messages. */
   supportsRecaps?: boolean;
   /** Whether this provider emits recaps natively without a YA side query. */

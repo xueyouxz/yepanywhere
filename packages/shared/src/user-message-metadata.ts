@@ -4,6 +4,29 @@ export type UserMessageDeliveryIntent =
   | "deferred"
   | "patient";
 
+/**
+ * Default quiet period a patient queued message waits for after the session
+ * reaches verified idle, when the item carries no explicit patienceSeconds.
+ */
+export const DEFAULT_PATIENT_QUEUE_PATIENCE_SECONDS = 30;
+
+export const MAX_PATIENT_QUEUE_PATIENCE_SECONDS = 24 * 60 * 60;
+
+/**
+ * Normalize a user-supplied patience value to whole seconds in
+ * [0, MAX_PATIENT_QUEUE_PATIENCE_SECONDS], or undefined when not a finite
+ * number.
+ */
+export function clampPatientPatienceSeconds(
+  value: unknown,
+): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.min(
+    MAX_PATIENT_QUEUE_PATIENCE_SECONDS,
+    Math.max(0, Math.round(value)),
+  );
+}
+
 export const PATIENT_QUEUE_PREFIX = "when done, ";
 
 export const PATIENT_QUEUE_PREFIXES = [
@@ -68,6 +91,19 @@ export interface UserMessageSpeechMetadata {
 
 export interface UserMessageMetadata {
   deliveryIntent?: UserMessageDeliveryIntent;
+  /**
+   * Quiet seconds after verified idle that a patient queued item waits for
+   * before delivery. Stamped at queue time; later setting changes do not
+   * mutate already queued items.
+   */
+  patienceSeconds?: number;
+  /**
+   * Steer with the provider's most-urgent lane (Claude `priority: "now"`:
+   * abort in-flight sampling, auto-background running tools). Only
+   * meaningful with deliveryIntent "steer" on providers reporting
+   * supportsSteerNow.
+   */
+  steerNow?: boolean;
   composition?: UserMessageCompositionMetadata;
   speech?: UserMessageSpeechMetadata;
   /** Browser-side request timestamp in server-clock epoch ms, when supplied. */

@@ -103,6 +103,13 @@ export interface UserMessage {
   tempIds?: string[];
   /** YA-internal submission timing and delivery-intent metadata. */
   metadata?: UserMessageMetadata;
+  /**
+   * Claude CLI command-queue lane for this message ("now" aborts in-flight
+   * sampling; "next" delivers after the current tool batch; "later" waits
+   * for end of turn). Forwarded on the SDKUserMessage; other providers
+   * ignore it. See topics/steer-queue-provider-differences.md.
+   */
+  priority?: "now" | "next" | "later";
 }
 
 export interface SDKSessionOptions {

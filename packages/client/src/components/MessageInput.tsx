@@ -1,9 +1,11 @@
-import type {
-  SessionLivenessSnapshot,
-  UploadedFile,
-  UserMessageCompositionMetadata,
-  UserMessageDeliveryIntent,
-  UserMessageSpeechMetadata,
+import {
+  DEFAULT_PATIENT_QUEUE_PATIENCE_SECONDS,
+  clampPatientPatienceSeconds,
+  type SessionLivenessSnapshot,
+  type UploadedFile,
+  type UserMessageCompositionMetadata,
+  type UserMessageDeliveryIntent,
+  type UserMessageSpeechMetadata,
 } from "@yep-anywhere/shared";
 import {
   type ClipboardEvent,
@@ -43,6 +45,8 @@ export interface UploadProgress {
 
 export interface MessageSubmissionMetadata {
   deliveryIntent: UserMessageDeliveryIntent;
+  patienceSeconds?: number;
+  steerNow?: boolean;
   composition: UserMessageCompositionMetadata;
   speech?: UserMessageSpeechMetadata;
 }
@@ -126,6 +130,8 @@ interface Props {
   supportsThinkingToggle?: boolean;
   /** Whether the provider supports active turn steering (default: false) */
   supportsSteering?: boolean;
+  /** Whether provider steering supports soft-immediate in-flight generation abort. */
+  supportsSteerNow?: boolean;
   /** Current behavior of the primary composer action. */
   primaryActionKind?: "send" | "steer" | "queue";
   /** Available slash commands (without "/" prefix) */
@@ -146,7 +152,7 @@ interface Props {
   /** Whether heartbeat turns are currently enabled for this session */
   heartbeatEnabled?: boolean;
   /** Current quiet-period timeout used by patient queue mode. */
-  patientQueueTimeoutMinutes?: number | null;
+  patientQueuePatienceSeconds?: number | null;
   /** Quick-toggle session heartbeat */
   onToggleHeartbeat?: () => void;
   /** Open heartbeat session settings */
@@ -191,6 +197,7 @@ export function MessageInput({
   supportsPermissionMode = true,
   supportsThinkingToggle = true,
   supportsSteering = false,
+  supportsSteerNow = false,
   primaryActionKind,
   slashCommands = [],
   onCustomCommand,
@@ -201,7 +208,7 @@ export function MessageInput({
   thinkingProvider,
   thinkingModel,
   heartbeatEnabled = false,
-  patientQueueTimeoutMinutes,
+  patientQueuePatienceSeconds,
   onToggleHeartbeat,
   onConfigureHeartbeat,
   correctionActive = false,
@@ -268,9 +275,13 @@ export function MessageInput({
       }
     },
   );
+  const [steerNowEnabled, setSteerNowEnabled] = useState(false);
   const effectivePrimaryActionKind = hasActiveDualActions
     ? enterActionKind
     : basePrimaryActionKind;
+  const effectivePatientQueuePatienceSeconds =
+    clampPatientPatienceSeconds(patientQueuePatienceSeconds) ??
+    DEFAULT_PATIENT_QUEUE_PATIENCE_SECONDS;
   const showPatientQueueMode = !!(
     supportsSteering || onQueue || basePrimaryActionKind === "queue"
   );
@@ -384,6 +395,12 @@ export function MessageInput({
           : undefined;
       return {
         deliveryIntent,
+        ...(deliveryIntent === "patient"
+          ? { patienceSeconds: effectivePatientQueuePatienceSeconds }
+          : {}),
+        ...(deliveryIntent === "steer" && supportsSteerNow && steerNowEnabled
+          ? { steerNow: true }
+          : {}),
         composition: {
           typingStartedAt,
           typingEndedAt: submittedAt,
@@ -393,7 +410,7 @@ export function MessageInput({
         ...(speech ? { speech } : {}),
       };
     },
-    [],
+    [effectivePatientQueuePatienceSeconds, steerNowEnabled, supportsSteerNow],
   );
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -410,7 +427,10 @@ export function MessageInput({
   }, [controls, onDraftControlsReady]);
 
   const handleSubmit = useCallback(
-    (messageOverride?: unknown) => {
+    (
+      messageOverride?: unknown,
+      actionOverride?: "send" | "steer" | "queue",
+    ) => {
       const override =
         typeof messageOverride === "string" ? messageOverride : undefined;
       // Stop voice recording and get any pending interim text
@@ -428,10 +448,11 @@ export function MessageInput({
       const hasContent = finalText.trim() || attachments.length > 0;
       if (hasContent && !disabled) {
         const message = finalText.trim();
+        const actionKind = actionOverride ?? effectivePrimaryActionKind;
         const deliveryIntent =
-          effectivePrimaryActionKind === "steer"
+          actionKind === "steer"
             ? "steer"
-            : effectivePrimaryActionKind === "queue"
+            : actionKind === "queue"
               ? "deferred"
               : "direct";
         const metadata = buildSubmissionMetadata(deliveryIntent);
@@ -454,6 +475,10 @@ export function MessageInput({
       resetCompositionMetadata,
     ],
   );
+
+  const handleSteer = useCallback(() => {
+    handleSubmit(undefined, "steer");
+  }, [handleSubmit]);
 
   const handleQueue = useCallback(
     () => {
@@ -658,7 +683,7 @@ export function MessageInput({
       ) {
         e.preventDefault();
         if (hasActiveDualActions && effectivePrimaryActionKind === "queue") {
-          handleSubmit();
+          handleSubmit(undefined, "steer");
         } else {
           handleQueue();
         }
@@ -1001,7 +1026,7 @@ export function MessageInput({
             thinkingProvider={thinkingProvider}
             thinkingModel={thinkingModel}
             heartbeatEnabled={heartbeatEnabled}
-            patientQueueTimeoutMinutes={patientQueueTimeoutMinutes}
+            patientQueuePatienceSeconds={effectivePatientQueuePatienceSeconds}
             onToggleHeartbeat={onToggleHeartbeat}
             onConfigureHeartbeat={onConfigureHeartbeat}
             contextUsage={contextUsage}
@@ -1010,6 +1035,9 @@ export function MessageInput({
             showPatientQueueMode={showPatientQueueMode}
             patientQueueEnabled={patientQueueEnabled}
             onTogglePatientQueue={togglePatientQueueEnabled}
+            showSteerNowMode={supportsSteerNow && hasActiveDualActions}
+            steerNowEnabled={steerNowEnabled}
+            onToggleSteerNow={() => setSteerNowEnabled((value) => !value)}
             enterActionKind={
               effectivePrimaryActionKind === "steer" ||
               effectivePrimaryActionKind === "queue"
@@ -1027,6 +1055,7 @@ export function MessageInput({
                 : handleSubmit
             }
             onQueue={onQueue ? handleQueue : undefined}
+            onSteer={hasActiveDualActions ? handleSteer : undefined}
             primaryActionKind={effectivePrimaryActionKind}
             canSend={canSubmit}
             disabled={disabled}

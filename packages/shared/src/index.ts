@@ -92,9 +92,12 @@ export type {
   UserMessageSpeechMetadata,
 } from "./user-message-metadata.js";
 export {
+  DEFAULT_PATIENT_QUEUE_PATIENCE_SECONDS,
+  MAX_PATIENT_QUEUE_PATIENCE_SECONDS,
   PATIENT_QUEUE_PREFIX,
   PATIENT_QUEUE_PREFIXES,
   applyPatientQueuePrefix,
+  clampPatientPatienceSeconds,
   hasPatientQueuePrefix,
   stripPatientQueuePrefix,
 } from "./user-message-metadata.js";

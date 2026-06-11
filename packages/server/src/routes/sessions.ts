@@ -18,6 +18,7 @@ import {
   type UserMessageDeliveryIntent,
   type UserMessageMetadata,
   type UrlProjectId,
+  clampPatientPatienceSeconds,
   getModelContextWindow,
   isUrlProjectId,
   thinkingOptionToConfig,
@@ -458,9 +459,21 @@ function buildUserMessageMetadata(
         }
       : undefined;
 
+  const deliveryIntent =
+    parseDeliveryIntent(rawMetadata.deliveryIntent) ?? fallbackIntent;
+  const patienceSeconds =
+    deliveryIntent === "patient"
+      ? clampPatientPatienceSeconds(rawMetadata.patienceSeconds)
+      : undefined;
+  const steerNow =
+    deliveryIntent === "steer" && rawMetadata.steerNow === true
+      ? true
+      : undefined;
+
   return {
-    deliveryIntent:
-      parseDeliveryIntent(rawMetadata.deliveryIntent) ?? fallbackIntent,
+    deliveryIntent,
+    ...(patienceSeconds !== undefined ? { patienceSeconds } : {}),
+    ...(steerNow ? { steerNow } : {}),
     ...(Object.keys(cleanComposition).length > 0
       ? { composition: cleanComposition }
       : {}),

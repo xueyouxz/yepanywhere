@@ -5,6 +5,7 @@ import { resolveSessionProviderCapabilities } from "../providerCapabilities";
 function provider(
   name: ProviderInfo["name"],
   supportsSteering?: boolean,
+  supportsSteerNow?: boolean,
 ): ProviderInfo {
   return {
     name,
@@ -13,6 +14,7 @@ function provider(
     authenticated: true,
     enabled: true,
     supportsSteering,
+    supportsSteerNow,
   };
 }
 
@@ -25,7 +27,8 @@ describe("resolveSessionProviderCapabilities", () => {
 
     expect(capabilities.providerInfo).toBeNull();
     expect(capabilities.generallySupportsSteering).toBe(true);
-    expect(capabilities.supportsSteeringNow).toBe(true);
+    expect(capabilities.supportsCurrentTurnSteering).toBe(true);
+    expect(capabilities.supportsSteerNow).toBe(false);
   });
 
   it("uses fetched metadata once it is available", () => {
@@ -35,7 +38,8 @@ describe("resolveSessionProviderCapabilities", () => {
     });
 
     expect(capabilities.generallySupportsSteering).toBe(true);
-    expect(capabilities.supportsSteeringNow).toBe(false);
+    expect(capabilities.supportsCurrentTurnSteering).toBe(false);
+    expect(capabilities.supportsSteerNow).toBe(false);
   });
 
   it("does not treat codex-oss as steerable without provider metadata", () => {
@@ -45,7 +49,8 @@ describe("resolveSessionProviderCapabilities", () => {
     });
 
     expect(capabilities.generallySupportsSteering).toBe(false);
-    expect(capabilities.supportsSteeringNow).toBe(false);
+    expect(capabilities.supportsCurrentTurnSteering).toBe(false);
+    expect(capabilities.supportsSteerNow).toBe(false);
   });
 
   it("honors non-Codex providers that advertise steering", () => {
@@ -55,6 +60,18 @@ describe("resolveSessionProviderCapabilities", () => {
     });
 
     expect(capabilities.generallySupportsSteering).toBe(true);
-    expect(capabilities.supportsSteeringNow).toBe(true);
+    expect(capabilities.supportsCurrentTurnSteering).toBe(true);
+    expect(capabilities.supportsSteerNow).toBe(false);
+  });
+
+  it("reports soft-immediate steering only when metadata says so", () => {
+    const capabilities = resolveSessionProviderCapabilities({
+      providers: [provider("claude", true, true)],
+      providerName: "claude",
+    });
+
+    expect(capabilities.generallySupportsSteering).toBe(true);
+    expect(capabilities.supportsCurrentTurnSteering).toBe(true);
+    expect(capabilities.supportsSteerNow).toBe(true);
   });
 });

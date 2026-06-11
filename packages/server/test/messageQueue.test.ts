@@ -34,4 +34,14 @@ describe("concatUserMessages", () => {
     ]);
     expect(combined.tempIds).toEqual(["temp-1", "temp-3"]);
   });
+
+  it("keeps the most urgent Claude SDK priority across chunks", () => {
+    const combined = concatUserMessages([
+      { ...msg("later"), priority: "later" },
+      { ...msg("now"), priority: "now" },
+      { ...msg("next"), priority: "next" },
+    ]);
+
+    expect(combined.priority).toBe("now");
+  });
 });

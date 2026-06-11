@@ -408,6 +408,43 @@ describe("Process", () => {
       await process.abort();
     });
 
+    it("marks Claude steer-now messages with now priority", async () => {
+      let resolveIterator: () => void;
+      const iterator: AsyncIterator<SDKMessage> = {
+        next: () =>
+          new Promise((resolve) => {
+            resolveIterator = () => resolve({ done: true, value: undefined });
+          }),
+      };
+      const queue = new MessageQueue();
+      const steerFn = vi.fn(async () => true);
+
+      const process = new Process(iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        provider: "claude",
+        idleTimeoutMs: 100,
+        queue,
+        steerFn,
+      });
+
+      process.queueMessage({
+        text: "steer immediately",
+        metadata: { deliveryIntent: "steer", steerNow: true },
+      });
+
+      expect(steerFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: "steer immediately",
+          priority: "now",
+        }),
+      );
+
+      resolveIterator?.();
+      await process.abort();
+    });
+
     it("falls back to queue when steerFn returns false", async () => {
       let resolveIterator: () => void;
       const iterator: AsyncIterator<SDKMessage> = {
@@ -970,6 +1007,7 @@ describe("Process", () => {
         projectPath: "/test",
         projectId: "proj-1",
         sessionId: "sess-1",
+        provider: "claude",
         idleTimeoutMs: 100,
         queue,
         steerFn,
@@ -997,6 +1035,7 @@ describe("Process", () => {
           text: "run tests",
           tempId: "temp-patient",
           metadata: expect.objectContaining({ deliveryIntent: "steer" }),
+          priority: "next",
         }),
       );
       expect(process.getDeferredQueueSummary()).toEqual([]);
@@ -1057,7 +1096,7 @@ describe("Process", () => {
       ]);
     });
 
-    it("blocks later deferred messages while a mid-queue edit is open", async () => {
+    it("keeps deferred order when a mid-queue edit spans turn completion", async () => {
       const controller = createControllableIterator();
       const queue = new MessageQueue();
       const steerFn = vi.fn(async () => true);
@@ -1090,27 +1129,22 @@ describe("Process", () => {
         },
       });
 
-      await waitFor(() => expect(steerFn).toHaveBeenCalledTimes(1));
-      expect(steerFn).toHaveBeenLastCalledWith(
-        expect.objectContaining({ tempId: "temp-1" }),
-      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(steerFn).not.toHaveBeenCalled();
       expect(process.getDeferredQueueSummary()).toMatchObject([
+        { tempId: "temp-1", content: "first" },
         { tempId: "temp-3", content: "third", blockedByEdit: true },
       ]);
 
       controller.push({
-        type: "user",
+        type: "result",
         session_id: "sess-1",
-        message: {
-          role: "user",
-          content: [{ type: "tool_result", tool_use_id: "tool-2" }],
-        },
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(steerFn).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(process.state.type).toBe("idle"));
+      expect(queue.depth).toBe(0);
 
-      process.deferMessage(
+      const replacement = process.deferMessage(
         { text: "second edited", tempId: "temp-2-edited" },
         {
           placement: { ...taken?.placement, replaceTempId: "temp-2" },
@@ -1118,23 +1152,17 @@ describe("Process", () => {
         },
       );
 
-      expect(process.getDeferredQueueSummary()).toMatchObject([
-        { tempId: "temp-2-edited", content: "second edited" },
-        { tempId: "temp-3", content: "third" },
-      ]);
-
-      controller.push({
-        type: "user",
-        session_id: "sess-1",
-        message: {
-          role: "user",
-          content: [{ type: "tool_result", tool_use_id: "tool-3" }],
-        },
+      expect(replacement).toMatchObject({
+        success: true,
+        deferred: false,
+        promoted: true,
       });
-
-      await waitFor(() => expect(steerFn).toHaveBeenCalledTimes(2));
-      expect(steerFn).toHaveBeenLastCalledWith(
-        expect.objectContaining({ tempId: "temp-2-edited" }),
+      expect(steerFn).not.toHaveBeenCalled();
+      expect(process.getDeferredQueueSummary()).toEqual([]);
+      await waitFor(() => expect(queue.depth).toBe(1));
+      const queuedProviderTurn = await queue[Symbol.asyncIterator]().next();
+      expect(queuedProviderTurn.value?.message.content).toBe(
+        `first\n\n${CONCAT_SEPARATOR}\n\nsecond edited\n\n${CONCAT_SEPARATOR}\n\nthird`,
       );
 
       controller.finish();
@@ -1401,7 +1429,43 @@ describe("Process", () => {
       await process.abort();
     });
 
-    it("skips patient messages when steering regular deferred tool-boundary turns", async () => {
+    it("marks Claude queued delivery with later priority after turn end", async () => {
+      const controller = createControllableIterator();
+      const queue = new MessageQueue();
+      const process = new Process(controller.iterator, {
+        projectPath: "/test",
+        projectId: "proj-1" as UrlProjectId,
+        sessionId: "sess-1",
+        provider: "claude",
+        idleTimeoutMs: 100,
+        queue,
+      });
+
+      process.deferMessage({
+        text: "claude queued",
+        tempId: "temp-claude-queued",
+        metadata: { deliveryIntent: "deferred" },
+      });
+
+      controller.push({
+        type: "result",
+        session_id: "sess-1",
+      });
+
+      await waitFor(() => expect(queue.depth).toBe(1));
+      const queuedProviderTurn = await queue[Symbol.asyncIterator]().next();
+      expect(queuedProviderTurn.value).toMatchObject({
+        priority: "later",
+        message: {
+          content: "claude queued",
+        },
+      });
+
+      controller.finish();
+      await process.abort();
+    });
+
+    it("keeps deferred messages queued at completed tool-result boundaries", async () => {
       const controller = createControllableIterator();
       const queue = new MessageQueue();
       const steerFn = vi.fn(async () => true);
@@ -1434,19 +1498,19 @@ describe("Process", () => {
         },
       });
 
-      await waitFor(() => expect(steerFn).toHaveBeenCalledTimes(1));
-      expect(steerFn).toHaveBeenCalledWith(
-        expect.objectContaining({
-          text: "regular queued",
-          tempId: "temp-regular",
-          metadata: expect.objectContaining({ deliveryIntent: "deferred" }),
-        }),
-      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(steerFn).not.toHaveBeenCalled();
+      expect(queue.depth).toBe(0);
       expect(process.getDeferredQueueSummary()).toMatchObject([
         {
           tempId: "temp-patient",
           content: "patient queued",
           metadata: { deliveryIntent: "patient" },
+        },
+        {
+          tempId: "temp-regular",
+          content: "regular queued",
+          metadata: { deliveryIntent: "deferred" },
         },
       ]);
 
@@ -1489,7 +1553,11 @@ describe("Process", () => {
         },
       ]);
 
-      expect(process.promoteEligiblePatientDeferredMessages()).toBe(true);
+      expect(
+        process.promoteEligiblePatientDeferredMessages({
+          quietSinceMs: Date.now() - 30_000,
+        }),
+      ).toMatchObject({ promoted: true });
       expect(process.getDeferredQueueSummary()).toEqual([]);
       expect(process.state.type).toBe("in-turn");
       const queuedProviderTurn = await queue[Symbol.asyncIterator]().next();
@@ -1566,7 +1634,7 @@ describe("Process", () => {
       await process.abort();
     });
 
-    it("promotes the next deferred message after a completed tool result", async () => {
+    it("promotes deferred messages after turn completion, not completed tool results", async () => {
       const controller = createControllableIterator();
       const queue = new MessageQueue();
       const steerFn = vi.fn(async () => true);
@@ -1605,18 +1673,30 @@ describe("Process", () => {
         },
       });
 
-      await waitFor(() => expect(steerFn).toHaveBeenCalledTimes(1));
-      expect(steerFn).toHaveBeenCalledWith(
-        expect.objectContaining({
-          text: "send after bash",
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(steerFn).not.toHaveBeenCalled();
+      expect(queue.depth).toBe(0);
+      expect(process.getDeferredQueueSummary()).toMatchObject([
+        {
           tempId: "temp-tool-boundary",
-        }),
-      );
+          content: "send after bash",
+        },
+      ]);
+
+      controller.push({
+        type: "result",
+        session_id: "sess-1",
+      });
+
+      await waitFor(() => expect(queue.depth).toBe(1));
+      const queuedProviderTurn = await queue[Symbol.asyncIterator]().next();
+      expect(queuedProviderTurn.value?.message).toMatchObject({
+        content: "send after bash",
+      });
       expect(process.getDeferredQueueSummary()).toEqual([]);
       expect(deferredEvents[deferredEvents.length - 1]).toMatchObject({
         type: "deferred-queue",
         reason: "promoted",
-        tempId: "temp-tool-boundary",
         messages: [],
       });
 

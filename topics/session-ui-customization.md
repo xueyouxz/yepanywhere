@@ -45,9 +45,12 @@ when queueing. The active composer model is:
   shortcut.
 - The **straight-arrow queue button** remains available for steering providers
   while a turn is active, including mobile users who cannot rely on keybinds.
+  The patient-switch visibility setting must not hide this alternate send
+  option.
 - The **patient stopwatch toggle** is default-off and affects only future queue
   submissions. Accepted queued items keep their own regular or patient intent.
-- Patient queued rows wait for the existing verified-quiet heartbeat timeout.
+- Patient queued rows wait for their per-item verified-quiet patience seconds
+  (default 30s).
   Regular queued rows may pass patient rows at delivery time, so UI should
   visibly distinguish patient rows while preserving composition order in the
   scroll-following queue tail.
@@ -56,9 +59,10 @@ when queueing. The active composer model is:
   `Ctrl+Enter`; broader keybind remapping can build from there.
 
 `onQueue` is only supplied while the agent is running, so a "done" agent never
-reaches the queue path. The queue control's *visibility* is the
-`queueControls` appearance toggle above; tooltips must state the regular queue
-and patient queue distinction. See
+reaches the queue path. The `queueControls` appearance toggle controls only
+the regular/patient switch; the alternate Steer/Later send button remains
+visible when dual-action delivery is available. Tooltips must state the regular
+queue and patient queue distinction. See
 [`message-control-steer-queue-btw-later-interrupt.md`](message-control-steer-queue-btw-later-interrupt.md).
 
 ## Remaining work
