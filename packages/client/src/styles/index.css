@@ -8670,7 +8670,8 @@ a.sidebar-nav-item {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3);
+  /* Vertical padding trimmed ~15% to shorten the category list. */
+  padding: calc(var(--space-3) * 0.85) var(--space-3);
   background: var(--bg-code);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
