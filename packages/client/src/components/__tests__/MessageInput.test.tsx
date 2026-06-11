@@ -118,6 +118,7 @@ vi.mock("../../hooks/useSessionToolbarVisibility", () => ({
   useSessionToolbarVisibility: () => ({
     visibility: {
       modeSelector: true,
+      steerNow: true,
       attachments: true,
       slashMenu: true,
       thinkingToggle: true,
@@ -309,6 +310,7 @@ function expectSubmission(
 
 const toolbarVisibility: MessageInputToolbarViewProps["visibility"] = {
   modeSelector: false,
+  steerNow: true,
   attachments: false,
   slashMenu: false,
   thinkingToggle: true,

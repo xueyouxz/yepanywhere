@@ -16,6 +16,7 @@ function parseJoinWindowSeconds(value: string): number {
 interface MessageDeliveryBaseline {
   joinWindowSeconds: number;
   composeAnchorsEnabled: boolean;
+  steerNowDefault: boolean;
 }
 
 /**
@@ -31,16 +32,20 @@ export function MessageDeliverySettings() {
   // or a save is in flight, cleared once the server catches up.
   const [draftJoinWindow, setDraftJoinWindow] = useState<string | null>(null);
   const [draftAnchors, setDraftAnchors] = useState<boolean | null>(null);
+  const [draftSteerNow, setDraftSteerNow] = useState<boolean | null>(null);
   const baselineRef = useRef<MessageDeliveryBaseline | null>(null);
 
   const serverJoinWindowSeconds = settings?.deferredJoinWindowSeconds ?? 0;
   const serverComposeAnchorsEnabled = settings?.composeAnchorsEnabled ?? false;
+  const serverSteerNowDefault =
+    settings?.clientDefaults?.steerNowDefault ?? false;
 
   useEffect(() => {
     if (settings && !baselineRef.current) {
       baselineRef.current = {
         joinWindowSeconds: settings.deferredJoinWindowSeconds ?? 0,
         composeAnchorsEnabled: settings.composeAnchorsEnabled ?? false,
+        steerNowDefault: settings.clientDefaults?.steerNowDefault ?? false,
       };
     }
   }, [settings]);
@@ -49,6 +54,7 @@ export function MessageDeliverySettings() {
     draftJoinWindow ?? String(serverJoinWindowSeconds);
   const shownJoinWindowSeconds = parseJoinWindowSeconds(shownJoinWindowText);
   const shownAnchors = draftAnchors ?? serverComposeAnchorsEnabled;
+  const shownSteerNowDefault = draftSteerNow ?? serverSteerNowDefault;
 
   // Debounced auto-save for the join window (sliders fire continuously).
   useEffect(() => {
@@ -77,21 +83,29 @@ export function MessageDeliverySettings() {
       setDraftAnchors(null);
     }
   }, [draftAnchors, serverComposeAnchorsEnabled]);
+  useEffect(() => {
+    if (draftSteerNow !== null && draftSteerNow === serverSteerNowDefault) {
+      setDraftSteerNow(null);
+    }
+  }, [draftSteerNow, serverSteerNowDefault]);
 
   const baseline = baselineRef.current;
   const canUndo =
     !!baseline &&
     (shownJoinWindowSeconds !== baseline.joinWindowSeconds ||
-      shownAnchors !== baseline.composeAnchorsEnabled);
+      shownAnchors !== baseline.composeAnchorsEnabled ||
+      shownSteerNowDefault !== baseline.steerNowDefault);
 
   const undo = useCallback(async () => {
     const snapshot = baselineRef.current;
     if (!snapshot) return;
     setDraftJoinWindow(null);
     setDraftAnchors(null);
+    setDraftSteerNow(null);
     await updateSettings({
       deferredJoinWindowSeconds: snapshot.joinWindowSeconds,
       composeAnchorsEnabled: snapshot.composeAnchorsEnabled,
+      clientDefaults: { steerNowDefault: snapshot.steerNowDefault },
     }).catch(() => {
       // surfaced via the hook's error state
     });
@@ -174,6 +188,27 @@ export function MessageDeliverySettings() {
               });
             }}
             aria-label={t("messageDeliveryComposeAnchorsTitle")}
+          />
+        </label>
+
+        <label className="settings-item">
+          <div className="settings-item-info">
+            <strong>{t("messageDeliverySteerNowDefaultTitle")}</strong>
+            <p>{t("messageDeliverySteerNowDefaultDescription")}</p>
+          </div>
+          <input
+            type="checkbox"
+            checked={shownSteerNowDefault}
+            onChange={(e) => {
+              const next = e.target.checked;
+              setDraftSteerNow(next);
+              void updateSettings({
+                clientDefaults: { steerNowDefault: next },
+              }).catch(() => {
+                // surfaced via the hook's error state
+              });
+            }}
+            aria-label={t("messageDeliverySteerNowDefaultTitle")}
           />
         </label>
 

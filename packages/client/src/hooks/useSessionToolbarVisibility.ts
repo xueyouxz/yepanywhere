@@ -12,6 +12,7 @@ import { useVersion } from "./useVersion";
 
 export interface SessionToolbarVisibility {
   modeSelector: boolean;
+  steerNow: boolean;
   attachments: boolean;
   slashMenu: boolean;
   thinkingToggle: boolean;
@@ -32,6 +33,7 @@ type SessionToolbarVisibilityDefaults = Partial<SessionToolbarVisibility>;
 
 export const DEFAULT_SESSION_TOOLBAR_VISIBILITY: SessionToolbarVisibility = {
   modeSelector: true,
+  steerNow: true,
   attachments: true,
   slashMenu: true,
   thinkingToggle: true,

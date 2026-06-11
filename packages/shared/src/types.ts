@@ -281,6 +281,7 @@ export interface SpeechClientDefaults {
 
 export interface SessionToolbarVisibilityClientDefaults {
   modeSelector?: boolean;
+  steerNow?: boolean;
   attachments?: boolean;
   slashMenu?: boolean;
   thinkingToggle?: boolean;
@@ -297,6 +298,11 @@ export interface SessionToolbarVisibilityClientDefaults {
 export interface ClientDefaults {
   /** Defaults used by browser clients when local storage has no explicit value. */
   speech?: SpeechClientDefaults;
+  /**
+   * Initial state of the per-turn "now" steering toggle for providers with a
+   * "now" lane (currently Claude). The toggle itself stays per-turn.
+   */
+  steerNowDefault?: boolean;
   /** Session toolbar visibility defaults for controls with no local override. */
   sessionToolbarVisibility?: SessionToolbarVisibilityClientDefaults;
 }

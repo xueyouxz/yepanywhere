@@ -824,6 +824,7 @@ export function MessageInputToolbarView({
     formatPatientQueueTimeout(DEFAULT_PATIENT_QUEUE_PATIENCE_SECONDS) ??
     "30s";
   const canToggleSteerNow = !!(
+    visibility.steerNow &&
     actionsControl.send?.showSteerNowMode &&
     actionsControl.send.onToggleSteerNow
   );
@@ -2075,8 +2076,9 @@ export function MessageInputToolbar({
   );
   const thinkingProviderInfo = useMemo(
     () =>
-      providers.find((provider) => provider.name === normalizedThinkingProvider) ??
-      null,
+      providers.find(
+        (provider) => provider.name === normalizedThinkingProvider,
+      ) ?? null,
     [normalizedThinkingProvider, providers],
   );
   const thinkingModelInfo = useMemo<ModelInfo | null>(
@@ -2089,11 +2091,18 @@ export function MessageInputToolbar({
   const thinkingEffortOptions = useMemo(
     () =>
       getEffortLevelOptions({
-        provider: thinkingProviderInfo ?? (normalizedThinkingProvider as ProviderName),
+        provider:
+          thinkingProviderInfo ?? (normalizedThinkingProvider as ProviderName),
         model: thinkingModelInfo ?? thinkingModel,
         translate: t,
       }),
-    [thinkingModel, thinkingModelInfo, thinkingProviderInfo, normalizedThinkingProvider, t],
+    [
+      thinkingModel,
+      thinkingModelInfo,
+      thinkingProviderInfo,
+      normalizedThinkingProvider,
+      t,
+    ],
   );
   const effectiveThinkingLevel = useMemo(
     () => resolveSupportedEffortLevel(thinkingLevel, thinkingEffortOptions),
@@ -2102,7 +2111,8 @@ export function MessageInputToolbar({
   const thinkingModeOptions = useMemo(
     () =>
       getThinkingModeOptions({
-        provider: thinkingProviderInfo ?? (normalizedThinkingProvider as ProviderName),
+        provider:
+          thinkingProviderInfo ?? (normalizedThinkingProvider as ProviderName),
         model: thinkingModelInfo ?? thinkingModel,
         effortOptions: thinkingEffortOptions,
       }),
@@ -2290,9 +2300,7 @@ export function MessageInputToolbar({
     )
       ? lastNonOffThinkingModeRef.current
       : (thinkingModeOptions.find((option) => option !== "off") ?? "auto");
-    setThinkingMode(
-      effectiveThinkingMode === "off" ? nextEnabledMode : "off",
-    );
+    setThinkingMode(effectiveThinkingMode === "off" ? nextEnabledMode : "off");
   }, [effectiveThinkingMode, setThinkingMode, thinkingModeOptions]);
 
   useLayoutEffect(() => {

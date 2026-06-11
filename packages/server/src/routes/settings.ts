@@ -48,6 +48,7 @@ const MAX_HELPER_TARGETS = 20;
 const HELPER_TARGET_MODEL_DISCOVERY_TIMEOUT_MS = 5000;
 const SESSION_TOOLBAR_VISIBILITY_CLIENT_DEFAULT_KEYS = [
   "modeSelector",
+  "steerNow",
   "attachments",
   "slashMenu",
   "thinkingToggle",
@@ -60,7 +61,11 @@ const SESSION_TOOLBAR_VISIBILITY_CLIENT_DEFAULT_KEYS = [
   "queueControls",
   "sessionStatus",
 ] as const satisfies readonly (keyof SessionToolbarVisibilityClientDefaults)[];
-const CLIENT_DEFAULT_KEYS = ["speech", "sessionToolbarVisibility"] as const;
+const CLIENT_DEFAULT_KEYS = [
+  "speech",
+  "sessionToolbarVisibility",
+  "steerNowDefault",
+] as const;
 const SPEECH_CLIENT_DEFAULT_KEYS = [
   "voiceInputEnabled",
   "speechMethod",
@@ -471,6 +476,15 @@ function parseClientDefaults(raw: unknown): ClientDefaults | undefined | null {
       parsed.speech = speech;
     }
   }
+  if ("steerNowDefault" in raw) {
+    if (raw.steerNowDefault === undefined || raw.steerNowDefault === null) {
+      parsed.steerNowDefault = undefined;
+    } else if (typeof raw.steerNowDefault !== "boolean") {
+      return null;
+    } else {
+      parsed.steerNowDefault = raw.steerNowDefault;
+    }
+  }
   if ("sessionToolbarVisibility" in raw) {
     const parsedVisibility = parseSessionToolbarVisibilityClientDefaults(
       raw.sessionToolbarVisibility,
@@ -496,6 +510,13 @@ function mergeClientDefaults(
         ...current?.speech,
         ...update.speech,
       };
+    }
+  }
+  if ("steerNowDefault" in update) {
+    if (update.steerNowDefault === undefined) {
+      delete merged.steerNowDefault;
+    } else {
+      merged.steerNowDefault = update.steerNowDefault;
     }
   }
   if ("sessionToolbarVisibility" in update) {

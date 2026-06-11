@@ -38,6 +38,11 @@ export function ToolbarSettings() {
       description: t("appearanceToolbarModeDescription"),
     },
     {
+      key: "steerNow",
+      title: t("appearanceToolbarSteerNowTitle"),
+      description: t("appearanceToolbarSteerNowDescription"),
+    },
+    {
       key: "attachments",
       title: t("appearanceToolbarAttachmentsTitle"),
       description: t("appearanceToolbarAttachmentsDescription"),

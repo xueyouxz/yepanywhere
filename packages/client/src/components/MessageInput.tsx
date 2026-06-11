@@ -20,6 +20,7 @@ import {
   type DraftControls,
   useDraftPersistence,
 } from "../hooks/useDraftPersistence";
+import { useVersion } from "../hooks/useVersion";
 import { useI18n } from "../i18n";
 import type { BtwToolbarMode } from "../lib/btwAsideRouting";
 import { hasCoarsePointer } from "../lib/deviceDetection";
@@ -283,7 +284,15 @@ export function MessageInput({
       }
     },
   );
-  const [steerNowEnabled, setSteerNowEnabled] = useState(false);
+  // Per-turn "now" steering toggle. The server-learned client default sets
+  // its initial state (Message Delivery settings); the toggle stays per-turn
+  // and a user click overrides the default for this composer.
+  const { version } = useVersion();
+  const steerNowDefault = version?.clientDefaults?.steerNowDefault ?? false;
+  const [steerNowOverride, setSteerNowOverride] = useState<boolean | null>(
+    null,
+  );
+  const steerNowEnabled = steerNowOverride ?? steerNowDefault;
   const effectivePrimaryActionKind = hasActiveDualActions
     ? enterActionKind
     : basePrimaryActionKind;
@@ -291,7 +300,9 @@ export function MessageInput({
     clampPatientPatienceSeconds(patientQueuePatienceSeconds) ??
     DEFAULT_PATIENT_QUEUE_PATIENCE_SECONDS;
   const showPatientQueueMode = !!(
-    supportsSteering || onQueue || basePrimaryActionKind === "queue"
+    supportsSteering ||
+    onQueue ||
+    basePrimaryActionKind === "queue"
   );
   const primaryActionLabel =
     effectivePrimaryActionKind === "steer"
@@ -495,44 +506,40 @@ export function MessageInput({
     handleSubmit(draft ? `/compact ${draft}` : "/compact", "send");
   }, [controls, handleSubmit]);
 
-  const handleQueue = useCallback(
-    () => {
-      const queueHandler =
-        onQueue ??
-        (effectivePrimaryActionKind === "queue" ? onSend : undefined);
+  const handleQueue = useCallback(() => {
+    const queueHandler =
+      onQueue ?? (effectivePrimaryActionKind === "queue" ? onSend : undefined);
 
-      // Stop voice recording and get any pending interim text
-      const pendingVoice = voiceButtonRef.current?.stopAndFinalize() ?? "";
+    // Stop voice recording and get any pending interim text
+    const pendingVoice = voiceButtonRef.current?.stopAndFinalize() ?? "";
 
-      let finalText = controls.getDraft().trimEnd();
-      if (pendingVoice) {
-        finalText = finalText ? `${finalText} ${pendingVoice}` : pendingVoice;
-      }
+    let finalText = controls.getDraft().trimEnd();
+    if (pendingVoice) {
+      finalText = finalText ? `${finalText} ${pendingVoice}` : pendingVoice;
+    }
 
-      const hasContent = finalText.trim() || attachments.length > 0;
-      if (hasContent && !disabled && queueHandler) {
-        const metadata = buildSubmissionMetadata(
-          patientQueueEnabled ? "patient" : "deferred",
-        );
-        controls.clearInput();
-        resetCompositionMetadata();
-        setInterimTranscript("");
-        queueHandler(finalText.trim(), metadata);
-        textareaRef.current?.focus();
-      }
-    },
-    [
-      disabled,
-      controls,
-      onQueue,
-      onSend,
-      effectivePrimaryActionKind,
-      patientQueueEnabled,
-      attachments.length,
-      buildSubmissionMetadata,
-      resetCompositionMetadata,
-    ],
-  );
+    const hasContent = finalText.trim() || attachments.length > 0;
+    if (hasContent && !disabled && queueHandler) {
+      const metadata = buildSubmissionMetadata(
+        patientQueueEnabled ? "patient" : "deferred",
+      );
+      controls.clearInput();
+      resetCompositionMetadata();
+      setInterimTranscript("");
+      queueHandler(finalText.trim(), metadata);
+      textareaRef.current?.focus();
+    }
+  }, [
+    disabled,
+    controls,
+    onQueue,
+    onSend,
+    effectivePrimaryActionKind,
+    patientQueueEnabled,
+    attachments.length,
+    buildSubmissionMetadata,
+    resetCompositionMetadata,
+  ]);
 
   const handleBtwClick = useCallback(() => {
     if (disabled || !onBtwShortcut) return;
@@ -551,9 +558,7 @@ export function MessageInput({
   }, [controls, disabled, onBtwShortcut, resetCompositionMetadata]);
 
   const submitPrimaryAction =
-    effectivePrimaryActionKind === "queue"
-      ? handleQueue
-      : handleSubmit;
+    effectivePrimaryActionKind === "queue" ? handleQueue : handleSubmit;
 
   const recallLastSubmission = useCallback(
     (allowExistingText = false) => {
@@ -1055,7 +1060,7 @@ export function MessageInput({
             onTogglePatientQueue={togglePatientQueueEnabled}
             showSteerNowMode={supportsSteerNow && hasActiveDualActions}
             steerNowEnabled={steerNowEnabled}
-            onToggleSteerNow={() => setSteerNowEnabled((value) => !value)}
+            onToggleSteerNow={() => setSteerNowOverride(!steerNowEnabled)}
             enterActionKind={
               effectivePrimaryActionKind === "steer" ||
               effectivePrimaryActionKind === "queue"

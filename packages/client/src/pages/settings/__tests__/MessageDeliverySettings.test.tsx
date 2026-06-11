@@ -120,6 +120,7 @@ describe("MessageDeliverySettings", () => {
     expect(mockUpdateSettings).toHaveBeenLastCalledWith({
       deferredJoinWindowSeconds: 20,
       composeAnchorsEnabled: true,
+      clientDefaults: { steerNowDefault: false },
     });
   });
 });
