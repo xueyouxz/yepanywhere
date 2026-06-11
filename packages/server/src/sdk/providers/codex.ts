@@ -462,8 +462,7 @@ async function terminateChildProcess(
     return;
   }
 
-  const killTarget =
-    process.platform !== "win32" && child.pid > 0 ? -child.pid : child.pid;
+  const killTarget = child.pid > 0 ? -child.pid : child.pid;
 
   try {
     process.kill(killTarget, "SIGTERM");

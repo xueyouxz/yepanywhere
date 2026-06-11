@@ -392,4 +392,97 @@ describe("CodexSessionReader - OSS Support", () => {
       ),
     ).toHaveLength(2);
   });
+
+  it("deduplicates exact cached Codex JSONL records", async () => {
+    const sessionId = "duplicate-records";
+    const now = new Date().toISOString();
+    const sessionPath = join(testDir, `${sessionId}.jsonl`);
+    const userMessage = {
+      type: "response_item",
+      timestamp: now,
+      payload: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "start here" }],
+      },
+    };
+    await writeFile(
+      sessionPath,
+      `${[
+        JSON.stringify({
+          type: "session_meta",
+          timestamp: now,
+          payload: {
+            id: sessionId,
+            cwd: "/test/project",
+            timestamp: now,
+            model_provider: "openai",
+          },
+        }),
+        JSON.stringify(userMessage),
+        JSON.stringify(userMessage),
+      ].join("\n")}\n`,
+    );
+
+    const loaded = await reader.getSession(
+      sessionId,
+      "test-project" as UrlProjectId,
+    );
+
+    expect(loaded?.data.session.entries).toHaveLength(2);
+    expect(
+      loaded?.data.session.entries.filter(
+        (entry) =>
+          entry.type === "response_item" &&
+          entry.payload.type === "message" &&
+          entry.payload.role === "user",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("does not expose the mutable Codex entry cache", async () => {
+    const sessionId = "entry-cache-copy";
+    const now = new Date().toISOString();
+    await writeFile(
+      join(testDir, `${sessionId}.jsonl`),
+      `${[
+        JSON.stringify({
+          type: "session_meta",
+          timestamp: now,
+          payload: {
+            id: sessionId,
+            cwd: "/test/project",
+            timestamp: now,
+            model_provider: "openai",
+          },
+        }),
+        JSON.stringify({
+          type: "response_item",
+          timestamp: now,
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "first turn" }],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    const first = await reader.getSession(
+      sessionId,
+      "test-project" as UrlProjectId,
+    );
+    const duplicate = first?.data.session.entries[1];
+    expect(duplicate).toBeDefined();
+    if (duplicate) {
+      first?.data.session.entries.push(duplicate);
+    }
+
+    const second = await reader.getSession(
+      sessionId,
+      "test-project" as UrlProjectId,
+    );
+
+    expect(second?.data.session.entries).toHaveLength(2);
+  });
 });

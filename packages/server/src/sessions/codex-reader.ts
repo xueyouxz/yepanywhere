@@ -103,6 +103,67 @@ function parseCodexJsonlChunk(
   return { entries, partialLine };
 }
 
+function getCodexMessagePayloadText(
+  content: Array<{ type: string; text?: string }>,
+): string {
+  return content
+    .map((block) => (typeof block.text === "string" ? block.text : block.type))
+    .join("\n");
+}
+
+function getCodexEntryDedupeKey(entry: CodexSessionEntry): string | null {
+  if (entry.type === "response_item") {
+    const { payload } = entry;
+    if (payload.type === "message") {
+      return [
+        entry.type,
+        entry.timestamp,
+        payload.type,
+        payload.role,
+        getCodexMessagePayloadText(payload.content),
+      ].join("\n");
+    }
+    return null;
+  }
+
+  if (entry.type === "event_msg") {
+    const { payload } = entry;
+    if (payload.type === "user_message" || payload.type === "agent_message") {
+      return [entry.type, entry.timestamp, payload.type, payload.message].join(
+        "\n",
+      );
+    }
+  }
+
+  return null;
+}
+
+function dedupeCodexEntries(
+  entries: CodexSessionEntry[],
+): CodexSessionEntry[] {
+  const seen = new Set<string>();
+  let deduped: CodexSessionEntry[] | null = null;
+
+  entries.forEach((entry, index) => {
+    const key = getCodexEntryDedupeKey(entry);
+    if (!key) {
+      deduped?.push(entry);
+      return;
+    }
+    if (seen.has(key)) {
+      if (!deduped) {
+        deduped = entries.slice(0, index);
+      }
+      return;
+    }
+
+    seen.add(key);
+    deduped?.push(entry);
+  });
+
+  return deduped ?? entries;
+}
+
 /**
  * Codex-specific session reader for Codex CLI JSONL files.
  *
@@ -434,7 +495,8 @@ export class CodexSessionReader implements ISessionReader {
       cached.size === stats.size &&
       cached.mtimeMs === stats.mtimeMs
     ) {
-      return cached.entries;
+      cached.entries = dedupeCodexEntries(cached.entries);
+      return cached.entries.slice();
     }
 
     if (cached && cached.filePath === filePath && cached.size < stats.size) {
@@ -448,10 +510,11 @@ export class CodexSessionReader implements ISessionReader {
         stats.size > cached.size,
       );
       cached.entries.push(...entries);
+      cached.entries = dedupeCodexEntries(cached.entries);
       cached.partialLine = partialLine;
       cached.size = stats.size;
       cached.mtimeMs = stats.mtimeMs;
-      return cached.entries;
+      return cached.entries.slice();
     }
 
     const lines = await readJsonlLines(filePath);
@@ -462,14 +525,15 @@ export class CodexSessionReader implements ISessionReader {
         entries.push(entry);
       }
     }
+    const dedupedEntries = dedupeCodexEntries(entries);
     this.entryCache.set(sessionId, {
       filePath,
       mtimeMs: stats.mtimeMs,
       size: stats.size,
-      entries,
+      entries: dedupedEntries,
       partialLine: "",
     });
-    return entries;
+    return dedupedEntries.slice();
   }
 
   private async readFileRange(
