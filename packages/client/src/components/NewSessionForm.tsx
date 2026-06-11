@@ -308,6 +308,10 @@ export interface NewSessionFormProps {
   placeholder?: string;
   /** Compact mode: no header, no mode selector (default: false) */
   compact?: boolean;
+  /** Seed the provider selection (e.g. "clear" from an existing session). */
+  preferredProvider?: ProviderName;
+  /** Seed the model selection; applied when preferredProvider matches. */
+  preferredModel?: string;
 }
 
 export function NewSessionForm({
@@ -321,6 +325,8 @@ export function NewSessionForm({
   rows = 6,
   placeholder,
   compact = false,
+  preferredProvider,
+  preferredModel,
 }: NewSessionFormProps) {
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -714,11 +720,18 @@ export function NewSessionForm({
       availableProviders.map((p) => p.name),
     );
     const savedDefaults = settings?.newSessionDefaults;
+    // An explicit caller preference (e.g. "clear" from an existing session)
+    // outranks saved new-session defaults.
+    const requestedProviderName =
+      preferredProvider && availableProviderNames.has(preferredProvider)
+        ? preferredProvider
+        : null;
     const savedProviderName =
-      savedDefaults?.provider &&
+      requestedProviderName ??
+      (savedDefaults?.provider &&
       availableProviderNames.has(savedDefaults.provider)
         ? savedDefaults.provider
-        : null;
+        : null);
     const initialProvider =
       providers.find((p) => p.name === savedProviderName) ??
       getDefaultProvider(providers);
@@ -726,16 +739,25 @@ export function NewSessionForm({
     if (!initialProvider) return;
 
     const initialModels = initialProvider.models ?? [];
+    const requestedModelId =
+      requestedProviderName &&
+      initialProvider.name === requestedProviderName &&
+      preferredModel &&
+      (initialModels.length === 0 ||
+        initialModels.some((model) => model.id === preferredModel))
+        ? preferredModel
+        : null;
     const preferredPromptSuggestionMode =
       getPreferredPromptSuggestionMode(savedDefaults);
     preferredPromptSuggestionModeRef.current = preferredPromptSuggestionMode;
     setSelectedProvider(initialProvider.name);
     setSelectedModel(
-      getPreferredProviderModelId(
-        initialProvider.name,
-        initialModels,
-        savedDefaults,
-      ),
+      requestedModelId ??
+        getPreferredProviderModelId(
+          initialProvider.name,
+          initialModels,
+          savedDefaults,
+        ),
     );
     setSelectedRecapMode(getDefaultRecapMode(initialProvider, savedDefaults));
     setSelectedPromptSuggestionMode(
@@ -758,6 +780,8 @@ export function NewSessionForm({
     settings,
     settingsLoading,
     helperTargetModelOptions,
+    preferredProvider,
+    preferredModel,
   ]);
 
   useEffect(() => {

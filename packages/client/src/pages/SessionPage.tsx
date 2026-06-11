@@ -895,6 +895,48 @@ function SessionPageContent({
     providerCapabilities;
   const currentOwnedProcessId =
     status.owner === "self" ? status.processId : undefined;
+
+  // "Fork from here": real prefix fork up to the message before this user
+  // turn; the fork opens cold with an empty composer (rewind-and-continue).
+  // Only offered when the provider has a fork primitive (never emulated).
+  const supportsForkFromTurn =
+    currentProviderInfo?.supportsForkSession === true;
+  const forkBeforeUserMessage = useCallback(
+    async (messageId: string) => {
+      const index = messages.findIndex((m) => (m.uuid ?? m.id) === messageId);
+      let anchorId: string | undefined;
+      for (let i = index - 1; i >= 0; i--) {
+        const candidate = messages[i];
+        const candidateId = candidate?.uuid ?? candidate?.id;
+        if (
+          candidateId &&
+          (candidate?.type === "user" || candidate?.type === "assistant")
+        ) {
+          anchorId = candidateId;
+          break;
+        }
+      }
+      if (index < 0 || !anchorId) {
+        showToast(t("forkFromTurnNoAnchor"), "error");
+        return;
+      }
+      try {
+        const result = await api.forkSession(projectId, actualSessionId, {
+          upToMessageId: anchorId,
+        });
+        showToast(t("forkFromTurnStarted"), "success");
+        navigate(
+          `${basePath}/projects/${projectId}/sessions/${result.sessionId}`,
+        );
+      } catch (err) {
+        showToast(
+          err instanceof Error ? err.message : t("sessionRestartFailed"),
+          "error",
+        );
+      }
+    },
+    [messages, projectId, actualSessionId, navigate, basePath, showToast, t],
+  );
   const activityRenderItems = useMemo(
     () => preprocessMessages(messages),
     [messages],
@@ -3573,6 +3615,16 @@ function SessionPageContent({
                       ? () => setShowHandoffModal(true)
                       : undefined
                   }
+                  onClear={() => {
+                    const params = new URLSearchParams({ projectId });
+                    if (effectiveProvider) {
+                      params.set("provider", effectiveProvider);
+                    }
+                    if (liveBadgeModel) {
+                      params.set("model", liveBadgeModel);
+                    }
+                    navigate(`${basePath}/new-session?${params.toString()}`);
+                  }}
                   onCompact={
                     supportsManualCompact ? handleCompactSession : undefined
                   }
@@ -3872,6 +3924,9 @@ function SessionPageContent({
                   canSteerDeferred={primaryComposerAction === "steer"}
                   onCorrectLatestUserMessage={handleCorrectLatestUserMessage}
                   onTrimBeforeUserMessage={trimClientFromUserMessage}
+                  onForkBeforeUserMessage={
+                    supportsForkFromTurn ? forkBeforeUserMessage : undefined
+                  }
                   markdownAugments={markdownAugments}
                   activeToolApproval={activeToolApproval}
                   hasOlderMessages={pagination?.hasOlderMessages}
@@ -4141,6 +4196,9 @@ function SessionPageContent({
                   )
                 }
                 contextUsage={session?.contextUsage}
+                supportsCompactOnUsageClick={
+                  !mainComposerForAside && supportsManualCompact
+                }
                 lastActivityAt={activityAt}
                 sessionLiveness={sessionLiveness}
                 projectId={projectId}

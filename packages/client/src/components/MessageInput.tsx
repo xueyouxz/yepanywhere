@@ -108,6 +108,13 @@ interface Props {
   onDraftControlsReady?: (controls: DraftControls) => void;
   /** Context usage for displaying usage indicator */
   contextUsage?: ContextUsage;
+  /**
+   * Make the context-usage indicator clickable: sends /compact through the
+   * normal send path, with any drafted composer text as the compact
+   * instructions (the draft is consumed). Only set when the provider
+   * advertises a compact command.
+   */
+  supportsCompactOnUsageClick?: boolean;
   /** Last session activity timestamp for stale composer liveness display. */
   lastActivityAt?: string | null;
   /** Server-derived provider/session liveness evidence. */
@@ -186,6 +193,7 @@ export function MessageInput({
   collapsed: externalCollapsed,
   onDraftControlsReady,
   contextUsage,
+  supportsCompactOnUsageClick = false,
   lastActivityAt,
   sessionLiveness,
   projectId,
@@ -479,6 +487,13 @@ export function MessageInput({
   const handleSteer = useCallback(() => {
     handleSubmit(undefined, "steer");
   }, [handleSubmit]);
+
+  // Context-usage click: request compaction through the normal send path,
+  // consuming any drafted text as the compact focus instructions.
+  const handleCompactUsageClick = useCallback(() => {
+    const draft = controls.getDraft().trim();
+    handleSubmit(draft ? `/compact ${draft}` : "/compact", "send");
+  }, [controls, handleSubmit]);
 
   const handleQueue = useCallback(
     () => {
@@ -1030,6 +1045,9 @@ export function MessageInput({
             onToggleHeartbeat={onToggleHeartbeat}
             onConfigureHeartbeat={onConfigureHeartbeat}
             contextUsage={contextUsage}
+            onCompactClick={
+              supportsCompactOnUsageClick ? handleCompactUsageClick : undefined
+            }
             lastActivityAt={lastActivityAt}
             sessionLiveness={sessionLiveness}
             showPatientQueueMode={showPatientQueueMode}

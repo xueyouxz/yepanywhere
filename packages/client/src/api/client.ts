@@ -712,6 +712,28 @@ export const api = {
       }),
     }),
 
+  /**
+   * Fork the provider transcript into a new session without starting a
+   * process or sending a message ("fork from here"). The fork opens cold;
+   * the next send resumes it normally.
+   */
+  forkSession: (
+    projectId: string,
+    sessionId: string,
+    options?: { upToMessageId?: string },
+  ) =>
+    fetchJSON<{
+      sessionId: string;
+      projectId: string;
+      provider?: ProviderName;
+      title?: string;
+      forkedFrom: string;
+      upToMessageId?: string;
+    }>(`/projects/${projectId}/sessions/${sessionId}/fork`, {
+      method: "POST",
+      body: JSON.stringify({ upToMessageId: options?.upToMessageId }),
+    }),
+
   queueMessage: (
     sessionId: string,
     message: string,

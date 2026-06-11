@@ -19,6 +19,7 @@ interface Props {
   sessionProvider?: string;
   onCorrectUserPrompt?: () => void;
   onTrimBeforeUserPrompt?: () => void;
+  onForkBeforeUserPrompt?: () => void;
   staleNowMs?: number;
   latestVisibleTimestampMs?: number | null;
   thinkingDurationMs?: number;
@@ -138,6 +139,7 @@ export const RenderItemComponent = memo(function RenderItemComponent({
   sessionProvider,
   onCorrectUserPrompt,
   onTrimBeforeUserPrompt,
+  onForkBeforeUserPrompt,
   staleNowMs,
   latestVisibleTimestampMs,
   thinkingDurationMs,
@@ -220,6 +222,7 @@ export const RenderItemComponent = memo(function RenderItemComponent({
             content={item.content}
             onCorrect={onCorrectUserPrompt}
             onTrimBefore={onTrimBeforeUserPrompt}
+            onForkBefore={onForkBeforeUserPrompt}
           />
         );
 

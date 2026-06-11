@@ -3395,6 +3395,124 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     });
   });
 
+  // POST /api/projects/:projectId/sessions/:sessionId/fork
+  // Fork the provider transcript into a new resumable session without
+  // starting a process or sending any message ("fork from here" / rewind).
+  // The forked session opens cold; the next user send resumes it normally.
+  routes.post("/projects/:projectId/sessions/:sessionId/fork", async (c) => {
+    const projectId = c.req.param("projectId");
+    const sessionId = c.req.param("sessionId");
+
+    if (!isUrlProjectId(projectId)) {
+      return c.json({ error: "Invalid project ID format" }, 400);
+    }
+    const project = await deps.scanner.getOrCreateProject(projectId);
+    if (!project) {
+      return c.json({ error: "Project not found or path does not exist" }, 404);
+    }
+
+    let body: { upToMessageId?: string } = {};
+    try {
+      body = await c.req.json<{ upToMessageId?: string }>();
+    } catch {
+      // Body is optional; full-transcript fork.
+    }
+    const upToMessageId =
+      typeof body.upToMessageId === "string" && body.upToMessageId
+        ? body.upToMessageId
+        : undefined;
+
+    const metadataProvider = deps.sessionMetadataService?.getProvider(
+      sessionId,
+    ) as ProviderName | undefined;
+    const providerName =
+      metadataProvider ??
+      deps.supervisor.getProcessForSession(sessionId)?.provider ??
+      project.provider;
+    if (!deps.supervisor.supportsForkSession(providerName)) {
+      return c.json(
+        { error: `${providerName} does not support transcript fork` },
+        400,
+      );
+    }
+
+    const originalMetadata =
+      deps.sessionMetadataService?.getMetadata(sessionId);
+    let baseTitle = normalizeRestartTitleCandidate(
+      originalMetadata?.customTitle,
+    );
+    if (!baseTitle) {
+      try {
+        const summary = await deps
+          .readerFactory(project)
+          .getSessionSummary(sessionId, projectId);
+        baseTitle = normalizeRestartTitleCandidate(summary?.title);
+      } catch {
+        // Title is cosmetic; fall through to the provider default.
+      }
+    }
+    const forkTitle = baseTitle
+      ? truncateSessionTitle(
+          /^Fork:/i.test(baseTitle) ? baseTitle : `Fork: ${baseTitle}`,
+        )
+      : undefined;
+
+    let fork: { sessionId: string };
+    try {
+      fork = await deps.supervisor.forkSession({
+        sessionId,
+        projectPath: project.path,
+        providerName,
+        upToMessageId,
+        title: forkTitle,
+      });
+    } catch (error) {
+      getLogger().warn(
+        {
+          event: "session_fork_failed",
+          sessionId,
+          projectId,
+          providerName,
+          upToMessageId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        "Transcript fork failed",
+      );
+      return c.json(
+        {
+          error:
+            error instanceof Error ? error.message : "Transcript fork failed",
+        },
+        500,
+      );
+    }
+
+    const savedExecutor = parseOptionalExecutor(
+      deps.sessionMetadataService?.getExecutor(sessionId),
+    ).executor;
+    await persistLaunchMetadata(fork.sessionId, providerName, savedExecutor);
+    if (forkTitle && deps.sessionMetadataService) {
+      await deps.sessionMetadataService.updateMetadata(fork.sessionId, {
+        title: forkTitle,
+      });
+      deps.eventBus?.emit({
+        type: "session-metadata-changed",
+        sessionId: fork.sessionId,
+        title: forkTitle,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    return c.json({
+      sessionId: fork.sessionId,
+      projectId,
+      provider: providerName,
+      title: forkTitle,
+      forkedFrom: sessionId,
+      upToMessageId,
+    });
+  });
+
   // POST /api/sessions/:sessionId/messages - Queue message
   routes.post("/sessions/:sessionId/messages", async (c) => {
     const sessionId = c.req.param("sessionId");

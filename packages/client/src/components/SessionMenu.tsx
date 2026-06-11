@@ -26,6 +26,8 @@ export interface SessionMenuProps {
   onCompact?: () => void | Promise<void>;
   /** Called to hand off the session into a fresh agent session */
   onHandoff?: () => void | Promise<void>;
+  /** Start an empty session in the same project with the same provider/model */
+  onClear?: () => void | Promise<void>;
   /** Called to terminate the session's process */
   onTerminate?: () => void | Promise<void>;
   /** Reload the page (non-swipe alternative for mobile) */
@@ -66,6 +68,7 @@ export function SessionMenu({
   onClone,
   onCompact,
   onHandoff,
+  onClear,
   onTerminate,
   onReload,
   onConfigureHeartbeat,
@@ -409,6 +412,23 @@ export function SessionMenu({
             <path d="M21 13v2a4 4 0 0 1-4 4H3" />
           </svg>
           {t("sessionMenuHandoff")}
+        </button>
+      )}
+      {onClear && (
+        <button type="button" onClick={() => handleAction(onClear)}>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
+            <path d="M12 5v14" />
+            <path d="M5 12h14" />
+          </svg>
+          {t("sessionMenuClear")}
         </button>
       )}
       {onShare && (

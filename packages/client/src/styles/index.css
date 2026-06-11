@@ -5472,6 +5472,30 @@ a.sidebar-nav-item {
   color: var(--app-yep-green);
 }
 
+/* Context-usage indicator as a "compact now" button: keep the indicator's
+   look, add an affordance ring on hover. */
+.context-usage-compact-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.1rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.context-usage-compact-button:hover:not(:disabled),
+.context-usage-compact-button:focus-visible {
+  border-color: var(--border-color);
+  background: color-mix(in srgb, var(--text-secondary) 8%, transparent);
+}
+
+.context-usage-compact-button:disabled {
+  cursor: default;
+}
+
 .btw-toolbar-button {
   display: inline-flex;
   align-items: center;

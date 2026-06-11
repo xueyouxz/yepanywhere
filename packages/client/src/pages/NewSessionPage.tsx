@@ -1,3 +1,4 @@
+import type { ProviderName } from "@yep-anywhere/shared";
 import { useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { NewSessionForm } from "../components/NewSessionForm";
@@ -20,6 +21,8 @@ export function NewSessionPage() {
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const projectId = searchParams.get("projectId") ?? undefined;
+  const preferredProvider = searchParams.get("provider") ?? undefined;
+  const preferredModel = searchParams.get("model") ?? undefined;
   const requestedDetached =
     !projectId && searchParams.get(DETACHED_PROJECT_PARAM) === "1";
   const { openSidebar, isWideScreen, toggleSidebar, isSidebarCollapsed } =
@@ -153,6 +156,8 @@ export function NewSessionPage() {
             recentProjectIds={recentProjectIds}
             projectsLoading={projectsLoading}
             onProjectChange={handleProjectChange}
+            preferredProvider={preferredProvider as ProviderName | undefined}
+            preferredModel={preferredModel}
           />
         </div>
       </main>

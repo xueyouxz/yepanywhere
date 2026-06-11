@@ -868,6 +868,8 @@ interface Props {
   onCorrectLatestUserMessage?: (messageId: string, content: string) => void;
   /** Callback to aggressively reload the client transcript from a user turn */
   onTrimBeforeUserMessage?: (messageId: string) => void;
+  /** Fork the session from just before the given user message (real prefix fork only). */
+  onForkBeforeUserMessage?: (messageId: string) => void;
   /** Pre-rendered markdown HTML from server (keyed by message ID) */
   markdownAugments?: Record<string, MarkdownAugment>;
   /** Active tool approval - prevents matching orphaned tool from showing as interrupted */
@@ -1078,6 +1080,7 @@ export const MessageList = memo(function MessageList({
   canSteerDeferred = false,
   onCorrectLatestUserMessage,
   onTrimBeforeUserMessage,
+  onForkBeforeUserMessage,
   markdownAugments,
   activeToolApproval,
   hasOlderMessages = false,
@@ -2917,6 +2920,11 @@ export const MessageList = memo(function MessageList({
                     ? () => onTrimBeforeUserMessage(item.id)
                     : undefined
                 }
+                onForkBeforeUserPrompt={
+                  onForkBeforeUserMessage && !item.isSubagent
+                    ? () => onForkBeforeUserMessage(item.id)
+                    : undefined
+                }
                 staleNowMs={getItemStaleNowMs(item)}
                 latestVisibleTimestampMs={latestVisibleTimestampMs}
               />
@@ -2967,6 +2975,13 @@ export const MessageList = memo(function MessageList({
                       onTrimBeforeUserMessage &&
                       !item.isSubagent
                         ? () => onTrimBeforeUserMessage(item.id)
+                        : undefined
+                    }
+                    onForkBeforeUserPrompt={
+                      item.type === "user_prompt" &&
+                      onForkBeforeUserMessage &&
+                      !item.isSubagent
+                        ? () => onForkBeforeUserMessage(item.id)
                         : undefined
                     }
                     staleNowMs={getItemStaleNowMs(item)}

@@ -15,6 +15,8 @@ interface Props {
   content: string | ContentBlock[];
   onCorrect?: () => void;
   onTrimBefore?: () => void;
+  /** Fork the session from just before this turn (real prefix fork only). */
+  onForkBefore?: () => void;
   extraActions?: ReactNode;
 }
 
@@ -310,15 +312,24 @@ function CollapsibleText({ text }: { text: string }) {
 function UserPromptActionButtons({
   onCorrect,
   onTrimBefore,
+  onForkBefore,
   copyText,
   extraActions,
 }: {
   onCorrect?: () => void;
   onTrimBefore?: () => void;
+  onForkBefore?: () => void;
   copyText?: string;
   extraActions?: ReactNode;
 }) {
-  if (!onCorrect && !onTrimBefore && !copyText && !extraActions) return null;
+  if (
+    !onCorrect &&
+    !onTrimBefore &&
+    !onForkBefore &&
+    !copyText &&
+    !extraActions
+  )
+    return null;
 
   return (
     <div className="user-prompt-actions">
@@ -328,6 +339,33 @@ function UserPromptActionButtons({
           label="Copy message text"
           className="user-prompt-action user-prompt-action-copy"
         />
+      )}
+      {onForkBefore && (
+        <button
+          type="button"
+          className="user-prompt-action"
+          onClick={onForkBefore}
+          aria-label="Fork session from before this turn"
+          title="Fork session from before this turn (re-reads context at standard price if the session has been idle past the cache window)"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="6" cy="6" r="3" />
+            <circle cx="6" cy="18" r="3" />
+            <circle cx="18" cy="12" r="3" />
+            <path d="M6 9v6" />
+            <path d="M8.5 7.5 15 11" />
+          </svg>
+        </button>
       )}
       {onTrimBefore && (
         <button
@@ -409,6 +447,7 @@ export const UserPromptBlock = memo(function UserPromptBlock({
   content,
   onCorrect,
   onTrimBefore,
+  onForkBefore,
   extraActions,
 }: Props) {
   if (typeof content === "string") {
@@ -438,6 +477,7 @@ export const UserPromptBlock = memo(function UserPromptBlock({
         <UserPromptActionButtons
           onCorrect={onCorrect}
           onTrimBefore={onTrimBefore}
+          onForkBefore={onForkBefore}
           copyText={getUserPromptCopyText(text)}
           extraActions={extraActions}
         />
@@ -490,6 +530,7 @@ export const UserPromptBlock = memo(function UserPromptBlock({
       <UserPromptActionButtons
         onCorrect={onCorrect}
         onTrimBefore={onTrimBefore}
+        onForkBefore={onForkBefore}
         copyText={getUserPromptCopyText(text)}
         extraActions={extraActions}
       />
