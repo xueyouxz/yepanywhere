@@ -752,6 +752,17 @@ export const api = {
       { method: "DELETE" },
     ),
 
+  updateDeferredMessage: (sessionId: string, tempId: string, message: string) =>
+    fetchJSON<{
+      updated: boolean;
+      tempId?: string;
+      message: string;
+      deferredMessages?: DeferredQueueMessage[];
+    }>(`/sessions/${sessionId}/deferred/${encodeURIComponent(tempId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ message }),
+    }),
+
   editDeferredMessage: (sessionId: string, tempId: string) =>
     fetchJSON<{
       message: string;

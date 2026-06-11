@@ -1739,6 +1739,19 @@ export class Process {
     return true;
   }
 
+  updateDeferredMessage(tempId: string, text: string): UserMessage | null {
+    const index = this.deferredQueue.findIndex(
+      (entry) => entry.message.tempId === tempId,
+    );
+    const entry = this.deferredQueue[index];
+    if (index === -1 || !entry) return null;
+
+    const updatedMessage = { ...entry.message, text };
+    this.deferredQueue[index] = { ...entry, message: updatedMessage };
+    this.emitDeferredQueueChange("edited", tempId);
+    return updatedMessage;
+  }
+
   steerDeferredMessage(tempId: string): SteeredDeferredMessage | null {
     const index = this.deferredQueue.findIndex(
       (entry) => entry.message.tempId === tempId,

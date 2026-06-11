@@ -856,7 +856,9 @@ interface Props {
   onTransferBtwAsideTurn?: (text: string) => void;
   /** Callback to cancel a deferred message */
   onCancelDeferred?: (tempId: string) => void;
-  /** Callback to take a deferred message back into the composer */
+  /** Callback to update queued text without moving it into the composer */
+  onUpdateDeferred?: (tempId: string, content: string) => void | Promise<void>;
+  /** Fallback callback to take a deferred message back into the composer */
   onEditDeferred?: (tempId: string) => void;
   /** Callback to promote a deferred message into current-turn steering */
   onSteerDeferred?: (tempId: string) => void;
@@ -943,6 +945,11 @@ function hasSelectedTextInside(element: HTMLElement): boolean {
   }
 
   return false;
+}
+
+function resizeQueuedInlineEditor(textarea: HTMLTextAreaElement): void {
+  textarea.style.height = "auto";
+  textarea.style.height = `${textarea.scrollHeight}px`;
 }
 
 function BtwAsideTimelineCard({
@@ -1065,6 +1072,7 @@ export const MessageList = memo(function MessageList({
   onToggleBtwAsideExpanded,
   onTransferBtwAsideTurn,
   onCancelDeferred,
+  onUpdateDeferred,
   onEditDeferred,
   onSteerDeferred,
   canSteerDeferred = false,
@@ -1088,6 +1096,13 @@ export const MessageList = memo(function MessageList({
   const forcedCurrentScrollTimersRef = useRef<ReturnType<typeof setTimeout>[]>(
     [],
   );
+  const queuedInlineEditorRef = useRef<HTMLTextAreaElement | null>(null);
+  const [queuedInlineEdit, setQueuedInlineEdit] = useState<{
+    tempId: string;
+    originalContent: string;
+    draft: string;
+    saving?: boolean;
+  } | null>(null);
   const programmaticScrollReleaseRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
@@ -1143,6 +1158,90 @@ export const MessageList = memo(function MessageList({
   const [queuedContextReturn, setQueuedContextReturn] =
     useState<QueuedContextReturnAnchor | null>(null);
   const nowMs = useRelativeNow();
+
+  const startQueuedInlineEdit = useCallback(
+    (deferred: DeferredMessage) => {
+      if (!deferred.tempId) {
+        return;
+      }
+      if (!onUpdateDeferred) {
+        onEditDeferred?.(deferred.tempId);
+        return;
+      }
+      shouldAutoScrollRef.current = false;
+      setQueuedInlineEdit({
+        tempId: deferred.tempId,
+        originalContent: deferred.content,
+        draft: deferred.content,
+      });
+    },
+    [onEditDeferred, onUpdateDeferred],
+  );
+
+  const cancelQueuedInlineEdit = useCallback(() => {
+    setQueuedInlineEdit(null);
+  }, []);
+
+  const saveQueuedInlineEdit = useCallback(async () => {
+    const edit = queuedInlineEdit;
+    if (!edit || edit.saving) {
+      return;
+    }
+    if (!onUpdateDeferred || edit.draft === edit.originalContent) {
+      setQueuedInlineEdit(null);
+      return;
+    }
+
+    setQueuedInlineEdit((current) =>
+      current?.tempId === edit.tempId ? { ...current, saving: true } : current,
+    );
+    try {
+      await onUpdateDeferred(edit.tempId, edit.draft);
+      setQueuedInlineEdit((current) =>
+        current?.tempId === edit.tempId ? null : current,
+      );
+    } catch {
+      setQueuedInlineEdit((current) =>
+        current?.tempId === edit.tempId
+          ? { ...current, saving: false }
+          : current,
+      );
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() => queuedInlineEditorRef.current?.focus());
+      } else {
+        setTimeout(() => queuedInlineEditorRef.current?.focus(), 0);
+      }
+    }
+  }, [onUpdateDeferred, queuedInlineEdit]);
+
+  useEffect(() => {
+    const textarea = queuedInlineEditorRef.current;
+    if (!textarea || !queuedInlineEdit) {
+      return;
+    }
+    textarea.focus();
+    const end = textarea.value.length;
+    textarea.setSelectionRange(end, end);
+  }, [queuedInlineEdit?.tempId]);
+
+  useEffect(() => {
+    const textarea = queuedInlineEditorRef.current;
+    if (!textarea || !queuedInlineEdit) {
+      return;
+    }
+    resizeQueuedInlineEditor(textarea);
+  }, [queuedInlineEdit?.draft, queuedInlineEdit]);
+
+  useEffect(() => {
+    if (
+      queuedInlineEdit &&
+      !deferredMessages.some(
+        (message) => message.tempId === queuedInlineEdit.tempId,
+      )
+    ) {
+      setQueuedInlineEdit(null);
+    }
+  }, [deferredMessages, queuedInlineEdit]);
 
   // Scroll to bottom, marking it as programmatic so scroll handler ignores it
   const scrollToBottom = useCallback(
@@ -2953,7 +3052,13 @@ export const MessageList = memo(function MessageList({
             timestampMs,
             nowMs,
           });
-          const canEditDeferred = !!(deferred.tempId && onEditDeferred);
+          const isEditingDeferred =
+            queuedInlineEdit?.tempId === deferred.tempId;
+          const canEditDeferred = !!(
+            deferred.tempId &&
+            (onUpdateDeferred || onEditDeferred) &&
+            deferred.deliveryState !== "sending"
+          );
           const canSteerQueued =
             canSteerDeferred &&
             !!deferred.tempId &&
@@ -2972,7 +3077,41 @@ export const MessageList = memo(function MessageList({
               } ${showAgeByDefault ? "is-message-age-visible" : ""}`}
             >
               <div className="message-render-content">
-                {canEditDeferred ? (
+                {isEditingDeferred ? (
+                  <textarea
+                    ref={queuedInlineEditorRef}
+                    className="message-user-prompt deferred-message-bubble deferred-message-inline-editor"
+                    value={queuedInlineEdit?.draft ?? deferred.content}
+                    disabled={queuedInlineEdit?.saving}
+                    rows={1}
+                    aria-label={t("sessionQueuedInlineEditLabel")}
+                    onChange={(event) => {
+                      resizeQueuedInlineEditor(event.currentTarget);
+                      const draft = event.currentTarget.value;
+                      setQueuedInlineEdit((current) => {
+                        if (!current || current.tempId !== deferred.tempId) {
+                          return current;
+                        }
+                        return { ...current, draft };
+                      });
+                    }}
+                    onBlur={() => {
+                      void saveQueuedInlineEdit();
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        cancelQueuedInlineEdit();
+                      } else if (
+                        event.key === "Enter" &&
+                        (event.metaKey || event.ctrlKey)
+                      ) {
+                        event.preventDefault();
+                        void saveQueuedInlineEdit();
+                      }
+                    }}
+                  />
+                ) : canEditDeferred ? (
                   <div
                     role="button"
                     tabIndex={0}
@@ -2981,14 +3120,14 @@ export const MessageList = memo(function MessageList({
                       if (hasSelectedTextInside(event.currentTarget)) {
                         return;
                       }
-                      onEditDeferred?.(deferred.tempId as string);
+                      startQueuedInlineEdit(deferred);
                     }}
                     onKeyDown={(event) => {
                       if (event.key !== "Enter" && event.key !== " ") {
                         return;
                       }
                       event.preventDefault();
-                      onEditDeferred?.(deferred.tempId as string);
+                      startQueuedInlineEdit(deferred);
                     }}
                     title="Select text or press Enter to edit queued message"
                     aria-label="Queued message text; press Enter to edit"
@@ -3055,73 +3194,111 @@ export const MessageList = memo(function MessageList({
                     </span>
                   ) : null}
                   <div className="deferred-message-actions">
-                    <button
-                      type="button"
-                      className="deferred-message-action deferred-message-action-context"
-                      onClick={() => {
-                        if (contextRenderId) {
-                          jumpToQueuedContext(tailItem.key, contextRenderId);
-                        }
-                      }}
-                      disabled={!contextRenderId}
-                      aria-label="Jump to queued message context"
-                      title={
-                        contextRenderId
-                          ? "Jump to queued message context"
-                          : "No loaded context before this queued message"
-                      }
-                    >
-                      <span className="deferred-message-context-icon">↩</span>
-                      <span>Context</span>
-                    </button>
-                    <CopyTextButton
-                      text={deferred.content}
-                      label="Copy queued message"
-                      className="deferred-message-action deferred-message-action-copy"
-                      showTextLabel
-                      onClick={(event) => event.stopPropagation()}
-                    />
-                    {canEditDeferred && (
-                      <button
-                        type="button"
-                        className="deferred-message-action deferred-message-action-edit"
-                        onClick={() =>
-                          onEditDeferred?.(deferred.tempId as string)
-                        }
-                        aria-label="Edit queued message"
-                        title="Edit queued message"
-                      >
-                        <PencilIcon />
-                        <span>Edit</span>
-                      </button>
-                    )}
-                    {canSteerQueued && (
-                      <button
-                        type="button"
-                        className="deferred-message-action deferred-message-action-steer"
-                        onClick={() =>
-                          onSteerDeferred?.(deferred.tempId as string)
-                        }
-                        aria-label={t("sessionSteerQueuedMessageNow")}
-                        title={t("sessionSteerQueuedMessageNow")}
-                      >
-                        <span className="deferred-message-steer-icon">↗</span>
-                        <span>{t("sessionSteerNow")}</span>
-                      </button>
-                    )}
-                    {deferred.tempId && onCancelDeferred && (
-                      <button
-                        type="button"
-                        className="deferred-message-action deferred-message-action-cancel"
-                        onClick={() =>
-                          onCancelDeferred(deferred.tempId as string)
-                        }
-                        aria-label="Cancel queued message"
-                        title="Cancel queued message"
-                      >
-                        <XIcon />
-                        <span>Cancel</span>
-                      </button>
+                    {isEditingDeferred ? (
+                      <>
+                        <button
+                          type="button"
+                          className="deferred-message-action deferred-message-action-save"
+                          disabled={queuedInlineEdit?.saving}
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                            void saveQueuedInlineEdit();
+                          }}
+                          aria-label={t("sessionQueuedInlineSave")}
+                          title={t("sessionQueuedInlineSave")}
+                        >
+                          <span>{t("sessionQueuedInlineSave")}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="deferred-message-action deferred-message-action-cancel-edit"
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                            cancelQueuedInlineEdit();
+                          }}
+                          aria-label={t("sessionQueuedInlineCancel")}
+                          title={t("sessionQueuedInlineCancel")}
+                        >
+                          <XIcon />
+                          <span>{t("sessionQueuedInlineCancel")}</span>
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="deferred-message-action deferred-message-action-context"
+                          onClick={() => {
+                            if (contextRenderId) {
+                              jumpToQueuedContext(
+                                tailItem.key,
+                                contextRenderId,
+                              );
+                            }
+                          }}
+                          disabled={!contextRenderId}
+                          aria-label="Jump to queued message context"
+                          title={
+                            contextRenderId
+                              ? "Jump to queued message context"
+                              : "No loaded context before this queued message"
+                          }
+                        >
+                          <span className="deferred-message-context-icon">
+                            ↩
+                          </span>
+                          <span>Context</span>
+                        </button>
+                        <CopyTextButton
+                          text={deferred.content}
+                          label="Copy queued message"
+                          className="deferred-message-action deferred-message-action-copy"
+                          showTextLabel
+                          onClick={(event) => event.stopPropagation()}
+                        />
+                        {canEditDeferred && (
+                          <button
+                            type="button"
+                            className="deferred-message-action deferred-message-action-edit"
+                            onClick={() => startQueuedInlineEdit(deferred)}
+                            aria-label="Edit queued message"
+                            title="Edit queued message"
+                          >
+                            <PencilIcon />
+                            <span>Edit</span>
+                          </button>
+                        )}
+                        {canSteerQueued && (
+                          <button
+                            type="button"
+                            className="deferred-message-action deferred-message-action-steer"
+                            onClick={() =>
+                              onSteerDeferred?.(deferred.tempId as string)
+                            }
+                            aria-label={t("sessionSteerQueuedMessageNow")}
+                            title={t("sessionSteerQueuedMessageNow")}
+                          >
+                            <span className="deferred-message-steer-icon">
+                              ↗
+                            </span>
+                            <span>{t("sessionSteerNow")}</span>
+                          </button>
+                        )}
+                        {deferred.tempId && onCancelDeferred && (
+                          <button
+                            type="button"
+                            className="deferred-message-action deferred-message-action-cancel"
+                            onClick={() =>
+                              onCancelDeferred(deferred.tempId as string)
+                            }
+                            aria-label="Cancel queued message"
+                            title="Cancel queued message"
+                          >
+                            <XIcon />
+                            <span>Cancel</span>
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>

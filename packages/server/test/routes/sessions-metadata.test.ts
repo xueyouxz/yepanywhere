@@ -295,6 +295,88 @@ describe("Sessions metadata route", () => {
     });
   });
 
+  it("updates a deferred message in place", async () => {
+    const updateDeferredMessage = vi.fn(() => ({
+      text: "queued text edited",
+      tempId: "temp-edit",
+    }));
+    const getDeferredQueueSummary = vi.fn(() => [
+      {
+        tempId: "temp-edit",
+        content: "queued text edited",
+        timestamp: "2026-04-25T00:00:00.000Z",
+      },
+      {
+        tempId: "temp-next",
+        content: "next queued",
+        timestamp: "2026-04-25T00:00:01.000Z",
+      },
+    ]);
+
+    const routes = createSessionsRoutes({
+      supervisor: {
+        getProcessForSession: vi.fn(() => ({
+          updateDeferredMessage,
+          getDeferredQueueSummary,
+        })),
+      } as unknown as SessionsDeps["supervisor"],
+    });
+
+    const response = await routes.request(
+      "/sessions/sess-1/deferred/temp-edit",
+      {
+        method: "PUT",
+        body: JSON.stringify({ message: "queued text edited" }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(updateDeferredMessage).toHaveBeenCalledWith(
+      "temp-edit",
+      "queued text edited",
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      updated: true,
+      tempId: "temp-edit",
+      message: "queued text edited",
+      deferredMessages: [
+        { tempId: "temp-edit", content: "queued text edited" },
+        { tempId: "temp-next", content: "next queued" },
+      ],
+    });
+  });
+
+  it("allows a deferred message to be updated to empty text", async () => {
+    const updateDeferredMessage = vi.fn(() => ({
+      text: "",
+      tempId: "temp-edit",
+    }));
+    const getDeferredQueueSummary = vi.fn(() => [
+      {
+        tempId: "temp-edit",
+        content: "",
+        timestamp: "2026-04-25T00:00:00.000Z",
+      },
+    ]);
+
+    const routes = createSessionsRoutes({
+      supervisor: {
+        getProcessForSession: vi.fn(() => ({
+          updateDeferredMessage,
+          getDeferredQueueSummary,
+        })),
+      } as unknown as SessionsDeps["supervisor"],
+    });
+
+    const response = await routes.request(
+      "/sessions/sess-1/deferred/temp-edit",
+      { method: "PUT", body: JSON.stringify({ message: "" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(updateDeferredMessage).toHaveBeenCalledWith("temp-edit", "");
+  });
+
   it("steers a deferred message from its queued chip", async () => {
     const steerDeferredMessage = vi.fn(() => ({
       message: {

@@ -4530,6 +4530,30 @@ a.sidebar-nav-item {
   outline-offset: 2px;
 }
 
+.deferred-message-inline-editor {
+  appearance: none;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  max-height: 220px;
+  resize: none;
+  overflow-y: auto;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+  background: var(--bg-user-message);
+}
+
+.deferred-message-inline-editor:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--attention-color);
+  outline-offset: 2px;
+}
+
 .deferred-message-action-copy.copied {
   color: var(--success-color, #4a4);
 }
@@ -4600,6 +4624,10 @@ a.sidebar-nav-item {
   color: var(--attention-color);
 }
 
+.deferred-message-action-save {
+  color: var(--attention-color);
+}
+
 .deferred-message-action-steer {
   color: var(--accent-color);
 }
@@ -4622,7 +4650,9 @@ a.sidebar-nav-item {
 }
 
 .deferred-message-action-cancel:hover,
-.deferred-message-action-cancel:focus-visible {
+.deferred-message-action-cancel:focus-visible,
+.deferred-message-action-cancel-edit:hover,
+.deferred-message-action-cancel-edit:focus-visible {
   color: var(--error-color);
 }
 

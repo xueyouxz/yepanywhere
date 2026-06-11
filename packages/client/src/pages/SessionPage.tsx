@@ -1877,6 +1877,64 @@ function SessionPageContent({
     return true;
   }, [deferredMessages, handleCancelDeferred]);
 
+  const handleUpdateDeferred = useCallback(
+    async (tempId: string, content: string) => {
+      const localMessage = deferredMessages.find(
+        (message) => message.tempId === tempId,
+      );
+      if (!localMessage) {
+        throw new Error("Deferred message not found");
+      }
+
+      addDeferredMessage({ ...localMessage, content });
+      if (localMessage.deliveryState === "recovered") {
+        return;
+      }
+
+      try {
+        const result = await api.updateDeferredMessage(
+          sessionId,
+          tempId,
+          content,
+        );
+        if (result.deferredMessages) {
+          syncDeferredMessages(result.deferredMessages, {
+            reason: "edited",
+            tempId,
+            source: "rest",
+          });
+        }
+      } catch (err) {
+        if (isMissingDeferredQueueEntryError(err)) {
+          addDeferredMessage({
+            ...localMessage,
+            content,
+            deliveryState: "recovered",
+          });
+          showToast(t("sessionDeferredEditLocalOnly"), "info");
+          return;
+        }
+
+        addDeferredMessage(localMessage);
+        console.error("Failed to update deferred message:", err);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        showToast(
+          t("sessionDeferredEditFailed", { message: errorMsg }),
+          "error",
+        );
+        throw err;
+      }
+    },
+    [
+      addDeferredMessage,
+      deferredMessages,
+      sessionId,
+      showToast,
+      syncDeferredMessages,
+      t,
+    ],
+  );
+
   const handleEditDeferred = useCallback(
     async (tempId: string) => {
       const draftControls = draftControlsRef.current;
@@ -3808,6 +3866,7 @@ function SessionPageContent({
                   onToggleBtwAsideExpanded={toggleBtwAsideExpanded}
                   onTransferBtwAsideTurn={transferBtwTurnToMotherComposer}
                   onCancelDeferred={handleCancelDeferred}
+                  onUpdateDeferred={handleUpdateDeferred}
                   onEditDeferred={handleEditDeferred}
                   onSteerDeferred={handleSteerDeferred}
                   canSteerDeferred={primaryComposerAction === "steer"}

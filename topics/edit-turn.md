@@ -7,10 +7,12 @@ Topic: edit-turn
 
 ## Proposal status
 
-This is a design proposal, not current implementation. Current YA behavior edits
-queued turns by restoring them into the composer, and edits the latest sent turn
-by restoring a correction draft into the composer. The proposed direction is to
-make the edited turn itself become the focused editing surface.
+Queued-turn inline editing is implemented as of 2026-06-11: clicking a queued
+turn edits it in place, blur saves the queued text in place, and `Cancel edit
+(Esc)` restores the original text without moving it into the composer. Sent-turn
+editing is still correction editing through the composer. The remaining proposed
+direction is to make sent-turn correction use the same inline target shape when
+that product contract is ready.
 
 ## Problem
 

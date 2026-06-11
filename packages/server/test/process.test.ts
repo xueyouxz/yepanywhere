@@ -999,6 +999,69 @@ describe("Process", () => {
       });
     });
 
+    it("updates a deferred message in place without changing queue order", async () => {
+      const iterator = createMockIterator([
+        { type: "system", session_id: "sess-1" },
+      ]);
+
+      const process = new Process(iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        idleTimeoutMs: 100,
+      });
+      const deferredEvents: ProcessEvent[] = [];
+      process.subscribe((event) => {
+        if (event.type === "deferred-queue") {
+          deferredEvents.push(event);
+        }
+      });
+      const metadata = {
+        deliveryIntent: "patient" as const,
+        patienceSeconds: 45,
+      };
+
+      process.deferMessage({ text: "first", tempId: "temp-1" });
+      process.deferMessage({
+        text: "second",
+        tempId: "temp-2",
+        metadata,
+      });
+      process.deferMessage({ text: "third", tempId: "temp-3" });
+      const originalTimestamp = process.getDeferredQueueSummary()[1]?.timestamp;
+
+      const updated = process.updateDeferredMessage("temp-2", "second edited");
+
+      expect(updated).toMatchObject({
+        text: "second edited",
+        tempId: "temp-2",
+        metadata,
+      });
+      expect(process.getDeferredQueueSummary()).toEqual([
+        {
+          tempId: "temp-1",
+          content: "first",
+          timestamp: expect.any(String),
+        },
+        {
+          tempId: "temp-2",
+          content: "second edited",
+          timestamp: originalTimestamp,
+          metadata,
+        },
+        {
+          tempId: "temp-3",
+          content: "third",
+          timestamp: expect.any(String),
+        },
+      ]);
+      expect(deferredEvents[deferredEvents.length - 1]).toMatchObject({
+        type: "deferred-queue",
+        reason: "edited",
+        tempId: "temp-2",
+      });
+    });
+
     it("steers a deferred message and strips patient wording", async () => {
       const controller = createControllableIterator();
       const queue = new MessageQueue();

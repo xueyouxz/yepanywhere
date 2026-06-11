@@ -3375,6 +3375,40 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     return c.json({ cancelled: true });
   });
 
+  // PUT /api/sessions/:sessionId/deferred/:tempId - Update queued text in place
+  routes.put("/sessions/:sessionId/deferred/:tempId", async (c) => {
+    const sessionId = c.req.param("sessionId");
+    const tempId = c.req.param("tempId");
+
+    let body: { message?: unknown };
+    try {
+      body = await c.req.json<{ message?: unknown }>();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+
+    if (typeof body.message !== "string") {
+      return c.json({ error: "Message must be a string" }, 400);
+    }
+
+    const process = deps.supervisor.getProcessForSession(sessionId);
+    if (!process) {
+      return c.json({ error: "No active process for session" }, 404);
+    }
+
+    const updated = process.updateDeferredMessage(tempId, body.message);
+    if (!updated) {
+      return c.json({ error: "Deferred message not found" }, 404);
+    }
+
+    return c.json({
+      updated: true,
+      tempId: updated.tempId,
+      message: updated.text,
+      deferredMessages: process.getDeferredQueueSummary(),
+    });
+  });
+
   // POST /api/sessions/:sessionId/deferred/:tempId/edit - Take a deferred message for editing
   routes.post("/sessions/:sessionId/deferred/:tempId/edit", (c) => {
     const sessionId = c.req.param("sessionId");

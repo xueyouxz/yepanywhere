@@ -8,6 +8,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentContentProvider } from "../../contexts/AgentContentContext";
 import { RenderModeProvider } from "../../contexts/RenderModeContext";
@@ -29,6 +30,9 @@ vi.mock("../../i18n", () => ({
           "Show thinking transcript rows when available",
         sessionSteerNow: "Steer now",
         sessionSteerQueuedMessageNow: "Steer queued message now",
+        sessionQueuedInlineEditLabel: "Edit queued message text",
+        sessionQueuedInlineSave: "Save edit",
+        sessionQueuedInlineCancel: "Cancel edit (Esc)",
       })[key] ?? key,
   }),
 }));
@@ -583,6 +587,91 @@ describe("MessageList", () => {
 
     expect(onEditDeferred).toHaveBeenCalledWith("temp-queued");
     expect(onCancelDeferred).toHaveBeenCalledWith("temp-queued");
+  });
+
+  it("edits queued text inline and saves on blur", async () => {
+    const onUpdateDeferred = vi.fn(
+      async (_tempId: string, _content: string) => undefined,
+    );
+
+    function Harness() {
+      const [deferredMessages, setDeferredMessages] = useState([
+        {
+          tempId: "temp-queued",
+          content: "queued text",
+          timestamp: "2026-04-25T00:00:00.000Z",
+        },
+      ]);
+      return (
+        <MessageList
+          messages={[]}
+          deferredMessages={deferredMessages}
+          onUpdateDeferred={async (tempId, content) => {
+            await onUpdateDeferred(tempId, content);
+            setDeferredMessages((messages) =>
+              messages.map((message) =>
+                message.tempId === tempId ? { ...message, content } : message,
+              ),
+            );
+          }}
+        />
+      );
+    }
+
+    const { container } = render(<Harness />);
+
+    fireEvent.click(screen.getByText("queued text"));
+    const editor = screen.getByLabelText(
+      "Edit queued message text",
+    ) as HTMLTextAreaElement;
+    expect(editor.value).toBe("queued text");
+    expect(container.querySelectorAll(".deferred-message")).toHaveLength(1);
+
+    fireEvent.change(editor, { target: { value: "queued text edited" } });
+    fireEvent.blur(editor);
+
+    await waitFor(() =>
+      expect(onUpdateDeferred).toHaveBeenCalledWith(
+        "temp-queued",
+        "queued text edited",
+      ),
+    );
+    await screen.findByText("queued text edited");
+    expect(screen.queryByLabelText("Edit queued message text")).toBeNull();
+    expect(container.querySelectorAll(".deferred-message")).toHaveLength(1);
+  });
+
+  it("cancels an inline queued edit without saving", () => {
+    const onUpdateDeferred = vi.fn(
+      async (_tempId: string, _content: string) => undefined,
+    );
+
+    render(
+      <MessageList
+        messages={[]}
+        deferredMessages={[
+          {
+            tempId: "temp-queued",
+            content: "queued text",
+            timestamp: "2026-04-25T00:00:00.000Z",
+          },
+        ]}
+        onUpdateDeferred={onUpdateDeferred}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("queued text"));
+    const editor = screen.getByLabelText(
+      "Edit queued message text",
+    ) as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: "queued text edited" } });
+    fireEvent.mouseDown(
+      screen.getByRole("button", { name: "Cancel edit (Esc)" }),
+    );
+
+    expect(onUpdateDeferred).not.toHaveBeenCalled();
+    expect(screen.getByText("queued text")).toBeTruthy();
+    expect(screen.queryByLabelText("Edit queued message text")).toBeNull();
   });
 
   it("jumps from a queued message to its transcript context and back", async () => {
