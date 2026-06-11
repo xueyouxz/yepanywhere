@@ -23,6 +23,42 @@ describe("ServerSettingsService", () => {
     expect(service.getSetting("heartbeatTurnText")).toBe("continue");
   });
 
+  it("hides patient queue controls by default", async () => {
+    const service = new ServerSettingsService({ dataDir: testDir });
+
+    await service.initialize();
+
+    expect(
+      service.getSetting("clientDefaults")?.sessionToolbarVisibility
+        ?.queueControls,
+    ).toBe(false);
+  });
+
+  it("preserves explicit patient queue visibility defaults", async () => {
+    await fs.writeFile(
+      path.join(testDir, "server-settings.json"),
+      JSON.stringify({
+        version: 2,
+        settings: {
+          clientDefaults: {
+            sessionToolbarVisibility: {
+              queueControls: true,
+            },
+          },
+        },
+      }),
+      "utf-8",
+    );
+    const service = new ServerSettingsService({ dataDir: testDir });
+
+    await service.initialize();
+
+    expect(
+      service.getSetting("clientDefaults")?.sessionToolbarVisibility
+        ?.queueControls,
+    ).toBe(true);
+  });
+
   it.each([
     "heartbeat",
     "yepanywhere heartbeat",

@@ -182,10 +182,10 @@ interface DeliveredUserEcho {
 const CONCATENATED_USER_TURN_SEPARATOR = "\n\n--------\n\n";
 const USER_ECHO_CLOCK_SKEW_MS = 60_000;
 
-// When several queued chunks are delivered as one turn, each chunk can carry a
-// leading relative-time marker, e.g. "(343s ago)" or "(13s later)" (optionally
-// preceded by a "---" rule). That prefix is not part of the user's typed text,
-// so strip it before matching a delivered turn against a queued message.
+// Older transcripts can contain a leading relative-time marker on queued turns,
+// e.g. "(343s ago)" or "(13s later)" (optionally preceded by a "---" rule).
+// That prefix was never part of the user's typed text, so strip it before
+// matching a delivered turn against a persisted queued message.
 const QUEUED_TURN_TIME_MARKER = /^(?:-{2,}\s*)?\(\d+\w* (?:ago|later)\)\s*/;
 
 function stripQueuedTurnTimeMarker(text: string): string {
@@ -239,7 +239,7 @@ function userTextContainsDeferredContent(
     return false;
   }
 
-  // A delivered chunk matches when, after dropping any leading time marker, it
+  // A delivered chunk matches when, after dropping any legacy time marker, it
   // equals the queued text or begins with it (a queued message may itself be
   // multi-paragraph, hence the trailing "\n\n" prefix form).
   const partMatches = (part: string): boolean => {
@@ -408,7 +408,7 @@ function removeEchoedQueueMessage<
   T extends { tempId?: string; content: string },
 >(messages: T[], tempIds?: string[], incomingText?: string | null): T[] {
   let next = messages;
-  if (tempIds && tempIds.length) {
+  if (tempIds?.length) {
     const ids = new Set(tempIds);
     next = next.filter(
       (message) => !(message.tempId && ids.has(message.tempId)),

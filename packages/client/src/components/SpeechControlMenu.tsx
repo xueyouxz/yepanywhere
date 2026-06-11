@@ -147,8 +147,10 @@ export function SpeechControlMenu({
   };
 
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: This non-interactive wrapper captures long-press/context gestures for the nested speech trigger and popup.
     <div
       ref={rootRef}
+      role="presentation"
       className={`speech-control-menu${open ? " is-open" : ""}`}
       onClickCapture={handleClickCapture}
       onContextMenu={handleContextMenu}

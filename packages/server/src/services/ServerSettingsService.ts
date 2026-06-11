@@ -22,6 +22,11 @@ const LEGACY_DEFAULT_HEARTBEAT_TURN_TEXTS = new Set([
   "heartbeat",
   "yepanywhere heartbeat",
 ]);
+const DEFAULT_CLIENT_DEFAULTS: ClientDefaults = {
+  sessionToolbarVisibility: {
+    queueControls: false,
+  },
+};
 
 export interface SpeechAudioRetentionSettings {
   /** Whether YA persists server-routed speech audio and sidecar metadata. */
@@ -114,10 +119,42 @@ export const DEFAULT_SERVER_SETTINGS: ServerSettings = {
   lifecycleWebhookDryRun: true,
   grokBuildUseXaiApiKey: false,
   codexUpdatePolicy: "notify",
+  clientDefaults: DEFAULT_CLIENT_DEFAULTS,
 };
+
+function mergeLoadedClientDefaults(
+  loaded: ClientDefaults | undefined,
+): ClientDefaults | undefined {
+  const merged: ClientDefaults = {
+    ...DEFAULT_CLIENT_DEFAULTS,
+    ...loaded,
+  };
+  const speech = {
+    ...DEFAULT_CLIENT_DEFAULTS.speech,
+    ...loaded?.speech,
+  };
+  const sessionToolbarVisibility = {
+    ...DEFAULT_CLIENT_DEFAULTS.sessionToolbarVisibility,
+    ...loaded?.sessionToolbarVisibility,
+  };
+
+  if (Object.keys(speech).length > 0) {
+    merged.speech = speech;
+  } else {
+    delete merged.speech;
+  }
+  if (Object.keys(sessionToolbarVisibility).length > 0) {
+    merged.sessionToolbarVisibility = sessionToolbarVisibility;
+  } else {
+    delete merged.sessionToolbarVisibility;
+  }
+
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
 
 function normalizeLoadedSettings(settings: ServerSettings): ServerSettings {
   const normalized = { ...DEFAULT_SERVER_SETTINGS, ...settings };
+  normalized.clientDefaults = mergeLoadedClientDefaults(settings.clientDefaults);
   const loadedHeartbeatText = settings.heartbeatTurnText?.trim();
   if (
     loadedHeartbeatText &&

@@ -7471,6 +7471,13 @@ a.sidebar-nav-item {
   align-items: stretch;
 }
 
+.output-appearance-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
 .output-appearance-panel {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -7771,6 +7778,15 @@ a.sidebar-nav-item {
 }
 
 @media (max-width: 600px) {
+  .output-appearance-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .output-appearance-header .settings-button {
+    align-self: flex-start;
+  }
+
   .output-appearance-control {
     grid-template-columns: 1fr;
     gap: var(--space-1);

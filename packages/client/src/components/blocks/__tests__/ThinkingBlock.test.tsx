@@ -32,7 +32,12 @@ describe("ThinkingBlock", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Expand thinking" }));
+    const details = screen
+      .getByLabelText("Expand thinking")
+      .closest("details") as HTMLDetailsElement | null;
+    expect(details).toBeTruthy();
+    details!.open = true;
+    fireEvent(details!, new Event("toggle"));
 
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
@@ -48,9 +53,7 @@ describe("ThinkingBlock", () => {
     );
 
     expect(screen.getByText("Thinking")).toBeDefined();
-    expect(
-      screen.getByRole("button", { name: "Expand thinking" }),
-    ).toBeDefined();
+    expect(screen.getByLabelText("Expand thinking")).toBeDefined();
   });
 
   it("renders heading-style thinking as a collapsible outline", () => {

@@ -10,7 +10,7 @@ function runBash(env: NodeJS.ProcessEnv): string {
     "bash",
     [
       "-c",
-      'printf "original=%s agentctl=%s" "${YA_ORIGINAL_BASH_ENV_MARKER-}" "${AGENTCTL_SESSION_ID-}"',
+      `printf "original=%s agentctl=%s" "\${YA_ORIGINAL_BASH_ENV_MARKER-}" "\${AGENTCTL_SESSION_ID-}"`,
     ],
     { encoding: "utf-8", env },
   );

@@ -1055,7 +1055,7 @@ export class OpenCodeProvider implements AgentProvider {
     sessionId: string,
   ): SDKMessage[] {
     const info = response?.info ?? response?.message;
-    if (!info || info.role !== "assistant" || !Array.isArray(response?.parts)) {
+    if (info?.role !== "assistant" || !Array.isArray(response?.parts)) {
       return [];
     }
 

@@ -310,7 +310,15 @@ export function QuestionAnswerPanel({
                         isSelected && option.preview ? "has-preview" : ""
                       }`}
                       aria-pressed={isSelected}
-                      onClick={() => handleSelectOption(option.label)}
+                      onClick={(event) => {
+                        if (
+                          event.target instanceof HTMLElement &&
+                          event.target.closest(".question-option-preview")
+                        ) {
+                          return;
+                        }
+                        handleSelectOption(option.label);
+                      }}
                     >
                       <span className="question-option-radio">
                         {currentQuestion.multiSelect
@@ -331,14 +339,9 @@ export function QuestionAnswerPanel({
                           </span>
                         )}
                       </div>
-                      {/* Preview is revealed for the focused (selected) option.
-                          stopPropagation lets the user select/copy its text
-                          without toggling the option off. */}
+                      {/* Preview is revealed for the focused (selected) option. */}
                       {isSelected && option.preview && (
-                        <div
-                          className="question-option-preview"
-                          onClick={(e) => e.stopPropagation()}
-                        >
+                        <div className="question-option-preview">
                           {option.preview}
                         </div>
                       )}

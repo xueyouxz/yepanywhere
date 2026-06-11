@@ -1220,12 +1220,12 @@ describe("Supervisor", () => {
           },
         ]);
 
-        await vi.advanceTimersByTimeAsync(30_000);
+        await vi.advanceTimersByTimeAsync(29_000);
         expect(started.state.type).toBe("idle");
         expect(started.queueDepth).toBe(0);
         expect(started.getDeferredQueueSummary()).toHaveLength(1);
 
-        await vi.advanceTimersByTimeAsync(30_000);
+        await vi.advanceTimersByTimeAsync(1_000);
         expect(started.state.type).toBe("in-turn");
         expect(started.queueDepth).toBe(1);
         expect(started.getDeferredQueueSummary()).toEqual([]);

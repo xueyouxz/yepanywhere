@@ -933,7 +933,7 @@ describe("useSession completion reconciliation", () => {
     expect(window.localStorage.getItem("queued-message-sess-1")).toBeNull();
   });
 
-  it("prunes persisted deferred chips from a time-marked concatenated turn", () => {
+  it("prunes persisted deferred chips from a legacy time-marked turn", () => {
     window.localStorage.setItem(
       "queued-message-sess-1",
       JSON.stringify([
@@ -949,8 +949,8 @@ describe("useSession completion reconciliation", () => {
         },
       ]),
     );
-    // Delivered as one turn with per-chunk "(Ns ago/later)" markers plus the
-    // "--------" separator, exactly as a multi-chunk queued send arrives.
+    // Older builds delivered one turn with per-chunk "(Ns ago/later)" markers
+    // plus the "--------" separator. Keep reconciling those persisted chips.
     sessionMessagesMock.messages = [
       {
         type: "user",

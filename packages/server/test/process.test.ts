@@ -1630,7 +1630,7 @@ describe("Process", () => {
       await process.abort();
     });
 
-    it("prefixes promoted deferred turns with compose-time anchors", async () => {
+    it("promotes deferred turns without rewriting user text", async () => {
       const controller = createControllableIterator();
       const queue = new MessageQueue();
       const process = new Process(controller.iterator, {
@@ -1645,16 +1645,11 @@ describe("Process", () => {
         events.push(event);
       });
 
-      // Anchor on metadata.serverReceivedAt so age is computed against real
-      // now() at promotion without fake timers: first composed 45s ago, second
-      // 15s ago (a 30s gap between the two).
-      const now = Date.now();
       process.deferMessage({
         text: "first queued",
         tempId: "temp-1",
         metadata: {
           deliveryIntent: "deferred",
-          serverReceivedAt: new Date(now - 45_000).toISOString(),
         },
       });
       process.deferMessage({
@@ -1662,7 +1657,6 @@ describe("Process", () => {
         tempId: "temp-2",
         metadata: {
           deliveryIntent: "deferred",
-          serverReceivedAt: new Date(now - 15_000).toISOString(),
         },
       });
 
@@ -1680,14 +1674,9 @@ describe("Process", () => {
           ? [event.message.message.content as string]
           : [],
       );
-      // First chunk anchors against delivery time (~45s ago); second against
-      // the first chunk's compose time (exactly 30s later). The live echo is
-      // the same stitched turn that the provider receives.
       expect(userContents).toHaveLength(1);
-      expect(userContents[0]).toMatch(
-        new RegExp(
-          `^\\(\\d+s ago\\)\\n\\nfirst queued\\n\\n${CONCAT_SEPARATOR}\\n\\n\\(30s later\\)\\n\\nsecond queued$`,
-        ),
+      expect(userContents[0]).toBe(
+        `first queued\n\n${CONCAT_SEPARATOR}\n\nsecond queued`,
       );
 
       const queuedProviderTurn = await queue[Symbol.asyncIterator]().next();

@@ -73,6 +73,18 @@ interface OutputAppearance {
   toolPreviewLineCount: number;
 }
 
+const DEFAULT_OUTPUT_APPEARANCE: OutputAppearance = {
+  font: "system",
+  fontSizePx: DEFAULT_OUTPUT_FONT_SIZE_PX,
+  fixedFont: "system",
+  fixedFontSizeOffsetPx: DEFAULT_OUTPUT_FIXED_FONT_SIZE_OFFSET_PX,
+  thinkingFontSizeOffsetPx: DEFAULT_OUTPUT_THINKING_FONT_SIZE_OFFSET_PX,
+  mathFontSizeOffsetPx: DEFAULT_OUTPUT_MATH_FONT_SIZE_OFFSET_PX,
+  lineSpacingPercent: DEFAULT_OUTPUT_LINE_SPACING_PERCENT,
+  verticalSpacingPercent: DEFAULT_OUTPUT_VERTICAL_SPACING_PERCENT,
+  toolPreviewLineCount: DEFAULT_OUTPUT_TOOL_PREVIEW_LINE_COUNT,
+};
+
 const outputFontStacks: Record<OutputProseFont, string> = {
   system: "var(--font-sans)",
   "source-serif-4": "var(--font-output-serif)",
@@ -230,6 +242,19 @@ function readStoredVerticalSpacingPercent(fontSizePx: number): number {
   }
 
   return DEFAULT_OUTPUT_VERTICAL_SPACING_PERCENT;
+}
+
+function clearStoredOutputAppearance(): void {
+  localStorage.removeItem(UI_KEYS.outputProseFont);
+  localStorage.removeItem(UI_KEYS.outputProseFontSize);
+  localStorage.removeItem(UI_KEYS.outputFixedFont);
+  localStorage.removeItem(UI_KEYS.outputFixedFontSizeOffset);
+  localStorage.removeItem(UI_KEYS.outputProseThinkingFontSizeOffset);
+  localStorage.removeItem(UI_KEYS.outputProseMathFontSizeOffset);
+  localStorage.removeItem(UI_KEYS.outputProseLineSpacingPercent);
+  localStorage.removeItem(UI_KEYS.outputProseVerticalSpacing);
+  localStorage.removeItem(UI_KEYS.outputProseVerticalSpacingPercent);
+  localStorage.removeItem(UI_KEYS.outputToolPreviewLineCount);
 }
 
 function loadOutputAppearance(): OutputAppearance {
@@ -471,6 +496,11 @@ export function useOutputAppearance() {
     }));
   }, []);
 
+  const resetOutputAppearance = useCallback(() => {
+    clearStoredOutputAppearance();
+    setAppearance({ ...DEFAULT_OUTPUT_APPEARANCE });
+  }, []);
+
   return {
     outputFont: appearance.font,
     outputFontSizePx: appearance.fontSizePx,
@@ -490,6 +520,7 @@ export function useOutputAppearance() {
     setOutputLineSpacingPercent,
     setOutputVerticalSpacingPercent,
     setOutputToolPreviewLineCount,
+    resetOutputAppearance,
   };
 }
 

@@ -91,6 +91,7 @@ export function AppearanceSettings() {
     setOutputLineSpacingPercent,
     setOutputVerticalSpacingPercent,
     setOutputToolPreviewLineCount,
+    resetOutputAppearance,
   } = useOutputAppearance();
   const { tabSize, setTabSize } = useTabSize();
   const { contentMaxWidth, setContentMaxWidth } = useContentMaxWidth();
@@ -368,9 +369,18 @@ export function AppearanceSettings() {
           </div>
         </div>
         <div className="settings-item output-appearance-settings">
-          <div className="settings-item-info">
-            <strong>{t("appearanceOutputTypographyTitle")}</strong>
-            <p>{t("appearanceOutputTypographyDescription")}</p>
+          <div className="output-appearance-header">
+            <div className="settings-item-info">
+              <strong>{t("appearanceOutputTypographyTitle")}</strong>
+              <p>{t("appearanceOutputTypographyDescription")}</p>
+            </div>
+            <button
+              type="button"
+              className="settings-button settings-button-secondary"
+              onClick={resetOutputAppearance}
+            >
+              {t("appearanceOutputTypographyReset")}
+            </button>
           </div>
 
           <div className="output-appearance-panel">
