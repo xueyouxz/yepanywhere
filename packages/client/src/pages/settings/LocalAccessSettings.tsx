@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api/client";
 import { FilterDropdown } from "../../components/FilterDropdown";
 import { useOptionalAuth } from "../../contexts/AuthContext";
@@ -8,6 +8,7 @@ import { useNetworkBinding } from "../../hooks/useNetworkBinding";
 import { useServerInfo } from "../../hooks/useServerInfo";
 import { useServerSettings } from "../../hooks/useServerSettings";
 import { useI18n } from "../../i18n";
+import { useSettingsUndo } from "./SettingsUndoContext";
 
 export function LocalAccessSettings() {
   const { t } = useI18n();
@@ -138,6 +139,32 @@ export function LocalAccessSettings() {
       ),
     );
   };
+
+  // Header undo discards unapplied form edits back to the live server state.
+  // Unlike snapshot panes, it never re-applies an old binding: applying is a
+  // network-rebind action and must stay behind the explicit Apply button.
+  const resetFormFromServer = useCallback(() => {
+    if (!binding || !auth || !serverSettings) return;
+    setLocalhostPort(String(binding.localhost.port));
+    setNetworkEnabled(binding.network.enabled);
+    setSelectedInterface(binding.network.host ?? "");
+    setCustomIp("");
+    setRequirePassword(auth.authEnabled);
+    setLocalhostOpenToggle(auth.localhostOpen);
+    setAuthPassword("");
+    setAuthPasswordConfirm("");
+    const ah = serverSettings.allowedHosts;
+    if (ah === "*") {
+      setAllowAllHostsToggle(true);
+      setAllowedHostsText("");
+    } else {
+      setAllowAllHostsToggle(false);
+      setAllowedHostsText(ah ?? "");
+    }
+    setFormError(null);
+    setHasChanges(false);
+  }, [auth, binding, serverSettings]);
+  useSettingsUndo(hasChanges, resetFormFromServer);
 
   const handleApplyChanges = async () => {
     if (!auth) return;

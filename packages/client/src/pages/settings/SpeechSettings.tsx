@@ -1,3 +1,4 @@
+import { useCallback, useMemo } from "react";
 import {
   FilterDropdown,
   type FilterOption,
@@ -12,6 +13,7 @@ import {
   resolveSpeechMethod,
   type SpeechMethodId,
 } from "../../lib/speechProviders/methods";
+import { useSettingsUndoBaseline } from "./SettingsUndoContext";
 
 export function SpeechSettings() {
   const { t } = useI18n();
@@ -27,6 +29,35 @@ export function SpeechSettings() {
     setGrokSpeechAudioSettings,
   } = useModelSettings();
   const { version: versionInfo, loading: versionLoading } = useVersion();
+  const undoState = useMemo(
+    () => ({
+      voiceInputEnabled,
+      speechMethod,
+      speechSmartTurnSettings,
+      grokSpeechAudioSettings,
+    }),
+    [
+      voiceInputEnabled,
+      speechMethod,
+      speechSmartTurnSettings,
+      grokSpeechAudioSettings,
+    ],
+  );
+  const restoreUndoState = useCallback(
+    (snapshot: typeof undoState) => {
+      setVoiceInputEnabled(snapshot.voiceInputEnabled);
+      setSpeechMethod(snapshot.speechMethod);
+      setSpeechSmartTurnSettings(snapshot.speechSmartTurnSettings);
+      setGrokSpeechAudioSettings(snapshot.grokSpeechAudioSettings);
+    },
+    [
+      setVoiceInputEnabled,
+      setSpeechMethod,
+      setSpeechSmartTurnSettings,
+      setGrokSpeechAudioSettings,
+    ],
+  );
+  useSettingsUndoBaseline(undoState, restoreUndoState);
   const serverVoiceEnabled =
     versionInfo?.capabilities?.includes("voiceInput") ?? true;
   const serverBackends = versionInfo?.voiceBackends ?? [];
@@ -49,12 +80,14 @@ export function SpeechSettings() {
     selectedBackend !== "browser-native" &&
     (selectedBackend !== "ya-grok" ||
       grokSpeechAudioSettings.uplinkMode === "pcm16") &&
-    versionInfo?.voiceBackendCapabilities?.[selectedBackend]?.smartTurn === true;
+    versionInfo?.voiceBackendCapabilities?.[selectedBackend]?.smartTurn ===
+      true;
   const showGrokAudioSettings = selectedBackend === "ya-grok";
   const smartTurnRequiresPcm =
     selectedBackend === "ya-grok" &&
     grokSpeechAudioSettings.uplinkMode !== "pcm16" &&
-    versionInfo?.voiceBackendCapabilities?.[selectedBackend]?.smartTurn === true;
+    versionInfo?.voiceBackendCapabilities?.[selectedBackend]?.smartTurn ===
+      true;
 
   return (
     <section className="settings-section">

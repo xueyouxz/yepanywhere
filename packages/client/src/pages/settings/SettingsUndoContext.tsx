@@ -1,4 +1,12 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 /**
  * Shared per-pane undo for settings pages.
@@ -49,4 +57,37 @@ export function useSettingsUndoRegistration(): {
   const [registration, setRegistration] =
     useState<SettingsUndoRegistration | null>(null);
   return { registration, setRegistration };
+}
+
+function jsonEqual<T>(a: T, b: T): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * Baseline-snapshot undo for a settings pane: captures the first non-null
+ * `current` as the pane-open snapshot, registers header Undo while `current`
+ * differs from it, and calls `restore(snapshot)` on Undo.
+ *
+ * Build `current` the same way every render (stable key order) — comparison
+ * is JSON-based unless `isEqual` is supplied. `restore` must be stable
+ * (useCallback) and should both persist the snapshot and reset any local
+ * form/draft state.
+ */
+export function useSettingsUndoBaseline<T>(
+  current: T | null | undefined,
+  restore: (snapshot: T) => void | Promise<void>,
+  isEqual: (a: T, b: T) => boolean = jsonEqual,
+): void {
+  const baselineRef = useRef<T | null>(null);
+  if (baselineRef.current === null && current != null) {
+    baselineRef.current = current;
+  }
+  const baseline = baselineRef.current;
+  const canUndo =
+    baseline != null && current != null && !isEqual(current, baseline);
+  const undo = useCallback(() => {
+    const snapshot = baselineRef.current;
+    if (snapshot != null) return restore(snapshot);
+  }, [restore]);
+  useSettingsUndo(canUndo, undo);
 }

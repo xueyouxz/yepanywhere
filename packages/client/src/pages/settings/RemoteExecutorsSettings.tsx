@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { RemoteExecutorTestResult } from "../../api/client";
 import { useRemoteExecutors } from "../../hooks/useRemoteExecutors";
 import { useI18n } from "../../i18n";
+import { useSettingsUndoBaseline } from "./SettingsUndoContext";
 
 interface ExecutorStatus {
   testing: boolean;
@@ -19,6 +20,29 @@ export function RemoteExecutorsSettings() {
   const [executorStatus, setExecutorStatus] = useState<
     Record<string, ExecutorStatus>
   >({});
+
+  // Header undo reconciles the executor list back to the open-time set
+  // (removes hosts added since, re-adds hosts removed since). Re-added hosts
+  // may land at the end of the list rather than their original position.
+  const undoState = useMemo(
+    () => (loading ? null : { executors }),
+    [loading, executors],
+  );
+  const restoreUndoState = useCallback(
+    async (snapshot: NonNullable<typeof undoState>) => {
+      const want = new Set(snapshot.executors);
+      const have = new Set(executors);
+      for (const host of executors) {
+        if (!want.has(host)) await removeExecutor(host);
+      }
+      for (const host of snapshot.executors) {
+        if (!have.has(host)) await addExecutor(host);
+      }
+      setAddError(null);
+    },
+    [executors, addExecutor, removeExecutor],
+  );
+  useSettingsUndoBaseline(undoState, restoreUndoState);
 
   const handleAddExecutor = async () => {
     if (!newHost.trim() || isAdding) return;

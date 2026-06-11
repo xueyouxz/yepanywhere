@@ -1,3 +1,4 @@
+import { useCallback, useMemo } from "react";
 import { BrowserNotificationToggle } from "../../components/BrowserNotificationToggle";
 import { PushNotificationToggle } from "../../components/PushNotificationToggle";
 import { useBrowserNotifications } from "../../hooks/useBrowserNotifications";
@@ -9,6 +10,7 @@ import {
   useSubscribedDevices,
 } from "../../hooks/useSubscribedDevices";
 import { useI18n } from "../../i18n";
+import { useSettingsUndoBaseline } from "./SettingsUndoContext";
 
 /**
  * Unified device that merges subscribed device info with connection status.
@@ -181,6 +183,29 @@ export function NotificationsSettings() {
 
   const hasSubscriptions = subscribedDevices.length > 0;
   const isLoading = devicesLoading || connectionsLoading;
+
+  // Header undo for the three server-side notification toggles. Push/browser
+  // subscription state is device-permission-bound and not snapshot-undoable.
+  const undoState = useMemo(
+    () =>
+      settings
+        ? {
+            toolApproval: settings.toolApproval,
+            userQuestion: settings.userQuestion,
+            sessionHalted: settings.sessionHalted,
+          }
+        : null,
+    [settings],
+  );
+  const restoreUndoState = useCallback(
+    (snapshot: NonNullable<typeof undoState>) => {
+      void updateSetting("toolApproval", snapshot.toolApproval);
+      void updateSetting("userQuestion", snapshot.userQuestion);
+      void updateSetting("sessionHalted", snapshot.sessionHalted);
+    },
+    [updateSetting],
+  );
+  useSettingsUndoBaseline(undoState, restoreUndoState);
 
   // Merge subscribed and connected devices
   const unifiedDevices = mergeDevices(

@@ -28,8 +28,10 @@ import {
   getDefaultProvider,
   useProviders,
 } from "../../hooks/useProviders";
+import { useCallback, useMemo } from "react";
 import { useServerSettings } from "../../hooks/useServerSettings";
 import { useI18n } from "../../i18n";
+import { useSettingsUndoBaseline } from "./SettingsUndoContext";
 import { useToastContext } from "../../contexts/ToastContext";
 import { helperTargetsToModelOptions } from "../../lib/helperTargets";
 import {
@@ -188,6 +190,33 @@ export function ModelSettings() {
 
   const availableProviders = getAvailableProviders(providers);
   const savedDefaults = settings?.newSessionDefaults;
+
+  // Header undo across both state sources: the client-scoped model prefs
+  // (useModelSettings setters) and the server-side new-session defaults.
+  const undoState = useMemo(
+    () =>
+      settings
+        ? {
+            model,
+            effortLevel,
+            thinkingMode,
+            showThinking,
+            newSessionDefaults: settings.newSessionDefaults ?? {},
+          }
+        : null,
+    [settings, model, effortLevel, thinkingMode, showThinking],
+  );
+  const restoreUndoState = useCallback(
+    (snapshot: NonNullable<typeof undoState>) => {
+      setModel(snapshot.model);
+      setEffortLevel(snapshot.effortLevel);
+      setThinkingMode(snapshot.thinkingMode);
+      setShowThinking(snapshot.showThinking);
+      void updateSetting("newSessionDefaults", snapshot.newSessionDefaults);
+    },
+    [setModel, setEffortLevel, setThinkingMode, setShowThinking, updateSetting],
+  );
+  useSettingsUndoBaseline(undoState, restoreUndoState);
   const selectedProvider =
     getPreferredProvider(providers, savedDefaults?.provider) ?? null;
   const selectedModels = selectedProvider?.models ?? [];

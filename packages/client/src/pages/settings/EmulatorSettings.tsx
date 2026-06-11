@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   EMULATOR_FPS_OPTIONS,
   EMULATOR_WIDTH_OPTIONS,
@@ -9,6 +9,7 @@ import {
 import { useEmulators } from "../../hooks/useEmulators";
 import { useServerSettings } from "../../hooks/useServerSettings";
 import { useI18n } from "../../i18n";
+import { useSettingsUndoBaseline } from "./SettingsUndoContext";
 
 const QUALITY_OPTIONS: EmulatorQuality[] = ["high", "medium", "low"];
 
@@ -52,6 +53,36 @@ export function EmulatorSettings() {
   );
 
   const chromeOsHosts = settings?.chromeOsHosts ?? [];
+
+  // Header undo: stream settings (client-scoped) + server-side device bridge
+  // toggle and ChromeOS host list. Device start/stop are actions, not state.
+  const undoState = useMemo(
+    () =>
+      settings
+        ? {
+            maxFps,
+            maxWidth,
+            quality,
+            adaptiveFps,
+            deviceBridgeEnabled: settings.deviceBridgeEnabled ?? false,
+            chromeOsHosts: settings.chromeOsHosts ?? [],
+          }
+        : null,
+    [settings, maxFps, maxWidth, quality, adaptiveFps],
+  );
+  const restoreUndoState = useCallback(
+    (snapshot: NonNullable<typeof undoState>) => {
+      setMaxFps(snapshot.maxFps);
+      setMaxWidth(snapshot.maxWidth);
+      setQuality(snapshot.quality);
+      setAdaptiveFps(snapshot.adaptiveFps);
+      void updateSetting("deviceBridgeEnabled", snapshot.deviceBridgeEnabled);
+      void updateSetting("chromeOsHosts", snapshot.chromeOsHosts);
+      setChromeOsHostError(null);
+    },
+    [setMaxFps, setMaxWidth, setQuality, setAdaptiveFps, updateSetting],
+  );
+  useSettingsUndoBaseline(undoState, restoreUndoState);
 
   const addHost = async () => {
     const value = hostInput.trim();

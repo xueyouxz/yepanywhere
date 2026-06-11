@@ -1,10 +1,18 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useServerSettings } from "../../hooks/useServerSettings";
 import { useI18n } from "../../i18n";
+import { useSettingsUndoBaseline } from "./SettingsUndoContext";
 
 const MAX_LENGTH = 10000;
 const DEFAULT_HEARTBEAT_TEXT = "continue";
 const DEFAULT_HEARTBEAT_AFTER_MINUTES = 15;
+
+function parseHeartbeatMinutes(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 1
+    ? Math.min(parsed, 1440)
+    : DEFAULT_HEARTBEAT_AFTER_MINUTES;
+}
 
 export function AgentContextSettings() {
   const { t } = useI18n();
@@ -18,6 +26,9 @@ export function AgentContextSettings() {
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // True once the form mirrors loaded settings; gates the undo baseline so
+  // it snapshots the open-time values, not the pre-load defaults.
+  const [formSynced, setFormSynced] = useState(false);
 
   useEffect(() => {
     if (settings) {
@@ -30,6 +41,7 @@ export function AgentContextSettings() {
       setHeartbeatTurnText(
         settings.heartbeatTurnText ?? DEFAULT_HEARTBEAT_TEXT,
       );
+      setFormSynced(true);
     }
   }, [settings]);
 
@@ -38,6 +50,36 @@ export function AgentContextSettings() {
     settings?.heartbeatTurnsAfterMinutes ?? DEFAULT_HEARTBEAT_AFTER_MINUTES;
   const serverHeartbeatTurnText =
     settings?.heartbeatTurnText ?? DEFAULT_HEARTBEAT_TEXT;
+
+  // Header undo covers shown form values (saved or not), back to open-time.
+  const undoState = useMemo(
+    () =>
+      formSynced
+        ? { instructions, heartbeatTurnsAfterMinutes, heartbeatTurnText }
+        : null,
+    [formSynced, instructions, heartbeatTurnsAfterMinutes, heartbeatTurnText],
+  );
+  const restoreUndoState = useCallback(
+    (snapshot: NonNullable<typeof undoState>) => {
+      setInstructions(snapshot.instructions);
+      setHeartbeatTurnsAfterMinutes(snapshot.heartbeatTurnsAfterMinutes);
+      setHeartbeatTurnText(snapshot.heartbeatTurnText);
+      setHasChanges(false);
+      setSaveError(null);
+      void updateSettings({
+        globalInstructions: snapshot.instructions.trim() || undefined,
+        heartbeatTurnsAfterMinutes: parseHeartbeatMinutes(
+          snapshot.heartbeatTurnsAfterMinutes,
+        ),
+        heartbeatTurnText:
+          snapshot.heartbeatTurnText.trim() || DEFAULT_HEARTBEAT_TEXT,
+      }).catch(() => {
+        // surfaced via the hook's error state
+      });
+    },
+    [updateSettings],
+  );
+  useSettingsUndoBaseline(undoState, restoreUndoState);
 
   const recomputeHasChanges = useCallback(
     (next: {
@@ -71,17 +113,11 @@ export function AgentContextSettings() {
     setIsSaving(true);
     setSaveError(null);
     try {
-      const parsedHeartbeatTurnsAfterMinutes = Number.parseInt(
-        heartbeatTurnsAfterMinutes,
-        10,
-      );
       await updateSettings({
         globalInstructions: instructions.trim() || undefined,
-        heartbeatTurnsAfterMinutes:
-          Number.isFinite(parsedHeartbeatTurnsAfterMinutes) &&
-          parsedHeartbeatTurnsAfterMinutes >= 1
-            ? Math.min(parsedHeartbeatTurnsAfterMinutes, 1440)
-            : DEFAULT_HEARTBEAT_AFTER_MINUTES,
+        heartbeatTurnsAfterMinutes: parseHeartbeatMinutes(
+          heartbeatTurnsAfterMinutes,
+        ),
         heartbeatTurnText: heartbeatTurnText.trim() || DEFAULT_HEARTBEAT_TEXT,
       });
       setHasChanges(false);

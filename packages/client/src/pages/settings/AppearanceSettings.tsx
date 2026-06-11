@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { SessionToolbarPreview } from "../../components/SessionToolbarPreview";
 import { ThinkingText } from "../../components/ThinkingText";
 import {
@@ -50,6 +50,7 @@ import {
   type SessionToolbarVisibilityKey,
   useSessionToolbarVisibility,
 } from "../../hooks/useSessionToolbarVisibility";
+import { useSettingsUndoBaseline } from "./SettingsUndoContext";
 import { useStableToolPreviewRendering } from "../../hooks/useStableToolPreviewRendering";
 import { useStreamingEnabled } from "../../hooks/useStreamingEnabled";
 import { TAB_SIZES, useTabSize } from "../../hooks/useTabSize";
@@ -134,6 +135,134 @@ export function AppearanceSettings() {
     setControlVisible,
     resetVisibility,
   } = useSessionToolbarVisibility();
+  // Header undo: snapshot every appearance value at pane open; restore sets
+  // each preference and re-syncs the numeric draft fields.
+  const undoState = useMemo(
+    () => ({
+      locale,
+      fontSize,
+      outputFont,
+      outputFontSizePx,
+      outputFixedFont,
+      outputFixedFontSizeOffsetPx,
+      outputThinkingFontSizeOffsetPx,
+      outputMathFontSizeOffsetPx,
+      outputLineSpacingPercent,
+      outputVerticalSpacingPercent,
+      outputToolPreviewLineCount,
+      tabSize,
+      contentMaxWidth,
+      theme,
+      streamingEnabled,
+      stableToolPreviewRendering,
+      inlineMediaExpandedByDefault,
+      funPhrasesEnabled,
+      floatingActionButtonEnabled,
+      tabTitleActivityEnabled,
+      showConnectionBars,
+      toolbarVisibility,
+    }),
+    [
+      locale,
+      fontSize,
+      outputFont,
+      outputFontSizePx,
+      outputFixedFont,
+      outputFixedFontSizeOffsetPx,
+      outputThinkingFontSizeOffsetPx,
+      outputMathFontSizeOffsetPx,
+      outputLineSpacingPercent,
+      outputVerticalSpacingPercent,
+      outputToolPreviewLineCount,
+      tabSize,
+      contentMaxWidth,
+      theme,
+      streamingEnabled,
+      stableToolPreviewRendering,
+      inlineMediaExpandedByDefault,
+      funPhrasesEnabled,
+      floatingActionButtonEnabled,
+      tabTitleActivityEnabled,
+      showConnectionBars,
+      toolbarVisibility,
+    ],
+  );
+  const restoreUndoState = useCallback(
+    (snapshot: typeof undoState) => {
+      setLocale(snapshot.locale);
+      setFontSize(snapshot.fontSize);
+      setOutputFont(snapshot.outputFont);
+      setOutputFontSizePx(snapshot.outputFontSizePx);
+      setOutputFixedFont(snapshot.outputFixedFont);
+      setOutputFixedFontSizeOffsetPx(snapshot.outputFixedFontSizeOffsetPx);
+      setOutputThinkingFontSizeOffsetPx(
+        snapshot.outputThinkingFontSizeOffsetPx,
+      );
+      setOutputMathFontSizeOffsetPx(snapshot.outputMathFontSizeOffsetPx);
+      setOutputLineSpacingPercent(snapshot.outputLineSpacingPercent);
+      setOutputVerticalSpacingPercent(snapshot.outputVerticalSpacingPercent);
+      setOutputToolPreviewLineCount(snapshot.outputToolPreviewLineCount);
+      setTabSize(snapshot.tabSize);
+      setContentMaxWidth(snapshot.contentMaxWidth);
+      setTheme(snapshot.theme);
+      setStreamingEnabled(snapshot.streamingEnabled);
+      setStableToolPreviewRendering(snapshot.stableToolPreviewRendering);
+      setInlineMediaExpandedByDefault(snapshot.inlineMediaExpandedByDefault);
+      setFunPhrasesEnabled(snapshot.funPhrasesEnabled);
+      setFloatingActionButtonEnabled(snapshot.floatingActionButtonEnabled);
+      setTabTitleActivityEnabled(snapshot.tabTitleActivityEnabled);
+      setShowConnectionBars(snapshot.showConnectionBars);
+      for (const [key, visible] of Object.entries(snapshot.toolbarVisibility)) {
+        setControlVisible(key as SessionToolbarVisibilityKey, visible);
+      }
+      setContentMaxWidthDraft(String(snapshot.contentMaxWidth));
+      setOutputFontSizeDraft(formatNumberSetting(snapshot.outputFontSizePx));
+      setOutputFixedFontSizeOffsetDraft(
+        formatNumberSetting(snapshot.outputFixedFontSizeOffsetPx),
+      );
+      setOutputThinkingFontSizeOffsetDraft(
+        formatNumberSetting(snapshot.outputThinkingFontSizeOffsetPx),
+      );
+      setOutputMathFontSizeOffsetDraft(
+        formatNumberSetting(snapshot.outputMathFontSizeOffsetPx),
+      );
+      setOutputLineSpacingDraft(
+        formatNumberSetting(snapshot.outputLineSpacingPercent),
+      );
+      setOutputVerticalSpacingDraft(
+        formatNumberSetting(snapshot.outputVerticalSpacingPercent),
+      );
+      setOutputToolPreviewLineCountDraft(
+        formatNumberSetting(snapshot.outputToolPreviewLineCount),
+      );
+    },
+    [
+      setLocale,
+      setFontSize,
+      setOutputFont,
+      setOutputFontSizePx,
+      setOutputFixedFont,
+      setOutputFixedFontSizeOffsetPx,
+      setOutputThinkingFontSizeOffsetPx,
+      setOutputMathFontSizeOffsetPx,
+      setOutputLineSpacingPercent,
+      setOutputVerticalSpacingPercent,
+      setOutputToolPreviewLineCount,
+      setTabSize,
+      setContentMaxWidth,
+      setTheme,
+      setStreamingEnabled,
+      setStableToolPreviewRendering,
+      setInlineMediaExpandedByDefault,
+      setFunPhrasesEnabled,
+      setFloatingActionButtonEnabled,
+      setTabTitleActivityEnabled,
+      setShowConnectionBars,
+      setControlVisible,
+    ],
+  );
+  useSettingsUndoBaseline(undoState, restoreUndoState);
+
   const translate = (key: string) => t(key as never);
   const toolbarControls: Array<{
     key: SessionToolbarVisibilityKey;

@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSchemaValidationContext } from "../../contexts/SchemaValidationContext";
 import { useDeveloperMode } from "../../hooks/useDeveloperMode";
 import { useReloadNotifications } from "../../hooks/useReloadNotifications";
 import { useSchemaValidation } from "../../hooks/useSchemaValidation";
 import { useServerSettings } from "../../hooks/useServerSettings";
 import { useI18n } from "../../i18n";
+import { useSettingsUndoBaseline } from "./SettingsUndoContext";
 
 export function DevelopmentSettings() {
   const { t } = useI18n();
@@ -18,13 +19,35 @@ export function DevelopmentSettings() {
   } = useReloadNotifications();
   const { settings: validationSettings, setEnabled: setValidationEnabled } =
     useSchemaValidation();
-  const {
-    remoteLogCollectionEnabled,
-    setRemoteLogCollectionEnabled,
-  } = useDeveloperMode();
+  const { remoteLogCollectionEnabled, setRemoteLogCollectionEnabled } =
+    useDeveloperMode();
   const { ignoredTools, clearIgnoredTools } = useSchemaValidationContext();
   const { settings: serverSettings, updateSetting: updateServerSetting } =
     useServerSettings();
+
+  const undoState = useMemo(
+    () =>
+      serverSettings
+        ? {
+            validationEnabled: validationSettings.enabled,
+            remoteLogCollectionEnabled,
+            serviceWorkerEnabled: serverSettings.serviceWorkerEnabled ?? true,
+          }
+        : null,
+    [validationSettings.enabled, remoteLogCollectionEnabled, serverSettings],
+  );
+  const restoreUndoState = useCallback(
+    (snapshot: NonNullable<typeof undoState>) => {
+      setValidationEnabled(snapshot.validationEnabled);
+      setRemoteLogCollectionEnabled(snapshot.remoteLogCollectionEnabled);
+      void updateServerSetting(
+        "serviceWorkerEnabled",
+        snapshot.serviceWorkerEnabled,
+      );
+    },
+    [setValidationEnabled, setRemoteLogCollectionEnabled, updateServerSetting],
+  );
+  useSettingsUndoBaseline(undoState, restoreUndoState);
 
   const [restarting, setRestarting] = useState(false);
   // When SSE reconnects after restart, re-enable the button

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useServerSettings } from "../../hooks/useServerSettings";
 import { useI18n } from "../../i18n";
+import { useSettingsUndoBaseline } from "./SettingsUndoContext";
 
 const MAX_URL_LENGTH = 2000;
 const MAX_TOKEN_LENGTH = 5000;
@@ -15,6 +16,9 @@ export function LifecycleWebhooksSettings() {
   const [isSaving, setIsSaving] = useState(false);
   const [hasDraftEdits, setHasDraftEdits] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // True once the form mirrors loaded settings; gates the undo baseline so
+  // it snapshots the open-time values, not the pre-load defaults.
+  const [formSynced, setFormSynced] = useState(false);
 
   const serverEnabled = settings?.lifecycleWebhooksEnabled ?? false;
   const serverUrl = settings?.lifecycleWebhookUrl ?? "";
@@ -35,6 +39,7 @@ export function LifecycleWebhooksSettings() {
     setUrl(serverUrl);
     setToken(serverToken);
     setDryRun(serverDryRun);
+    setFormSynced(true);
   }, [
     hasDraftEdits,
     isSaving,
@@ -44,6 +49,32 @@ export function LifecycleWebhooksSettings() {
     serverUrl,
     settings,
   ]);
+
+  // Header undo covers shown form values (saved or not), back to open-time.
+  const undoState = useMemo(
+    () => (formSynced ? { enabled, url, token, dryRun } : null),
+    [formSynced, enabled, url, token, dryRun],
+  );
+  const restoreUndoState = useCallback(
+    (snapshot: NonNullable<typeof undoState>) => {
+      setEnabled(snapshot.enabled);
+      setUrl(snapshot.url);
+      setToken(snapshot.token);
+      setDryRun(snapshot.dryRun);
+      setHasDraftEdits(false);
+      setSaveError(null);
+      void updateSettings({
+        lifecycleWebhooksEnabled: snapshot.enabled,
+        lifecycleWebhookUrl: snapshot.url.trim() || undefined,
+        lifecycleWebhookToken: snapshot.token.trim() || undefined,
+        lifecycleWebhookDryRun: snapshot.dryRun,
+      }).catch(() => {
+        // surfaced via the hook's error state
+      });
+    },
+    [updateSettings],
+  );
+  useSettingsUndoBaseline(undoState, restoreUndoState);
 
   const handleSave = useCallback(async () => {
     setIsSaving(true);

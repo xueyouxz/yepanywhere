@@ -49,7 +49,22 @@ like sliders debounce their saves rather than deferring them.
 
 The per-pane undo affordance has a single implementation and a single
 location: panes register their open-time snapshot revert via
-`useSettingsUndo` (`pages/settings/SettingsUndoContext.tsx`), and
-`SettingsLayout` renders the one Undo button top-right on the header row —
-never inside scrollable pane content. A pane that adopts immediate apply
-should register undo so accidental changes stay recoverable.
+`useSettingsUndo` / `useSettingsUndoBaseline`
+(`pages/settings/SettingsUndoContext.tsx`), and `SettingsLayout` renders
+the one Undo button top-right on the header row — never inside scrollable
+pane content. A pane that adopts immediate apply should register undo so
+accidental changes stay recoverable.
+
+Undo semantics vary by pane kind, deliberately:
+- **Snapshot panes** (immediate-apply or simple Save forms) revert to the
+  pane-open snapshot via `useSettingsUndoBaseline` — wired in Message
+  Delivery, Speech, Notifications, Development, Model, Emulator,
+  Appearance, Agent Context, Lifecycle Webhooks, Remote Executors
+  (list reconciliation; re-added hosts may lose position).
+- **Apply-flow panes** (Local Access) register `useSettingsUndo` with
+  discard-unapplied-edits semantics only: re-applying an old network
+  binding automatically could sever the operator's own connection, so
+  applying stays behind the explicit button.
+- **Not wired**: About/Devices/Remote Access (status and actions, no
+  undoable settings); Providers (multiple independent sub-forms — needs
+  a multi-registration design before a pane-level undo is honest).
