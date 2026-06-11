@@ -3168,18 +3168,12 @@ a.sidebar-nav-item {
   display: none;
 }
 
-.thinking-dot-btn {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
+.thinking-block.timeline-item::before {
   background: var(--thinking-color);
-  box-shadow: 0 0 0 3px
-    color-mix(in srgb, var(--thinking-color) 14%, transparent);
-  flex: 0 0 auto;
 }
 
-.thinking-block .collapsible__summary:hover .thinking-dot-btn,
-.thinking-block .collapsible__summary:focus-visible .thinking-dot-btn {
+.thinking-block.timeline-item:hover::before,
+.thinking-block.timeline-item:focus-within::before {
   box-shadow: 0 0 0 4px
     color-mix(in srgb, var(--thinking-color) 24%, transparent);
 }

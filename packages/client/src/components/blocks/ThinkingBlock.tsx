@@ -60,7 +60,7 @@ export const ThinkingBlock = memo(function ThinkingBlock({
         aria-label={isExpanded ? "Collapse thinking" : "Expand thinking"}
         title={isExpanded ? "Collapse thinking" : "Expand thinking"}
       >
-        <span className="timeline-dot-btn thinking-dot-btn" aria-hidden />
+        <span className="timeline-dot-btn" aria-hidden />
         <span>
           {isStreaming ? "Thinking..." : "Thinking"}
           {durationLabel && (

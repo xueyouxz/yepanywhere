@@ -278,7 +278,7 @@ describe("MessageList", () => {
     expect(container.querySelector(".text-block-assistant")).toBeNull();
   });
 
-  it("expands a collapsed thinking block from the left dot", async () => {
+  it("expands a collapsed thinking block from the timeline hit target", async () => {
     const { container } = render(
       <MessageList
         provider="codex"
@@ -294,9 +294,12 @@ describe("MessageList", () => {
     const thinkingBlock = container.querySelector<HTMLDetailsElement>(
       "details.thinking-block",
     );
-    const dot = container.querySelector<HTMLElement>(".thinking-dot-btn");
+    const dot = container.querySelector<HTMLElement>(
+      ".thinking-block .timeline-dot-btn",
+    );
     expect(thinkingBlock?.open).toBe(false);
     expect(dot).toBeTruthy();
+    expect(container.querySelector(".thinking-dot-btn")).toBeNull();
 
     fireEvent.click(dot as HTMLElement);
 
