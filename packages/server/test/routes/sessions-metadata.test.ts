@@ -1189,6 +1189,114 @@ describe("Sessions metadata route", () => {
     expect(json.error).toContain("Start a handoff session");
   });
 
+  it("resumes before the API-error tail when a good assistant message exists", async () => {
+    const project = createProject();
+    const goodUuid = "22222222-2222-4222-8222-222222222222";
+    const resumeSession = vi.fn(async () => ({
+      id: "proc-1",
+      sessionId: "sess-1",
+      permissionMode: "default",
+      modeVersion: 0,
+    }));
+
+    const makeAssistant = (params: {
+      uuid: string;
+      parentUuid: string | null;
+      isApiErrorMessage?: boolean;
+      text: string;
+    }) => ({
+      type: "assistant",
+      isSidechain: false,
+      userType: "external",
+      cwd: project.path,
+      sessionId: "sess-1",
+      version: "1.0.0",
+      uuid: params.uuid,
+      timestamp: "2026-05-31T00:00:00.000Z",
+      parentUuid: params.parentUuid,
+      ...(params.isApiErrorMessage
+        ? { isApiErrorMessage: true, apiErrorStatus: 400 }
+        : {}),
+      message: {
+        id: `c7bff7ca-${params.uuid.slice(9)}`,
+        type: "message",
+        role: "assistant",
+        model: params.isApiErrorMessage ? "<synthetic>" : "claude-sonnet-4-5",
+        content: [{ type: "text", text: params.text }],
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      },
+    });
+
+    const routes = createSessionsRoutes({
+      supervisor: {
+        resumeSession,
+      } as unknown as SessionsDeps["supervisor"],
+      scanner: {
+        getOrCreateProject: vi.fn(async () => project),
+      } as unknown as SessionsDeps["scanner"],
+      readerFactory: vi.fn(
+        () =>
+          ({
+            getSession: vi.fn(async () => ({
+              summary: {
+                ...createSummary(),
+                provider: "claude",
+                model: "claude-sonnet-4-5-20250929",
+              },
+              data: {
+                provider: "claude",
+                session: {
+                  messages: [
+                    makeAssistant({
+                      uuid: goodUuid,
+                      parentUuid: null,
+                      text: "All done.",
+                    }),
+                    makeAssistant({
+                      uuid: "11111111-1111-4111-8111-111111111111",
+                      parentUuid: goodUuid,
+                      isApiErrorMessage: true,
+                      text: "API Error: 400 diagnostics.previous_message_id",
+                    }),
+                  ],
+                },
+              },
+            })),
+            getSessionSummary: vi.fn(async () => null),
+          }) as unknown as ISessionReader,
+      ),
+      sessionMetadataService: {
+        getProvider: vi.fn(() => "claude"),
+        getExecutor: vi.fn(() => undefined),
+      } as unknown as NonNullable<SessionsDeps["sessionMetadataService"]>,
+    });
+
+    const response = await routes.request(
+      `/projects/${project.id}/sessions/sess-1/resume`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: "continue",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(resumeSession).toHaveBeenCalledWith(
+      "sess-1",
+      project.path,
+      expect.objectContaining({ text: "continue" }),
+      undefined,
+      expect.objectContaining({
+        providerName: "claude",
+        resumeSessionAt: goodUuid,
+      }),
+    );
+  });
+
   it("returns full-resume recovery when compact-first resume fails", async () => {
     const project = createProject();
     const resumeSession = vi.fn(async () => {

@@ -285,6 +285,12 @@ export interface ModelSettings {
   helperSideModel?: string;
   /** Resume strategy. undefined and "full" preserve existing behavior. */
   resumeMode?: ResumeMode;
+  /**
+   * Resume only up to and including this transcript message UUID, dropping
+   * the tail (e.g. a trailing Claude SDK API-error message). Forwarded to
+   * providers that support prefix resume; ignored elsewhere.
+   */
+  resumeSessionAt?: string;
 }
 
 /** Error response when queue is full */
@@ -1248,6 +1254,9 @@ export class Supervisor {
     const result = await activeProvider.startSession({
       cwd: projectPath,
       resumeSessionId,
+      resumeSessionAt: resumeSessionId
+        ? modelSettings?.resumeSessionAt
+        : undefined,
       permissionMode: effectiveMode,
       model: modelSettings?.model,
       serviceTier: modelSettings?.serviceTier,

@@ -121,6 +121,12 @@ interface ClaudeResumeApiErrorBlocker {
   recovery: typeof CLAUDE_RESUME_API_ERROR_RECOVERY;
   messageId?: string;
   apiErrorStatus?: unknown;
+  /**
+   * Transcript UUID of the last assistant message before the API-error tail.
+   * When present, the session is recoverable by resuming up to this message
+   * (SDK `resumeSessionAt`) instead of requiring a handoff.
+   */
+  resumeAtMessageId?: string;
 }
 
 function getClaudeResumeApiErrorBlocker(
@@ -141,11 +147,26 @@ function getClaudeResumeApiErrorBlocker(
     const apiError = raw as ClaudeSessionEntry & {
       apiErrorStatus?: unknown;
     };
+    // Walk further back past the API-error tail for the last good assistant
+    // message; its transcript uuid is a safe prefix-resume point.
+    let resumeAtMessageId: string | undefined;
+    for (let j = i - 1; j >= 0; j--) {
+      const prior = activeBranch[j]?.raw;
+      if (prior?.type !== "assistant") {
+        continue;
+      }
+      if (prior.isApiErrorMessage === true) {
+        continue;
+      }
+      resumeAtMessageId = prior.uuid;
+      break;
+    }
     return {
       error: CLAUDE_RESUME_API_ERROR_MESSAGE,
       recovery: CLAUDE_RESUME_API_ERROR_RECOVERY,
       messageId: raw.message.id,
       apiErrorStatus: apiError.apiErrorStatus,
+      resumeAtMessageId,
     };
   }
 
@@ -2889,6 +2910,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         : null,
     };
 
+    let resumeSessionAt: string | undefined;
     if (isClaudeSdkProviderName(providerName)) {
       let blocker: ClaudeResumeApiErrorBlocker | null = null;
       try {
@@ -2910,7 +2932,23 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         );
       }
 
-      if (blocker) {
+      if (blocker?.resumeAtMessageId) {
+        // Recoverable: resume up to the last good assistant message,
+        // dropping the API-error tail, instead of forcing a handoff.
+        resumeSessionAt = blocker.resumeAtMessageId;
+        getLogger().info(
+          {
+            event: "claude_resume_truncated_after_api_error",
+            sessionId,
+            projectId,
+            providerName,
+            messageId: blocker.messageId,
+            apiErrorStatus: blocker.apiErrorStatus,
+            resumeSessionAt,
+          },
+          "Resuming Claude session before SDK API-error tail",
+        );
+      } else if (blocker) {
         getLogger().warn(
           {
             event: "claude_resume_blocked_after_api_error",
@@ -2956,6 +2994,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
           promptSuggestionMode: helperSettings.promptSuggestionMode,
           helperSideModel: helperSettings.helperSideModel,
           resumeMode,
+          resumeSessionAt,
         },
       );
     } catch (error) {

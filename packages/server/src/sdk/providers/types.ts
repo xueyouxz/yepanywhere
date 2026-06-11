@@ -59,6 +59,13 @@ export interface StartSessionOptions {
   /** Session ID to resume (optional) */
   resumeSessionId?: string;
   /**
+   * Resume only up to and including the message with this transcript UUID.
+   * Used with `resumeSessionId` to drop an unsafe transcript tail (e.g. a
+   * trailing SDK API-error message). Providers without prefix-resume support
+   * ignore it.
+   */
+  resumeSessionAt?: string;
+  /**
    * Optional provider-visible client identity, used by providers that expose
    * launcher identity in session metadata (currently Codex).
    */
