@@ -23,7 +23,7 @@ describe("ContextUsageIndicator", () => {
 
     const indicator = container.querySelector(".context-usage-indicator");
     expect(indicator?.getAttribute("title")).toBe(
-      "Context: 19.38% (50.0K / 258.0K tokens)",
+      "Context: 19.4% (50.0K / 258.0K tokens)",
     );
     expect(container.querySelector(".context-usage-label")?.textContent).toBe(
       "19%",

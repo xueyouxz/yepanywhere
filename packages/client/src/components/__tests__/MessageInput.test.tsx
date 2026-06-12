@@ -1190,7 +1190,7 @@ describe("MessageInput", () => {
     );
 
     const primaryButton = screen.getByLabelText("toolbarQueueLabel");
-    expect(primaryButton.getAttribute("title")).toContain(
+    expect(primaryButton.getAttribute("data-tooltip")).toContain(
       "toolbarQueueTooltip",
     );
 
@@ -1436,6 +1436,44 @@ describe("MessageInput", () => {
     const indicator = container.querySelector(".context-usage-indicator");
     expect(indicator).toBeTruthy();
     expect(indicator?.closest("button")).toBe(null);
+  });
+
+  it("uses only the custom tooltip on the primary send action", () => {
+    const { container } = render(
+      <MessageInputToolbarView
+        t={toolbarT}
+        visibility={toolbarVisibility}
+        attachmentControl={{ attachmentCount: 0 }}
+        shortcutsControl={{
+          open: false,
+          isearchScope: null,
+          setOpen:
+            vi.fn() as unknown as MessageInputToolbarViewProps["shortcutsControl"]["setOpen"],
+          settingsOpen: false,
+          setSettingsOpen:
+            vi.fn() as unknown as MessageInputToolbarViewProps["shortcutsControl"]["setSettingsOpen"],
+          hasDualActions: false,
+          enterActionKind: "steer",
+          canSwapEnterAction: false,
+          queueShortcutLabel: "Queue while agent runs",
+        }}
+        actionsControl={{
+          send: {
+            onSend: vi.fn(),
+            canSend: true,
+            primaryActionKind: "steer",
+            primaryActionLabel: "Steer current turn",
+            tooltip: "Steer current turn\nEnter",
+            icon: "↗",
+          },
+        }}
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: "Steer current turn" });
+    expect(button.getAttribute("data-tooltip")).toBe("Steer current turn\nEnter");
+    expect(button.getAttribute("title")).toBe(null);
+    expect(container.querySelector(".send-button-with-help")).toBe(button);
   });
 
   it("opens a bottom-row overflow strip for lower-priority controls", () => {

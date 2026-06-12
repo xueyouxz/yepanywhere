@@ -1941,7 +1941,6 @@ export function MessageInputToolbarView({
                   : ""
               }`}
               aria-label={actionsControl.send.primaryActionLabel}
-              title={actionsControl.send.tooltip}
               data-tooltip={actionsControl.send.tooltip}
             >
               <span className="send-icon">{actionsControl.send.icon}</span>

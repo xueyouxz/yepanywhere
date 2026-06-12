@@ -26,6 +26,7 @@ export function ContextUsageIndicator({
   // Clamp percentage to 0-100
   const clampedPercentage = Math.min(100, Math.max(0, percentage));
   const displayPercentage = Math.round(clampedPercentage);
+  const tooltipPercentage = formatPercentage(clampedPercentage);
 
   // Calculate the stroke-dasharray for the pie chart
   // Circumference of circle with r=8 (for size=16) = 2 * PI * r
@@ -42,12 +43,12 @@ export function ContextUsageIndicator({
 
   const tooltip = usage.contextWindow
     ? t("contextTooltipWithWindow", {
-        percentage: clampedPercentage,
+        percentage: tooltipPercentage,
         used: formatTokens(usage.inputTokens),
         total: formatTokens(usage.contextWindow),
       })
     : t("contextTooltipNoWindow", {
-        percentage: clampedPercentage,
+        percentage: tooltipPercentage,
         used: formatTokens(usage.inputTokens),
       });
 
@@ -100,4 +101,8 @@ function formatTokens(tokens: number): string {
     return `${(tokens / 1_000).toFixed(1)}K`;
   }
   return tokens.toString();
+}
+
+function formatPercentage(percentage: number): string {
+  return percentage.toFixed(1).replace(/\.0$/, "");
 }
