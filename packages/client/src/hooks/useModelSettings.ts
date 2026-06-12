@@ -121,8 +121,8 @@ const SHOW_THINKING_VALUES: ShowThinking[] = ["default", "on", "off"];
 
 /**
  * "Show thinking" preference (default/on/off). Provider-agnostic: drives the
- * client render gate (default show/hide of thought blocks) and the request
- * side (summaries) where supported. Defaults to "default" (provider-native).
+ * client render gate (default show/hide of thought blocks). Provider summary
+ * requests are controlled separately by the server. Defaults to "default".
  */
 function loadShowThinking(): ShowThinking {
   const stored = getServerScoped("showThinking");

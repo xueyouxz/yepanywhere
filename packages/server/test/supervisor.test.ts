@@ -92,6 +92,79 @@ describe("Supervisor", () => {
       expect(process1.id).toBe(process2.id);
     });
 
+    it("restarts an existing process when thinking display changes", async () => {
+      const startSession = vi.fn(
+        async (options: Parameters<AgentProvider["startSession"]>[0]) => {
+          const queue = new MessageQueue();
+          let aborted = false;
+
+          async function* iterator() {
+            yield {
+              type: "system" as const,
+              subtype: "init" as const,
+              session_id: options.resumeSessionId ?? "display-session",
+            };
+            while (!aborted) {
+              await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+          }
+
+          return {
+            iterator: iterator(),
+            queue,
+            abort: () => {
+              aborted = true;
+            },
+          };
+        },
+      );
+      const provider: AgentProvider = {
+        name: "claude",
+        displayName: "Claude",
+        supportsPermissionMode: true,
+        supportsThinkingToggle: true,
+        supportsSlashCommands: true,
+        isInstalled: async () => true,
+        isAuthenticated: async () => true,
+        getAuthStatus: async () => ({
+          installed: true,
+          authenticated: true,
+          enabled: true,
+        }),
+        getAvailableModels: async () => [],
+        startSession,
+      };
+      const supervisorWithProvider = new Supervisor({
+        provider,
+        idleTimeoutMs: 100,
+      });
+
+      const process1 = await supervisorWithProvider.resumeSession(
+        "display-session",
+        "/tmp/test",
+        { text: "first" },
+        undefined,
+        { thinking: { type: "adaptive" } },
+      );
+
+      const process2 = await supervisorWithProvider.resumeSession(
+        "display-session",
+        "/tmp/test",
+        { text: "second" },
+        undefined,
+        { thinking: { type: "adaptive", display: "summarized" } },
+      );
+
+      expect(process1.id).not.toBe(process2.id);
+      expect(startSession).toHaveBeenCalledTimes(2);
+      expect(startSession.mock.calls[1]?.[0].thinking).toEqual({
+        type: "adaptive",
+        display: "summarized",
+      });
+
+      await supervisorWithProvider.abortProcess(process2.id);
+    });
+
     it("creates new process for different session", async () => {
       mockSdk.addScenario(createMockScenario("sess-123", "First"));
       mockSdk.addScenario(createMockScenario("sess-456", "Second"));

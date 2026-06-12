@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import { thinkingOptionToConfig } from "../src/types.js";
 
 describe("thinkingOptionToConfig", () => {
-  it("leaves display unset for provider-native default", () => {
+  it("requests summarized display by default when thinking is enabled", () => {
     expect(thinkingOptionToConfig("auto")).toEqual({
-      thinking: { type: "adaptive" },
+      thinking: { type: "adaptive", display: "summarized" },
     });
     expect(thinkingOptionToConfig("on:high", "default")).toEqual({
-      thinking: { type: "adaptive" },
+      thinking: { type: "adaptive", display: "summarized" },
       effort: "high",
     });
   });
@@ -22,9 +22,9 @@ describe("thinkingOptionToConfig", () => {
     });
   });
 
-  it("explicitly omits display when show-thinking is off", () => {
+  it("keeps requesting summaries when the display preference is off", () => {
     expect(thinkingOptionToConfig("auto", "off")).toEqual({
-      thinking: { type: "adaptive", display: "omitted" },
+      thinking: { type: "adaptive", display: "summarized" },
     });
   });
 

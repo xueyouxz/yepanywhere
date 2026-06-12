@@ -541,7 +541,7 @@ interface StartSessionBody {
   model?: string;
   serviceTier?: string;
   thinking?: ThinkingOption;
-  /** Request-side "Show thinking" preference (default/on/off). */
+  /** Display preference for thinking rows (default/on/off). */
   showThinking?: ShowThinking;
   provider?: ProviderName;
   /** Browser-side timestamp for request latency tracking (epoch ms) */
@@ -575,7 +575,7 @@ interface CreateSessionBody {
   model?: string;
   serviceTier?: string;
   thinking?: ThinkingOption;
-  /** Request-side "Show thinking" preference (default/on/off). */
+  /** Display preference for thinking rows (default/on/off). */
   showThinking?: ShowThinking;
   provider?: ProviderName;
   /** SSH host alias for remote execution (undefined = local) */

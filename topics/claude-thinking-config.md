@@ -16,9 +16,10 @@ Related topics: [claude provider control](claude.md),
 
 - `thinkingOptionToConfig` (`packages/shared/src/types.ts`) is the **sole**
   constructor of a `ThinkingConfig`. Every thinking-enabled option
-  resolves to `{ type: "adaptive" }`: `"auto"` → adaptive; `"on:<effort>"`
-  → adaptive + effort; a plain `EffortLevel` → adaptive + effort. Only
-  `"off"` → `disabled`.
+  resolves to `{ type: "adaptive", display: "summarized" }`: `"auto"` →
+  adaptive summarized; `"on:<effort>"` → adaptive summarized + effort; a
+  plain `EffortLevel` → adaptive summarized + effort. Only `"off"` →
+  `disabled`.
 - The `{ type: "enabled"; budgetTokens }` union member exists but is
   **never emitted** — the in-code comment notes it "crashes the CLI" on
   Opus 4.6+ (it is the older-model fixed-budget form). Adaptive is the
@@ -56,21 +57,21 @@ source-refresh-sensitive — pin and re-read the version when acting, per
   toggle/effort UI could be gated per selected model rather than a fixed
   `supportsThinkingToggle = true`.
 
-## Showing thinking text — why it never appears, and the real path
+## Showing thinking text — request side and render side
 
-This is the "I have never once seen Claude thinking in YA" issue. Two
-layers, both real and both fixable:
+This was the "I have never once seen Claude thinking in YA" issue. Two
+layers are involved:
 
-- **Layer A — request omits `display`.** On Opus 4.7/4.8 thinking text is
-  *omitted by default* — the API streams only pings during a
-  redacted-thinking phase, so there is no reasoning text to show. The
-  opt-in is `display: 'summarized'`, and it **is** reachable:
+- **Layer A — request `display: 'summarized'`.** On Opus 4.7/4.8 thinking
+  text is *omitted by provider default* — the API streams only pings
+  during a redacted-thinking phase, so there is no reasoning text to
+  show. The opt-in is `display: 'summarized'`, and it **is** reachable:
   `ThinkingAdaptive` in the installed SDK is
   `{ type: 'adaptive'; display?: 'summarized' | 'omitted' }`. YA's shared
-  `ThinkingConfig` (`packages/shared/src/types.ts`) constructs
-  `{ type: "adaptive" }` with **no `display` field**, so it defaults to
-  `'omitted'`. That alone explains seeing no thinking text — the model is
-  told not to return it.
+  `thinkingOptionToConfig` now always emits
+  `{ type: "adaptive", display: "summarized" }` whenever thinking is
+  enabled. The client "Show thinking" preference is display-only; it
+  decides whether already-produced thinking rows render.
 - **Layer B — render already exists.** The thinking-block renderer is
   built and wired: `thinkingRenderer`
   (`packages/client/src/components/renderers/blocks/ThinkingRenderer.tsx`)
@@ -90,22 +91,19 @@ layers, both real and both fixable:
   catch-up. This is the only thing the isolating test below needs to
   settle — and it is verify-first, not assumed-broken.
 
-Codex, for contrast, **always** requests reasoning summaries: the Codex
+Codex similarly **always** requests reasoning summaries: the Codex
 provider hard-codes `summary: "auto"` (`packages/server/src/sdk/
 providers/codex.ts`), so Codex transcripts carry `summary_text` blocks
 that the shared renderer already shows. Codex's user-facing show/hide is
-the render-only transcript collapse, not a request control. Claude has no
-equivalent request control today — that is the gap this note's proposal
-closes.
+the render-only transcript collapse, not a request control. Claude now
+follows that same product shape: request summaries from the provider, then
+let YA decide whether to render them to a given client.
 
-On Opus 4.7/4.8 the **default is to show no thinking blocks** — this is
-the documented, observed default, not an uncertainty. The Claude Code TUI
-surfaces summarized thinking only when `~/.claude/settings.json` sets
-`"showThinkingSummaries": true` (the documented opt-in users add to see
-them), and in practice summaries appear routinely only at effort `high`
-or above. So the redacted default yields at most a thinking
-spinner/token pill; "never see thinking" is expected, not a YA-specific
-bug.
+On Opus 4.7/4.8 the provider default is to show no thinking blocks. YA
+overrides that by explicitly requesting summarized display when thinking
+is enabled. In practice summaries appear routinely only at effort `high`
+or above, so low-effort turns may still produce little or no thinking
+text.
 
 That setting does **not** rescue YA, though YA already loads it: the
 Claude provider passes `settingSources: ["user", "project", "local"]`
@@ -126,30 +124,11 @@ model/CLI is not honoring `display`).
 
 ## Proposal (incremental, each gated)
 
-1. **Request thinking summaries** (highest priority — the concrete cause
-   of "never see thinking"; the renderer already exists, so this is the
-   whole functional gap). A new **request-side** user setting controls
-   whether YA sends `display: 'summarized'` on the adaptive request:
-   - Add `display?: 'summarized' | 'omitted'` to YA's adaptive
-     `ThinkingConfig` (`packages/shared/src/types.ts`) and thread a
-     `summaries` flag through `thinkingOptionToConfig`.
-   - Carry a `thinkingSummaries?: boolean` request field through the
-     session/process routes to the Claude provider.
-   - Expose a toggle, **default off** (status quo; a user who wants it on
-     flips the new-session-default analog, exactly like thinking / effort
-     / model). It is configurable **mid-session** in the thinking toolbar
-     menu (`MessageInputToolbar` `ThinkingToolbarControl`, "applies next
-     turn") and present in the new-session form as the default for new
-     sessions. Per-turn semantics: it never rewrites prior turns.
-   - Capability-gate so request ⇔ display: only send `display:'summarized'`
-     for providers/models that will render it (Claude adaptive). Codex
-     already forces `summary:'auto'`, so the toggle is Claude-relevant;
-     hide or disable it where the provider already summarizes.
-   - Distinct from the **render-only** show/hide of already-produced
-     blocks (collapse/expand, the transcript toggle), which stays as-is
-     and never re-requests.
-   - Then run the isolating test above to confirm summarized blocks reach
-     the client (persisted-message vs dropped `stream_event` delivery).
+1. **Confirm summarized-block delivery.** YA now requests summaries when
+   thinking is enabled, and the renderer already exists. Keep the
+   isolating test above in mind: if summarized blocks arrive but do not
+   render, fix Layer B; if no summarized blocks arrive, re-check Claude
+   SDK support or model behavior.
 2. Surface `taskBudget.total` as an optional per-session token-budget
    control in the new-session / effort UI, default unset (let the model
    decide), behind a capability flag tied to model support and the alpha

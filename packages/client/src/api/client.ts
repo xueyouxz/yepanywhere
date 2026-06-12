@@ -158,7 +158,7 @@ export interface SessionOptions {
   /** Provider-visible service tier. Omit for provider/default behavior. */
   serviceTier?: string;
   thinking?: ThinkingOption;
-  /** Request-side "Show thinking" preference (default/on/off). */
+  /** Display preference for thinking rows (default/on/off). */
   showThinking?: ShowThinking;
   provider?: ProviderName;
   /** SSH host alias for remote execution (undefined = local) */

@@ -1066,9 +1066,8 @@ export function NewSessionForm({
 
       // Get model and thinking settings
       const thinking = toThinkingOption(effectiveThinkingMode, effectiveEffortLevel);
-      // "Show thinking" preference (default/on/off). Sent for all providers;
-      // the server maps it to a request knob where the provider supports one,
-      // and the client render gate honors it regardless.
+      // Display preference for thinking rows; sent for compatibility while the
+      // server requests provider summaries independently.
       const showThinking = getShowThinkingSetting();
       const sessionOptions = {
         mode: sessionMode,

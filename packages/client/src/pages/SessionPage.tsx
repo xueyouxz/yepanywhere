@@ -1328,9 +1328,8 @@ function SessionPageContent({
     }
     const { outgoingText, slashCommand } = prepared;
     const thinking = prepared.thinking ?? getThinkingSetting();
-    // "Show thinking" preference (default/on/off), sent for all providers;
-    // server maps it where the provider has a request knob, client render
-    // gate honors it regardless.
+    // Display preference for thinking rows; sent for compatibility while the
+    // server requests provider summaries independently.
     const showThinking = getShowThinkingSetting();
     const queuedEditDraftAtSubmit = queuedEditDraft;
     const actionAtMs = Date.now();
@@ -1608,9 +1607,8 @@ function SessionPageContent({
     }
     const { outgoingText, slashCommand } = prepared;
     const thinking = prepared.thinking ?? getThinkingSetting();
-    // "Show thinking" preference (default/on/off), sent for all providers;
-    // server maps it where the provider has a request knob, client render
-    // gate honors it regardless.
+    // Display preference for thinking rows; sent for compatibility while the
+    // server requests provider summaries independently.
     const showThinking = getShowThinkingSetting();
     const actionAtMs = Date.now();
     const clientTimestamp = getServerClockTimestamp(actionAtMs);

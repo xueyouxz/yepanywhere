@@ -68,6 +68,41 @@ const LIVENESS_PROBE_CHECK_INTERVAL_MS = 30 * 1000;
 const LIVENESS_PROBE_REFRESH_MS = 60 * 1000;
 const DEFAULT_HEARTBEAT_TURN_TEXT = "continue";
 const DEFAULT_HEARTBEAT_TURNS_AFTER_MINUTES = 5;
+
+function thinkingConfigsEqual(
+  current?: ThinkingConfig,
+  next?: ThinkingConfig,
+): boolean {
+  if (current?.type !== next?.type) return false;
+  if (!current || !next) return true;
+  if (current.type === "adaptive" && next.type === "adaptive") {
+    return current.display === next.display;
+  }
+  if (current.type === "enabled" && next.type === "enabled") {
+    return (
+      current.budgetTokens === next.budgetTokens &&
+      current.display === next.display
+    );
+  }
+  return true;
+}
+
+function isDynamicThinkingModeConfig(thinking?: ThinkingConfig): boolean {
+  return (
+    !thinking ||
+    thinking.type === "disabled" ||
+    (thinking.type === "adaptive" && thinking.display === undefined)
+  );
+}
+
+function canApplyThinkingConfigDynamically(
+  current?: ThinkingConfig,
+  next?: ThinkingConfig,
+): boolean {
+  if (!isDynamicThinkingModeConfig(current)) return false;
+  if (!isDynamicThinkingModeConfig(next)) return false;
+  return current?.type !== next?.type;
+}
 const DEFAULT_INTERRUPT_TIMEOUT_MS = 2000;
 const FORCED_HEARTBEAT_INTERRUPT_PREAMBLE =
   "interrupted for heartbeat; resume interrupted command after responding:";
@@ -1410,10 +1445,12 @@ export class Supervisor {
         if (existingProcess.isTerminated) {
           this.unregisterProcess(existingProcess);
         } else {
+          let restartExistingProcess = false;
           // Check if thinking/effort settings changed
-          const thinkingChanged =
-            existingProcess.thinking?.type !==
-            (modelSettings?.thinking?.type ?? undefined);
+          const thinkingChanged = !thinkingConfigsEqual(
+            existingProcess.thinking,
+            modelSettings?.thinking,
+          );
           const effortChanged =
             existingProcess.effort !== modelSettings?.effort;
 
@@ -1421,6 +1458,10 @@ export class Supervisor {
             if (
               thinkingChanged &&
               !effortChanged &&
+              canApplyThinkingConfigDynamically(
+                existingProcess.thinking,
+                modelSettings?.thinking,
+              ) &&
               existingProcess.supportsThinkingModeChange
             ) {
               // Toggle adaptive/disabled dynamically via deprecated API
@@ -1454,23 +1495,34 @@ export class Supervisor {
                   sessionId,
                   processId: existingProcess.id,
                   oldThinking: existingProcess.thinking?.type,
+                  oldThinkingDisplay:
+                    existingProcess.thinking?.type === "adaptive" ||
+                    existingProcess.thinking?.type === "enabled"
+                      ? existingProcess.thinking.display
+                      : undefined,
                   oldEffort: existingProcess.effort,
                   newThinking: modelSettings?.thinking?.type,
+                  newThinkingDisplay:
+                    modelSettings?.thinking?.type === "adaptive" ||
+                    modelSettings?.thinking?.type === "enabled"
+                      ? modelSettings.thinking.display
+                      : undefined,
                   newEffort: modelSettings?.effort,
                 },
                 "Thinking/effort changed, restarting process",
               );
               await existingProcess.abort();
               this.unregisterProcess(existingProcess);
+              restartExistingProcess = true;
               // Fall through to start a new session with the updated settings
             }
           }
           // Update permission mode if specified
-          if (permissionMode) {
+          if (!restartExistingProcess && permissionMode) {
             existingProcess.setPermissionMode(permissionMode);
           }
           // Queue message to existing process (if we didn't fall through to restart)
-          if (!existingProcess.isTerminated) {
+          if (!restartExistingProcess && !existingProcess.isTerminated) {
             if (modelSettings?.resumeMode === "compact-first") {
               await this.queueAfterResumeCompaction({
                 process: existingProcess,
@@ -1676,7 +1728,10 @@ export class Supervisor {
 
     const modelChanged = nextModel !== process.resolvedModel;
     const serviceTierChanged = nextServiceTier !== process.serviceTier;
-    const thinkingChanged = nextThinking?.type !== process.thinking?.type;
+    const thinkingChanged = !thinkingConfigsEqual(
+      process.thinking,
+      nextThinking,
+    );
     const effortChanged = nextEffort !== process.effort;
 
     if (
@@ -1793,8 +1848,10 @@ export class Supervisor {
     // Service tier is cost-affecting, so changes require an explicit restart
     // rather than being inferred from a normal prompt.
     const serviceTierChanged = process.serviceTier !== requestedServiceTier;
-    const thinkingChanged =
-      process.thinking?.type !== (requestedThinking?.type ?? undefined);
+    const thinkingChanged = !thinkingConfigsEqual(
+      process.thinking,
+      requestedThinking,
+    );
     const effortChanged = process.effort !== requestedEffort;
 
     if (serviceTierChanged || thinkingChanged || effortChanged) {
@@ -1802,6 +1859,7 @@ export class Supervisor {
         !serviceTierChanged &&
         thinkingChanged &&
         !effortChanged &&
+        canApplyThinkingConfigDynamically(process.thinking, requestedThinking) &&
         process.supportsThinkingModeChange
       ) {
         // Toggle thinking dynamically via deprecated API (works for auto↔off)
