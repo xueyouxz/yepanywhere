@@ -8,6 +8,12 @@ import {
 import { useRemoteBasePath } from "../hooks/useRemoteBasePath";
 import { toBrowserAppHref } from "../lib/appHref";
 import {
+  getPathBasename,
+  getProjectRelativePath,
+  normalizePathSeparators,
+  stripTrailingPathSeparators,
+} from "../lib/text";
+import {
   FileViewer,
   type FileViewerMode,
   type FileViewerSource,
@@ -62,35 +68,25 @@ function getProjectPath(projectId: string): string | null {
   }
   try {
     const projectPath = fromUrlProjectId(projectId);
-    return projectPath.startsWith("/") ? projectPath.replace(/\/+$/, "") : null;
+    return stripTrailingPathSeparators(projectPath);
   } catch {
     return null;
   }
 }
 
 function getProjectViewerFilePath(projectId: string, filePath: string): string {
-  if (!filePath.startsWith("/")) {
-    return filePath;
-  }
-
   const projectPath = getProjectPath(projectId);
-  if (!projectPath) {
-    return filePath;
+  const projectRelativePath = getProjectRelativePath(filePath, projectPath);
+  if (projectRelativePath !== null) {
+    return projectRelativePath;
   }
 
-  if (filePath === projectPath) {
-    return ".";
-  }
-
-  const prefix = `${projectPath}/`;
-  return filePath.startsWith(prefix) ? filePath.slice(prefix.length) : filePath;
-}
-
-/**
- * Get filename from path.
- */
-function getFileName(filePath: string): string {
-  return filePath.split("/").pop() || filePath;
+  const normalizedPath = normalizePathSeparators(filePath);
+  const isAbsolutePath =
+    normalizedPath.startsWith("/") || /^[a-zA-Z]:\//.test(normalizedPath);
+  return !isAbsolutePath && filePath.includes("\\")
+    ? normalizePathSeparators(filePath)
+    : filePath;
 }
 
 function formatLineSuffix(lineNumber?: number, lineEnd?: number): string {
@@ -176,7 +172,7 @@ export const FilePathLink = memo(function FilePathLink({
   }, []);
 
   // Format the display text
-  const fileName = showFullPath ? filePath : getFileName(filePath);
+  const fileName = showFullPath ? filePath : getPathBasename(filePath);
   const text = displayText || fileName;
 
   const lineSuffix = formatLineSuffix(lineNumber, lineEnd);

@@ -1,9 +1,15 @@
 import { type ReactNode, useState } from "react";
 import { parseShellToolOutput } from "../../../lib/shellToolOutput";
+import { getPathBasename, makeDisplayPath } from "../../../lib/text";
 import { AnsiText } from "../../ui/AnsiText";
 import { FixedFontMathToggle } from "../../ui/FixedFontMathToggle";
 import { Modal } from "../../ui/Modal";
-import type { ToolRenderer, WriteStdinInput, WriteStdinResult } from "./types";
+import type {
+  ToolRenderer,
+  ToolSummaryContext,
+  WriteStdinInput,
+  WriteStdinResult,
+} from "./types";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -58,7 +64,7 @@ function getLinkedFilePath(input: unknown): string | undefined {
 }
 
 function getFileName(filePath: string): string {
-  return filePath.split("/").pop() || filePath;
+  return getPathBasename(filePath);
 }
 
 function getLinkedToolName(input: unknown): string | undefined {
@@ -69,17 +75,23 @@ function getLinkedToolName(input: unknown): string | undefined {
   return toolName.length > 0 ? toolName : undefined;
 }
 
-function getInputTargetLabel(input: unknown): string | undefined {
+function getInputTargetLabel(
+  input: unknown,
+  context?: ToolSummaryContext,
+): string | undefined {
   const filePath = getLinkedFilePath(input);
   if (filePath) {
-    return getFileName(filePath);
+    return getFileName(makeDisplayPath(filePath, context?.projectPath));
   }
   return getLinkedCommand(input);
 }
 
-function getOriginLabel(input: unknown): string | undefined {
+function getOriginLabel(
+  input: unknown,
+  context?: ToolSummaryContext,
+): string | undefined {
   const linkedToolName = getLinkedToolName(input);
-  const target = getInputTargetLabel(input);
+  const target = getInputTargetLabel(input, context);
   const prefix =
     linkedToolName === "Read"
       ? "Read via PTY"
@@ -219,18 +231,21 @@ export const writeStdinRenderer: ToolRenderer<
   displayName: "Shell",
 
   renderToolUse(input, _context) {
+    const summaryContext = { projectPath: _context.projectPath };
     const sessionId = getSessionId(input);
     const chars = getChars(input);
     const command = getLinkedCommand(input);
     const filePath = getLinkedFilePath(input);
-    const originLabel = getOriginLabel(input);
+    const originLabel = getOriginLabel(input, summaryContext);
     const action =
       chars === undefined || chars.length === 0
         ? "waiting for output"
         : `input: ${formatChars(chars)}`;
 
     const originLine = originLabel ? `origin: ${originLabel}\n` : "";
-    const fileLine = filePath ? `file: ${filePath}\n` : "";
+    const fileLine = filePath
+      ? `file: ${makeDisplayPath(filePath, _context.projectPath)}\n`
+      : "";
     const commandLine = command ? `command: ${command}\n` : "";
 
     return (
@@ -283,10 +298,10 @@ export const writeStdinRenderer: ToolRenderer<
     );
   },
 
-  getUseSummary(input) {
+  getUseSummary(input, context) {
     const sessionId = getSessionId(input);
     const chars = getChars(input);
-    const inputSummary = getOriginLabel(input);
+    const inputSummary = getOriginLabel(input, context);
 
     if (chars === undefined || chars.length === 0) {
       if (inputSummary) {

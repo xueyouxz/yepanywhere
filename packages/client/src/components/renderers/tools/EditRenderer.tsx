@@ -17,7 +17,7 @@ import {
   isUserRejection,
 } from "../../../lib/classifyToolError";
 import { isMarkdownLikeFile } from "../../../lib/markdownFiles";
-import { makeDisplayPath } from "../../../lib/text";
+import { getPathBasename, makeDisplayPath } from "../../../lib/text";
 import { validateToolResult } from "../../../lib/validateToolResult";
 import { FilePathLink } from "../../FilePathLink";
 import { SchemaWarning } from "../../SchemaWarning";
@@ -152,8 +152,7 @@ function getFileName(filePath?: string): string {
   if (typeof filePath !== "string") return "Patch";
   const trimmed = filePath.trim();
   if (!trimmed) return "Patch";
-  const segments = trimmed.split(/[\\/]/);
-  return segments[segments.length - 1] || trimmed;
+  return getPathBasename(trimmed);
 }
 
 function getPatchTargetSummary(

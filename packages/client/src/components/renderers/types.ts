@@ -41,6 +41,8 @@ export interface RenderContext {
   toggleThinkingExpanded?: () => void;
   /** Provider type - tool renderers may use fallback rendering for non-Claude providers */
   provider?: string;
+  /** Absolute session project path, used for compact file path display */
+  projectPath?: string | null;
   /** Expanded state for a renderer-owned row summary outline. */
   summaryExpanded?: boolean;
   /** Toggle a renderer-owned row summary outline. */

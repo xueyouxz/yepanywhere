@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useOptionalSessionMetadata } from "../../contexts/SessionMetadataContext";
 import {
   OUTPUT_APPEARANCE_CHANGE_EVENT,
   useOutputToolPreviewLineCount,
@@ -415,6 +416,7 @@ export const ToolCallRow = memo(function ToolCallRow({
 }: Props) {
   const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [bashCommandExpanded, setBashCommandExpanded] = useState(false);
+  const sessionMetadata = useOptionalSessionMetadata();
   const outputToolPreviewLineCount = useOutputToolPreviewLineCount();
   const deferredPreviewTypography = useDeferredPreviewTypographyMetrics();
   const toggleSummaryExpanded = useCallback(() => {
@@ -428,8 +430,9 @@ export const ToolCallRow = memo(function ToolCallRow({
       theme: "dark",
       toolUseId: id,
       provider: sessionProvider,
+      projectPath: sessionMetadata?.projectPath ?? null,
     }),
-    [status, id, sessionProvider],
+    [status, id, sessionProvider, sessionMetadata?.projectPath],
   );
   const interactiveSummaryContext: RenderContext = useMemo(
     () => ({
@@ -618,8 +621,10 @@ export const ToolCallRow = memo(function ToolCallRow({
   };
 
   const summary = useMemo(() => {
-    return getToolSummary(toolName, toolInput, toolResult, status);
-  }, [toolName, toolInput, toolResult, status]);
+    return getToolSummary(toolName, toolInput, toolResult, status, {
+      projectPath: sessionMetadata?.projectPath ?? null,
+    });
+  }, [toolName, toolInput, toolResult, status, sessionMetadata?.projectPath]);
   const headerCommand = isBashTool
     ? getDisplayBashCommandFromInput(toolInput)
     : "";

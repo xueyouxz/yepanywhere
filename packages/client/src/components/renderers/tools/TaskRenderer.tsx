@@ -9,7 +9,10 @@ import {
 import type { ZodError } from "zod";
 import { AgentContentContext } from "../../../contexts/AgentContentContext";
 import { useSchemaValidationContext } from "../../../contexts/SchemaValidationContext";
-import { useSessionMetadata } from "../../../contexts/SessionMetadataContext";
+import {
+  useOptionalSessionMetadata,
+  useSessionMetadata,
+} from "../../../contexts/SessionMetadataContext";
 import { classifyToolError } from "../../../lib/classifyToolError";
 import { preprocessMessages } from "../../../lib/preprocessMessages";
 import { validateToolResult } from "../../../lib/validateToolResult";
@@ -173,7 +176,7 @@ function TaskInline({
   status: ToolCallItem["status"];
   toolUseId?: string;
 }) {
-  const { projectId, sessionId } = useSessionMetadata();
+  const { projectId, projectPath, sessionId } = useSessionMetadata();
   const context = useContext(AgentContentContext);
   const {
     reportValidationError,
@@ -476,6 +479,7 @@ function TaskInline({
                   context={{
                     isStreaming: false,
                     theme: "dark",
+                    projectPath,
                     thinkingExpanded,
                     toggleThinkingExpanded,
                   }}
@@ -527,6 +531,7 @@ function TaskToolResult({
   result: TaskResult;
   isError: boolean;
 }) {
+  const projectPath = useOptionalSessionMetadata()?.projectPath ?? null;
   const [isExpanded, setIsExpanded] = useState(true);
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
   const toggleThinkingExpanded = useCallback(() => {
@@ -580,6 +585,7 @@ function TaskToolResult({
               context={{
                 isStreaming: false,
                 theme: "dark",
+                projectPath,
                 thinkingExpanded,
                 toggleThinkingExpanded,
               }}

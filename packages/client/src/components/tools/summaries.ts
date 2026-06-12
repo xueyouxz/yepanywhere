@@ -1,6 +1,8 @@
 import { getDisplayBashCommandFromInput } from "../../lib/bashCommand";
+import { getPathBasename } from "../../lib/text";
 import type { ToolCallItem, ToolResultData } from "../../types/renderItems";
 import { toolRegistry } from "../renderers/tools";
+import type { ToolSummaryContext } from "../renderers/tools/types";
 
 /**
  * Safely call a renderer method, falling back to undefined on error.
@@ -26,6 +28,7 @@ export function getToolSummary(
   input: unknown,
   result: ToolResultData | undefined,
   status: ToolCallItem["status"],
+  context?: ToolSummaryContext,
 ): string {
   const renderer = toolRegistry.get(toolName);
   const canonicalToolName = renderer.tool;
@@ -33,7 +36,7 @@ export function getToolSummary(
   if (status === "pending" || status === "aborted" || status === "incomplete") {
     // Show input summary while no ordinary result is available.
     if (renderer.getUseSummary) {
-      const summary = safeCall(() => renderer.getUseSummary?.(input));
+      const summary = safeCall(() => renderer.getUseSummary?.(input, context));
       if (summary !== undefined) return summary;
     }
     return getDefaultInputSummary(canonicalToolName, input);
@@ -43,7 +46,7 @@ export function getToolSummary(
   // For some tools, combine input + result for a complete summary
   let inputSummary: string;
   if (renderer.getUseSummary) {
-    const summary = safeCall(() => renderer.getUseSummary?.(input));
+    const summary = safeCall(() => renderer.getUseSummary?.(input, context));
     inputSummary = summary ?? getDefaultInputSummary(canonicalToolName, input);
   } else {
     inputSummary = getDefaultInputSummary(canonicalToolName, input);
@@ -56,6 +59,7 @@ export function getToolSummary(
         result?.structured ?? result?.content,
         result?.isError ?? false,
         input,
+        context,
       ),
     );
     resultSummary =
@@ -185,5 +189,5 @@ function truncate(str: string, maxLen: number): string {
 }
 
 function getFileName(filePath: string): string {
-  return filePath.split("/").pop() || filePath;
+  return getPathBasename(filePath);
 }

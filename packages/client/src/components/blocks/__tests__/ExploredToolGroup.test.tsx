@@ -187,6 +187,36 @@ describe("ExploredToolGroup", () => {
     ).toBeDefined();
   });
 
+  it("compacts Windows project paths in pending explored rows", () => {
+    const windowsProjectRoot = "C:\\Users\\user\\Documents\\code\\playbox";
+    const windowsProjectId = toUrlProjectId(windowsProjectRoot);
+    const read = toolCall("read-1", "Read", {
+      file_path: `${windowsProjectRoot}\\docs\\tactical\\note.md`,
+    });
+    const search = toolCall("grep-1", "Grep", {
+      pattern: "needle",
+      path: `${windowsProjectRoot}\\src\\renderer`,
+    });
+    const list = toolCall("list-1", "list_dir", {
+      target_directory: `${windowsProjectRoot}\\packages\\client`,
+    });
+
+    render(
+      <SessionMetadataProvider
+        projectId={windowsProjectId}
+        projectPath={windowsProjectRoot}
+        sessionId="session-1"
+      >
+        <ExploredToolGroup id="explored-test" items={[read, search, list]} />
+      </SessionMetadataProvider>,
+    );
+
+    expect(screen.getByText("note.md")).toBeDefined();
+    expect(screen.getByText("needle in src/renderer")).toBeDefined();
+    expect(screen.getByText("packages/client")).toBeDefined();
+    expect(screen.queryByText(/C:\\Users\\user/)).toBeNull();
+  });
+
   it("lets explored grep match counts open a match table", () => {
     const read = toolCall(
       "read-1",

@@ -891,8 +891,7 @@ function SessionPageContent({
     currentProviderInfo?.supportsPermissionMode ?? true;
   const supportsThinkingToggle =
     currentProviderInfo?.supportsThinkingToggle ?? true;
-  const { generallySupportsSteering, supportsSteerNow } =
-    providerCapabilities;
+  const { generallySupportsSteering, supportsSteerNow } = providerCapabilities;
   const currentOwnedProcessId =
     status.owner === "self" ? status.processId : undefined;
 
@@ -4098,6 +4097,7 @@ function SessionPageContent({
                     onDenyWithFeedback={handleDenyWithFeedback}
                     collapsed={approvalCollapsed}
                     onCollapsedChange={setApprovalCollapsed}
+                    projectPath={project?.path ?? null}
                   />
                   <MessageInputToolbar
                     mode={permissionMode}

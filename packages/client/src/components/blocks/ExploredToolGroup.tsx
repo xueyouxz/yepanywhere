@@ -1,4 +1,6 @@
 import { memo, useRef, useState } from "react";
+import { useOptionalSessionMetadata } from "../../contexts/SessionMetadataContext";
+import { getPathBasename, makeDisplayPath } from "../../lib/text";
 import {
   getLatestMessageTimestampMs,
   MESSAGE_STALE_THRESHOLD_MS,
@@ -159,11 +161,17 @@ function stringField(input: unknown, field: string): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function compactPath(path: string): string {
-  return path.replace(/^\.?\//, "");
+function compactPath(
+  path: string,
+  projectPath: string | null | undefined,
+): string {
+  return makeDisplayPath(path, projectPath);
 }
 
-function getSearchSummary(input: unknown): string {
+function getSearchSummary(
+  input: unknown,
+  projectPath: string | null | undefined,
+): string {
   const pattern = stringField(input, "pattern") || stringField(input, "query");
   const path =
     stringField(input, "path") ||
@@ -172,50 +180,71 @@ function getSearchSummary(input: unknown): string {
   const glob = stringField(input, "glob");
   const scope = path || glob;
   if (pattern && scope) {
-    return `${pattern} in ${compactPath(scope)}`;
+    return `${pattern} in ${path ? compactPath(path, projectPath) : glob}`;
   }
   return pattern || scope || "search";
 }
 
-function getListSummary(input: unknown): string {
+function getListSummary(
+  input: unknown,
+  projectPath: string | null | undefined,
+): string {
   const pattern = stringField(input, "pattern");
   const path =
     stringField(input, "path") ||
     stringField(input, "target_directory") ||
     stringField(input, "directory");
   if (pattern && path) {
-    return `${pattern} in ${compactPath(path)}`;
+    return `${pattern} in ${compactPath(path, projectPath)}`;
   }
-  return compactPath(path || pattern || "files");
+  return path ? compactPath(path, projectPath) : pattern || "files";
 }
 
-function getFallbackSummary(item: ToolCallItem): string {
+function getFallbackSummary(
+  item: ToolCallItem,
+  projectPath: string | null | undefined,
+): string {
   const kind = getExplorationKind(item.toolName);
   if (kind === "search") {
-    return getSearchSummary(item.toolInput);
+    return getSearchSummary(item.toolInput, projectPath);
   }
   if (kind === "list") {
-    return getListSummary(item.toolInput);
+    return getListSummary(item.toolInput, projectPath);
   }
-  return (
+  const filePath =
     stringField(item.toolInput, "file_path") ||
-    stringField(item.toolInput, "target_file") ||
-    "file"
-  );
+    stringField(item.toolInput, "target_file");
+  return filePath
+    ? getPathBasename(makeDisplayPath(filePath, projectPath))
+    : "file";
 }
 
-export function getExploredEntrySearchPreview(item: ToolCallItem): string {
-  const summary = getFallbackSummary(item);
+export function getExploredEntrySearchPreview(
+  item: ToolCallItem,
+  projectPath?: string | null,
+): string {
+  const summary = getFallbackSummary(item, projectPath);
   return summary
     ? `${getDisplayLabel(item.toolName)}: ${summary}`
     : getDisplayLabel(item.toolName);
 }
 
-export function getExploredEntrySearchText(item: ToolCallItem): string {
+export function getExploredEntrySearchText(
+  item: ToolCallItem,
+  projectPath?: string | null,
+): string {
   const parts = [
     getDisplayLabel(item.toolName),
-    getFallbackSummary(item),
-    getToolSummary(item.toolName, item.toolInput, item.toolResult, item.status),
+    getFallbackSummary(item, projectPath),
+    getToolSummary(
+      item.toolName,
+      item.toolInput,
+      item.toolResult,
+      item.status,
+      {
+        projectPath,
+      },
+    ),
   ];
   return Array.from(
     new Set(parts.map((part) => part.trim()).filter(Boolean)),
@@ -240,6 +269,7 @@ function statusGlyph(status: ToolCallItem["status"]): string {
 function renderEntrySummary(
   item: ToolCallItem,
   sessionProvider: string | undefined,
+  projectPath: string | null | undefined,
 ) {
   const kind = getExplorationKind(item.toolName);
   const result = item.toolResult?.structured ?? item.toolResult?.content;
@@ -250,6 +280,7 @@ function renderEntrySummary(
     theme: "dark",
     toolUseId: item.id,
     provider: sessionProvider,
+    projectPath,
   };
 
   if (
@@ -275,10 +306,11 @@ function renderEntrySummary(
       item.toolInput,
       item.toolResult,
       item.status,
+      { projectPath },
     );
   }
 
-  return getFallbackSummary(item);
+  return getFallbackSummary(item, projectPath);
 }
 
 export const ExploredToolGroup = memo(function ExploredToolGroup({
@@ -289,6 +321,8 @@ export const ExploredToolGroup = memo(function ExploredToolGroup({
   latestVisibleTimestampMs,
 }: Props) {
   const [expanded, setExpanded] = useState(true);
+  const sessionMetadata = useOptionalSessionMetadata();
+  const projectPath = sessionMetadata?.projectPath ?? null;
   const staticAgeNowMsRef = useRef(Date.now());
   const timestampMs = getGroupTimestampMs(items);
   const hasTimestamp = timestampMs !== null;
@@ -359,7 +393,7 @@ export const ExploredToolGroup = memo(function ExploredToolGroup({
                     {getDisplayLabel(item.toolName)}
                   </span>
                   <span className="explored-entry-summary">
-                    {renderEntrySummary(item, sessionProvider)}
+                    {renderEntrySummary(item, sessionProvider, projectPath)}
                   </span>
                 </div>
               ))}

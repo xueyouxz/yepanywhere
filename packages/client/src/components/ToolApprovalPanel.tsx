@@ -29,6 +29,7 @@ interface Props {
   collapsed?: boolean;
   /** Callback when collapse state changes */
   onCollapsedChange?: (collapsed: boolean) => void;
+  projectPath?: string | null;
 }
 
 // Delay before buttons become clickable to prevent accidental clicks
@@ -43,6 +44,7 @@ export function ToolApprovalPanel({
   onDenyWithFeedback,
   collapsed = false,
   onCollapsedChange,
+  projectPath,
 }: Props) {
   const { t } = useI18n();
   const [submitting, setSubmitting] = useState(false);
@@ -198,7 +200,9 @@ export function ToolApprovalPanel({
     ? makeSecurityVisibleText(request.toolName)
     : undefined;
   const summary = request.toolName
-    ? getToolSummary(request.toolName, displayToolInput, undefined, "pending")
+    ? getToolSummary(request.toolName, displayToolInput, undefined, "pending", {
+        projectPath,
+      })
     : request.prompt;
   const displaySummary = summary ? makeSecurityVisibleText(summary) : summary;
 
@@ -215,8 +219,9 @@ export function ToolApprovalPanel({
       isStreaming: true,
       theme: "dark",
       toolUseId: request.id,
+      projectPath,
     }),
-    [request.id],
+    [request.id, projectPath],
   );
 
   return (

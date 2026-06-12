@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ZodError } from "zod";
 import { useSchemaValidationContext } from "../../../contexts/SchemaValidationContext";
+import { getPathBasename, makeDisplayPath } from "../../../lib/text";
 import { validateToolResult } from "../../../lib/validateToolResult";
 import { SchemaWarning } from "../../SchemaWarning";
 import type { GlobInput, GlobResult, ToolRenderer } from "./types";
@@ -11,17 +12,27 @@ const MAX_FILES_COLLAPSED = 20;
  * Extract filename from path
  */
 function getFileName(filePath: string): string {
-  return filePath.split("/").pop() || filePath;
+  return getPathBasename(filePath);
 }
 
 /**
  * Glob tool use - shows pattern being searched
  */
-function GlobToolUse({ input }: { input: GlobInput }) {
+function GlobToolUse({
+  input,
+  projectPath,
+}: {
+  input: GlobInput;
+  projectPath?: string | null;
+}) {
   return (
     <div className="glob-tool-use">
       <span className="glob-pattern">{input.pattern}</span>
-      {input.path && <span className="glob-path">in {input.path}</span>}
+      {input.path && (
+        <span className="glob-path">
+          in {makeDisplayPath(input.path, projectPath)}
+        </span>
+      )}
     </div>
   );
 }
@@ -32,9 +43,11 @@ function GlobToolUse({ input }: { input: GlobInput }) {
 function GlobToolResult({
   result,
   isError,
+  projectPath,
 }: {
   result: GlobResult;
   isError: boolean;
+  projectPath?: string | null;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const { enabled, reportValidationError, isToolIgnored } =
@@ -102,8 +115,12 @@ function GlobToolResult({
       <div className="file-list">
         {displayFiles.map((file) => (
           <div key={file} className="file-list-item">
-            <span className="file-path">{getFileName(file)}</span>
-            <span className="file-dir">{file}</span>
+            <span className="file-path">
+              {getFileName(makeDisplayPath(file, projectPath))}
+            </span>
+            <span className="file-dir">
+              {makeDisplayPath(file, projectPath)}
+            </span>
           </div>
         ))}
         {needsCollapse && !isExpanded && (
@@ -129,16 +146,31 @@ export const globRenderer: ToolRenderer<GlobInput, GlobResult> = {
   tool: "Glob",
   displayName: "List",
 
-  renderToolUse(input, _context) {
-    return <GlobToolUse input={input as GlobInput} />;
+  renderToolUse(input, context) {
+    return (
+      <GlobToolUse
+        input={input as GlobInput}
+        projectPath={context.projectPath}
+      />
+    );
   },
 
-  renderToolResult(result, isError, _context) {
-    return <GlobToolResult result={result as GlobResult} isError={isError} />;
+  renderToolResult(result, isError, context) {
+    return (
+      <GlobToolResult
+        result={result as GlobResult}
+        isError={isError}
+        projectPath={context.projectPath}
+      />
+    );
   },
 
-  getUseSummary(input) {
-    return `pattern: "${(input as GlobInput).pattern}"`;
+  getUseSummary(input, context) {
+    const globInput = input as GlobInput;
+    const pattern = `pattern: "${globInput.pattern}"`;
+    return globInput.path
+      ? `${pattern} in ${makeDisplayPath(globInput.path, context?.projectPath)}`
+      : pattern;
   },
 
   getResultSummary(result, isError) {

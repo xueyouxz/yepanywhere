@@ -4,7 +4,7 @@ import { useOptionalSessionMetadata } from "../../../contexts/SessionMetadataCon
 import { useSchemaValidationContext } from "../../../contexts/SchemaValidationContext";
 import { isMarkdownLikeFile } from "../../../lib/markdownFiles";
 import { compactShikiLineBreaks } from "../../../lib/shikiHtml";
-import { makeDisplayPath } from "../../../lib/text";
+import { getPathBasename, makeDisplayPath } from "../../../lib/text";
 import { validateToolResult } from "../../../lib/validateToolResult";
 import {
   FILE_MARKDOWN_PREVIEW_BASE_DENSITY,
@@ -31,7 +31,7 @@ interface WriteInputWithAugment extends WriteInput {
  * Extract filename from path
  */
 function getFileName(filePath: string): string {
-  return filePath.split("/").pop() || filePath;
+  return getPathBasename(filePath);
 }
 
 /**

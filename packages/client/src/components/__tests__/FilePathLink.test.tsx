@@ -81,6 +81,46 @@ describe("FilePathLink", () => {
     );
   });
 
+  it("links Windows absolute paths under the project as project-relative paths", () => {
+    const projectRoot = "C:\\Users\\user\\Documents\\code\\playbox";
+    const projectId = toUrlProjectId(projectRoot);
+
+    render(
+      <FilePathLink
+        projectId={projectId}
+        filePath={`${projectRoot}\\docs\\tactical\\note.md`}
+        lineNumber={8}
+        displayText="docs/tactical/note.md"
+      />,
+    );
+
+    const link = screen.getByRole("link", {
+      name: /docs\/tactical\/note\.md\s*:8/,
+    });
+    expect(link.getAttribute("href")).toBe(
+      `/projects/${projectId}/file?path=docs%2Ftactical%2Fnote.md&line=8`,
+    );
+  });
+
+  it("keeps Windows absolute paths outside the project absolute", () => {
+    const projectRoot = "C:\\Users\\user\\Documents\\code\\playbox";
+    const projectId = toUrlProjectId(projectRoot);
+
+    render(
+      <FilePathLink
+        projectId={projectId}
+        filePath={"D:\\scratch\\outside.md"}
+        lineNumber={4}
+        displayText="outside.md"
+      />,
+    );
+
+    const link = screen.getByRole("link", { name: /outside\.md\s*:4/ });
+    expect(link.getAttribute("href")).toBe(
+      `/projects/${projectId}/file?path=D%3A%5Cscratch%5Coutside.md&line=4`,
+    );
+  });
+
   it("uses share-scoped file routes when rendered in a public share", () => {
     const projectId = toUrlProjectId("/local/graehl/yepanywhere");
 

@@ -75,6 +75,24 @@ describe("rewritePublicShareLocalAppHref", () => {
     );
   });
 
+  it("rewrites Windows local-file links under the shared project root", () => {
+    const windowsProjectRoot = "C:\\Users\\user\\Documents\\code\\playbox";
+    const windowsProjectId = toUrlProjectId(windowsProjectRoot);
+    const windowsContext = {
+      ...context,
+      projectId: windowsProjectId,
+    };
+    const rewritten = rewritePublicShareLocalAppHref(
+      "https://ya.graehl.org/api/local-file?path=C%3A%5CUsers%5Cuser%5CDocuments%5Ccode%5Cplaybox%5Cdocs%5Cguide.md&render=1",
+      windowsContext,
+      shareUrl,
+    );
+
+    expect(rewritten).toBe(
+      `/share/share-secret/file?path=docs%2Fguide.md&h=ygraehl&r=wss%3A%2F%2Frelay.graehl.org%2Fws&projectId=${windowsProjectId}`,
+    );
+  });
+
   it("marks local image sources for public share media hydration", () => {
     const root = document.createElement("div");
     root.innerHTML =

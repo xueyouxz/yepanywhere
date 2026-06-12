@@ -84,4 +84,43 @@ describe("getToolSummary", () => {
 
     expect(summary).toBe("npm test");
   });
+
+  it("keeps Windows file paths compact in default summaries", () => {
+    const projectPath = "C:\\Users\\user\\Documents\\code\\playbox";
+    const summary = getToolSummary(
+      "Read",
+      {
+        file_path: `${projectPath}\\docs\\tactical\\note.md`,
+      },
+      undefined,
+      "pending",
+      { projectPath },
+    );
+
+    expect(summary).toBe("note.md");
+  });
+
+  it("uses project-relative Windows paths for grep summaries", () => {
+    const projectPath = "C:\\Users\\user\\Documents\\code\\playbox";
+    const summary = getToolSummary(
+      "Grep",
+      {
+        pattern: "needle",
+        path: `${projectPath}\\src\\renderer`,
+      },
+      {
+        content: "",
+        isError: false,
+        structured: {
+          mode: "files_with_matches",
+          filenames: [],
+          numFiles: 3,
+        },
+      },
+      "complete",
+      { projectPath },
+    );
+
+    expect(summary).toBe("needle in src/renderer → 3 files");
+  });
 });

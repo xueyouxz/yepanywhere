@@ -4,6 +4,11 @@ import {
   parseLineColumn,
 } from "@yep-anywhere/shared";
 import { createContext, type ReactNode, useContext } from "react";
+import {
+  getProjectRelativePath,
+  normalizePathSeparators,
+  stripTrailingPathSeparators,
+} from "../lib/text";
 
 export interface PublicShareContextValue {
   projectId: string | null;
@@ -57,7 +62,7 @@ function getProjectRoot(projectId: string | null): string | null {
     return null;
   }
   try {
-    return fromUrlProjectId(projectId).replace(/\/+$/, "");
+    return stripTrailingPathSeparators(fromUrlProjectId(projectId));
   } catch {
     return null;
   }
@@ -76,23 +81,20 @@ export function normalizePublicShareFilePath(
   projectId: string | null,
 ): { lineNumber?: number; path: string } | null {
   const parsed = parseLineColumn(filePath);
-  const parsedPath = parsed.path.replaceAll("\\", "/");
-  if (parsedPath.startsWith("/")) {
-    const projectRoot = getProjectRoot(projectId);
-    if (!projectRoot) {
-      return null;
-    }
-    if (parsedPath === projectRoot) {
-      return null;
-    }
-    const prefix = `${projectRoot}/`;
-    if (!parsedPath.startsWith(prefix)) {
-      return null;
-    }
-    const relativePath = normalizeRelativePath(parsedPath.slice(prefix.length));
+  const parsedPath = normalizePathSeparators(parsed.path);
+  const projectRoot = getProjectRoot(projectId);
+  const projectRelativePath = getProjectRelativePath(parsedPath, projectRoot);
+  if (projectRelativePath === ".") {
+    return null;
+  }
+  if (projectRelativePath !== null) {
+    const relativePath = normalizeRelativePath(projectRelativePath);
     return relativePath
       ? { lineNumber: parsed.line, path: relativePath }
       : null;
+  }
+  if (parsedPath.startsWith("/") || /^[a-zA-Z]:\//.test(parsedPath)) {
+    return null;
   }
 
   const relativePath = normalizeRelativePath(parsedPath);

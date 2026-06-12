@@ -9,6 +9,7 @@ import {
 import type { ZodError } from "zod";
 import { useSchemaValidationContext } from "../../../contexts/SchemaValidationContext";
 import { useOutputToolPreviewLineCount } from "../../../hooks/useOutputAppearance";
+import { getPathBasename, makeDisplayPath } from "../../../lib/text";
 import { validateToolResult } from "../../../lib/validateToolResult";
 import { SchemaWarning } from "../../SchemaWarning";
 import { SessionFilePathLink } from "../../SessionFilePathLink";
@@ -124,10 +125,12 @@ function GrepMatchDrilldown({
   label,
   matches,
   pattern,
+  projectPath,
 }: {
   label: string;
   matches: GrepMatch[];
   pattern?: string;
+  projectPath?: string | null;
 }) {
   const [showModal, setShowModal] = useState(false);
   const showFileColumn = hasMultipleGrepMatchFiles(matches);
@@ -166,7 +169,9 @@ function GrepMatchDrilldown({
                     key={`${match.filePath}:${match.lineNumber}:${match.columnNumber ?? ""}:${index}`}
                   >
                     {showFileColumn && (
-                      <td className="grep-match-file">{match.filePath}</td>
+                      <td className="grep-match-file">
+                        {makeDisplayPath(match.filePath, projectPath)}
+                      </td>
                     )}
                     <td className="grep-match-line">
                       {match.columnNumber
@@ -191,8 +196,7 @@ function GrepMatchDrilldown({
  * Extract filename from path
  */
 function getFileName(filePath: string): string {
-  const trimmed = filePath.replace(/\/+$/, "");
-  return trimmed.split("/").pop() || filePath;
+  return getPathBasename(filePath);
 }
 
 function hasMultipleGrepMatchFiles(matches: GrepMatch[]): boolean {
@@ -203,12 +207,22 @@ function hasMultipleGrepMatchFiles(matches: GrepMatch[]): boolean {
 /**
  * Grep tool use - shows search pattern
  */
-function GrepToolUse({ input }: { input: GrepInput }) {
+function GrepToolUse({
+  input,
+  projectPath,
+}: {
+  input: GrepInput;
+  projectPath?: string | null;
+}) {
   return (
     <div className="grep-tool-use">
       <span className="grep-pattern">{input.pattern}</span>
       {input.glob && <span className="grep-glob">({input.glob})</span>}
-      {input.path && <span className="grep-path">in {input.path}</span>}
+      {input.path && (
+        <span className="grep-path">
+          in {makeDisplayPath(input.path, projectPath)}
+        </span>
+      )}
     </div>
   );
 }
@@ -219,10 +233,12 @@ function GrepToolUse({ input }: { input: GrepInput }) {
 function FileListView({
   filenames,
   isExpanded,
+  projectPath,
   setIsExpanded,
 }: {
   filenames: string[];
   isExpanded: boolean;
+  projectPath?: string | null;
   setIsExpanded: (expanded: boolean) => void;
 }) {
   const needsCollapse = filenames.length > MAX_FILES_COLLAPSED;
@@ -236,8 +252,12 @@ function FileListView({
       <div className="file-list">
         {displayFiles.map((file) => (
           <div key={file} className="file-list-item">
-            <span className="file-path">{getFileName(file)}</span>
-            <span className="file-dir">{file}</span>
+            <span className="file-path">
+              {getFileName(makeDisplayPath(file, projectPath))}
+            </span>
+            <span className="file-dir">
+              {makeDisplayPath(file, projectPath)}
+            </span>
           </div>
         ))}
         {needsCollapse && !isExpanded && (
@@ -298,10 +318,12 @@ function GrepCollapsedPreview({
   input,
   result,
   isError,
+  projectPath,
 }: {
   input?: GrepInput;
   result: GrepResult | undefined;
   isError: boolean;
+  projectPath?: string | null;
 }) {
   const previewLineCount = useOutputToolPreviewLineCount();
   const matches = useMemo(() => {
@@ -328,8 +350,11 @@ function GrepCollapsedPreview({
           key={`${match.filePath}:${match.lineNumber}:${match.columnNumber ?? ""}:${index}`}
         >
           {showFileColumn && (
-            <span className="grep-preview-file" title={match.filePath}>
-              {getFileName(match.filePath)}
+            <span
+              className="grep-preview-file"
+              title={makeDisplayPath(match.filePath, projectPath)}
+            >
+              {getFileName(makeDisplayPath(match.filePath, projectPath))}
             </span>
           )}
           <span className="grep-preview-line">
@@ -358,10 +383,12 @@ function GrepToolResult({
   input,
   result,
   isError,
+  projectPath,
 }: {
   input?: GrepInput;
   result: GrepResult;
   isError: boolean;
+  projectPath?: string | null;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const { enabled, reportValidationError, isToolIgnored } =
@@ -432,6 +459,7 @@ function GrepToolResult({
             label={matchLabel}
             matches={matches}
             pattern={input?.pattern}
+            projectPath={projectPath}
           />
           {appliedLimit && (
             <span className="badge badge-info">limit: {appliedLimit}</span>
@@ -472,6 +500,7 @@ function GrepToolResult({
       <FileListView
         filenames={filenames}
         isExpanded={isExpanded}
+        projectPath={projectPath}
         setIsExpanded={setIsExpanded}
       />
     </div>
@@ -480,12 +509,18 @@ function GrepToolResult({
 
 function getGrepScope(
   input: GrepInput,
+  projectPath?: string | null,
 ):
   | { kind: "path"; value: string; label: string }
   | { kind: "glob"; value: string; label: string }
   | null {
   if (input.path) {
-    return { kind: "path", value: input.path, label: getFileName(input.path) };
+    const displayPath = makeDisplayPath(input.path, projectPath);
+    return {
+      kind: "path",
+      value: input.path,
+      label: getFileName(displayPath),
+    };
   }
   if (input.glob) {
     return { kind: "glob", value: input.glob, label: input.glob };
@@ -493,9 +528,19 @@ function getGrepScope(
   return null;
 }
 
-function getGrepUseSummary(input: GrepInput): string {
-  const scope = getGrepScope(input);
-  return scope ? `${input.pattern} in ${scope.value}` : input.pattern;
+function getGrepUseSummary(
+  input: GrepInput,
+  projectPath?: string | null,
+): string {
+  const scope = getGrepScope(input, projectPath);
+  if (!scope) {
+    return input.pattern;
+  }
+  const scopeText =
+    scope.kind === "path"
+      ? makeDisplayPath(scope.value, projectPath)
+      : scope.value;
+  return `${input.pattern} in ${scopeText}`;
 }
 
 export function truncateGrepPatternForWidth(
@@ -531,13 +576,15 @@ function GrepSummaryPattern({
   expanded,
   input,
   onToggle,
+  projectPath,
 }: {
   expanded: boolean;
   input: GrepInput;
   onToggle?: () => void;
+  projectPath?: string | null;
 }) {
-  const summary = getGrepUseSummary(input);
-  const scope = getGrepScope(input);
+  const summary = getGrepUseSummary(input, projectPath);
+  const scope = getGrepScope(input, projectPath);
   const rowRef = useRef<HTMLSpanElement | null>(null);
   const scopeRef = useRef<HTMLSpanElement | null>(null);
   const measureRef = useRef<HTMLSpanElement | null>(null);
@@ -597,7 +644,7 @@ function GrepSummaryPattern({
       resizeObserver.observe(scopeRef.current);
     }
     return () => resizeObserver.disconnect();
-  }, [expanded, input.pattern, scope?.value]);
+  }, [expanded, input.pattern, projectPath, scope?.value]);
 
   const clipClassName = `grep-summary-pattern-clip${onToggle ? " grep-summary-pattern-action" : ""}`;
   const clipContent = onToggle ? (
@@ -678,12 +725,14 @@ function GrepInteractiveSummary({
   input,
   result,
   isError,
+  projectPath,
   summaryExpanded,
   toggleSummaryExpanded,
 }: {
   input: GrepInput;
   result: GrepResult | undefined;
   isError: boolean;
+  projectPath?: string | null;
   summaryExpanded?: boolean;
   toggleSummaryExpanded?: () => void;
 }) {
@@ -697,6 +746,7 @@ function GrepInteractiveSummary({
         expanded={summaryExpanded ?? false}
         input={input}
         onToggle={toggleSummaryExpanded}
+        projectPath={projectPath}
       />
       <span className="grep-summary-arrow" aria-hidden="true">
         →
@@ -705,6 +755,7 @@ function GrepInteractiveSummary({
         label={resultLabel.text}
         matches={resultLabel.matches}
         pattern={input.pattern}
+        projectPath={projectPath}
       />
     </span>
   );
@@ -714,22 +765,28 @@ export const grepRenderer: ToolRenderer<GrepInput, GrepResult> = {
   tool: "Grep",
   displayName: "Grep",
 
-  renderToolUse(input, _context) {
-    return <GrepToolUse input={input as GrepInput} />;
+  renderToolUse(input, context) {
+    return (
+      <GrepToolUse
+        input={input as GrepInput}
+        projectPath={context.projectPath}
+      />
+    );
   },
 
-  renderToolResult(result, isError, _context, input) {
+  renderToolResult(result, isError, context, input) {
     return (
       <GrepToolResult
         input={input as GrepInput | undefined}
         result={result as GrepResult}
         isError={isError}
+        projectPath={context.projectPath}
       />
     );
   },
 
-  getUseSummary(input) {
-    return getGrepUseSummary(input as GrepInput);
+  getUseSummary(input, context) {
+    return getGrepUseSummary(input as GrepInput, context?.projectPath);
   },
 
   getResultSummary(result, isError) {
@@ -745,18 +802,20 @@ export const grepRenderer: ToolRenderer<GrepInput, GrepResult> = {
         input={input as GrepInput}
         result={result as GrepResult | undefined}
         isError={isError}
+        projectPath={context.projectPath}
         summaryExpanded={context.summaryExpanded}
         toggleSummaryExpanded={context.toggleSummaryExpanded}
       />
     );
   },
 
-  renderCollapsedPreview(input, result, isError) {
+  renderCollapsedPreview(input, result, isError, context) {
     return (
       <GrepCollapsedPreview
         input={input as GrepInput | undefined}
         result={result as GrepResult | undefined}
         isError={isError}
+        projectPath={context.projectPath}
       />
     );
   },

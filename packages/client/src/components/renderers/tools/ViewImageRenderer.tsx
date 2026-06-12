@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useFetchedImage } from "../../../hooks/useRemoteImage";
+import { getPathBasename, makeDisplayPath } from "../../../lib/text";
 import { Modal } from "../../ui/Modal";
 import type { ToolRenderer } from "./types";
 
@@ -8,7 +9,7 @@ interface ViewImageInput {
 }
 
 function getFileName(path: string): string {
-  return path.split("/").pop() ?? path;
+  return getPathBasename(path);
 }
 
 /**
@@ -48,14 +49,17 @@ function ViewImageButton({
   path,
   className,
   onClick,
+  projectPath,
 }: {
   path: string;
   className: string;
   onClick: (e: React.MouseEvent) => void;
+  projectPath?: string | null;
 }) {
+  const displayPath = makeDisplayPath(path, projectPath);
   return (
     <button type="button" className={className} onClick={onClick}>
-      {getFileName(path)}
+      {getFileName(displayPath)}
       <span className="file-line-count-inline">(image)</span>
     </button>
   );
@@ -68,19 +72,22 @@ function ViewImageClickable({
   path,
   buttonClass,
   stopPropagation,
+  projectPath,
 }: {
   path: string;
   buttonClass: string;
   stopPropagation?: boolean;
+  projectPath?: string | null;
 }) {
   const [showModal, setShowModal] = useState(false);
-  const fileName = getFileName(path);
+  const fileName = getFileName(makeDisplayPath(path, projectPath));
 
   return (
     <>
       <ViewImageButton
         path={path}
         className={buttonClass}
+        projectPath={projectPath}
         onClick={(e) => {
           if (stopPropagation) e.stopPropagation();
           setShowModal(true);
@@ -99,39 +106,48 @@ export const viewImageRenderer: ToolRenderer<ViewImageInput, unknown> = {
   tool: "ViewImage",
   displayName: "View Image",
 
-  renderToolUse(input, _context) {
+  renderToolUse(input, context) {
     const { path } = input as ViewImageInput;
     return (
       <div className="read-image-result">
-        <ViewImageClickable path={path} buttonClass="file-link-button" />
+        <ViewImageClickable
+          path={path}
+          buttonClass="file-link-button"
+          projectPath={context.projectPath}
+        />
       </div>
     );
   },
 
-  renderToolResult(_result, _isError, _context, input) {
+  renderToolResult(_result, _isError, context, input) {
     const { path } = input as ViewImageInput;
     return (
       <div className="read-image-result">
-        <ViewImageClickable path={path} buttonClass="file-link-button" />
+        <ViewImageClickable
+          path={path}
+          buttonClass="file-link-button"
+          projectPath={context.projectPath}
+        />
       </div>
     );
   },
 
-  getUseSummary(input) {
+  getUseSummary(input, context) {
     const path = (input as ViewImageInput)?.path ?? "";
-    return getFileName(path);
+    return getFileName(makeDisplayPath(path, context?.projectPath));
   },
 
   getResultSummary(_result, isError) {
     return isError ? "Error" : "Image loaded";
   },
 
-  renderInteractiveSummary(input, _result, _isError, _context) {
+  renderInteractiveSummary(input, _result, _isError, context) {
     const { path } = input as ViewImageInput;
     return (
       <ViewImageClickable
         path={path}
         buttonClass="file-link-inline"
+        projectPath={context.projectPath}
         stopPropagation
       />
     );

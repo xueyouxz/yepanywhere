@@ -5,6 +5,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { toUrlProjectId } from "@yep-anywhere/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionMetadataProvider } from "../../../../contexts/SessionMetadataContext";
 import { I18nProvider } from "../../../../i18n";
@@ -332,6 +333,80 @@ describe("GrepRenderer", () => {
       HTMLElement.prototype.getBoundingClientRect =
         originalGetBoundingClientRect;
     }
+  });
+
+  it("compacts Windows project paths in summaries and result lists", () => {
+    const projectPath = "C:\\Users\\user\\Documents\\code\\playbox";
+    const projectId = toUrlProjectId(projectPath);
+
+    render(
+      <SessionMetadataProvider
+        projectId={projectId}
+        projectPath={projectPath}
+        sessionId="session-1"
+      >
+        <I18nProvider>
+          {grepRenderer.renderInteractiveSummary?.(
+            {
+              output_mode: "content",
+              path: `${projectPath}\\src\\renderer\\Tool.tsx`,
+              pattern: "needle",
+            },
+            {
+              mode: "content",
+              filenames: [],
+              numFiles: 2,
+              content:
+                `${projectPath}\\src\\a.ts:3:needle one\n` +
+                `${projectPath}\\src\\b.ts:7:needle two`,
+              matches: [
+                {
+                  filePath: `${projectPath}\\src\\a.ts`,
+                  lineNumber: 3,
+                  text: "needle one",
+                },
+                {
+                  filePath: `${projectPath}\\src\\b.ts`,
+                  lineNumber: 7,
+                  text: "needle two",
+                },
+              ],
+            },
+            false,
+            {
+              ...renderContext,
+              projectPath,
+              summaryExpanded: true,
+              toggleSummaryExpanded: vi.fn(),
+            },
+          )}
+          {grepRenderer.renderToolResult(
+            {
+              mode: "files_with_matches",
+              filenames: [
+                `${projectPath}\\src\\a.ts`,
+                `${projectPath}\\src\\nested\\b.ts`,
+              ],
+              numFiles: 2,
+            },
+            false,
+            { ...renderContext, projectPath },
+            { pattern: "needle", path: `${projectPath}\\src` },
+          )}
+        </I18nProvider>
+      </SessionMetadataProvider>,
+    );
+
+    expect(screen.getByRole("link", { name: "Tool.tsx" })).toBeDefined();
+    expect(screen.getByText("needle in src/renderer/Tool.tsx")).toBeDefined();
+    expect(screen.getByText("src/a.ts")).toBeDefined();
+    expect(screen.getByText("src/nested/b.ts")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "2 matches" }));
+
+    expect(screen.getAllByText("src/a.ts").length).toBeGreaterThan(0);
+    expect(screen.getByText("src/b.ts")).toBeDefined();
+    expect(screen.queryByText(/C:\\Users\\user/)).toBeNull();
   });
 });
 

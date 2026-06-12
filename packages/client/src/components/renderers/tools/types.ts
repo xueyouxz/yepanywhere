@@ -338,6 +338,10 @@ export interface KillShellResult {
   shell_id: string;
 }
 
+export interface ToolSummaryContext {
+  projectPath?: string | null;
+}
+
 /**
  * Tool renderer interface
  */
@@ -363,9 +367,14 @@ export interface ToolRenderer<TInput = unknown, TResult = unknown> {
     input?: TInput,
   ): ReactNode;
   /** Summary for collapsed tool_use view */
-  getUseSummary?(input: TInput): string;
+  getUseSummary?(input: TInput, context?: ToolSummaryContext): string;
   /** Summary for collapsed tool_result view */
-  getResultSummary?(result: TResult, isError: boolean, input?: TInput): string;
+  getResultSummary?(
+    result: TResult,
+    isError: boolean,
+    input?: TInput,
+    context?: ToolSummaryContext,
+  ): string;
   /**
    * Render an interactive summary that replaces the expand/collapse behavior.
    * When provided, the row won't expand - instead clicking invokes this component.
