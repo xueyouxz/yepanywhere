@@ -478,12 +478,13 @@ export class GeminiSessionReader implements ISessionReader {
   }
 
   /**
-   * Extract the model from the first assistant message.
+   * Extract the model from the most recent assistant message (a session's
+   * model can change mid-transcript).
    */
   private extractModel(messages: GeminiSessionMessage[]): string | undefined {
-    // Find the first assistant message with a model field
-    for (const msg of messages) {
-      if (msg.type === "gemini") {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg?.type === "gemini") {
         const assistantMsg = msg as GeminiAssistantMessage;
         if (assistantMsg.model) {
           return assistantMsg.model;

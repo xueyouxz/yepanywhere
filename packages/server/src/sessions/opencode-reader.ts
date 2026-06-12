@@ -405,8 +405,9 @@ export class OpenCodeSessionReader implements ISessionReader {
             const msgContent = await readFile(msgPath, "utf-8");
             const msg = JSON.parse(msgContent) as OpenCodeMessage;
 
-            // Get model from first assistant message
-            if (!model && msg.role === "assistant" && msg.modelID) {
+            // Track the latest assistant model (a session's model can
+            // change mid-transcript); files iterate in chronological order.
+            if (msg.role === "assistant" && msg.modelID) {
               model = msg.modelID;
             }
 

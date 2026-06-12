@@ -688,14 +688,16 @@ export class ClaudeSessionReader implements ISessionReader {
   }
 
   /**
-   * Extract the model from the first assistant message.
+   * Extract the model from the most recent assistant message. A session's
+   * model can change mid-transcript (fork with a model override, setModel),
+   * so the last real model is the session's current one.
    * The model is stored in message.model (e.g., "claude-opus-4-5-20251101").
    */
   private extractModel(messages: ClaudeSessionEntry[]): string | undefined {
-    // Find the first assistant message with a real model field.
     // Skip "<synthetic>" which the SDK uses for error messages (e.g., 500 errors).
-    for (const msg of messages) {
-      if (msg.type === "assistant") {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg?.type === "assistant") {
         const model = msg.message.model;
         if (model && model !== "<synthetic>") {
           return model;

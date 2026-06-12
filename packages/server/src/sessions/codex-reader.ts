@@ -783,9 +783,11 @@ export class CodexSessionReader implements ISessionReader {
    * Extract the model from turn_context entries.
    */
   private extractModel(entries: CodexSessionEntry[]): string | undefined {
-    // Find first turn_context entry with a model
-    for (const entry of entries) {
-      if (entry.type === "turn_context" && entry.payload.model) {
+    // Last turn_context with a model: per-turn context tracks the model the
+    // session is currently using, which can change mid-transcript.
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const entry = entries[i];
+      if (entry?.type === "turn_context" && entry.payload.model) {
         return entry.payload.model;
       }
     }
