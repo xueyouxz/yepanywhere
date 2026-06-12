@@ -2237,7 +2237,7 @@ export function MessageInputToolbar({
             : t("toolbarQueueLabel")
         : t("toolbarSend");
   const stopTitle = `${t("toolbarStop")} (Esc)`;
-  const showStopButton = !!(isRunning && onStop && isThinking);
+  const showStopButton = !!(isRunning && onStop && isThinking && !canSend);
   const showPatientQueueToggle = canShowPatientQueueToggle;
   const showSendButton = !!(
     onSend &&

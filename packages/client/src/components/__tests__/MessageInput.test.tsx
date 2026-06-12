@@ -670,7 +670,7 @@ describe("MessageInput", () => {
     expect(keys).toEqual(["Ctrl", "Alt", "S"]);
   });
 
-  it("keeps stop available while a running composer has queued text", () => {
+  it("hides stop while a running composer has queued text", () => {
     const onStop = vi.fn();
     const textarea = renderMessageInput(
       vi.fn(() => true),
@@ -684,10 +684,9 @@ describe("MessageInput", () => {
 
     fireEvent.change(textarea, { target: { value: "still editable" } });
 
-    fireEvent.click(screen.getByLabelText("toolbarStop"));
-
     expect(screen.getByLabelText("toolbarQueueLabel")).toBeTruthy();
-    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(screen.queryByLabelText("toolbarStop")).toBeNull();
+    expect(onStop).not.toHaveBeenCalled();
   });
 
   it("stops the current turn with Escape from the composer", () => {
