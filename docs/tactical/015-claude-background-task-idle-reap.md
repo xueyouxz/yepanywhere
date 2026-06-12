@@ -13,6 +13,8 @@ Progress:
   owned-process retention.
 - [ ] Add regression coverage so an owned Claude process with pending
   provider-owned wakeups is not idle-reaped.
+- [ ] Keep explicit operator configuration authoritative: an `IDLE_TIMEOUT`
+  env override must continue to win over the new no-config default.
 
 ## Problem
 
@@ -104,6 +106,9 @@ Relevant implementation points:
   - `transitionToIdle()` starts the idle reap timer.
 - `packages/server/src/supervisor/types.ts`
   - `DEFAULT_IDLE_TIMEOUT_MS = 5 * 60 * 1000`.
+- `packages/server/src/config.ts`
+  - normal startup passes `config.idleTimeoutMs` into the supervisor, so the
+    `IDLE_TIMEOUT` default there must move with `DEFAULT_IDLE_TIMEOUT_MS`.
 - `packages/server/src/supervisor/Process.ts`
   - idle reaping calls the provider abort function.
 - `packages/server/src/sdk/providers/claude.ts`
@@ -135,6 +140,11 @@ The SDK does expose the needed concepts:
     and `/loop` work that will wake the session later.
 - The SDK stream also has task lifecycle system messages:
   `task_started`, `task_updated`, `task_progress`, and `task_notification`.
+  Current SDK typings expose:
+  - `task_notification.status`: `completed`, `failed`, `stopped`;
+  - `task_updated.patch.status`: `pending`, `running`, `completed`, `failed`,
+    `killed`, `paused`;
+  - `task_updated.patch.is_backgrounded?: boolean`.
 - The SDK comment for `session_state_changed idle` says it is an authoritative
   turn-over signal after held-back result flushing and the background-agent
   loop exits. That is useful, but it is still a turn-over signal, not a
@@ -146,12 +156,14 @@ Important distinction:
   tasks. It is not an introspection API.
 - A no-op Stop hook can be used as an observational hook to capture
   `background_tasks` and `session_crons` without changing the transcript or
-  model behavior.
+  model behavior. Implementation must return the minimal continue/neutral hook
+  output and avoid `additionalContext`, `decision`, or any other field that
+  could alter the model turn.
 
 ## Tactical Mitigation
 
-First step: increase the default idle reap timeout for owned provider
-processes from 5 minutes to 20 minutes.
+First step: increase the no-config default idle reap timeout for owned
+provider processes from 5 minutes to 20 minutes.
 
 Rationale:
 
@@ -160,6 +172,9 @@ Rationale:
 - A 20-minute timeout reduces the chance of breaking active Claude work while
   the correct retention model is implemented.
 - This is only a mitigation. It does not make `result` a quiescence signal.
+- Existing explicit `IDLE_TIMEOUT` deployments should keep their configured
+  value; this is a new-install/no-env default, not a configuration precedence
+  change.
 
 Guardrail for this mitigation: do not remove idle reaping entirely. The
 architecture mandate still stands: an idle provider session and a closed client
@@ -169,9 +184,16 @@ tab must not indefinitely consume server resources.
 
 Introduce explicit provider-retention evidence for Claude. A Claude-owned
 process should not be reaped while any known provider-owned wakeup remains.
+The useful internal question is not whether the session is "done forever";
+with session crons and loops that may be unknowable. The question is whether
+the process is **reap eligible now**.
 
 Candidate retention model:
 
+- Add a provider-retention snapshot surface from the Claude provider to
+  `Process`, rather than hiding the decision only in the supervisor-level
+  heartbeat/feature retention callback. Provider-owned wakeups are lifecycle
+  evidence of the running process itself.
 - Track the latest Stop hook snapshot for the session:
   - `background_tasks.length > 0`
   - `session_crons.length > 0`
@@ -179,8 +201,12 @@ Candidate retention model:
   - add/update task on `task_started`, `task_updated`, `task_progress`;
   - settle/remove task on `task_notification` with `completed`, `failed`, or
     `stopped`;
-  - treat `is_backgrounded` and non-terminal task status as retention evidence.
-- Consider Claude quiescent for idle-reap only when:
+  - settle/remove task on `task_updated.patch.status` with terminal statuses
+    such as `completed`, `failed`, or `killed`;
+  - treat `is_backgrounded` and non-terminal task status as retention evidence;
+  - treat unknown task status conservatively as retention evidence until a
+    terminal update or a clean empty Stop hook snapshot proves otherwise.
+- Consider a Claude-owned process reap eligible now only when:
   - the process is owned by YA;
   - Claude has reached a turn boundary;
   - Claude has emitted `session_state_changed idle`, if available;
@@ -195,7 +221,8 @@ Suggested state naming:
 - `idle`: the visible foreground turn is over.
 - `provider-retained`: the foreground turn is idle, but Claude has known
   background/scheduled work that may wake it.
-- `reap-eligible`: idle and no provider-owned wakeup evidence remains.
+- `reap-eligible-now`: idle and no provider-owned wakeup evidence currently
+  remains.
 
 The UI does not need to show every internal distinction immediately. The
 server-side lifecycle decision does.
@@ -207,7 +234,10 @@ server-side lifecycle decision does.
   JSONL is useful forensic evidence, but the live SDK hook/control stream is
   the authoritative place to observe current registered wakeups.
 - Do not break heartbeat behavior. Heartbeat turns are YA-owned work and remain
-  separate from Claude-owned background task wakeups.
+  separate from Claude-owned background task wakeups. Cheap cooperation is
+  enough: while provider-retained, the session should not look like plain
+  `verified-idle` to heartbeat scheduling, so heartbeat does not inject a YA
+  turn into a provider-owned pause.
 - Do not let the fix keep truly idle sessions forever. If Stop hook data says
   no background tasks and no session crons, the normal idle reap policy should
   still apply after the configured timeout.
@@ -233,29 +263,37 @@ server-side lifecycle decision does.
 Add focused coverage before changing the lifecycle rules broadly:
 
 - Unit test: Claude `result` followed by Stop hook data with one
-  `background_tasks` entry does not become reap-eligible.
+  `background_tasks` entry does not become reap-eligible-now.
 - Unit test: Claude `session_state_changed idle` with one `session_crons`
-  entry does not become reap-eligible.
+  entry does not become reap-eligible-now.
 - Unit test: after a `task_notification` settles the last background task and
   the Stop hook snapshot is empty, normal idle reap eligibility returns.
+- Unit test: `task_updated.patch.status: "killed"` clears retention for that
+  task, while unknown or non-terminal statuses retain conservatively.
 - Regression test: no live subscribers and heartbeat disabled still reap a
   truly idle Claude process after the timeout.
+- Regression test: no explicit `IDLE_TIMEOUT` uses the new 20-minute default,
+  while an explicit env override still wins.
 - Regression test: `waiting-input` still blocks idle reap.
 - Regression test: deferred queue promotion still happens at whole-turn idle
   boundaries.
+- Regression test: heartbeat scheduling skips or treats provider-retained
+  Claude idle as not plain verified idle, without making heartbeat the primary
+  lifecycle owner.
 - Windows-focused manual test: start a Claude session that backgrounds a long
   command, wait past the previous 5-minute timeout, confirm YA still owns the
   session and permission/tool calls continue after the task wakes the agent.
 
 ## Open Questions
 
-- Should the first implementation rely only on a no-op Stop hook snapshot, or
-  should it also maintain the SDK task map from day one?
+- Should the implementation expose provider-retained idle in `/api/processes`
+  now, or keep it as internal liveness evidence until the UI has a clear need?
 - Does Claude always fire Stop hooks before every wake-capable pause, including
   background shell tasks, background subagents, `/loop`, and scheduled wakeups?
 - Should `session_state_changed idle` become the preferred Claude turn boundary
   over `result`, with `result` retained only for older SDK versions?
 - How should provider-retained idle be exposed in `/api/processes` and session
   activity copy without making YA-visible behavior feel novel or confusing?
-- Should the default 20-minute mitigation apply to all providers or only
-  Claude-owned sessions until the provider-specific retention model lands?
+- Should the default 20-minute mitigation stay global for owned provider
+  processes, or narrow later if another provider shows materially different
+  resource/cost behavior?
