@@ -84,6 +84,9 @@ export type {
   SessionLivenessDerivedStatus,
   SessionLivenessProbeStatus,
   SessionLivenessSnapshot,
+  SessionProviderRetentionSnapshot,
+  SessionWakeReason,
+  SessionWakeReasonSnapshot,
 } from "./session-liveness.js";
 
 export type {

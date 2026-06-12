@@ -684,7 +684,7 @@ export class Supervisor {
       globalInstructions: modelSettings?.globalInstructions,
       promptSuggestions: promptSuggestionMode === "native",
       onProviderRetentionChange: () =>
-        processHolder.process?.handleProviderRetentionChanged(),
+        this.handleProviderRetentionChanged(processHolder),
       onToolApproval: async (toolName, input, opts) => {
         if (!processHolder.process) {
           return { behavior: "deny", message: "Process not ready" };
@@ -1065,7 +1065,7 @@ export class Supervisor {
       globalInstructions: modelSettings?.globalInstructions,
       promptSuggestions: promptSuggestionMode === "native",
       onProviderRetentionChange: () =>
-        processHolder.process?.handleProviderRetentionChanged(),
+        this.handleProviderRetentionChanged(processHolder),
       onToolApproval: async (toolName, input, opts) => {
         // Delegate to the process's handleToolApproval
         if (!processHolder.process) {
@@ -1192,7 +1192,7 @@ export class Supervisor {
       shouldEmitLiveDeltas: () =>
         processHolder.process?.hasLiveDeltaSubscribers() ?? false,
       onProviderRetentionChange: () =>
-        processHolder.process?.handleProviderRetentionChanged(),
+        this.handleProviderRetentionChanged(processHolder),
       onToolApproval: async (toolName, input, opts) => {
         if (!processHolder.process) {
           return { behavior: "deny", message: "Process not ready" };
@@ -1316,7 +1316,7 @@ export class Supervisor {
       shouldEmitLiveDeltas: () =>
         processHolder.process?.hasLiveDeltaSubscribers() ?? false,
       onProviderRetentionChange: () =>
-        processHolder.process?.handleProviderRetentionChanged(),
+        this.handleProviderRetentionChanged(processHolder),
       onToolApproval: async (toolName, input, opts) => {
         if (!processHolder.process) {
           return { behavior: "deny", message: "Process not ready" };
@@ -3140,6 +3140,26 @@ export class Supervisor {
     this.eventBus.emit(event);
   }
 
+  private handleProviderRetentionChanged(processHolder: {
+    process: Process | null;
+  }): void {
+    processHolder.process?.handleProviderRetentionChanged();
+    this.emitWorkerActivity();
+  }
+
+  private processHasActiveWork(process: Process): boolean {
+    if (
+      process.state.type === "in-turn" ||
+      process.state.type === "waiting-input"
+    ) {
+      return true;
+    }
+    return (
+      process.getLivenessSnapshot().derivedStatus ===
+      "verified-waiting-provider"
+    );
+  }
+
   /**
    * Emit worker activity event for safe restart indicator.
    * Called when workers are added, removed, or change state.
@@ -3147,8 +3167,8 @@ export class Supervisor {
   private emitWorkerActivity(): void {
     if (!this.eventBus) return;
 
-    const hasActiveWork = Array.from(this.processes.values()).some(
-      (p) => p.state.type === "in-turn" || p.state.type === "waiting-input",
+    const hasActiveWork = Array.from(this.processes.values()).some((p) =>
+      this.processHasActiveWork(p),
     );
 
     const event: WorkerActivityEvent = {
@@ -3427,8 +3447,8 @@ export class Supervisor {
     queueLength: number;
     hasActiveWork: boolean;
   } {
-    const hasActiveWork = Array.from(this.processes.values()).some(
-      (p) => p.state.type === "in-turn" || p.state.type === "waiting-input",
+    const hasActiveWork = Array.from(this.processes.values()).some((p) =>
+      this.processHasActiveWork(p),
     );
     return {
       activeWorkers: this.processes.size,

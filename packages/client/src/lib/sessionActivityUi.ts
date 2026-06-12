@@ -1,3 +1,4 @@
+import type { SessionLivenessSnapshot } from "@yep-anywhere/shared";
 import type { RenderItem } from "../types/renderItems";
 
 export type SessionActivityOwner = "self" | "external" | "none";
@@ -10,6 +11,7 @@ interface SessionActivityUiInput {
   owner: SessionActivityOwner;
   processState: SessionActivityProcessState;
   items: RenderItem[];
+  sessionLiveness?: SessionLivenessSnapshot | null;
   hasSessionUpdateStream?: boolean;
   sessionUpdatesConnected?: boolean;
 }
@@ -65,6 +67,7 @@ export function getSessionActivityUiState({
   owner,
   processState,
   items,
+  sessionLiveness = null,
   hasSessionUpdateStream = false,
   sessionUpdatesConnected = true,
 }: SessionActivityUiInput): SessionActivityUiState {
@@ -82,9 +85,11 @@ export function getSessionActivityUiState({
   );
 
   const ownsTurn = owner === "self";
+  const providerRetained =
+    sessionLiveness?.derivedStatus === "verified-waiting-provider";
   const staleStreamMayHideCurrentTurn =
     hasSessionUpdateStream && !sessionUpdatesConnected;
-  const processStateIsActive = processState !== "idle";
+  const processStateIsActive = processState !== "idle" || providerRetained;
   const latestTurnFallbackActive =
     !latestTurnSettled &&
     (hasPendingToolCallsInLatestTurn || staleStreamMayHideCurrentTurn);
@@ -93,6 +98,7 @@ export function getSessionActivityUiState({
   const canStopOwnedProcess =
     ownsTurn &&
     (processState === "in-turn" ||
+      providerRetained ||
       (!latestTurnSettled && hasPendingToolCallsInLatestTurn));
 
   return {
@@ -106,6 +112,7 @@ export function getSessionActivityUiState({
       latestTurnMayStillBeActive &&
       (processState === "in-turn" ||
         processState === "waiting-input" ||
+        providerRetained ||
         latestTurnFallbackActive),
   };
 }

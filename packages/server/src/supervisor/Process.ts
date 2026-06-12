@@ -7,6 +7,8 @@ import type {
   ProviderName,
   RecapMode,
   SessionLivenessSnapshot,
+  SessionWakeReason,
+  SessionWakeReasonSnapshot,
   SlashCommand,
   ThinkingConfig,
   UserQuestionAnswers,
@@ -191,6 +193,24 @@ function getClaudeSessionStateChange(
   return state === "idle" || state === "running" || state === "requires_action"
     ? state
     : null;
+}
+
+function getSdkMessageSubtype(message: SDKMessage): string | undefined {
+  return typeof message.subtype === "string" ? message.subtype : undefined;
+}
+
+function isProviderWorkWakeMessage(message: SDKMessage): boolean {
+  const claudeState = getClaudeSessionStateChange(message);
+  if (claudeState !== null) {
+    return false;
+  }
+  if (message.type === "result") {
+    return false;
+  }
+  if (message.type === "system" && message.subtype === "init") {
+    return false;
+  }
+  return true;
 }
 
 function extractMessageText(message: SDKMessage): string | undefined {
@@ -422,6 +442,7 @@ export class Process {
   private getProviderRetentionFn:
     | (() => ProviderRetentionSnapshot)
     | null = null;
+  private lastWakeReason: SessionWakeReasonSnapshot | null = null;
   private _lastLivenessProbe: LivenessProbeResult | null = null;
   private _livenessProbeInFlight: Promise<LivenessProbeResult | null> | null =
     null;
@@ -635,6 +656,7 @@ export class Process {
       lastLivenessProbe: this._lastLivenessProbe,
       processAlive: this.isProcessAlive,
       providerRetention,
+      lastWakeReason: this.lastWakeReason,
       queueDepth: this.queueDepth,
       deferredQueueDepth: this.deferredQueueDepth,
       now,
@@ -655,6 +677,49 @@ export class Process {
     if (this._state.type === "idle") {
       this.rescheduleIdleTimerForCurrentIdlePeriod();
     }
+  }
+
+  private recordWakeReason(
+    reason: SessionWakeReason,
+    message?: SDKMessage,
+    at = new Date(),
+  ): void {
+    this.lastWakeReason = {
+      at: at.toISOString(),
+      fromState: this._state.type,
+      reason,
+      ...(message ? { messageType: message.type } : {}),
+      ...(message && getSdkMessageSubtype(message)
+        ? { messageSubtype: getSdkMessageSubtype(message) }
+        : {}),
+    };
+  }
+
+  private transitionToInTurnForWake(
+    reason: SessionWakeReason,
+    message?: SDKMessage,
+    at?: Date,
+  ): void {
+    if (this._state.type === "in-turn") {
+      return;
+    }
+    this.recordWakeReason(reason, message, at);
+    this.clearIdleTimer();
+    this.setState({ type: "in-turn" });
+  }
+
+  private promoteIdleForProviderWork(
+    message: SDKMessage,
+    receivedAt: Date,
+  ): void {
+    if (this._state.type !== "idle" || !isProviderWorkWakeMessage(message)) {
+      return;
+    }
+    this.transitionToInTurnForWake(
+      "provider-message-after-idle",
+      message,
+      receivedAt,
+    );
   }
 
   private toLivenessState(): LivenessProcessState {
@@ -1615,8 +1680,7 @@ export class Process {
 
       // Transition to running if we were idle
       if (this._state.type === "idle") {
-        this.clearIdleTimer();
-        this.setState({ type: "in-turn" });
+        this.transitionToInTurnForWake("user-message");
       }
       // Pass message with UUID so SDK uses the same UUID we emitted via SSE
       const position = this.messageQueue.push(messageWithUuid);
@@ -2244,7 +2308,7 @@ export class Process {
       }
     }
     // No more pending approvals
-    this.setState({ type: "in-turn" });
+    this.transitionToInTurnForWake("tool-approval-resolved");
   }
 
   /**
@@ -2269,7 +2333,7 @@ export class Process {
         this._state.request.id === requestId
       ) {
         // Mock SDK case - just transition back to idle/running
-        this.setState({ type: "in-turn" });
+        this.transitionToInTurnForWake("tool-approval-resolved");
         return true;
       }
       return false;
@@ -2519,6 +2583,8 @@ export class Process {
           this._resolvedModel = message.message.model;
         }
 
+        this.promoteIdleForProviderWork(message, receivedAt);
+
         // Emit to SSE subscribers
         // See shouldEmitMessage() for why we never filter messages
         if (shouldEmitMessage(message)) {
@@ -2663,22 +2729,25 @@ export class Process {
         break;
 
       case "running":
-        this.clearIdleTimer();
         if (
           this._state.type === "waiting-input" &&
           this.pendingToolApprovals.size > 0
         ) {
+          this.clearIdleTimer();
           return;
         }
         if (this._state.type !== "in-turn") {
-          this.setState({ type: "in-turn" });
+          this.transitionToInTurnForWake("session-state-running");
+        } else {
+          this.clearIdleTimer();
         }
         break;
 
       case "requires_action":
-        this.clearIdleTimer();
         if (this._state.type === "idle") {
-          this.setState({ type: "in-turn" });
+          this.transitionToInTurnForWake("session-state-requires-action");
+        } else {
+          this.clearIdleTimer();
         }
         break;
     }
@@ -2982,7 +3051,7 @@ export class Process {
     if (nextMessage) {
       // In real implementation with MessageQueue, this happens automatically
       // For mock SDK, we just transition back to running
-      this.setState({ type: "in-turn" });
+      this.transitionToInTurnForWake("user-message");
     }
   }
 

@@ -946,6 +946,7 @@ function SessionPageContent({
         owner: status.owner,
         processState,
         items: activityRenderItems,
+        sessionLiveness,
         hasSessionUpdateStream,
         sessionUpdatesConnected,
       }),
@@ -953,6 +954,7 @@ function SessionPageContent({
       activityRenderItems,
       hasSessionUpdateStream,
       processState,
+      sessionLiveness,
       sessionUpdatesConnected,
       status.owner,
     ],
@@ -3701,6 +3703,7 @@ function SessionPageContent({
           model={session.model}
           status={status}
           processState={processState}
+          sessionLiveness={sessionLiveness}
           contextUsage={session.contextUsage}
           originator={session.originator}
           cliVersion={session.cliVersion}

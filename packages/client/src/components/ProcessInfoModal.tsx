@@ -39,6 +39,7 @@ interface ProcessInfoModalProps {
   model?: string;
   status: SessionStatus;
   processState: ProcessState;
+  sessionLiveness?: SessionLivenessSnapshot | null;
   contextUsage?: ContextUsage;
   originator?: string;
   cliVersion?: string;
@@ -140,6 +141,20 @@ function formatSandboxPolicy(
   return `${policy.type} (${details.join(", ")})`;
 }
 
+function formatProviderRetention(
+  retention: SessionLivenessSnapshot["providerRetention"] | undefined,
+): string | null {
+  if (!retention?.retained) return null;
+
+  const counts = [
+    `bg=${retention.backgroundTaskCount ?? 0}`,
+    `crons=${retention.sessionCronCount ?? 0}`,
+    `tasks=${retention.liveTaskCount ?? 0}`,
+  ].join(" ");
+  const reasons = retention.reasons.join(", ");
+  return reasons ? `${counts}; ${reasons}` : counts;
+}
+
 function InfoRow({
   label,
   value,
@@ -181,6 +196,7 @@ export function ProcessInfoModal({
   model,
   status,
   processState,
+  sessionLiveness,
   contextUsage,
   originator,
   cliVersion,
@@ -199,6 +215,7 @@ export function ProcessInfoModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { connected: streamConnected, connectionState } = useActivityBusState();
+  const liveness = processInfo?.liveness ?? sessionLiveness ?? null;
 
   // Fetch process info when modal opens (if session is owned)
   useEffect(() => {
@@ -226,6 +243,21 @@ export function ProcessInfoModal({
       .split("-")
       .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
       .join(" ");
+
+  const activityValue =
+    liveness?.derivedStatus === "verified-waiting-provider"
+      ? t("toolbarLivenessWaitingOnProvider")
+      : formatKebab(processState);
+  const retentionValue = formatProviderRetention(liveness?.providerRetention);
+  const wake = liveness?.lastWakeReason;
+  const wakeValue = wake
+    ? `${formatKebab(wake.reason)} (${formatTimeAgo(new Date(wake.at).getTime(), tr)})`
+    : null;
+  const wakeMessageValue = wake?.messageType
+    ? wake.messageSubtype
+      ? `${wake.messageType}/${wake.messageSubtype}`
+      : wake.messageType
+    : null;
 
   const getProviderDisplay = (p: string) => {
     switch (p) {
@@ -275,7 +307,25 @@ export function ProcessInfoModal({
           />
           <InfoRow
             label={t("processInfoLabelActivity")}
-            value={formatKebab(processState)}
+            value={activityValue}
+          />
+          <InfoRow
+            label={t("processInfoLabelLiveness")}
+            value={liveness ? formatKebab(liveness.derivedStatus) : null}
+          />
+          <InfoRow
+            label={t("processInfoLabelProviderRetention")}
+            value={retentionValue}
+            mono
+          />
+          <InfoRow
+            label={t("processInfoLabelLastWake")}
+            value={wakeValue}
+          />
+          <InfoRow
+            label={t("processInfoLabelWakeMessage")}
+            value={wakeMessageValue}
+            mono
           />
           <InfoRow label={t("processInfoLabelOriginator")} value={originator} />
           <InfoRow

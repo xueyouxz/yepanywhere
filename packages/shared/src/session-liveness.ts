@@ -22,6 +22,30 @@ export type SessionLivenessProbeStatus =
   | "unavailable"
   | "error";
 
+export interface SessionProviderRetentionSnapshot {
+  retained: boolean;
+  reasons: string[];
+  backgroundTaskCount?: number;
+  sessionCronCount?: number;
+  liveTaskCount?: number;
+  lastUpdatedAt?: string | null;
+}
+
+export type SessionWakeReason =
+  | "session-state-running"
+  | "session-state-requires-action"
+  | "provider-message-after-idle"
+  | "user-message"
+  | "tool-approval-resolved";
+
+export interface SessionWakeReasonSnapshot {
+  at: string;
+  fromState: "idle" | "in-turn" | "waiting-input" | "terminated";
+  reason: SessionWakeReason;
+  messageType?: string;
+  messageSubtype?: string;
+}
+
 export interface SessionLivenessSnapshot {
   checkedAt: string;
   derivedStatus: SessionLivenessDerivedStatus;
@@ -41,6 +65,8 @@ export interface SessionLivenessSnapshot {
   silenceMs: number | null;
   longSilenceThresholdMs: number;
   processAlive?: boolean;
+  providerRetention?: SessionProviderRetentionSnapshot;
+  lastWakeReason?: SessionWakeReasonSnapshot;
   queueDepth: number;
   deferredQueueDepth: number;
 }

@@ -1,6 +1,7 @@
 # Claude Background Task Idle Reap
 
-Status: Implemented. Windows manual validation still recommended.
+Status: Implemented. Follow-up wake diagnostics and UI clarity implemented;
+Windows manual validation still recommended.
 
 Progress:
 
@@ -16,6 +17,12 @@ Progress:
 - [x] 2026-06-13: Kept explicit operator configuration authoritative:
   an `IDLE_TIMEOUT` env override continues to win over the new no-config
   default.
+- [x] 2026-06-13: Add low-churn wake diagnostics so provider-retained idle
+  and post-background wakeups are visible without adding a new first-class
+  `AgentActivity` enum value.
+- [x] 2026-06-13: Promote a coarse-idle owned process back to `in-turn` when
+  provider work messages arrive after a provider-retained idle pause, even if
+  Claude does not emit `session_state_changed` with `state: "running"`.
 
 ## Problem
 
@@ -230,6 +237,49 @@ Suggested state naming:
 The UI does not need to show every internal distinction immediately. The
 server-side lifecycle decision does.
 
+## Follow-up: Wake Diagnostics
+
+The first implementation keeps `AgentActivity` as the coarse process-control
+state: `in-turn`, `idle`, `waiting-input`, or `terminated`. That avoided broad
+activity-bus and client lifecycle churn, but real validation showed an
+important nuance:
+
+- YA can correctly retain a Claude-owned process while it is foreground-idle
+  and waiting on provider-owned background work.
+- When that background task completes, Claude may append new session content
+  without first sending `session_state_changed` with `state: "running"`.
+- YA then receives fresh messages and token usage, but the coarse activity row
+  can still say `idle` because ordinary provider messages do not currently
+  promote an idle `Process` back to `in-turn`.
+
+Low-churn follow-up model:
+
+- Keep `AgentActivity` unchanged.
+- Treat provider-retained idle as a liveness/retention overlay, not a new
+  activity enum value.
+- Add structured optional diagnostics to liveness/process info:
+  - current provider-retention snapshot: retained flag, reasons, task/cron
+    counts, and last retention update time;
+  - last wake reason: timestamp, previous coarse state, reason, and the
+    provider message type/subtype when a provider message wakes an idle
+    process.
+- Show those diagnostics in Session Info/debug surfaces, and let UI activity
+  derivation treat `verified-waiting-provider` as background work without
+  replacing the canonical coarse state.
+- Promote from coarse `idle` to `in-turn` on post-idle provider work messages
+  such as assistant output, stream events, task lifecycle messages, and tool
+  result messages. Do not promote on terminal boundary/bookkeeping messages
+  such as `result`, `session_state_changed idle`, or `init`.
+
+This keeps the public state machine small while answering future debugging
+questions:
+
+- Why did this idle process not reap?
+- What provider-owned work was retaining it?
+- What caused it to wake back into active work?
+- Did Claude explicitly report `running`, or did YA infer the wake from a
+  post-idle provider message?
+
 ## Guardrails
 
 - Do not treat `result` alone as safe-to-reap for Claude.
@@ -283,6 +333,13 @@ Add focused coverage before changing the lifecycle rules broadly:
 - Regression test: heartbeat scheduling skips or treats provider-retained
   Claude idle as not plain verified idle, without making heartbeat the primary
   lifecycle owner.
+- Regression test: a provider work message arriving while an owned process is
+  coarse-idle promotes the process back to `in-turn`, records a wake reason,
+  and clears any immediate idle reap timer.
+- Regression test: liveness snapshots expose provider-retention and last-wake
+  diagnostics without requiring a new `AgentActivity` value.
+- UI test: provider-retained idle is shown as background/provider work in
+  Session Info/activity derivation rather than plain idle.
 - Windows-focused manual test: start a Claude session that backgrounds a long
   command, wait past the previous 5-minute timeout, confirm YA still owns the
   session and permission/tool calls continue after the task wakes the agent.

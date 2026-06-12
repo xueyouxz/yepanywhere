@@ -4,6 +4,8 @@ import type {
   SessionLivenessDerivedStatus,
   SessionLivenessProbeStatus,
   SessionLivenessSnapshot,
+  SessionProviderRetentionSnapshot,
+  SessionWakeReasonSnapshot,
 } from "@yep-anywhere/shared";
 import type { ProviderRetentionSnapshot } from "../sdk/types.js";
 
@@ -24,6 +26,7 @@ export interface BuildSessionLivenessSnapshotInput {
   lastLivenessProbe: LivenessProbeResult | null;
   processAlive?: boolean;
   providerRetention?: ProviderRetentionSnapshot;
+  lastWakeReason?: SessionWakeReasonSnapshot | null;
   queueDepth: number;
   deferredQueueDepth: number;
   now?: Date;
@@ -47,6 +50,30 @@ function elapsedMs(now: Date, then: Date | null | undefined): number | null {
   return then ? Math.max(0, now.getTime() - then.getTime()) : null;
 }
 
+function serializeProviderRetention(
+  snapshot: ProviderRetentionSnapshot | undefined,
+): SessionProviderRetentionSnapshot | undefined {
+  if (!snapshot) {
+    return undefined;
+  }
+  return {
+    retained: snapshot.retained,
+    reasons: snapshot.reasons,
+    ...(snapshot.backgroundTaskCount !== undefined
+      ? { backgroundTaskCount: snapshot.backgroundTaskCount }
+      : {}),
+    ...(snapshot.sessionCronCount !== undefined
+      ? { sessionCronCount: snapshot.sessionCronCount }
+      : {}),
+    ...(snapshot.liveTaskCount !== undefined
+      ? { liveTaskCount: snapshot.liveTaskCount }
+      : {}),
+    ...(snapshot.lastUpdatedAt !== undefined
+      ? { lastUpdatedAt: isoOrNull(snapshot.lastUpdatedAt) }
+      : {}),
+  };
+}
+
 export function buildSessionLivenessSnapshot({
   provider,
   state,
@@ -58,12 +85,15 @@ export function buildSessionLivenessSnapshot({
   lastLivenessProbe,
   processAlive,
   providerRetention,
+  lastWakeReason = null,
   queueDepth,
   deferredQueueDepth,
   now = new Date(),
   longSilenceThresholdMs = DEFAULT_LONG_SILENCE_THRESHOLD_MS,
 }: BuildSessionLivenessSnapshotInput): SessionLivenessSnapshot {
   const evidence = [`state:${state.type}`, `provider:${provider}`];
+  const serializedProviderRetention =
+    serializeProviderRetention(providerRetention);
   const silenceMs = elapsedMs(now, lastProviderMessageAt);
   const activeSilenceAnchor = lastProviderMessageAt ?? lastStateChangeAt ?? startedAt;
   const activeSilenceMs = elapsedMs(now, activeSilenceAnchor) ?? 0;
@@ -232,6 +262,10 @@ export function buildSessionLivenessSnapshot({
     silenceMs,
     longSilenceThresholdMs,
     ...(processAlive !== undefined ? { processAlive } : {}),
+    ...(serializedProviderRetention
+      ? { providerRetention: serializedProviderRetention }
+      : {}),
+    ...(lastWakeReason ? { lastWakeReason } : {}),
     queueDepth,
     deferredQueueDepth,
   };

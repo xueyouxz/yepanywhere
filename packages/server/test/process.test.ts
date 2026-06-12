@@ -291,6 +291,10 @@ describe("Process", () => {
       });
 
       await waitFor(() => expect(process.state.type).toBe("in-turn"));
+      expect(process.getLivenessSnapshot().lastWakeReason).toMatchObject({
+        fromState: "idle",
+        reason: "session-state-requires-action",
+      });
       expect(process.getPendingInputRequest()).toBeNull();
     });
 
@@ -328,6 +332,11 @@ describe("Process", () => {
         expect(process.getLivenessSnapshot()).toMatchObject({
           derivedStatus: "verified-waiting-provider",
           activeWorkKind: "agent-turn",
+          providerRetention: {
+            retained: true,
+            reasons: ["stop-hook-background-tasks:1"],
+            backgroundTaskCount: 1,
+          },
         });
 
         await vi.advanceTimersByTimeAsync(150);
@@ -338,6 +347,74 @@ describe("Process", () => {
         await vi.advanceTimersByTimeAsync(0);
 
         expect(abortFn).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("wakes retained idle on provider work before an immediate idle reap", async () => {
+      vi.useFakeTimers();
+      try {
+        let providerRetention: ProviderRetentionSnapshot = {
+          retained: true,
+          reasons: ["stop-hook-background-tasks:1"],
+          backgroundTaskCount: 1,
+          sessionCronCount: 0,
+          liveTaskCount: 0,
+        };
+        const abortFn = vi.fn();
+        const controller = createControllableIterator();
+        const process = new Process(controller.iterator, {
+          projectPath: "/test",
+          projectId: "proj-1",
+          sessionId: "sess-1",
+          provider: "claude",
+          idleTimeoutMs: 100,
+          abortFn,
+          getProviderRetentionFn: () => providerRetention,
+        });
+
+        controller.push({
+          type: "system",
+          subtype: "init",
+          session_id: "sess-1",
+        });
+        controller.push({ type: "result", session_id: "sess-1" });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(process.state.type).toBe("idle");
+
+        await vi.advanceTimersByTimeAsync(150);
+        expect(abortFn).not.toHaveBeenCalled();
+
+        providerRetention = { retained: false, reasons: [] };
+        process.handleProviderRetentionChanged();
+        controller.push({
+          type: "system",
+          subtype: "task_notification",
+          task_id: "task-1",
+          status: "completed",
+          session_id: "sess-1",
+        } as SDKMessage);
+
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(process.state.type).toBe("in-turn");
+
+        await vi.advanceTimersByTimeAsync(0);
+        expect(abortFn).not.toHaveBeenCalled();
+        expect(process.getLivenessSnapshot()).toMatchObject({
+          derivedStatus: "verified-progressing",
+          lastWakeReason: {
+            fromState: "idle",
+            reason: "provider-message-after-idle",
+            messageType: "system",
+            messageSubtype: "task_notification",
+          },
+          providerRetention: {
+            retained: false,
+            reasons: [],
+          },
+        });
       } finally {
         vi.useRealTimers();
       }

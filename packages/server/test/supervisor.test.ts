@@ -1284,10 +1284,17 @@ describe("Supervisor", () => {
         expect(started.getLivenessSnapshot().derivedStatus).toBe(
           "verified-waiting-provider",
         );
+        expect(supervisorWithHeartbeat.getWorkerActivity()).toMatchObject({
+          activeWorkers: 1,
+          hasActiveWork: true,
+        });
 
         await vi.advanceTimersByTimeAsync(60_000);
         expect(started.state.type).toBe("idle");
         expect(started.queueDepth).toBe(0);
+        expect(supervisorWithHeartbeat.getWorkerActivity().hasActiveWork).toBe(
+          true,
+        );
 
         const abortPromise = supervisorWithHeartbeat.abortProcess(started.id);
         await vi.advanceTimersByTimeAsync(5000);
