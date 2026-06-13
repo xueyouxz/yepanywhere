@@ -2779,6 +2779,13 @@ a.sidebar-nav-item {
   min-height: 0; /* Critical for nested flex overflow */
 }
 
+.main-content-mobile-inner .session-input-inner,
+.main-content-mobile-inner .session-messages .message-list {
+  width: 100%;
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+}
+
 /* Mobile-specific adjustments */
 @media (max-width: 600px) {
   .session-header {
@@ -10822,16 +10829,18 @@ a.sidebar-nav-item {
     padding-right: calc(1rem + min(30px, 2vw));
   }
 
+  /* Keep the normal session transcript/composer on the user's content-width
+     preference. The /btw split-pane layout has a narrower-track override above. */
   .main-content-constrained .session-input-inner {
     width: 100%;
-    max-width: none;
-    margin: 0;
+    max-width: var(--content-max-width);
+    margin: 0 auto;
   }
 
   .main-content-constrained .session-messages .message-list {
     width: 100%;
-    max-width: none;
-    margin: 0;
+    max-width: var(--content-max-width);
+    margin: 0 auto;
   }
 
   /* Show sidebar toggle on desktop for collapse/expand functionality */
