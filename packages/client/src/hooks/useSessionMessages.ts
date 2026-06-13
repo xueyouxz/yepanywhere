@@ -108,6 +108,17 @@ interface SessionLoadCacheGlobal {
   __YA_SESSION_LOAD_CACHE__?: Map<string, SessionLoadCacheEntry>;
 }
 
+type SessionLoadCacheEnv = Pick<
+  ImportMetaEnv,
+  "DEV" | "VITE_SESSION_LOAD_CACHE"
+>;
+
+export function isSessionLoadCacheEnabled(
+  env: SessionLoadCacheEnv = import.meta.env,
+): boolean {
+  return env.DEV === true && env.VITE_SESSION_LOAD_CACHE === "true";
+}
+
 function cloneForCache<T>(value: T): T {
   if (typeof structuredClone === "function") {
     return structuredClone(value);
@@ -150,6 +161,7 @@ function readSessionLoadCache(
   tailTurns?: number,
   tailFrom?: string,
 ): SessionLoadCacheEntry | undefined {
+  if (!isSessionLoadCacheEnabled()) return undefined;
   if (typeof window === "undefined") return undefined;
   return getSessionLoadCache().get(
     getSessionLoadVariantKey({ projectId, sessionId, tailTurns, tailFrom }),
@@ -163,6 +175,7 @@ function writeSessionLoadCache(
   tailTurns?: number,
   tailFrom?: string,
 ): void {
+  if (!isSessionLoadCacheEnabled()) return;
   if (typeof window === "undefined") return;
   getSessionLoadCache().set(
     getSessionLoadVariantKey({ projectId, sessionId, tailTurns, tailFrom }),

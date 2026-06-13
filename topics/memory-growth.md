@@ -18,6 +18,15 @@
   non-incremental session detail response; streaming and `afterMessageId`
   refreshes must append normally so the loaded tail can grow without repeated
   recutting.
+- In-tab session-load caching is a developer convenience only. It must stay
+  disabled in production builds and default-off in development because retaining
+  every visited transcript can grow mobile browser memory and briefly show
+  stale transcript state during ordinary navigation.
+- Any future production client-side cache needs an explicit design note before
+  it ships: what user-visible behavior it changes, what data it retains, its
+  eviction policy, memory/entry limits, low-memory mobile behavior, invalidation
+  and staleness rules, and why those trade-offs are acceptable. Ad hoc
+  transcript caching must not be enabled by default.
 
 ## 2026-05-12: heartbeat session `019e1ac6-c836-7e33-891e-2ba878d27ca5`
 
