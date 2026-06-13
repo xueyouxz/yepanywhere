@@ -197,6 +197,15 @@ function appendComposerTransferDraft(
   return `${current}\n\n${addition}`;
 }
 
+function appendSlashCommandDraft(currentDraft: string, command: string): string {
+  const normalizedCommand = command.startsWith("/") ? command : `/${command}`;
+  const current = currentDraft.trimEnd();
+  if (/^\/[^\s/]*$/.test(current)) {
+    return `${normalizedCommand} `;
+  }
+  return current ? `${current} ${normalizedCommand} ` : `${normalizedCommand} `;
+}
+
 function getDeferredEditPlacement(
   messages: DeferredMessage[],
   tempId: string,
@@ -844,16 +853,19 @@ function SessionPageContent({
   // Inject custom client-side commands alongside SDK-discovered ones.
   // Keep /model last so it stays nearest the slash button in the upward menu.
   const allSlashCommands = useMemo(() => {
-    if (status.owner !== "self") {
-      return slashCommands;
+    if (status.owner === "external") {
+      return [];
     }
 
-    const orderedCommands: string[] = CLIENT_SLASH_COMMANDS.filter(
-      (command) =>
-        command !== "model" &&
-        (command !== "btw" || supportsBtwAsides) &&
-        (command !== "done" || !!focusedBtwAsideId),
-    );
+    const orderedCommands: string[] =
+      status.owner === "self"
+        ? CLIENT_SLASH_COMMANDS.filter(
+            (command) =>
+              command !== "model" &&
+              (command !== "btw" || supportsBtwAsides) &&
+              (command !== "done" || !!focusedBtwAsideId),
+          )
+        : [];
     if (supportsManualCompact) {
       orderedCommands.push("compact");
     }
@@ -864,7 +876,9 @@ function SessionPageContent({
       }
     }
 
-    orderedCommands.push("model");
+    if (status.owner === "self") {
+      orderedCommands.push("model");
+    }
 
     return orderedCommands;
   }, [
@@ -2754,7 +2768,7 @@ function SessionPageContent({
         setShowModelSwitchModal(true);
         return true;
       }
-      if (command === "compact") {
+      if (command === "compact" && supportsManualCompact) {
         void handleCompactSession();
         return true;
       }
@@ -2789,13 +2803,21 @@ function SessionPageContent({
       hideBtwAside,
       showToast,
       startBtwAside,
+      supportsManualCompact,
     ],
   );
 
   const handleToolbarSlashCommand = useCallback(
     (command: string) => {
       const bare = command.startsWith("/") ? command.slice(1) : command;
-      handleCustomCommand(bare);
+      if (handleCustomCommand(bare)) {
+        return;
+      }
+      const controls = draftControlsRef.current;
+      if (!controls) {
+        return;
+      }
+      controls.setDraft(appendSlashCommandDraft(controls.getDraft(), bare));
     },
     [handleCustomCommand],
   );
@@ -4114,9 +4136,7 @@ function SessionPageContent({
                     onModeChange={setPermissionMode}
                     supportsPermissionMode={supportsPermissionMode}
                     supportsThinkingToggle={supportsThinkingToggle}
-                    slashCommands={
-                      status.owner === "self" ? allSlashCommands : []
-                    }
+                    slashCommands={allSlashCommands}
                     onSelectSlashCommand={handleToolbarSlashCommand}
                     thinkingProvider={effectiveProvider}
                     thinkingModel={liveBadgeModel}
@@ -4216,7 +4236,7 @@ function SessionPageContent({
                   mainComposerForAside ? undefined : handleRemoveAttachment
                 }
                 uploadProgress={mainComposerForAside ? [] : uploadProgress}
-                slashCommands={status.owner === "self" ? allSlashCommands : []}
+                slashCommands={allSlashCommands}
                 onCustomCommand={handleCustomCommand}
                 onBtwShortcut={
                   childSessionParentHref || supportsBtwAsides

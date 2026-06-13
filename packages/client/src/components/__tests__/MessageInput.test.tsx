@@ -588,6 +588,30 @@ describe("MessageInput", () => {
     expect(onRecallLastSubmission).toHaveBeenCalledTimes(1);
   });
 
+  it("shows slash suggestions from a leading slash token", () => {
+    const textarea = renderMessageInput(vi.fn(() => true), {
+      slashCommands: ["compact", "goal"],
+      onCustomCommand: vi.fn(() => false),
+    });
+
+    fireEvent.change(textarea, { target: { value: "/co" } });
+
+    expect(screen.getByRole("menuitem", { name: "/compact" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "/goal" })).toBeNull();
+  });
+
+  it("accepts a typed slash suggestion into the composer", () => {
+    const textarea = renderMessageInput(vi.fn(() => true), {
+      slashCommands: ["compact", "goal"],
+      onCustomCommand: vi.fn(() => false),
+    }) as HTMLTextAreaElement;
+
+    fireEvent.change(textarea, { target: { value: "/co" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(textarea.value).toBe("/compact ");
+  });
+
   it("shows the isearch key guide on shortcut help hover while search is active", async () => {
     renderMessageInput();
 

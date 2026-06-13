@@ -5783,6 +5783,10 @@ a.sidebar-nav-item {
   background: var(--bg-hover);
 }
 
+.slash-command-item.active {
+  background: var(--bg-hover);
+}
+
 .slash-command-shortcut {
   color: var(--link-color);
   font-weight: 700;
@@ -5798,6 +5802,12 @@ a.sidebar-nav-item {
 
 .slash-command-item:only-child {
   border-radius: var(--radius-md);
+}
+
+.composer-slash-command-menu {
+  bottom: calc(100% - var(--space-1));
+  left: var(--space-2);
+  z-index: 120;
 }
 
 /* Attachment list */

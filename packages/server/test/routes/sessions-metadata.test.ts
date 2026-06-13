@@ -13,7 +13,7 @@ import {
 } from "../../src/routes/sessions.js";
 import type { CodexSessionReader } from "../../src/sessions/codex-reader.js";
 import type { GrokSessionReader } from "../../src/sessions/grok-reader.js";
-import type { ISessionReader } from "../../src/sessions/types.js";
+import type { ISessionReader, LoadedSession } from "../../src/sessions/types.js";
 import { ResumeCompactionError } from "../../src/supervisor/Supervisor.js";
 import type { Project, SessionSummary } from "../../src/supervisor/types.js";
 
@@ -43,6 +43,18 @@ function createSummary(): SessionSummary {
     ownership: { owner: "none" },
     provider: "codex",
     model: "gpt-5-codex",
+  };
+}
+
+function createLoadedCodexSession(): LoadedSession {
+  return {
+    summary: createSummary(),
+    data: {
+      provider: "codex",
+      session: {
+        entries: [],
+      },
+    },
   };
 }
 
@@ -953,6 +965,44 @@ describe("Sessions metadata route", () => {
     });
     expect(json.ownership).not.toHaveProperty("state");
     expect(json.processState).toBe("idle");
+  });
+
+  it("returns static Codex slash commands for stopped sessions", async () => {
+    const project = { ...createProject(), provider: "codex" as const };
+
+    const routes = createSessionsRoutes({
+      supervisor: {
+        getProcessForSession: vi.fn(() => null),
+        wasEverOwned: vi.fn(() => false),
+      } as unknown as SessionsDeps["supervisor"],
+      scanner: {
+        getOrCreateProject: vi.fn(async () => project),
+      } as unknown as SessionsDeps["scanner"],
+      readerFactory: vi.fn(
+        () =>
+          ({
+            getSession: vi.fn(async () => createLoadedCodexSession()),
+          }) as unknown as ISessionReader,
+      ),
+      sessionMetadataService: {
+        getMetadata: vi.fn(() => undefined),
+        getProvider: vi.fn(() => "codex"),
+      } as unknown as NonNullable<SessionsDeps["sessionMetadataService"]>,
+    });
+
+    const response = await routes.request(
+      `/projects/${project.id}/sessions/sess-1`,
+    );
+    expect(response.status).toBe(200);
+
+    const json = await response.json();
+    expect(json.ownership).toEqual({ owner: "none" });
+    expect(json.slashCommands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "compact" }),
+        expect.objectContaining({ name: "goal" }),
+      ]),
+    );
   });
 
   it("prefers persisted provider over conflicting client resume provider", async () => {

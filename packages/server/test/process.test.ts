@@ -816,6 +816,40 @@ describe("Process", () => {
       resolveIterator?.();
       await process.abort();
     });
+
+    it("keeps native Codex compact as a slash command before commands are cached", async () => {
+      let resolveIterator: () => void;
+      const iterator: AsyncIterator<SDKMessage> = {
+        next: () =>
+          new Promise((resolve) => {
+            resolveIterator = () => resolve({ done: true, value: undefined });
+          }),
+      };
+      const queue = new MessageQueue();
+      const process = new Process(iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        idleTimeoutMs: 100,
+        queue,
+        provider: "codex",
+        supportedCommandsFn: async () => [],
+      });
+
+      const result = process.queueMessage({
+        text: "/compact",
+      });
+
+      expect(result.success).toBe(true);
+      expect(process.getMessageHistory()[0]?.message?.content).toBe(
+        "/compact",
+      );
+      const queuedProviderTurn = await queue[Symbol.asyncIterator]().next();
+      expect(queuedProviderTurn.value?.message.content).toBe("/compact");
+
+      resolveIterator?.();
+      await process.abort();
+    });
   });
 
   describe("recaps", () => {

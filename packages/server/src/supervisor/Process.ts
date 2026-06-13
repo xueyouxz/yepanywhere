@@ -101,7 +101,7 @@ function patientPatienceMsForEntry(entry: DeferredQueueEntry): number {
   return patienceSeconds * 1000;
 }
 
-const CODEX_NATIVE_SLASH_COMMAND_NAMES = new Set(["goal"]);
+const CODEX_NATIVE_SLASH_COMMAND_NAMES = new Set(["compact", "goal"]);
 const ASK_USER_QUESTION_TOOL_NAME = "AskUserQuestion";
 
 function isAskUserQuestionTool(toolName: string): boolean {

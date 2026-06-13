@@ -501,6 +501,8 @@
   "toolbarSteerNowShortLabel": "Now",
   "toolbarSteerNowTooltip": "Steer now interrupts in-flight generation without ending the turn.",
   "toolbarOverflowMenu": "More toolbar controls",
+  "slashCommandsLabel": "Slash commands",
+  "slashCommandsShow": "Show slash commands",
   "toolbarQueuePrimaryActionLabel": "Queue from primary action",
   "toolbarThinkingTitle": "{current}. Click to choose; right-click or long-press to toggle off/on. Applies next turn.",
   "toolbarThinkingAppliesNextTurn": "Applies next turn",

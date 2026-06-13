@@ -189,7 +189,26 @@ describe("CodexProvider", () => {
       expect(typeof session.abort).toBe("function");
       expect(typeof session.interrupt).toBe("function");
       expect(typeof session.probeLiveness).toBe("function");
+      expect(typeof session.supportedCommands).toBe("function");
       expect(session.queue).toBeDefined();
+    });
+
+    it("advertises native slash commands for toolbar controls", async () => {
+      const noCliProvider = new CodexProvider({
+        codexPath: "/nonexistent/codex",
+      });
+
+      const session = await noCliProvider.startSession({
+        cwd: "/tmp",
+        initialMessage: { text: "test" },
+      });
+
+      await expect(session.supportedCommands?.()).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: "compact" }),
+          expect.objectContaining({ name: "goal" }),
+        ]),
+      );
     });
 
     it("should emit error if Codex CLI is not found", async () => {

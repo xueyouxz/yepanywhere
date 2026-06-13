@@ -11,7 +11,6 @@ import { promisify } from "node:util";
 import {
   HELPER_SIDE_MODEL_CHEAPEST,
   type ModelInfo,
-  type SlashCommand,
 } from "@yep-anywhere/shared";
 import {
   isCodexCorrelationDebugEnabled,
@@ -76,6 +75,7 @@ import type {
   TurnSteerResponse,
 } from "./codex-protocol/index.js";
 import { createAgentctlSessionEnvBridge } from "./agentctl-session-env.js";
+import { CODEX_BUILTIN_COMMANDS } from "./staticSlashCommands.js";
 import type {
   AgentProvider,
   AgentSession,
@@ -164,13 +164,6 @@ function isCodexLiveDeltaSuppressionEnabled(): boolean {
 function isCodexLiveDeltaNotificationMethod(method: string): boolean {
   return CODEX_LIVE_DELTA_NOTIFICATION_METHODS.has(method);
 }
-const CODEX_BUILTIN_COMMANDS: SlashCommand[] = [
-  {
-    name: "goal",
-    description: "Keep working toward a verifiable end state until it is met",
-    argumentHint: "<verifiable end state>",
-  },
-];
 const CODEX_THINKING_OFF_MIN_REASONING_EFFORT_PREFIXES = [
   "gpt-5.3-codex-spark",
 ] as const;

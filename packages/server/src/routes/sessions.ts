@@ -60,6 +60,7 @@ import {
 } from "../sessions/persisted-augments.js";
 import { findSessionSummaryAcrossProviders } from "../sessions/provider-resolution.js";
 import type { ISessionReader } from "../sessions/types.js";
+import { getStaticSlashCommandsForProvider } from "../sdk/providers/staticSlashCommands.js";
 import type { ExternalSessionTracker } from "../supervisor/ExternalSessionTracker.js";
 import type {
   DeferredMessagePlacement,
@@ -88,6 +89,17 @@ const SESSION_DETAIL_SLOW_LOG_MS = 250;
 const CLAUDE_RESUME_API_ERROR_RECOVERY = "handoff-required";
 const CLAUDE_RESUME_API_ERROR_MESSAGE =
   "Claude session cannot be safely resumed because the Claude SDK recorded an API-error response as the latest assistant message. Start a handoff session instead.";
+
+async function getSessionSlashCommands(
+  process: Process | undefined,
+  provider: ProviderName | undefined,
+) {
+  if (process?.supportsDynamicCommands) {
+    const commands = await process.supportedCommands();
+    if (commands) return commands;
+  }
+  return getStaticSlashCommandsForProvider(provider);
+}
 
 function roundedMs(value: number): number {
   return Math.round(value * 10) / 10;
@@ -1931,15 +1943,14 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     const pendingInputRequest =
       process?.state.type === "waiting-input" ? process.state.request : null;
 
-    // Get available slash commands from active process
-    const slashCommands = process?.supportsDynamicCommands
-      ? await process.supportedCommands()
-      : null;
-
     // Read minimal session info from disk (just for title/timestamps, no messages)
     const metadataProvider = deps.sessionMetadataService?.getProvider(
       sessionId,
     ) as ProviderName | undefined;
+    const slashCommands = await getSessionSlashCommands(
+      process,
+      process?.provider ?? metadataProvider ?? project.provider,
+    );
     const sessionSummaryResult = await findSessionSummaryAcrossProviders(
       project,
       sessionId,
@@ -2210,12 +2221,14 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     const pendingInputRequest =
       process?.state.type === "waiting-input" ? process.state.request : null;
 
-    // Get available slash commands from active process (for "/" button in toolbar)
+    // Get available slash commands (for "/" button and typed slash menu)
     // The init message that normally carries these gets discarded from the SSE buffer
-    // after ~30s, so we attach them to the REST response for reliable delivery.
-    const slashCommands = process?.supportsDynamicCommands
-      ? await process.supportedCommands()
-      : null;
+    // after ~30s, so we attach them to the REST response. Providers with known
+    // native built-ins, such as Codex, can expose those while stopped.
+    const slashCommands = await getSessionSlashCommands(
+      process,
+      process?.provider ?? session?.provider ?? metadataProvider ?? project.provider,
+    );
 
     if (!session) {
       // Session file doesn't exist yet - only valid if we own the process

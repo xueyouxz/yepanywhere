@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useI18n } from "../i18n";
 import { getSlashCommandMenuParts } from "../lib/slashCommands";
 
 interface SlashCommandButtonProps {
@@ -20,6 +21,7 @@ export function SlashCommandButton({
   onSelectCommand,
   disabled,
 }: SlashCommandButtonProps) {
+  const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{
     bottom: number;
@@ -102,8 +104,8 @@ export function SlashCommandButton({
         className={`slash-command-button ${isOpen ? "active" : ""}`}
         onClick={handleToggle}
         disabled={disabled}
-        title="Slash commands"
-        aria-label="Show slash commands"
+        title={t("slashCommandsLabel")}
+        aria-label={t("slashCommandsShow")}
         aria-expanded={isOpen}
         aria-haspopup="menu"
       >
@@ -121,7 +123,7 @@ export function SlashCommandButton({
               left: menuPos.left,
             }}
             role="menu"
-            aria-label="Slash commands"
+            aria-label={t("slashCommandsLabel")}
           >
             {commands.map((command) => (
               <SlashCommandMenuItem
