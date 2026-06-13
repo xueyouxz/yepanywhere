@@ -144,18 +144,25 @@ export function SettingsLayout() {
     ? CATEGORY_COMPONENTS[effectiveCategory]
     : null;
 
-  // The single per-pane Undo affordance: panes register via useSettingsUndo;
-  // the button renders top-right on the header row, never in pane content.
-  const undoButton = undoRegistration?.canUndo ? (
+  const canUndoSettingsChange = undoRegistration?.canUndo ?? false;
+
+  // The single per-pane Undo affordance: panes register via useSettingsUndo.
+  // Keep the button's header footprint even while hidden so settings rows do
+  // not shift when a field first becomes undoable.
+  const undoButton = (
     <button
       type="button"
       className="settings-button"
-      onClick={() => void undoRegistration.undo()}
+      onClick={() => void undoRegistration?.undo()}
       title={t("settingsUndoChangesTooltip")}
+      disabled={!canUndoSettingsChange}
+      aria-hidden={!canUndoSettingsChange}
+      tabIndex={canUndoSettingsChange ? 0 : -1}
+      style={{ visibility: canUndoSettingsChange ? "visible" : "hidden" }}
     >
       {t("settingsUndoChanges")}
     </button>
-  ) : undefined;
+  );
 
   // Narrow settings: category list OR category detail (not both)
   if (!useTwoColumnSettings) {
