@@ -153,6 +153,49 @@ and the user read. Reported upstream:
 mitigation is rendering-side only (the contract above). Adjacent to the
 existing API-error unsafe-resume contract.
 
+## Concurrent External Writers (TUI + YA) On One Session File
+
+A Claude session is a single `.jsonl` that any process can open and append to;
+there is no lock and no cross-process coordination. When a TUI-started session
+is `external` to YA and the user sends from YA anyway, YA's resume becomes a
+second writer on that one file. The `external-session-warning` banner
+(`packages/client/src/components/ExternalSessionWarning.tsx`) is the
+user-facing guard for this; the failure modes below are why it does not fade
+until the window is focused and why its copy is hedged.
+
+Reproduced end-to-end (claude CLI 2.1.177, 2026-06-13): seed session `S` with
+a codeword, resume `S` in a live TUI (which loads the tip into memory), then
+`claude --resume S -p "<second codeword>"` from another process. Findings,
+each a contract the rendering and resume-safety code must respect:
+
+- **Resume continues in place; it does not SDK-fork.** `--resume` without
+  `--fork-session` returns the *same* session id and appends to the *same*
+  file. So "external send" is two writers on one transcript, not two files.
+  <!-- verified: claude 2.1.177, 2026-06-13 -->
+- **A live process never re-reads the transcript.** The TUI answered only with
+  the codeword it learned before the external write — the externally-appended
+  turn was invisible to it on screen and in the context it sent next. Any
+  in-memory provider owner (TUI, or YA's own SDK process) has this staleness;
+  file tailing and the live in-memory branch can diverge. <!-- verified -->
+- **Two writers fork the `parentUuid` chain.** Both the external turn and the
+  TUI's next turn parented to the same pre-existing leaf, producing two sibling
+  branches in one file (and N concurrent writers produce an N-way fork). The
+  bytes stay valid — a 4-writer race left 0 malformed lines — so the damage is
+  *logical* branch divergence, not file corruption. Atomicity of individual
+  line appends does not prevent it. <!-- verified -->
+- **A later resume keeps exactly one branch and silently drops the rest.**
+  Resuming the forked `S` rebuilt context from a single branch and omitted the
+  other entirely, with no error. Which branch survives is not reliably the
+  latest write: in the repro the dropped branch was the chronologically-later
+  TUI exchange the human had been reading. So the mechanism is knowable and
+  reproducible, but *which* completed work goes missing is not predictable from
+  the outside — hence the banner promises only *likely* effects. <!-- verified -->
+
+This is the multi-writer companion to the single-writer api_error
+"Resume context loss" case above; both end in completed, user-read work
+absent from resumed context, and YA can only observe and render, not prevent,
+provider-side branch selection.
+
 ## Current Problem Areas
 
 Observed user reports:
