@@ -243,9 +243,9 @@ describe("speech routes", () => {
         JSON.stringify({
           type: "start",
           backendId: backend.id,
-          mimeType: "audio/pcm;rate=24000;encoding=s16le",
+          mimeType: "audio/pcm;rate=16000;encoding=s16le",
           streaming: true,
-          sampleRate: 24000,
+          sampleRate: 16000,
           encoding: "pcm",
           smartTurn: {
             enabled: true,
@@ -283,7 +283,7 @@ describe("speech routes", () => {
         text: "hello world",
         transcriptionId: expect.any(String),
       });
-      expect(backend.options?.sampleRate).toBe(24000);
+      expect(backend.options?.sampleRate).toBe(16000);
       expect(backend.options?.smartTurnThreshold).toBe(0.7);
       expect(backend.options?.smartTurnTimeoutMs).toBe(3000);
       const metadataPath = await findRetainedMetadata(

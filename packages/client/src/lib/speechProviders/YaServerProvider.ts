@@ -61,7 +61,13 @@ interface SpeechWsMessage {
   words?: SpeechWordTimestamp[];
 }
 
-const STREAM_SAMPLE_RATE = 24_000;
+const STREAM_SAMPLE_RATE = 16_000;
+const STREAM_CHUNK_MS = 100;
+const STREAM_CHUNK_SAMPLES = Math.round(
+  (STREAM_SAMPLE_RATE * STREAM_CHUNK_MS) / 1000,
+);
+const SCRIPT_PROCESSOR_BUFFER_SIZE = 1024;
+const PCM_FRAME_POOL_SIZE = 16;
 const STREAM_MIME_TYPE = `audio/pcm;rate=${STREAM_SAMPLE_RATE};encoding=s16le`;
 // If the Web Audio processor never fires within this window the capture
 // pipeline is dead (e.g. a mobile AudioContext that refused to resume). Surface
@@ -128,6 +134,23 @@ function getAudioContextConstructor(): typeof AudioContext | null {
   );
 }
 
+function createStreamingAudioContext(
+  AudioContextCtor: typeof AudioContext,
+): AudioContext {
+  try {
+    return new AudioContextCtor({
+      latencyHint: "interactive",
+      sampleRate: STREAM_SAMPLE_RATE,
+    });
+  } catch {
+    try {
+      return new AudioContextCtor({ latencyHint: "interactive" });
+    } catch {
+      return new AudioContextCtor();
+    }
+  }
+}
+
 function speechWsUrl(basePath: string): string {
   const normalizedBase = basePath.replace(/\/$/, "");
   const url = new URL(`${normalizedBase}/api/speech/ws`, window.location.href);
@@ -141,7 +164,13 @@ function streamingMicConstraints(): MediaStreamConstraints {
       // Mono: a proper downmix of the capture device, which transcribes
       // better than reading one channel of a stereo stream. (Dropping this to
       // chase the cold-open latency hurt recognition quality, so keep it.)
-      channelCount: 1,
+      channelCount: { ideal: 1 },
+      // xAI streaming STT recommends 16 kHz PCM16. These are ideals because
+      // browsers may not expose the mic at this exact rate/size; the
+      // AudioContext below requests 16 kHz and Web Audio resamples the track
+      // when the capture device runs at another rate.
+      sampleRate: { ideal: STREAM_SAMPLE_RATE },
+      sampleSize: { ideal: 16 },
       // All call-oriented processing off: capture the raw mic. No audio is
       // played, so echoCancellation has nothing to cancel; noiseSuppression
       // and autoGainControl reshape the waveform (the source of garbled
@@ -228,34 +257,113 @@ function decideSmartTurn(
   return { command: "send", transcript: trimmed };
 }
 
-function floatToInt16Pcm(
-  samples: Float32Array,
-  sampleRate: number,
-): ArrayBuffer {
-  const ratio = sampleRate / STREAM_SAMPLE_RATE;
-  const outputLength = Math.max(1, Math.round(samples.length / ratio));
-  const buffer = new ArrayBuffer(outputLength * 2);
-  const view = new DataView(buffer);
+const IS_LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
 
-  for (let i = 0; i < outputLength; i += 1) {
-    const start = Math.min(samples.length - 1, Math.floor(i * ratio));
-    // Span at least one input sample. When the context runs below 24 kHz
-    // (ratio < 1, which Chrome does for voice-processed input) the naive
-    // window can be empty and would otherwise write silence for ~1/3 of
-    // output samples, attenuating and corrupting the captured audio.
-    const end = Math.max(
-      start + 1,
-      Math.min(samples.length, Math.floor((i + 1) * ratio)),
-    );
-    let sum = 0;
-    for (let j = start; j < end; j += 1) {
-      sum += samples[j] ?? 0;
-    }
-    const sample = Math.max(-1, Math.min(1, sum / (end - start)));
-    view.setInt16(i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+interface Pcm16Frame {
+  readonly view: Int16Array;
+  readonly dataView: DataView;
+  samples: number;
+}
+
+function createPcm16Frame(): Pcm16Frame {
+  const buffer = new ArrayBuffer(
+    STREAM_CHUNK_SAMPLES * Int16Array.BYTES_PER_ELEMENT,
+  );
+  return {
+    view: new Int16Array(buffer),
+    dataView: new DataView(buffer),
+    samples: 0,
+  };
+}
+
+function pcm16FramePayload(frame: Pcm16Frame): ArrayBufferView {
+  return frame.samples === frame.view.length
+    ? frame.view
+    : frame.view.subarray(0, frame.samples);
+}
+
+class Pcm16Chunker {
+  private readonly available: Pcm16Frame[] = Array.from(
+    { length: PCM_FRAME_POOL_SIZE },
+    () => createPcm16Frame(),
+  );
+  private current = createPcm16Frame();
+  private offset = 0;
+
+  constructor(private readonly onFrame: (frame: Pcm16Frame) => void) {}
+
+  release(frame: Pcm16Frame): void {
+    frame.samples = 0;
+    this.available.push(frame);
   }
 
-  return buffer;
+  flush(): void {
+    if (this.offset === 0) return;
+    const frame = this.current;
+    frame.samples = this.offset;
+    this.current = this.available.pop() ?? createPcm16Frame();
+    this.offset = 0;
+    this.onFrame(frame);
+  }
+
+  writeFloatSamples(samples: Float32Array, sampleRate: number): void {
+    if (samples.length === 0) return;
+    const ratio =
+      Number.isFinite(sampleRate) && sampleRate > 0
+        ? sampleRate / STREAM_SAMPLE_RATE
+        : 1;
+    const outputLength = Math.max(1, Math.round(samples.length / ratio));
+
+    for (let i = 0; i < outputLength; i += 1) {
+      const start = Math.min(samples.length - 1, Math.floor(i * ratio));
+      // Span at least one input sample. When the context runs below the target
+      // rate (ratio < 1) the naive window can be empty and would otherwise
+      // write silence for a slice of output samples, attenuating capture.
+      const end = Math.max(
+        start + 1,
+        Math.min(samples.length, Math.floor((i + 1) * ratio)),
+      );
+      let sum = 0;
+      for (let j = start; j < end; j += 1) {
+        sum += samples[j] ?? 0;
+      }
+      this.writeSample(sum / (end - start));
+    }
+  }
+
+  private writeSample(sample: number): void {
+    const clamped = Math.max(-1, Math.min(1, sample));
+    const pcm = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+    if (IS_LITTLE_ENDIAN) {
+      this.current.view[this.offset] = pcm;
+    } else {
+      this.current.dataView.setInt16(this.offset * 2, pcm, true);
+    }
+    this.offset += 1;
+    if (this.offset === STREAM_CHUNK_SAMPLES) {
+      this.flush();
+    }
+  }
+}
+
+function describeAudioTrackSettings(stream: MediaStream): string | null {
+  const track =
+    typeof stream.getAudioTracks === "function"
+      ? stream.getAudioTracks()[0]
+      : undefined;
+  const settings = track?.getSettings?.();
+  if (!settings) return null;
+  const part = (label: string, value: unknown): string =>
+    `${label}=${value ?? "?"}`;
+  return [
+    "track settings",
+    part("rate", settings.sampleRate),
+    part("channels", settings.channelCount),
+    part("sampleSize", settings.sampleSize),
+    part("ec", settings.echoCancellation),
+    part("ns", settings.noiseSuppression),
+    part("agc", settings.autoGainControl),
+  ].join(" ");
 }
 
 /**
@@ -285,6 +393,7 @@ export class YaServerProvider implements SpeechProvider {
   private audioSource: MediaStreamAudioSourceNode | null = null;
   private processor: ScriptProcessorNode | null = null;
   private silentGain: GainNode | null = null;
+  private pcmChunker: Pcm16Chunker | null = null;
   private chunks: Blob[] = [];
   private mimeType = "audio/webm";
   private submitOnStop = false;
@@ -489,7 +598,7 @@ export class YaServerProvider implements SpeechProvider {
     // resume runs inside the click's user-activation window. iOS/Android refuse
     // to start an AudioContext resumed outside a user gesture; resuming after
     // `await getUserMedia` previously left capture dead on mobile.
-    const audioContext = new AudioContextCtor();
+    const audioContext = createStreamingAudioContext(AudioContextCtor);
     this.audioContext = audioContext;
     const resumePromise =
       audioContext.state === "suspended"
@@ -555,6 +664,8 @@ export class YaServerProvider implements SpeechProvider {
       return;
     }
     mark("getUserMedia ready");
+    const trackSettings = describeAudioTrackSettings(stream);
+    if (trackSettings) mark(trackSettings);
 
     this.stream = stream;
     this.mimeType = STREAM_MIME_TYPE;
@@ -570,9 +681,36 @@ export class YaServerProvider implements SpeechProvider {
     // completes. Waiting for the socket/resume here is what dropped the first
     // seconds of speech.
     let socketReady = false;
-    const pendingFrames: ArrayBuffer[] = [];
+    const pendingFrames: Pcm16Frame[] = [];
+    const sentFrames: Pcm16Frame[] = [];
+    let pcmChunker: Pcm16Chunker;
+    const releaseTransmittedFrames = (): void => {
+      if (ws.bufferedAmount !== 0) return;
+      while (sentFrames.length > 0) {
+        const frame = sentFrames.pop();
+        if (frame) pcmChunker.release(frame);
+      }
+    };
+    const sendPcmFrameNow = (frame: Pcm16Frame): void => {
+      releaseTransmittedFrames();
+      ws.send(pcm16FramePayload(frame));
+      sentFrames.push(frame);
+    };
+    const sendPcmFrame = (frame: Pcm16Frame): void => {
+      if (socketReady && ws.readyState === WebSocket.OPEN) {
+        sendPcmFrameNow(frame);
+      } else {
+        pendingFrames.push(frame);
+      }
+    };
+    pcmChunker = new Pcm16Chunker(sendPcmFrame);
+    this.pcmChunker = pcmChunker;
     const source = audioContext.createMediaStreamSource(stream);
-    const processor = audioContext.createScriptProcessor(4096, 1, 1);
+    const processor = audioContext.createScriptProcessor(
+      SCRIPT_PROCESSOR_BUFFER_SIZE,
+      1,
+      1,
+    );
     const silentGain = audioContext.createGain();
     silentGain.gain.value = 0;
     this.audioProcessorActive = false;
@@ -598,12 +736,7 @@ export class YaServerProvider implements SpeechProvider {
         mark(`frame peak=${peak.toFixed(3)}`);
         loudnessFramesLeft -= 1;
       }
-      const pcm = floatToInt16Pcm(input, audioContext.sampleRate);
-      if (socketReady && ws.readyState === WebSocket.OPEN) {
-        ws.send(pcm);
-      } else {
-        pendingFrames.push(pcm);
-      }
+      pcmChunker.writeFloatSamples(input, audioContext.sampleRate);
     };
     source.connect(processor);
     processor.connect(silentGain);
@@ -641,8 +774,12 @@ export class YaServerProvider implements SpeechProvider {
         }),
       );
       socketReady = true;
-      for (const pcm of pendingFrames) {
-        if (ws.readyState === WebSocket.OPEN) ws.send(pcm);
+      for (const frame of pendingFrames) {
+        if (ws.readyState === WebSocket.OPEN) {
+          sendPcmFrameNow(frame);
+        } else {
+          pcmChunker.release(frame);
+        }
       }
       pendingFrames.length = 0;
     };
@@ -951,6 +1088,7 @@ export class YaServerProvider implements SpeechProvider {
     if (this.options.serverStreaming) {
       this.streamingStopRequested = true;
       this.pendingSmartTurnCommand = null;
+      this.pcmChunker?.flush();
       this.commitStreamingPreview();
       this.cleanupStreamingMedia();
       if (this.ws?.readyState === WebSocket.OPEN) {
@@ -998,6 +1136,7 @@ export class YaServerProvider implements SpeechProvider {
     this.processor = null;
     this.audioSource = null;
     this.silentGain = null;
+    this.pcmChunker = null;
     void this.audioContext?.close();
     this.audioContext = null;
     this.releaseActiveStream();

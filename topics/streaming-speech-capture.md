@@ -22,7 +22,9 @@ Primary code: `packages/client/src/lib/speechProviders/YaServerProvider.ts`
 
 - **Standard mode (current): Web Audio `ScriptProcessorNode`.** Deprecated but
   universally available. The processor pulls mic frames off the audio clock;
-  it must be connected to `destination` (through a zero-gain node) to fire.
+  it must be connected to `destination` (through a zero-gain node) to fire. YA
+  requests a 16 kHz `AudioContext` so Web Audio can resample the mic track to
+  xAI's native STT rate before YA packs samples into PCM16.
 - **AudioWorklet mode (planned, opt-in):** the modern replacement. Recent
   Chrome supports `AudioWorkletNode`, so the next implementation pass should
   add a small PCM worklet behind feature detection (`audioContext.audioWorklet`
@@ -70,9 +72,12 @@ Primary code: `packages/client/src/lib/speechProviders/YaServerProvider.ts`
    `~/.yep-anywhere/speech-audio/<date>/` `.bin`+`.json` - analyze peak/RMS vs
    transcript directly rather than trusting the browser console.
 
-5. **Resampler must not zero samples.** `floatToInt16Pcm` averages input
-   windows; when the context runs below 24 kHz (`ratio < 1`) each output sample
-   must still span at least 1 input sample, or ~1/3 of output is silence.
+5. **PCM packing must not allocate per callback.** The streaming path targets
+   xAI-native 16 kHz PCM16 and emits 100 ms chunks (1600 samples / 3200 bytes).
+   `Pcm16Chunker` reuses fixed buffers and only flushes a short final frame on
+   manual stop. If Web Audio still reports a non-16 kHz context, the fallback
+   resampler averages input windows and each output sample must span at least 1
+   input sample, or a slice of output becomes silence.
 
 6. **Mid-session failure must reach the client.** `SpeechStreamHandlers.onError`
    carries an upstream timeout/drop (no caller awaits `openPromise` once the
@@ -95,9 +100,16 @@ code fault.
 Planned, both as STT settings (`pluggable-speech-recognition.md` covers the
 settings surface):
 
-- **Mic device picker.** Enumerate input devices and pass `deviceId` to
-  `getUserMedia`. Fixes silent capture from a wrong default device, and lets
-  the user avoid a slow-opening device.
+- **Mic device picker.** Add an explicit native input-device chooser to the
+  shared `SpeechControlMenu` STT options surface (the mic-attached menu reused
+  by the new-session composer and message toolbar). Enumerate
+  `audioinput` devices, store the browser-local selected `deviceId`, and pass
+  it to `getUserMedia` for both warm-mic pre-open and per-dictation capture.
+  Fixes silent capture from a wrong default device, and lets the user avoid a
+  slow-opening device. Do **not** expose low-level capture params such as
+  downsampling, mono mixing, sample size, or AudioContext sample rate in that
+  UI; those remain browser/Web Audio responsibilities governed by the capture
+  contracts above.
 - **Warm-mic option (implemented, opt-in, default off).** A **standalone**
   browser-local setting that
   applies to **all server-mediated speech recognition** (every backend, both
@@ -170,7 +182,8 @@ Next diagnostic step (not yet done): enable **Remote Log Collection**
   salvage + request-id guard (#6); browser-local warm-mic option; `[YaSTT]`
   diagnostics.
 - **Open / not implemented:** mobile "never red" (above); mic device picker;
-  AudioWorklet mode.
+  AudioWorklet mode. The non-AudioWorklet path already sends 16 kHz PCM16 in
+  100 ms chunks.
 
 ## Diagnostics
 

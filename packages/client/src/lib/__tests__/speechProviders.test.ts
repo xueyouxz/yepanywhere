@@ -793,6 +793,164 @@ describe("YA server speech provider", () => {
     }
   });
 
+  it("streams 16 kHz PCM16 in 100ms chunks and flushes partial stop audio", async () => {
+    const fakeTrack = {
+      readyState: "live",
+      stop: vi.fn(),
+      getSettings: () => ({
+        sampleRate: 16_000,
+        sampleSize: 16,
+        channelCount: 1,
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      }),
+    } as unknown as MediaStreamTrack;
+    const fakeStream = {
+      getTracks: () => [fakeTrack],
+      getAudioTracks: () => [fakeTrack],
+    } as unknown as MediaStream;
+    const getUserMedia = vi.fn(async () => fakeStream);
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia },
+    });
+
+    class FakeWebSocket {
+      static readonly CONNECTING = 0;
+      static readonly OPEN = 1;
+      static readonly CLOSED = 3;
+      static readonly instances: FakeWebSocket[] = [];
+      binaryType: BinaryType = "blob";
+      readyState = FakeWebSocket.CONNECTING;
+      onopen: ((event: Event) => void) | null = null;
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      onclose: ((event: CloseEvent) => void) | null = null;
+      send = vi.fn();
+      constructor(readonly url: string) {
+        FakeWebSocket.instances.push(this);
+      }
+      open() {
+        this.readyState = FakeWebSocket.OPEN;
+        this.onopen?.(new Event("open"));
+      }
+      close() {
+        this.readyState = FakeWebSocket.CLOSED;
+        this.onclose?.(new CloseEvent("close"));
+      }
+    }
+
+    let processorNode:
+      | {
+          onaudioprocess:
+            | null
+            | ((event: {
+                inputBuffer: { getChannelData: () => Float32Array };
+              }) => void);
+        }
+      | undefined;
+    const audioContextOptions: AudioContextOptions[] = [];
+    const scriptProcessorArgs: Array<[number, number, number]> = [];
+    class FakeAudioContext {
+      readonly state = "running";
+      readonly sampleRate = 16_000;
+      readonly destination = {};
+      constructor(options?: AudioContextOptions) {
+        if (options) audioContextOptions.push(options);
+      }
+      resume = vi.fn(async () => undefined);
+      close = vi.fn(async () => undefined);
+      createMediaStreamSource() {
+        return { connect: vi.fn(), disconnect: vi.fn() };
+      }
+      createScriptProcessor(
+        bufferSize: number,
+        inputChannels: number,
+        outputChannels: number,
+      ) {
+        scriptProcessorArgs.push([bufferSize, inputChannels, outputChannels]);
+        processorNode = {
+          onaudioprocess: null,
+        };
+        return {
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+          get onaudioprocess() {
+            return processorNode?.onaudioprocess ?? null;
+          },
+          set onaudioprocess(
+            callback:
+              | null
+              | ((event: {
+                  inputBuffer: { getChannelData: () => Float32Array };
+                }) => void),
+          ) {
+            if (processorNode) processorNode.onaudioprocess = callback;
+          },
+        };
+      }
+      createGain() {
+        return { gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() };
+      }
+    }
+
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+
+    const provider = new YaServerProvider("ya-grok", "", {
+      serverStreaming: true,
+    });
+    provider.start();
+    await Promise.resolve();
+    const ws = FakeWebSocket.instances[0]!;
+    ws.open();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(audioContextOptions[0]).toMatchObject({
+      latencyHint: "interactive",
+      sampleRate: 16_000,
+    });
+    expect(getUserMedia).toHaveBeenCalledWith({
+      audio: expect.objectContaining({
+        channelCount: { ideal: 1 },
+        sampleRate: { ideal: 16_000 },
+        sampleSize: { ideal: 16 },
+      }),
+    });
+    expect(scriptProcessorArgs).toEqual([[1024, 1, 1]]);
+
+    const callback = processorNode?.onaudioprocess;
+    expect(callback).toBeTypeOf("function");
+    const input = new Float32Array(1024).fill(0.25);
+    const fireFrame = () =>
+      callback?.({ inputBuffer: { getChannelData: () => input } });
+
+    fireFrame();
+    expect(
+      ws.send.mock.calls.filter(([payload]) => payload instanceof Int16Array),
+    ).toHaveLength(0);
+
+    fireFrame();
+    const binaryCalls = ws.send.mock.calls.filter(
+      ([payload]) => payload instanceof Int16Array,
+    );
+    expect(binaryCalls).toHaveLength(1);
+    expect(binaryCalls[0]?.[0]).toBeInstanceOf(Int16Array);
+    expect((binaryCalls[0]?.[0] as Int16Array).length).toBe(1600);
+    expect((binaryCalls[0]?.[0] as Int16Array).byteLength).toBe(3200);
+
+    provider.stop();
+    const afterStopBinaryCalls = ws.send.mock.calls.filter(
+      ([payload]) => payload instanceof Int16Array,
+    );
+    expect(afterStopBinaryCalls).toHaveLength(2);
+    expect((afterStopBinaryCalls[1]?.[0] as Int16Array).length).toBe(448);
+
+    provider.dispose();
+  });
+
   it("keeps a warm streaming mic open across dictations until dispose", async () => {
     let stopped = false;
     const stopTrack = vi.fn(() => {
