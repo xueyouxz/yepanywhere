@@ -113,6 +113,10 @@ settings surface):
   as downsampling, mono mixing, sample size, or AudioContext sample rate in
   that UI; those remain browser/Web Audio responsibilities governed by the
   capture contracts above.
+- **Grok audio mode and Smart Turn controls are transport-neutral.** Direct
+  and relayed clients both have a streaming speech path now; do not hide the
+  PCM/browser-compressed choice or Smart Turn controls merely because the app
+  connection is reached through relay.
 - **Warm-mic option (implemented, opt-in, default off).** A **standalone**
   browser-local setting that
   applies to **all server-mediated speech recognition** (every backend, both

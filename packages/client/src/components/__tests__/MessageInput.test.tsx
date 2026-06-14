@@ -26,6 +26,7 @@ const {
   mockSetSpeechSmartTurnSettings,
   mockSetGrokSpeechAudioSettings,
   mockVoiceToggle,
+  remoteBasePathState,
 } = vi.hoisted(() => ({
   versionState: {
     version: {
@@ -58,6 +59,9 @@ const {
   mockSetSpeechSmartTurnSettings: vi.fn(),
   mockSetGrokSpeechAudioSettings: vi.fn(),
   mockVoiceToggle: vi.fn(),
+  remoteBasePathState: {
+    basePath: "",
+  },
 }));
 
 vi.mock("../../hooks/useDraftPersistence", () => ({
@@ -144,6 +148,10 @@ vi.mock("../../hooks/useVersion", () => ({
     refetch: vi.fn(),
     refetchFresh: vi.fn(),
   }),
+}));
+
+vi.mock("../../hooks/useRemoteBasePath", () => ({
+  useRemoteBasePath: () => remoteBasePathState.basePath,
 }));
 
 vi.mock("../../i18n", () => ({
@@ -405,6 +413,7 @@ describe("MessageInput", () => {
     modelSettingsState.grokSpeechAudioSettings = {
       uplinkMode: "pcm16",
     };
+    remoteBasePathState.basePath = "";
     mockSetSpeechMethod.mockReset();
     mockSetThinkingMode.mockReset();
     mockSetEffortLevel.mockReset();
@@ -566,6 +575,31 @@ describe("MessageInput", () => {
     expect(mockSetGrokSpeechAudioSettings).toHaveBeenCalledWith({
       uplinkMode: "pcm16",
     });
+  });
+
+  it("keeps Grok audio controls visible in relay mode", () => {
+    remoteBasePathState.basePath = "/ygraehl";
+    versionState.version = {
+      ...versionState.version,
+      voiceBackends: ["ya-grok"],
+      voiceBackendCapabilities: {
+        "ya-grok": { streaming: true, smartTurn: true },
+      },
+    };
+    modelSettingsState.speechMethod = "ya-grok";
+    modelSettingsState.hasStoredSpeechMethod = true;
+    modelSettingsState.grokSpeechAudioSettings = {
+      uplinkMode: "browser-compressed",
+    };
+
+    renderMessageInput();
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "voice" }));
+
+    expect(screen.getByText("Grok STT audio")).toBeDefined();
+    expect(
+      (screen.getByLabelText("Compressed") as HTMLInputElement).checked,
+    ).toBe(true);
   });
 
   it("keeps Up as native navigation when the composer has text", () => {

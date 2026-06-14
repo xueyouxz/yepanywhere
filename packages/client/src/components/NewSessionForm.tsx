@@ -885,11 +885,9 @@ export function NewSessionForm({
   );
   const showSpeechMethodSelector =
     voiceInputEnabled && speechMethodOptions.length > 1;
-  const relayTransport = basePath !== "";
   const selectedSpeechBackendCapabilities =
     versionInfo?.voiceBackendCapabilities?.[selectedSpeechMethod];
   const selectedSpeechCanStream =
-    !relayTransport &&
     selectedSpeechMethod !== "browser-native" &&
     (selectedSpeechMethod !== "ya-grok" ||
       grokSpeechAudioSettings.uplinkMode === "pcm16") &&
@@ -899,8 +897,7 @@ export function NewSessionForm({
     selectedSpeechBackendCapabilities?.smartTurn === true;
   const activeSpeechSmartTurnSettings: SpeechSmartTurnSettings | undefined =
     supportsSelectedSpeechSmartTurn ? speechSmartTurnSettings : undefined;
-  const showGrokSpeechAudioControls =
-    !relayTransport && selectedSpeechMethod === "ya-grok";
+  const showGrokSpeechAudioControls = selectedSpeechMethod === "ya-grok";
 
   // Combined display text: committed text + interim transcript
   const displayText = interimTranscript
