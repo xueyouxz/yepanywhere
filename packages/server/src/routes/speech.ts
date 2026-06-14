@@ -29,6 +29,8 @@ export interface SpeechSessionDeps {
   speechBackendRegistry: SpeechBackendRegistry;
   dataDir?: string;
   serverSettingsService?: ServerSettingsService;
+  xaiSttApiKey?: string;
+  shareXaiSttApiKeyWithClients?: boolean;
 }
 
 export interface SpeechRouteDeps extends SpeechSessionDeps {
@@ -735,6 +737,19 @@ export function createSpeechWebSocketSession(
 
 export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
   const routes = new Hono();
+
+  routes.get("/xai-client-key", (c) => {
+    if (deps.shareXaiSttApiKeyWithClients !== true) {
+      return c.json(
+        { error: "Server xAI STT key borrowing is disabled" },
+        403,
+      );
+    }
+    if (!deps.xaiSttApiKey) {
+      return c.json({ error: "Server xAI STT key is not configured" }, 404);
+    }
+    return c.json({ apiKey: deps.xaiSttApiKey });
+  });
 
   routes.post("/transcribe", async (c) => {
     let rawBody: unknown;

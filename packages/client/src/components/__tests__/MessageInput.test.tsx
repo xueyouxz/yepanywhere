@@ -525,7 +525,11 @@ describe("MessageInput", () => {
     ).toBe("ya-grok");
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "voice" }));
-    expect(screen.getByRole("radio", { name: /Grok STT/ })).toBeDefined();
+    expect(
+      screen.getByRole("radio", {
+        name: /^Grok STT xAI speech-to-text through YA\.$/,
+      }),
+    ).toBeDefined();
     fireEvent.click(screen.getByRole("radio", { name: /Deepgram STT/ }));
 
     expect(mockSetSpeechMethod).toHaveBeenCalledWith("ya-deepgram");
@@ -567,7 +571,7 @@ describe("MessageInput", () => {
     fireEvent.contextMenu(screen.getByRole("button", { name: "voice" }));
     expect(screen.getByText("Grok STT audio")).toBeDefined();
     expect(
-      (screen.getByLabelText("Compressed") as HTMLInputElement).checked,
+      (screen.getByLabelText("Batch") as HTMLInputElement).checked,
     ).toBe(true);
     expect(screen.queryByText("Smart Turn")).toBeNull();
 
@@ -598,7 +602,7 @@ describe("MessageInput", () => {
 
     expect(screen.getByText("Grok STT audio")).toBeDefined();
     expect(
-      (screen.getByLabelText("Compressed") as HTMLInputElement).checked,
+      (screen.getByLabelText("Batch") as HTMLInputElement).checked,
     ).toBe(true);
   });
 

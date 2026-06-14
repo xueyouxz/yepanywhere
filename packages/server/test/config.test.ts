@@ -155,4 +155,23 @@ describe("loadConfig codex paths", () => {
     expect(config.ambientXaiApiKey).toBe("ambient-xai-key");
     expect(process.env.XAI_API_KEY).toBeUndefined();
   });
+
+  it("requires explicit opt-in before sharing xAI STT keys with clients", async () => {
+    vi.stubEnv("YA_stt__XAI_API_KEY", "xai-key");
+
+    const { loadConfig } = await import("../src/config.js");
+    const config = loadConfig();
+
+    expect(config.xaiSttApiKey).toBe("xai-key");
+    expect(config.shareXaiSttApiKeyWithClients).toBe(false);
+  });
+
+  it("parses the xAI STT client key sharing opt-in", async () => {
+    vi.stubEnv("YA_stt__SHARE_XAI_KEY_WITH_CLIENTS", "1");
+
+    const { loadConfig } = await import("../src/config.js");
+    const config = loadConfig();
+
+    expect(config.shareXaiSttApiKeyWithClients).toBe(true);
+  });
 });

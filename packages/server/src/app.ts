@@ -212,6 +212,10 @@ export interface AppOptions {
   voiceInputEnabled?: boolean;
   /** Validated server-routed speech backends for capability advertisement. */
   speechBackendRegistry?: SpeechBackendRegistry;
+  /** xAI STT key that direct browser STT clients may borrow when enabled. */
+  xaiSttApiKey?: string;
+  /** Whether authenticated clients may borrow the server's xAI STT key. */
+  shareXaiSttApiKeyWithClients?: boolean;
   /** Allowed directory prefixes for serving local images. Default: ["/tmp"] */
   allowedImagePaths?: string[];
 }
@@ -1174,6 +1178,8 @@ export function createApp(options: AppOptions): AppResult {
         upgradeWebSocket: options.upgradeWebSocket,
         dataDir: options.dataDir,
         serverSettingsService: options.serverSettingsService,
+        xaiSttApiKey: options.xaiSttApiKey,
+        shareXaiSttApiKeyWithClients: options.shareXaiSttApiKeyWithClients,
       }),
     );
   }

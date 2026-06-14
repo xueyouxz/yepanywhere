@@ -6,6 +6,10 @@
 
 Topic: pluggable-speech-recognition
 
+See also: [direct-xai-speech.md](direct-xai-speech.md) for the hosted Grok
+plan where the browser sends audio directly to xAI and YA only brokers
+explicit credential/config material.
+
 ## Contract
 
 - `VOICE_INPUT=false` is the master kill switch. When it is false, YA does
@@ -226,6 +230,64 @@ client through `fetchJSON("/speech/transcribe", ...)`.
 6. Re-check current provider audio-input support before implementing
    audio-as-modality. Providers that accept audio should get the original
    audio content, while text-only providers keep the transcript-first path.
+
+## Server-Local STT Deployment Plan
+
+Server-local STT is still a first-class reason to keep the YA-mediated speech
+flow. The hosted Grok path should prefer browser-to-xAI when browser-safe auth
+is acceptable, but a local recognizer is different: the model and its warm
+state live on the YA host, so browser audio must go to YA.
+
+Deploy it in stages:
+
+1. **Batch first, streaming later.** Make `ya-whisper` reliable for
+   press-to-talk batch transcription through `POST /api/speech/transcribe`
+   before attempting local streaming partials. A complete utterance is enough
+   for local Whisper's natural operating mode; local streaming requires VAD or
+   chunk-stitching and should not block the first usable server-local release.
+2. **Use the existing warm worker as the first runtime.** Start with the
+   current `faster-whisper` subprocess (`whisper_worker.py`) because it already
+   matches YA's backend contract and keeps the model loaded. Treat
+   `whisper.cpp` or another runtime as a swappable backend implementation only
+   if deployment friction, CPU performance, or packaging makes
+   `faster-whisper` the wrong choice.
+3. **Ship explicit operator configuration.** The opt-in is
+   `YA_VOICE_BACKENDS=ya-whisper`. Model/runtime knobs stay server-local:
+   `WHISPER_MODEL`, `WHISPER_DEVICE`, and `WHISPER_COMPUTE_TYPE`. The default
+   should remain CPU-safe (`device=cpu`, `compute_type=int8`) and the model
+   should be chosen for the host class rather than silently downloading a
+   multi-GB model on first use without a clear operator decision.
+4. **Add a readiness surface before advertising.** Startup validation should
+   confirm Python exists, `faster_whisper` imports, the configured model can
+   load, and a tiny known audio sample transcribes within an acceptable
+   timeout. Only then should `/api/version.voiceBackends` advertise
+   `ya-whisper`. Failures should be actionable in logs: missing package,
+   missing model/cache, unsupported device/compute type, or model-load timeout.
+5. **Make model warm-up observable.** The first utterance may legitimately pay
+   model-load cost, but the UI and logs should distinguish "loading local STT
+   model" from ordinary recognition. Record model name, device, compute type,
+   cold-load duration, and per-utterance real-time factor in server logs and
+   retained metadata.
+6. **Keep audio retention useful for tuning.** Retained audio plus sidecar
+   transcript metadata is especially valuable for local STT. The sidecar
+   should include model/runtime settings and biasing prompt/keyterms so bad
+   transcriptions can be reproduced after changing model size or prompt
+   construction.
+7. **Add biasing before optimizing streaming.** Local Whisper's biggest YA
+   advantage is project/session context. Implement `buildBiasingContext()` and
+   feed its prompt into Whisper before spending effort on local streaming
+   partials.
+8. **Verify with a fixed audio fixture and one live mic pass.** The deployment
+   smoke should cover a generated/checked-in short utterance, an empty/silence
+   file, and one browser capture. Acceptance is: backend advertised only when
+   ready, first request may be cold but succeeds or reports a clear error,
+   subsequent requests reuse the worker, and transcription metadata records the
+   runtime settings.
+
+Hosted relay support for server-local STT is a product choice, not a technical
+requirement. If the operator wants phone-to-local-Whisper dictation through
+YA, the existing batch YA API path is the safer first target; relayed streaming
+to a local model remains a later optimization after local batch is solid.
 
 ## Verification Checklist
 

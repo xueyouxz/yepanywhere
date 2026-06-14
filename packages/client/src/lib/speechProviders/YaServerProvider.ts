@@ -867,7 +867,7 @@ export class YaServerProvider implements SpeechProvider {
         return;
       }
       const message =
-        "No microphone audio detected. Check mic permissions, or switch Grok STT audio to compressed mode in the speech menu.";
+        "No microphone audio detected. Check mic permissions, or switch Grok STT audio to Batch mode in the speech menu.";
       this.cleanupStreamingMedia();
       this.setState({
         status: "error",

@@ -136,6 +136,8 @@ export interface Config {
   xaiSttApiKey?: string;
   /** General xAI API key from XAI_API_KEY, scrubbed from process.env after load. */
   ambientXaiApiKey?: string;
+  /** Whether authenticated clients may borrow the server's xAI STT key. */
+  shareXaiSttApiKeyWithClients: boolean;
   /** Whisper model name for ya-whisper backend (default: distil-large-v3). */
   whisperModel?: string;
   /** Whisper device for ya-whisper backend (default: cpu). */
@@ -321,6 +323,10 @@ export function loadConfig(): Config {
     deepgramApiKey: sttEnv.DEEPGRAM_API_KEY || undefined,
     xaiSttApiKey: sttEnv.XAI_API_KEY || ambientXaiApiKey,
     ambientXaiApiKey,
+    shareXaiSttApiKeyWithClients: parseBooleanOrDefault(
+      sttEnv.SHARE_XAI_KEY_WITH_CLIENTS,
+      false,
+    ),
     whisperModel: process.env.WHISPER_MODEL || undefined,
     whisperDevice: process.env.WHISPER_DEVICE || undefined,
     whisperComputeType: process.env.WHISPER_COMPUTE_TYPE || undefined,

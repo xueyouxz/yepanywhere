@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   FilterDropdown,
   type FilterOption,
@@ -15,6 +15,10 @@ import {
   resolveSpeechMethod,
   type SpeechMethodId,
 } from "../../lib/speechProviders/methods";
+import {
+  getBrowserXaiSttApiKey,
+  setBrowserXaiSttApiKey,
+} from "../../lib/speechProviders/xaiCredentials";
 import { useSettingsUndoBaseline } from "./SettingsUndoContext";
 
 export function SpeechSettings() {
@@ -31,6 +35,9 @@ export function SpeechSettings() {
     setGrokSpeechAudioSettings,
   } = useModelSettings();
   const { keepMicWarm, setKeepMicWarm } = useSpeechCaptureSettings();
+  const [browserXaiKey, setBrowserXaiKey] = useState(() =>
+    getBrowserXaiSttApiKey(),
+  );
   const relayTransport = useRemoteBasePath() !== "";
   const { version: versionInfo, loading: versionLoading } = useVersion();
   const undoState = useMemo(
@@ -182,6 +189,27 @@ export function SpeechSettings() {
             {t("speechSettingsStreamingRelayUnavailable")}
           </p>
         )}
+
+        <div className="settings-item model-settings-item">
+          <div className="settings-item-info">
+            <strong>{t("speechSettingsXaiKeyTitle")}</strong>
+            <p>{t("speechSettingsXaiKeyDescription")}</p>
+          </div>
+          <input
+            type="password"
+            className="settings-input"
+            value={browserXaiKey}
+            placeholder={t("speechSettingsXaiKeyPlaceholder")}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              setBrowserXaiKey(value);
+              setBrowserXaiSttApiKey(value);
+            }}
+            aria-label={t("speechSettingsXaiKeyTitle")}
+          />
+        </div>
 
         <div className="settings-item">
           <div className="settings-item-info">

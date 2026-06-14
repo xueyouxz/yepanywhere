@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DirectXaiSpeechProvider } from "../speechProviders/DirectXaiSpeechProvider";
 import { YaServerProvider } from "../speechProviders/YaServerProvider";
 import {
   DEFAULT_SPEECH_METHOD,
+  XAI_DIRECT_BATCH_SPEECH_METHOD,
   getOrderedServerSpeechBackends,
   getPreferredSpeechMethod,
   getSpeechMethods,
   resolveSpeechMethod,
 } from "../speechProviders/methods";
+import { setBrowserXaiSttApiKey } from "../speechProviders/xaiCredentials";
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -23,6 +26,7 @@ function deferred<T>(): {
 }
 
 afterEach(() => {
+  localStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -41,7 +45,11 @@ describe("speech provider method selection", () => {
   it("does not require client-side backend hardcodes to build selector options", () => {
     expect(
       getSpeechMethods(["ya-custom-stt"]).map((method) => method.id),
-    ).toEqual(["ya-custom-stt", DEFAULT_SPEECH_METHOD]);
+    ).toEqual([
+      "ya-custom-stt",
+      XAI_DIRECT_BATCH_SPEECH_METHOD,
+      DEFAULT_SPEECH_METHOD,
+    ]);
   });
 
   it("uses explicit labels for known STT backends", () => {
@@ -50,6 +58,21 @@ describe("speech provider method selection", () => {
         .slice(0, 2)
         .map((method) => method.label),
     ).toEqual(["Grok STT", "Deepgram STT"]);
+  });
+
+  it("keeps the direct xAI batch method as an explicit client choice", () => {
+    expect(
+      getSpeechMethods(["ya-grok"]).find(
+        (method) => method.id === XAI_DIRECT_BATCH_SPEECH_METHOD,
+      ),
+    ).toMatchObject({
+      label: "Grok STT direct",
+      serverRouted: false,
+      clientSupported: true,
+    });
+    expect(
+      resolveSpeechMethod(XAI_DIRECT_BATCH_SPEECH_METHOD, ["ya-grok"], true),
+    ).toBe(XAI_DIRECT_BATCH_SPEECH_METHOD);
   });
 
   it("prefers Grok over Deepgram when no explicit user method is stored", () => {
@@ -1427,6 +1450,94 @@ describe("YA server speech provider", () => {
 
     expect(onError).toHaveBeenCalledWith("xAI STT streaming timed out");
     expect(onResult).not.toHaveBeenCalled();
+
+    provider.dispose();
+  });
+});
+
+describe("direct xAI speech provider", () => {
+  it("posts recorded batch audio directly to xAI with the browser key", async () => {
+    setBrowserXaiSttApiKey("browser-xai-key");
+    const fakeStream = {
+      getTracks: () => [{ stop: vi.fn(), readyState: "live" }],
+    } as unknown as MediaStream;
+    const getUserMedia = vi.fn(async () => fakeStream);
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia },
+    });
+
+    class FakeMediaRecorder {
+      static isTypeSupported() {
+        return true;
+      }
+
+      state: RecordingState = "inactive";
+      ondataavailable: ((event: BlobEvent) => void) | null = null;
+      onstop: (() => void) | null = null;
+
+      constructor(
+        readonly stream: MediaStream,
+        readonly options: MediaRecorderOptions,
+      ) {}
+
+      start() {
+        this.state = "recording";
+      }
+
+      stop() {
+        this.state = "inactive";
+        this.ondataavailable?.({
+          data: new Blob(["audio"], { type: "audio/webm;codecs=opus" }),
+        } as BlobEvent);
+        this.onstop?.();
+      }
+    }
+    vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
+
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ text: "direct transcript" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const onResult = vi.fn();
+    const onEnd = vi.fn();
+    const provider = new DirectXaiSpeechProvider({
+      micDeviceId: "usb-mic",
+      onResult,
+      onEnd,
+    });
+
+    provider.start();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(provider.getState().status).toBe("listening");
+
+    provider.stop();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(getUserMedia).toHaveBeenCalledWith({
+      audio: { deviceId: { exact: "usb-mic" } },
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.x.ai/v1/stt",
+      expect.objectContaining({
+        method: "POST",
+        headers: { Authorization: "Bearer browser-xai-key" },
+      }),
+    );
+    const form = fetchMock.mock.calls[0]?.[1]?.body as FormData;
+    expect(form.get("format")).toBe("true");
+    expect(form.get("language")).toBe("en");
+    expect(form.get("file")).toBeInstanceOf(Blob);
+    await vi.waitFor(() =>
+      expect(onResult).toHaveBeenCalledWith("direct transcript"),
+    );
+    expect(onEnd).toHaveBeenCalledTimes(1);
 
     provider.dispose();
   });

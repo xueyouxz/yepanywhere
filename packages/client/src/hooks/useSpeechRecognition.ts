@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ConnectionSpeechSocket } from "../lib/connection/types";
 import { BrowserNativeProvider } from "../lib/speechProviders/BrowserNativeProvider";
+import { DirectXaiSpeechProvider } from "../lib/speechProviders/DirectXaiSpeechProvider";
 import { YaServerProvider } from "../lib/speechProviders/YaServerProvider";
+import { XAI_DIRECT_BATCH_SPEECH_METHOD } from "../lib/speechProviders/methods";
 import {
   SPEECH_STATUS_LABELS as PROVIDER_SPEECH_STATUS_LABELS,
   type SpeechProvider,
@@ -79,6 +81,9 @@ function createProvider(
     onError?: (e: string) => void;
   },
 ): SpeechProvider {
+  if (speechMethod === XAI_DIRECT_BATCH_SPEECH_METHOD) {
+    return new DirectXaiSpeechProvider(events);
+  }
   if (speechMethod && speechMethod !== "browser-native") {
     return new YaServerProvider(speechMethod, basePath, events);
   }

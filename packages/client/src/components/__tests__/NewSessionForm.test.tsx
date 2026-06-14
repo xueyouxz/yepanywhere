@@ -914,7 +914,7 @@ describe("NewSessionForm", () => {
     fireEvent.contextMenu(screen.getByText("voice"));
     expect(screen.getByText("Grok STT audio")).toBeDefined();
     expect(
-      (screen.getByLabelText("Compressed") as HTMLInputElement).checked,
+      (screen.getByLabelText("Batch") as HTMLInputElement).checked,
     ).toBe(true);
     expect(screen.queryByText("Smart Turn")).toBeNull();
 
@@ -950,7 +950,7 @@ describe("NewSessionForm", () => {
 
     expect(screen.getByText("Grok STT audio")).toBeDefined();
     expect(
-      (screen.getByLabelText("Compressed") as HTMLInputElement).checked,
+      (screen.getByLabelText("Batch") as HTMLInputElement).checked,
     ).toBe(true);
   });
 

@@ -13,13 +13,15 @@ timings, codex rescan intervals, cache TTLs) live only in `config.ts`.
 
 ## Naming conventions
 
-- **`YA_<module>__<NAME>` — YA-private secret, consume-and-strip.** Read
+- **`YA_<module>__<NAME>` — YA-private module env, consume-and-strip.** Read
   for a YA subsystem, then **deleted from `process.env` on load** so it can
   never leak into a spawned child CLI (`harvestYaModuleEnv` in
   `packages/server/src/yaModuleEnv.ts`; read via `getModuleEnv(module)`).
   Module and name split on the **first** `__`. This protects credentials
   whose bare names another vendor's CLI would honor — see the billing
-  footgun in [cost-efficiency.md](cost-efficiency.md).
+  footgun in [cost-efficiency.md](cost-efficiency.md). Use this prefix for
+  module-scoped knobs that sit beside those credentials, too, so one subsystem
+  does not grow two YA env families.
 - **Vendor-named fallback secrets** — accepted only where explicitly
   documented. `XAI_API_KEY` is accepted as a convenience fallback for Grok STT,
   then deleted from `process.env` during config load. `YA_stt__XAI_API_KEY`
@@ -61,6 +63,7 @@ timings, codex rescan intervals, cache TTLs) live only in `config.ts`.
 |-----|---------|
 | `YA_stt__XAI_API_KEY` | xAI key → `ya-grok` backend; auto-enables when set. |
 | `XAI_API_KEY` | xAI standard key accepted as a `ya-grok` STT fallback, then scrubbed from child env. Grok Build receives it only when its provider setting explicitly opts in. |
+| `YA_stt__SHARE_XAI_KEY_WITH_CLIENTS` | `1` lets authenticated private clients borrow the configured xAI STT key for direct browser-to-xAI transcription. Default false; setting an STT key alone does not expose it. |
 | `YA_stt__DEEPGRAM_API_KEY` | Deepgram key → `ya-deepgram` backend; auto-enables when set. |
 | `WHISPER_MODEL` / `WHISPER_DEVICE` / `WHISPER_COMPUTE_TYPE` | Local Whisper tuning. |
 

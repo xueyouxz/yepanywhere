@@ -14,6 +14,8 @@ import {
 export type SpeechMethodId = string;
 
 export const DEFAULT_SPEECH_METHOD: SpeechMethodId = "browser-native";
+export const XAI_DIRECT_BATCH_SPEECH_METHOD: SpeechMethodId =
+  "xai-grok-direct-batch";
 
 const SERVER_BACKEND_PREFERENCE = ["ya-grok", "ya-deepgram"] as const;
 
@@ -48,6 +50,14 @@ export interface SpeechMethodDescriptor {
   /** True if this method requires a server-side backend. */
   serverRouted: boolean;
 }
+
+const DIRECT_XAI_BATCH_METHOD: SpeechMethodDescriptor = {
+  id: XAI_DIRECT_BATCH_SPEECH_METHOD,
+  label: "Grok STT direct",
+  description: "Browser sends batch, non-streaming audio directly to xAI.",
+  clientSupported: true,
+  serverRouted: false,
+};
 
 function browserNativeAvailable(): boolean {
   if (typeof window === "undefined") return false;
@@ -152,6 +162,10 @@ export function resolveSpeechMethod(
     return DEFAULT_SPEECH_METHOD;
   }
 
+  if (storedMethod === XAI_DIRECT_BATCH_SPEECH_METHOD) {
+    return XAI_DIRECT_BATCH_SPEECH_METHOD;
+  }
+
   return activeServerBackends.includes(storedMethod)
     ? storedMethod
     : DEFAULT_SPEECH_METHOD;
@@ -168,6 +182,7 @@ export function getSpeechMethods(
 ): SpeechMethodDescriptor[] {
   return [
     ...getOrderedServerSpeechBackends(serverBackends).map(describeServerBackend),
+    DIRECT_XAI_BATCH_METHOD,
     describeBrowserNative(userAgent),
   ];
 }

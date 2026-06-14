@@ -613,6 +613,8 @@ async function startServer() {
     codexCliPath: config.codexCliPath,
     voiceInputEnabled: config.voiceInputEnabled,
     speechBackendRegistry,
+    xaiSttApiKey: config.xaiSttApiKey,
+    shareXaiSttApiKeyWithClients: config.shareXaiSttApiKeyWithClients,
     allowedImagePaths: config.allowedImagePaths,
   });
   markStartup("app created");
@@ -666,6 +668,8 @@ async function startServer() {
       upgradeWebSocket,
       dataDir: config.dataDir,
       serverSettingsService,
+      xaiSttApiKey: config.xaiSttApiKey,
+      shareXaiSttApiKeyWithClients: config.shareXaiSttApiKeyWithClients,
     }),
   );
   markStartup("speech routes mounted");
