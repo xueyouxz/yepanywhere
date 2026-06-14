@@ -153,6 +153,7 @@ describe("getSessionActivityUiState", () => {
     expect(state.pendingToolCallInLatestTurn).toEqual({
       id: "t9",
       toolName: "Bash",
+      toolInput: { command: "npm test" },
     });
   });
 

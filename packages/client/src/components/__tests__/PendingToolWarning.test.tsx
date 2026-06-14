@@ -9,6 +9,7 @@ afterEach(cleanup);
 
 function renderBanner(props: {
   toolName?: string;
+  toolInput?: unknown;
   pendingSinceMs?: number | null;
   onDismiss?: () => void;
 }) {
@@ -16,6 +17,7 @@ function renderBanner(props: {
     <I18nProvider>
       <PendingToolWarning
         toolName={props.toolName ?? "Bash"}
+        toolInput={props.toolInput ?? { command: "npm test" }}
         pendingSinceMs={props.pendingSinceMs ?? Date.now() - 5000}
         onDismiss={props.onDismiss ?? (() => {})}
       />
@@ -24,15 +26,17 @@ function renderBanner(props: {
 }
 
 describe("PendingToolWarning", () => {
-  it("names the pending tool in the waiting copy when recent", () => {
+  it("names the unfinished tool in the waiting copy when recent", () => {
     renderBanner({ toolName: "Edit", pendingSinceMs: Date.now() - 5000 });
-    expect(screen.getByText(/Waiting on a Edit approval/)).toBeTruthy();
+    expect(
+      screen.getByText(/Unfinished Edit call in this session/),
+    ).toBeTruthy();
   });
 
   it("switches to the discard-risk copy once the call is stale", () => {
     renderBanner({ pendingSinceMs: Date.now() - 20 * 60 * 1000 });
     expect(
-      screen.getByText(/previous run left a Bash call unanswered/),
+      screen.getByText(/Unfinished Bash call, possibly abandoned/),
     ).toBeTruthy();
   });
 
@@ -43,12 +47,12 @@ describe("PendingToolWarning", () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
-  it("opens the risk explanation modal from the what's-the-risk affordance", () => {
+  it("opens the risk explanation modal from the elapsed-time affordance", () => {
     renderBanner({});
     // The modal title only renders inside the Modal, not the always-present
     // hover tooltip, so it is an unambiguous signal the modal opened.
     expect(screen.queryByText(/Why check the other process/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /What's the risk/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Last activity/ }));
     expect(screen.getByText(/Why check the other process/)).toBeTruthy();
   });
 });

@@ -1,29 +1,34 @@
 import { useEffect, useState } from "react";
 import { useI18n } from "../i18n";
-import { Modal } from "./ui/Modal";
+import { useTheme } from "../hooks/useTheme";
+import { toolRegistry } from "./renderers/tools";
+import { RiskAffordance } from "./RiskAffordance";
 
 /**
- * Blue "waiting elsewhere" banner: shown when a session has no detected owner
- * yet its latest turn ends on an unanswered tool call. YA infers another
- * program (a terminal or IDE) opened the call and is parked at its approval
- * prompt — but it can't tell that apart from a program that exited and left
- * the call dangling, so the copy is hedged and age-aware.
+ * Blue "unfinished tool call" banner: shown when a session has no detected
+ * owner yet its latest turn ends on a tool_use with no recorded result. That
+ * dangling call is all YA actually knows — it can't tell a live program parked
+ * mid-call from one that exited and left the call behind — so the banner stays
+ * a short, non-committal flag. The hedged detail (and the actual tool call)
+ * lives in the hover/click explanation, not the banner line.
  *
  * Sibling of ExternalSessionWarning (the amber live-concurrent-writer banner);
- * the two share the `external-session-risk*` "What's the risk?" styling and a
- * common fork/branch/silent-loss vocabulary.
+ * both hang the risk explanation off their elapsed "… ago" text via the shared
+ * RiskAffordance, and share a common fork/branch/silent-loss vocabulary.
  */
 export function PendingToolWarning({
   toolName,
+  toolInput,
   pendingSinceMs,
   onDismiss,
 }: {
   toolName: string;
+  toolInput: unknown;
   pendingSinceMs: number | null;
   onDismiss: () => void;
 }) {
   const { t } = useI18n();
-  const [showModal, setShowModal] = useState(false);
+  const { theme } = useTheme();
   const [nowTick, setNowTick] = useState(() => Date.now());
 
   // Tick the elapsed counter each second; resync on focus/visibility so a
@@ -48,10 +53,9 @@ export function PendingToolWarning({
   // copy switches from "waiting" to the "may have been discarded" framing.
   const isStale =
     elapsedSeconds != null && elapsedSeconds >= STALE_AFTER_SECONDS;
-  const duration = formatDuration(elapsedSeconds ?? 0);
   const message = isStale
-    ? t("pendingToolWarningStale", { tool: toolName, duration })
-    : t("pendingToolWarningWaiting", { tool: toolName, duration });
+    ? t("pendingToolWarningStale", { tool: toolName })
+    : t("pendingToolWarningWaiting", { tool: toolName });
 
   return (
     <div
@@ -77,19 +81,22 @@ export function PendingToolWarning({
         </svg>
         <span>
           {message}{" "}
-          <span className="external-session-risk">
-            <button
-              type="button"
-              className="external-session-risk-link"
-              aria-haspopup="dialog"
-              onClick={() => setShowModal(true)}
-            >
-              {t("pendingToolWarningWhy")}
-            </button>
-            <div className="external-session-risk-tooltip" role="tooltip">
-              <PendingToolRiskExplanation />
-            </div>
-          </span>
+          {elapsedSeconds != null && (
+            <RiskAffordance
+              label={t("pendingToolWarningElapsed", {
+                duration: formatDuration(elapsedSeconds),
+              })}
+              labelClassName="external-session-warning-elapsed"
+              modalTitle={t("pendingToolWarningExplainTitle")}
+              explanation={
+                <PendingToolRiskExplanation
+                  toolName={toolName}
+                  toolInput={toolInput}
+                  theme={theme === "light" ? "light" : "dark"}
+                />
+              }
+            />
+          )}
         </span>
       </div>
       <button
@@ -114,26 +121,38 @@ export function PendingToolWarning({
           <path d="m6 6 12 12" />
         </svg>
       </button>
-      {showModal && (
-        <Modal
-          title={t("pendingToolWarningExplainTitle")}
-          onClose={() => setShowModal(false)}
-        >
-          <PendingToolRiskExplanation />
-        </Modal>
-      )}
     </div>
   );
 }
 
 /**
- * Likely-ill-effects explanation, shared by the hover tooltip and the modal.
- * Deliberately hedged: YA cannot tell a parked prompt from an exited program.
+ * Likely-ill-effects explanation, shown in the hover tooltip and the modal.
+ * Leads with the concrete unfinished tool call (rendered with the same
+ * per-tool renderers the transcript uses) so "which call?" is answered, then
+ * the deliberately hedged effects: YA cannot tell a parked program from an
+ * exited one.
  */
-function PendingToolRiskExplanation() {
+function PendingToolRiskExplanation({
+  toolName,
+  toolInput,
+  theme,
+}: {
+  toolName: string;
+  toolInput: unknown;
+  theme: "light" | "dark";
+}) {
   const { t } = useI18n();
   return (
     <div className="external-session-risk-explanation">
+      <div className="pending-tool-warning-call">
+        <span className="pending-tool-warning-call-label">
+          {toolRegistry.getDisplayName(toolName, "pending")}
+        </span>
+        {toolRegistry.renderToolUse(toolName, toolInput, {
+          isStreaming: false,
+          theme,
+        })}
+      </div>
       <p>{t("pendingToolRiskIntro")}</p>
       <ul>
         <li>

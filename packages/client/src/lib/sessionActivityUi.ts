@@ -16,8 +16,12 @@ interface SessionActivityUiInput {
 export interface SessionActivityUiState {
   hasPendingToolCalls: boolean;
   hasPendingToolCallsInLatestTurn: boolean;
-  /** Tip-most pending tool_use in the latest turn (id + tool name), if any. */
-  pendingToolCallInLatestTurn: { id: string; toolName: string } | null;
+  /** Tip-most pending tool_use in the latest turn (id, name, input), if any. */
+  pendingToolCallInLatestTurn: {
+    id: string;
+    toolName: string;
+    toolInput: unknown;
+  } | null;
   latestTurnSettled: boolean;
   canStopOwnedProcess: boolean;
   shouldDeferMessages: boolean;
@@ -82,12 +86,16 @@ export function getSessionActivityUiState({
   // The dangling tool call the "waiting elsewhere" banner is about: the
   // tip-most pending tool_use in the latest turn. Used to name the tool and to
   // re-arm a per-tool dismissal when a *different* call goes pending.
-  let pendingToolCallInLatestTurn: { id: string; toolName: string } | null =
+  let pendingToolCallInLatestTurn: SessionActivityUiState["pendingToolCallInLatestTurn"] =
     null;
   for (let index = latestTurnItems.length - 1; index >= 0; index -= 1) {
     const item = latestTurnItems[index];
     if (item?.type === "tool_call" && item.status === "pending") {
-      pendingToolCallInLatestTurn = { id: item.id, toolName: item.toolName };
+      pendingToolCallInLatestTurn = {
+        id: item.id,
+        toolName: item.toolName,
+        toolInput: item.toolInput,
+      };
       break;
     }
   }

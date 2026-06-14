@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
-import { Modal } from "./ui/Modal";
+import { RiskAffordance } from "./RiskAffordance";
 
 /**
  * Warning shown while another process (a terminal Claude session, an IDE
@@ -17,7 +17,6 @@ import { Modal } from "./ui/Modal";
 export function ExternalSessionWarning({ active }: { active: boolean }) {
   const { t } = useI18n();
   const [visible, setVisible] = useState(active);
-  const [showModal, setShowModal] = useState(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
   // When the external warning first appeared (the precipitating event).
   const detectedAtRef = useRef<number | null>(active ? Date.now() : null);
@@ -77,29 +76,14 @@ export function ExternalSessionWarning({ active }: { active: boolean }) {
       <span className="external-session-warning-text">
         {t("sessionExternalWarning")}
       </span>{" "}
-      <span className="external-session-risk">
-        <button
-          type="button"
-          className="external-session-risk-link external-session-warning-elapsed"
-          aria-haspopup="dialog"
-          onClick={() => setShowModal(true)}
-        >
-          {t("sessionExternalWarningElapsed", {
-            duration: formatDuration(elapsedSeconds),
-          })}
-        </button>
-        <div className="external-session-risk-tooltip" role="tooltip">
-          <ExternalSessionRiskExplanation />
-        </div>
-      </span>
-      {showModal && (
-        <Modal
-          title={t("sessionExternalWarningExplainTitle")}
-          onClose={() => setShowModal(false)}
-        >
-          <ExternalSessionRiskExplanation />
-        </Modal>
-      )}
+      <RiskAffordance
+        label={t("sessionExternalWarningElapsed", {
+          duration: formatDuration(elapsedSeconds),
+        })}
+        labelClassName="external-session-warning-elapsed"
+        modalTitle={t("sessionExternalWarningExplainTitle")}
+        explanation={<ExternalSessionRiskExplanation />}
+      />
     </div>
   );
 }

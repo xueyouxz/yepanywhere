@@ -3871,6 +3871,7 @@ function SessionPageContent({
       {hasPendingToolCalls && pendingToolCall && !pendingElsewhereDismissed && (
         <PendingToolWarning
           toolName={pendingToolCall.toolName}
+          toolInput={pendingToolCall.toolInput}
           pendingSinceMs={
             sessionUpdatedAt ? Date.parse(sessionUpdatedAt) : null
           }
