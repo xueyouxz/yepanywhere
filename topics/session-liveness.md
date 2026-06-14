@@ -8,6 +8,8 @@ that depend on it, especially heartbeat turns, deferred queue promotion, and
 patient queue intent.
 
 Related topic: [heartbeat ownership and timers](heartbeat.md).
+Related topic: [session ownership and shared-transcript writers](session-ownership.md)
+— who is writing the file, a different axis from whether the turn is progressing.
 
 ## Contracts
 

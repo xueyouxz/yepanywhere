@@ -196,6 +196,10 @@ This is the multi-writer companion to the single-writer api_error
 absent from resumed context, and YA can only observe and render, not prevent,
 provider-side branch selection.
 
+See also: the provider-neutral ownership model, the Codex equivalent, and the
+`owner === "none"` pending-tool ("waiting elsewhere") banner are in
+[session-ownership.md](session-ownership.md).
+
 ## Current Problem Areas
 
 Observed user reports:
