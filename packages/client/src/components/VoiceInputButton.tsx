@@ -230,7 +230,7 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
   const button = (
     <button
       type="button"
-      className={`voice-input-button ${isActive ? "listening" : ""} ${className}`}
+      className={`voice-input-button ${isListening ? "listening" : ""} ${isStarting ? "connecting" : ""} ${className}`}
       onClick={handleClick}
       disabled={disabled}
       title={
@@ -247,8 +247,10 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
       }
       aria-pressed={isActive}
     >
-      {isActive ? (
-        // Recording indicator - animated bars
+      {isListening ? (
+        // Recording indicator - animated bars (only once audio is actually
+        // flowing; during "starting" we show the mic so the button does not
+        // look like it is capturing before the pipeline is live).
         <svg
           width="16"
           height="16"
@@ -297,8 +299,10 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
     </button>
   );
 
-  // If showing status text, wrap in container; otherwise just return the button
-  if (showStatusText && isListening) {
+  // If showing status text, wrap in container; otherwise just return the button.
+  // Show during "starting" too so the user sees "Connecting..." instead of a
+  // button that looks live before capture has actually begun.
+  if (showStatusText && isActive) {
     return (
       <div
         className={`voice-input-container ${isListening ? "listening" : ""} ${statusClass}`}

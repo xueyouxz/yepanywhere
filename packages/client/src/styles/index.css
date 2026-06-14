@@ -4382,7 +4382,11 @@ a.sidebar-nav-item {
 
 .steer-now-toggle:has(input:checked) {
   border-color: color-mix(in srgb, var(--attention-color) 70%, transparent);
-  background: color-mix(in srgb, var(--attention-color) 20%, var(--bg-tertiary));
+  background: color-mix(
+    in srgb,
+    var(--attention-color) 20%,
+    var(--bg-tertiary)
+  );
   color: var(--text-primary);
 }
 
@@ -5178,9 +5182,9 @@ a.sidebar-nav-item {
    row and let Effort own the second row. */
 .thinking-controls-panel--inline {
   grid-template-columns: var(
-    --thinking-controls-inline-columns,
-    repeat(auto-fit, minmax(6rem, max-content))
-  );
+      --thinking-controls-inline-columns,
+      repeat(auto-fit, minmax(6rem, max-content))
+    );
   column-gap: var(--thinking-controls-inline-column-gap, 1rem);
   row-gap: var(--thinking-controls-inline-row-gap, var(--space-3));
   align-items: start;
@@ -5214,8 +5218,7 @@ a.sidebar-nav-item {
   align-items: center;
   gap: var(--thinking-toolbar-option-gap, 0.35rem);
   min-height: var(--thinking-toolbar-option-min-height, 2rem);
-  padding:
-    var(--thinking-toolbar-option-padding-block, 0.35rem)
+  padding: var(--thinking-toolbar-option-padding-block, 0.35rem)
     var(--thinking-toolbar-option-padding-inline, 0.55rem);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
@@ -5592,6 +5595,26 @@ a.sidebar-nav-item {
 
 .voice-input-button.listening:hover {
   background: rgba(239, 68, 68, 0.25);
+}
+
+/* Connecting: pipeline is starting but not yet capturing. Amber + a gentle
+   pulse so the button reads as "warming up", distinct from the red recording
+   state, and never implies audio is being captured before it is. */
+.voice-input-button.connecting {
+  background: rgba(234, 179, 8, 0.12);
+  border-color: rgb(234, 179, 8);
+  color: rgb(234, 179, 8);
+  animation: voice-connecting-pulse 1s ease-in-out infinite;
+}
+
+@keyframes voice-connecting-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 /* Animated bars for recording state */

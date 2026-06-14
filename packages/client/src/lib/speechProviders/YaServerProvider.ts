@@ -63,6 +63,10 @@ interface SpeechWsMessage {
 
 const STREAM_SAMPLE_RATE = 24_000;
 const STREAM_MIME_TYPE = `audio/pcm;rate=${STREAM_SAMPLE_RATE};encoding=s16le`;
+// If the Web Audio processor never fires within this window the capture
+// pipeline is dead (e.g. a mobile AudioContext that refused to resume). Surface
+// a real error instead of ending silently with no transcript.
+const AUDIO_FLOW_TIMEOUT_MS = 3500;
 const SMART_TURN_COMMAND_PAUSE_SECONDS = 0.5;
 const SMART_TURN_COMMANDS = new Set<SpeechTurnCommand>([
   "send",
@@ -263,6 +267,8 @@ export class YaServerProvider implements SpeechProvider {
   private streamingCurrentPreviewTranscript = "";
   private streamingStopRequested = false;
   private pendingSmartTurnCommand: SpeechTurnCommand | null = null;
+  private audioFlowWatchdog: ReturnType<typeof setTimeout> | null = null;
+  private audioProcessorActive = false;
   private startToken = 0;
   private disposed = false;
 
@@ -370,6 +376,23 @@ export class YaServerProvider implements SpeechProvider {
       throw new Error("Streaming speech capture is not supported");
     }
 
+    // Create and resume the AudioContext synchronously, before any await, so it
+    // runs inside the click's user-activation window. iOS/Android refuse to
+    // start (or silently keep suspended) an AudioContext resumed outside a user
+    // gesture; doing it after `await getUserMedia` previously left streaming
+    // capture dead on mobile with no audio and no error.
+    const audioContext = new AudioContextCtor();
+    this.audioContext = audioContext;
+    const resumePromise =
+      audioContext.state === "suspended"
+        ? audioContext.resume().catch(() => undefined)
+        : Promise.resolve();
+
+    const abandonContext = (): void => {
+      void audioContext.close();
+      if (this.audioContext === audioContext) this.audioContext = null;
+    };
+
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         channelCount: 1,
@@ -382,6 +405,7 @@ export class YaServerProvider implements SpeechProvider {
       stream.getTracks().forEach((track) => {
         track.stop();
       });
+      abandonContext();
       return;
     }
 
@@ -404,6 +428,7 @@ export class YaServerProvider implements SpeechProvider {
     });
     if (this.disposed || token !== this.startToken) {
       ws.close();
+      abandonContext();
       this.stopTracks();
       return;
     }
@@ -457,13 +482,10 @@ export class YaServerProvider implements SpeechProvider {
       }),
     );
 
-    const audioContext = new AudioContextCtor();
-    if (audioContext.state === "suspended") {
-      await audioContext.resume();
-    }
+    await resumePromise;
     if (this.disposed || token !== this.startToken) {
-      await audioContext.close();
       ws.close();
+      abandonContext();
       this.stopTracks();
       return;
     }
@@ -472,6 +494,7 @@ export class YaServerProvider implements SpeechProvider {
     const processor = audioContext.createScriptProcessor(4096, 1, 1);
     const silentGain = audioContext.createGain();
     silentGain.gain.value = 0;
+    this.audioProcessorActive = false;
     processor.onaudioprocess = (event) => {
       if (
         token !== this.startToken ||
@@ -479,6 +502,12 @@ export class YaServerProvider implements SpeechProvider {
         ws.readyState !== WebSocket.OPEN
       ) {
         return;
+      }
+      // The processor fires off the audio clock regardless of whether the user
+      // is speaking, so the first callback means the capture pipeline is live.
+      if (!this.audioProcessorActive) {
+        this.audioProcessorActive = true;
+        this.clearAudioFlowWatchdog();
       }
       const pcm = floatToInt16Pcm(
         event.inputBuffer.getChannelData(0),
@@ -490,11 +519,44 @@ export class YaServerProvider implements SpeechProvider {
     processor.connect(silentGain);
     silentGain.connect(audioContext.destination);
 
-    this.audioContext = audioContext;
     this.audioSource = source;
     this.processor = processor;
     this.silentGain = silentGain;
+    this.startAudioFlowWatchdog(token);
     this.setState({ status: "listening", isListening: true, error: null });
+  }
+
+  private startAudioFlowWatchdog(token: number): void {
+    this.clearAudioFlowWatchdog();
+    this.audioFlowWatchdog = setTimeout(() => {
+      if (
+        this.disposed ||
+        token !== this.startToken ||
+        this.audioProcessorActive
+      ) {
+        return;
+      }
+      const message =
+        "No microphone audio detected. Check mic permissions, or switch Grok STT audio to compressed mode in the speech menu.";
+      this.cleanupStreamingMedia();
+      this.setState({
+        status: "error",
+        isListening: false,
+        interimTranscript: "",
+        error: message,
+      });
+      this.options.onError?.(message);
+      this.options.onEnd?.();
+      this.ws?.close();
+      this.ws = null;
+    }, AUDIO_FLOW_TIMEOUT_MS);
+  }
+
+  private clearAudioFlowWatchdog(): void {
+    if (this.audioFlowWatchdog !== null) {
+      clearTimeout(this.audioFlowWatchdog);
+      this.audioFlowWatchdog = null;
+    }
   }
 
   private handleStreamingMessage(data: unknown): void {
@@ -763,6 +825,7 @@ export class YaServerProvider implements SpeechProvider {
   }
 
   private cleanupStreamingMedia(): void {
+    this.clearAudioFlowWatchdog();
     this.processor?.disconnect();
     this.audioSource?.disconnect();
     this.silentGain?.disconnect();

@@ -205,7 +205,10 @@ async function transcribe(
   return backend.transcribe(audio, options);
 }
 
-function cleanContextString(value: unknown, maxLength = 300): string | undefined {
+function cleanContextString(
+  value: unknown,
+  maxLength = 300,
+): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed.slice(0, maxLength) : undefined;
@@ -458,6 +461,15 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
       let backendId: string | null = null;
       let context: SpeechTranscriptionContext | undefined;
       let streamSession: SpeechStreamSession | null = null;
+      // The upstream handshake (e.g. xAI returning transcript.created) can take
+      // a noticeable moment. We establish it concurrently rather than awaiting
+      // inside the serialized message chain, so incoming audio is never blocked
+      // behind it. Frames that arrive before the session is ready buffer here
+      // and flush in order the instant it resolves — otherwise a slow handshake
+      // produced a dead window where early speech was lost and no live partials
+      // were emitted.
+      let streamSessionPromise: Promise<SpeechStreamSession> | null = null;
+      let pendingAudio: Buffer[] = [];
       let streamRequestId: string | null = null;
       let streamStartedAt = "";
       let streamStartedAtMs = 0;
@@ -475,11 +487,12 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
 
         if (!msg) {
           if (normalized.buffer) {
+            chunks.push(normalized.buffer);
             if (streamSession) {
-              chunks.push(normalized.buffer);
               streamSession.sendAudio(normalized.buffer);
-            } else {
-              chunks.push(normalized.buffer);
+            } else if (streamSessionPromise) {
+              // Session still handshaking: buffer in order, flushed on resolve.
+              pendingAudio.push(normalized.buffer);
             }
           } else {
             logger.warn("Unparseable speech WS frame");
@@ -494,6 +507,8 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
           context = parseTranscriptionContext(msg.context);
           streamSession?.close();
           streamSession = null;
+          streamSessionPromise = null;
+          pendingAudio = [];
           streamRequestId = null;
           streamingTranscriptTrace = [];
           streamingSpeechFinalTexts = [];
@@ -522,7 +537,9 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
               return;
             }
             const smartTurn =
-              backend.capabilities.smartTurn === true ? msg.smartTurn : undefined;
+              backend.capabilities.smartTurn === true
+                ? msg.smartTurn
+                : undefined;
 
             streamRequestId = randomUUID();
             streamStartedAtMs = Date.now();
@@ -549,38 +566,73 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
               "Speech streaming transcription started",
             );
 
-            streamSession = await backend.stream(
-              {
-                mimeType,
-                sampleRate,
-                encoding,
-                interimResults: true,
-                endpointingMs: 250,
-                language: "en",
-                smartTurnThreshold: smartTurn?.threshold,
-                smartTurnTimeoutMs: smartTurn?.timeoutMs,
-              },
-              {
-                onPartial: (event) => {
-                  streamingTranscriptTrace.push(
-                    formatStreamingTranscriptTraceLine(
-                      getPartialTraceKind(event),
-                      event.text,
-                    ),
-                  );
-                  if (event.speechFinal && !streamingStopRequested) {
-                    streamingSpeechFinalTexts.push(event.text);
-                  }
-                  send(ws, {
-                    type: "interim",
-                    text: event.text,
-                    isFinal: event.isFinal,
-                    speechFinal: event.speechFinal,
-                    words: event.words,
-                  });
+            // Establish the backend session without blocking the WS message
+            // chain: the xAI handshake can take seconds, and awaiting it here
+            // would stall every audio frame behind it (head-of-line blocking),
+            // dropping the first seconds of speech. Instead, buffer incoming
+            // frames in `pendingAudio` and flush them in order once the session
+            // resolves.
+            const requestId = streamRequestId;
+            streamSessionPromise = backend
+              .stream(
+                {
+                  mimeType,
+                  sampleRate,
+                  encoding,
+                  interimResults: true,
+                  endpointingMs: 250,
+                  language: "en",
+                  smartTurnThreshold: smartTurn?.threshold,
+                  smartTurnTimeoutMs: smartTurn?.timeoutMs,
                 },
-              },
-            );
+                {
+                  onPartial: (event) => {
+                    streamingTranscriptTrace.push(
+                      formatStreamingTranscriptTraceLine(
+                        getPartialTraceKind(event),
+                        event.text,
+                      ),
+                    );
+                    if (event.speechFinal && !streamingStopRequested) {
+                      streamingSpeechFinalTexts.push(event.text);
+                    }
+                    send(ws, {
+                      type: "interim",
+                      text: event.text,
+                      isFinal: event.isFinal,
+                      speechFinal: event.speechFinal,
+                      words: event.words,
+                    });
+                  },
+                },
+              )
+              .then((session) => {
+                streamSession = session;
+                for (const buffered of pendingAudio) {
+                  session.sendAudio(buffered);
+                }
+                pendingAudio = [];
+                return session;
+              });
+            streamSessionPromise.catch((err: unknown) => {
+              const message = err instanceof Error ? err.message : String(err);
+              logger.error(
+                {
+                  component: "speech",
+                  requestId,
+                  source: "ws",
+                  mode: "stream",
+                  backendId,
+                  err,
+                },
+                "Speech streaming session failed to open",
+              );
+              streamSessionPromise = null;
+              pendingAudio = [];
+              if (!streamingStopRequested) {
+                send(ws, { type: "error", message });
+              }
+            });
           }
           return;
         }
@@ -593,10 +645,13 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
           return;
         }
 
-        if (streamSession && streamRequestId) {
+        if (streamSessionPromise && streamRequestId) {
           try {
             streamingStopRequested = true;
-            const done = await streamSession.finish();
+            // The session may still be handshaking; wait for it (and the
+            // in-order flush of any buffered frames) before finishing.
+            const session = await streamSessionPromise;
+            const done = await session.finish();
             streamingTranscriptTrace.push(
               formatStreamingTranscriptTraceLine("done", done.text),
             );
@@ -637,6 +692,8 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
             send(ws, { type: "error", message });
           } finally {
             streamSession = null;
+            streamSessionPromise = null;
+            pendingAudio = [];
             streamRequestId = null;
             streamingTranscriptTrace = [];
             streamingSpeechFinalTexts = [];
@@ -684,7 +741,14 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
 
         onClose() {
           streamSession?.close();
+          // A still-handshaking session must be closed once it resolves, or it
+          // leaks an open xAI socket after the client disconnects.
+          streamSessionPromise
+            ?.then((session) => session.close())
+            .catch(() => {});
           streamSession = null;
+          streamSessionPromise = null;
+          pendingAudio = [];
           streamingTranscriptTrace = [];
           streamingSpeechFinalTexts = [];
           streamingStopRequested = false;
