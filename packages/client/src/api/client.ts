@@ -16,6 +16,7 @@ import type {
   NewSessionDefaults,
   PendingInputType,
   PromptSuggestionMode,
+  PromptCacheKeepaliveSettings,
   ProviderInfo,
   ProviderName,
   RecapMode,
@@ -1504,6 +1505,8 @@ export interface ServerSettings {
   deviceBridgeEnabled?: boolean;
   /** Defaults applied when opening the new session form */
   newSessionDefaults?: NewSessionDefaults;
+  /** Provider-scoped prompt-cache keepalive settings */
+  promptCacheKeepalive?: PromptCacheKeepaliveSettings;
   /** Browser-client defaults used when local storage has no explicit value */
   clientDefaults?: ClientDefaults;
   /** Server-routed speech audio retention policy */

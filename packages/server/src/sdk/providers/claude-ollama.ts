@@ -6,7 +6,10 @@
  * Ollama 0.14+ natively speaks the Anthropic Messages API.
  */
 
-import type { ModelInfo } from "@yep-anywhere/shared";
+import type {
+  ModelInfo,
+  PromptCacheKeepaliveProviderInfo,
+} from "@yep-anywhere/shared";
 import { getLogger } from "../../logging/logger.js";
 import { ClaudeProvider } from "./claude.js";
 import type { AuthStatus } from "./types.js";
@@ -83,6 +86,9 @@ async function fetchOllamaModelDetails(
 export class ClaudeOllamaProvider extends ClaudeProvider {
   override readonly name = "claude-ollama" as const;
   override readonly displayName = "Claude + Ollama";
+  override readonly promptCacheKeepalive:
+    | PromptCacheKeepaliveProviderInfo
+    | undefined = undefined;
 
   /** Configurable Ollama URL. Defaults to OLLAMA_URL env or localhost:11434. */
   private static ollamaUrl = process.env.OLLAMA_URL || DEFAULT_OLLAMA_URL;

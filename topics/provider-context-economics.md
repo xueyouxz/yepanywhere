@@ -10,6 +10,7 @@ Topic: provider-context-economics
 Related topics: [session-context-actions](session-context-actions.md),
 [resume-compaction](resume-compaction.md),
 [cost-efficiency](cost-efficiency.md),
+[prompt-cache-keepalive](prompt-cache-keepalive.md),
 [forged-transcript-handoff](forged-transcript-handoff.md)
 
 ## The model: stateless API + transcript replay
@@ -66,14 +67,22 @@ analogous with provider-set lifetimes):
   inheritance (different bytes), but typically far smaller than the
   source context.
 
-## Codex / others
+## OpenAI / Codex / others
 
-Codex resume replays its rollout file through the Responses API;
-OpenAI applies automatic prompt caching with provider-controlled
-lifetimes (order of minutes, no write fee). Same shape: cold resume =
-one full-price prefix replay. ACP providers (gemini-acp, grok-acp) and
-opencode hold session state behind their own protocols; we cannot see
-or control their cache behavior, only observe latency/usage.
+Codex resume replays its rollout file through the Responses API, but YA's
+active `codex` backend delegates to Codex app-server / CLI rather than calling
+the OpenAI API directly. OpenAI API prompt caching now has documented
+retention policies: the shorter-lived retained prefix generally lasts 5-10
+minutes of inactivity and at most one hour, while extended retention on
+supported models can keep cached prefixes up to 24 hours. The checked-in Codex
+app-server protocol subset exposes cached-token accounting but no retention
+override, so normal YA Codex sessions should treat TTL as provider-owned unless
+a future protocol refresh proves otherwise.
+
+Same shape: cold resume = one full-price prefix replay. ACP providers
+(gemini-acp, grok-acp) and opencode hold session state behind their own
+protocols; we cannot see or control their cache behavior, only observe
+latency/usage.
 
 ## UI rule: no hidden costly ops
 
@@ -90,3 +99,7 @@ emulated fallback that differs in kind from what the button names:
   (one summarization turn now / new session with quoted context),
   consistent with the Gate 4 copy requirements in
   [resume-compaction](resume-compaction.md).
+- Keepalive-style cache warming must follow
+  [prompt-cache-keepalive](prompt-cache-keepalive.md): explicit,
+  client-owned, bounded, and never a hidden transcript turn or abandoned
+  server cron.

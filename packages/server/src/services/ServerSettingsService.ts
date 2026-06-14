@@ -12,6 +12,7 @@ import type {
   ClientDefaults,
   HelperTargetConfig,
   NewSessionDefaults,
+  PromptCacheKeepaliveSettings,
 } from "@yep-anywhere/shared";
 import { normalizeYaClientBaseUrlFromShareViewerUrl } from "@yep-anywhere/shared";
 import { publishDeferredDeliverySettings } from "../supervisor/deferredDeliverySettings.js";
@@ -85,6 +86,8 @@ export interface ServerSettings {
   speechAudioRetention: SpeechAudioRetentionSettings;
   /** OpenAI-compatible helper endpoints for side-session helper work */
   helperTargets?: HelperTargetConfig[];
+  /** Per-provider prompt-cache keepalive policy and cadence. */
+  promptCacheKeepalive?: PromptCacheKeepaliveSettings;
   /** Whether lifecycle webhook delivery is enabled */
   lifecycleWebhooksEnabled?: boolean;
   /** External webhook URL that receives lifecycle events */

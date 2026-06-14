@@ -46,6 +46,15 @@ novelty must never be the out-of-the-box experience.
   be useful should be removed, not accumulated. The configuration
   surface is itself a user-visible cost.
 
+## Known Exceptions
+
+[prompt-cache-keepalive](prompt-cache-keepalive.md) is a deliberate
+default-on exception for active-enough live clients, but only where a provider
+exposes a no-context-move refresh path. The default must not create visible
+session rows, future-visible provider context, or autonomous server upkeep for
+sessions with no current client viewer; stronger hidden-message keepalive modes
+remain explicit per-provider choices.
+
 ## Worked instances: queued-turn delivery
 
 [compose-time-context-anchors](compose-time-context-anchors.md)

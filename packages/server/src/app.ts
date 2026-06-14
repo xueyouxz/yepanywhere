@@ -5,6 +5,7 @@ import type {
   AppSession,
   UrlProjectId,
 } from "@yep-anywhere/shared";
+import { DEFAULT_PROMPT_CACHE_KEEPALIVE_INACTIVITY_MINUTES } from "@yep-anywhere/shared";
 import { Hono } from "hono";
 import { join } from "node:path";
 import type { AuthService } from "./auth/AuthService.js";
@@ -79,7 +80,7 @@ import { type UploadDeps, createUploadRoutes } from "./routes/upload.js";
 import { createSpeechRoutes } from "./routes/speech.js";
 import { createVersionRoutes } from "./routes/version.js";
 import { WS_INTERNAL_AUTHENTICATED } from "./middleware/internal-auth.js";
-import { configureProviderRuntime } from "./sdk/providers/index.js";
+import { configureProviderRuntime, getProvider } from "./sdk/providers/index.js";
 import type {
   ClaudeSDK,
   PermissionMode,
@@ -571,6 +572,28 @@ export function createApp(options: AppOptions): AppResult {
     getHeartbeatTurnCandidates: options.sessionMetadataService
       ? getHeartbeatTurnCandidates
       : undefined,
+    getPromptCacheKeepaliveSettings: (providerName) => {
+      const capability = getProvider(providerName)?.promptCacheKeepalive;
+      if (!capability?.supportsNoContextPollutionNudge) {
+        return {
+          enabled: false,
+          inactivityMinutes: DEFAULT_PROMPT_CACHE_KEEPALIVE_INACTIVITY_MINUTES,
+        };
+      }
+
+      const saved =
+        options.serverSettingsService?.getSetting("promptCacheKeepalive")
+          ?.providers?.[providerName];
+      const mode = saved?.mode ?? capability.defaultMode;
+      const inactivityMinutes =
+        saved?.inactivityMinutes ??
+        capability.defaultInactivityMinutes ??
+        DEFAULT_PROMPT_CACHE_KEEPALIVE_INACTIVITY_MINUTES;
+      return {
+        enabled: mode === "auto",
+        inactivityMinutes,
+      };
+    },
   });
 
   // Create external session tracker if eventBus is available

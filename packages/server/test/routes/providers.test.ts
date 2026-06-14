@@ -21,9 +21,7 @@ function createProvider(overrides: Partial<AgentProvider> = {}): AgentProvider {
       authenticated: true,
       enabled: true,
     })),
-    getAvailableModels: vi.fn(async () => [
-      { id: "sonnet", name: "Sonnet" },
-    ]),
+    getAvailableModels: vi.fn(async () => [{ id: "sonnet", name: "Sonnet" }]),
     startSession: vi.fn(async () => {
       throw new Error("not implemented");
     }),
@@ -151,6 +149,34 @@ describe("Providers Routes", () => {
       expect.objectContaining({
         supportsSteering: true,
         supportsSteerNow: true,
+      }),
+    ]);
+  });
+
+  it("serializes prompt-cache keepalive capability", async () => {
+    const provider = createProvider({
+      promptCacheKeepalive: {
+        supportsNoContextPollutionNudge: true,
+        defaultMode: "auto",
+        defaultInactivityMinutes: 40,
+      },
+    });
+    const routes = createProvidersRoutes({
+      providers: [provider],
+      cacheTtlMs: 60_000,
+    });
+
+    const response = await routes.request("/");
+    const json = (await response.json()) as { providers: Array<unknown> };
+
+    expect(json.providers).toEqual([
+      expect.objectContaining({
+        name: "claude",
+        promptCacheKeepalive: {
+          supportsNoContextPollutionNudge: true,
+          defaultMode: "auto",
+          defaultInactivityMinutes: 40,
+        },
       }),
     ]);
   });

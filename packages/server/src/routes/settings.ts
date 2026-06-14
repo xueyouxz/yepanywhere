@@ -16,6 +16,10 @@ import {
   normalizeYaClientBaseUrl,
   normalizeYaClientBaseUrlFromShareViewerUrl,
   type PermissionMode,
+  DEFAULT_PROMPT_CACHE_KEEPALIVE_INACTIVITY_MINUTES,
+  PROMPT_CACHE_KEEPALIVE_MODES,
+  type PromptCacheKeepaliveMode,
+  type PromptCacheKeepaliveSettings,
   PROMPT_SUGGESTION_MODES,
   type PromptSuggestionMode,
   type ProviderName,
@@ -590,6 +594,62 @@ function parseSpeechAudioRetention(
   return { enabled, maxAgeDays, maxBytes };
 }
 
+function parsePromptCacheKeepalive(
+  raw: unknown,
+): PromptCacheKeepaliveSettings | undefined | null {
+  if (raw === undefined) return null;
+  if (raw === null || raw === "") return undefined;
+  if (!isRecord(raw)) return null;
+
+  const rawProviders = raw.providers;
+  if (rawProviders === undefined || rawProviders === null) return {};
+  if (!isRecord(rawProviders)) return null;
+
+  const providers: PromptCacheKeepaliveSettings["providers"] = {};
+  for (const [providerName, rawProviderSetting] of Object.entries(
+    rawProviders,
+  )) {
+    if (!ALL_PROVIDERS.includes(providerName as ProviderName)) return null;
+    if (rawProviderSetting === undefined || rawProviderSetting === null) {
+      continue;
+    }
+    if (!isRecord(rawProviderSetting)) return null;
+
+    const setting: {
+      mode?: PromptCacheKeepaliveMode;
+      inactivityMinutes?: number;
+    } = {};
+    if ("mode" in rawProviderSetting) {
+      if (
+        typeof rawProviderSetting.mode !== "string" ||
+        !PROMPT_CACHE_KEEPALIVE_MODES.includes(
+          rawProviderSetting.mode as PromptCacheKeepaliveMode,
+        )
+      ) {
+        return null;
+      }
+      setting.mode = rawProviderSetting.mode as PromptCacheKeepaliveMode;
+    }
+    if ("inactivityMinutes" in rawProviderSetting) {
+      const value = rawProviderSetting.inactivityMinutes;
+      if (
+        typeof value !== "number" ||
+        !Number.isInteger(value) ||
+        value < 1 ||
+        value > 1440
+      ) {
+        return null;
+      }
+      setting.inactivityMinutes = value;
+    }
+    if (Object.keys(setting).length > 0) {
+      providers[providerName as ProviderName] = setting;
+    }
+  }
+
+  return { providers };
+}
+
 export function createSettingsRoutes(deps: SettingsRoutesDeps): Hono {
   const app = new Hono();
   const {
@@ -891,6 +951,23 @@ export function createSettingsRoutes(deps: SettingsRoutesDeps): Hono {
         return c.json({ error: "Invalid helperTargets setting" }, 400);
       }
       updates.helperTargets = parsedTargets;
+    }
+
+    if ("promptCacheKeepalive" in body) {
+      const parsedKeepalive = parsePromptCacheKeepalive(
+        body.promptCacheKeepalive,
+      );
+      if (parsedKeepalive === null) {
+        return c.json(
+          {
+            error: `promptCacheKeepalive must configure provider modes (${PROMPT_CACHE_KEEPALIVE_MODES.join(
+              ", ",
+            )}) and integer inactivityMinutes between 1 and 1440 (default ${DEFAULT_PROMPT_CACHE_KEEPALIVE_INACTIVITY_MINUTES})`,
+          },
+          400,
+        );
+      }
+      updates.promptCacheKeepalive = parsedKeepalive;
     }
 
     if (typeof body.lifecycleWebhooksEnabled === "boolean") {

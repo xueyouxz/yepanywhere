@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  DEFAULT_PROMPT_CACHE_KEEPALIVE_INACTIVITY_MINUTES,
   type EffortLevel,
   type PermissionRules,
   type PromptSuggestionMode,
@@ -352,6 +353,11 @@ export interface HeartbeatTurnCandidate {
   hasPendingToolCall: boolean;
 }
 
+export interface PromptCacheKeepaliveSettings {
+  enabled: boolean;
+  inactivityMinutes: number;
+}
+
 /** Optional callback to persist executor when session ID is received */
 export type OnSessionExecutorCallback = (
   sessionId: string,
@@ -397,6 +403,10 @@ export interface SupervisorOptions {
   getHeartbeatTurnCandidates?: () =>
     | Promise<HeartbeatTurnCandidate[]>
     | HeartbeatTurnCandidate[];
+  /** Callback to read the current provider-scoped prompt-cache keepalive setting. */
+  getPromptCacheKeepaliveSettings?: (
+    provider: ProviderName,
+  ) => PromptCacheKeepaliveSettings | undefined;
   /** Maximum time to wait for a graceful provider interrupt before hard abort. */
   interruptTimeoutMs?: number;
 }
@@ -425,6 +435,9 @@ export class Supervisor {
   private getHeartbeatTurnCandidates?: () =>
     | Promise<HeartbeatTurnCandidate[]>
     | HeartbeatTurnCandidate[];
+  private getPromptCacheKeepaliveSettings?: (
+    provider: ProviderName,
+  ) => PromptCacheKeepaliveSettings | undefined;
   private heartbeatTurnInFlight = false;
   private heartbeatTurnTimer: ReturnType<typeof setInterval>;
   private livenessProbeTimer: ReturnType<typeof setInterval>;
@@ -432,10 +445,7 @@ export class Supervisor {
    * One-shot patient-queue re-checks keyed by process id. Bounded: armed only
    * while a process holds patient deferred entries; cleared on unregister.
    */
-  private patientCheckTimers = new Map<
-    string,
-    ReturnType<typeof setTimeout>
-  >();
+  private patientCheckTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private interruptTimeoutMs: number;
 
   constructor(options: SupervisorOptions) {
@@ -456,6 +466,8 @@ export class Supervisor {
     this.onSessionSummary = options.onSessionSummary;
     this.getHeartbeatTurnSettings = options.getHeartbeatTurnSettings;
     this.getHeartbeatTurnCandidates = options.getHeartbeatTurnCandidates;
+    this.getPromptCacheKeepaliveSettings =
+      options.getPromptCacheKeepaliveSettings;
     this.interruptTimeoutMs =
       options.interruptTimeoutMs ?? DEFAULT_INTERRUPT_TIMEOUT_MS;
     this.staleCheckTimer = setInterval(
@@ -505,6 +517,29 @@ export class Supervisor {
       return "native";
     }
     return "off";
+  }
+
+  registerPromptCacheKeepaliveViewer(process: Process): () => void {
+    if (!process.supportsPromptCacheKeepalive()) {
+      return () => {};
+    }
+
+    return process.registerPromptCacheKeepaliveLease({
+      getInactivityMs: () => {
+        const setting = this.getPromptCacheKeepaliveSettings?.(
+          process.provider,
+        );
+        if (!setting?.enabled) {
+          return null;
+        }
+        const inactivityMinutes =
+          Number.isFinite(setting.inactivityMinutes) &&
+          setting.inactivityMinutes > 0
+            ? setting.inactivityMinutes
+            : DEFAULT_PROMPT_CACHE_KEEPALIVE_INACTIVITY_MINUTES;
+        return inactivityMinutes * 60_000;
+      },
+    });
   }
 
   async startSession(
@@ -951,9 +986,13 @@ export class Supervisor {
       });
     }
 
-    const queued = await this.queueProcessMessage(params.process, params.message, {
-      allowSteer: false,
-    });
+    const queued = await this.queueProcessMessage(
+      params.process,
+      params.message,
+      {
+        allowSteer: false,
+      },
+    );
     if (!queued.success) {
       throw new Error(queued.error ?? "Failed to queue message after compact");
     }
@@ -1232,6 +1271,7 @@ export class Supervisor {
       probeLivenessFn: probeLiveness,
       getProviderActivityFn: getProviderActivity,
       getProviderRetentionFn: getProviderRetention,
+      refreshPromptCacheFn: result.refreshPromptCache,
       pid: () => {
         const p = result.pid;
         return typeof p === "function" ? p() : p;
@@ -1356,6 +1396,7 @@ export class Supervisor {
       probeLivenessFn: probeLiveness,
       getProviderActivityFn: getProviderActivity,
       getProviderRetentionFn: getProviderRetention,
+      refreshPromptCacheFn: result.refreshPromptCache,
       pid: () => {
         const p = result.pid;
         return typeof p === "function" ? p() : p;
@@ -1875,7 +1916,10 @@ export class Supervisor {
         !serviceTierChanged &&
         thinkingChanged &&
         !effortChanged &&
-        canApplyThinkingConfigDynamically(process.thinking, requestedThinking) &&
+        canApplyThinkingConfigDynamically(
+          process.thinking,
+          requestedThinking,
+        ) &&
         process.supportsThinkingModeChange
       ) {
         // Toggle thinking dynamically via deprecated API (works for auto↔off)

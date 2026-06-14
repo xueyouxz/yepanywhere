@@ -425,8 +425,13 @@ export function handleSessionSubscribe(
       console.error("[WS Relay] Error in session subscription:", err);
     },
   });
+  const cleanupPromptCacheKeepalive =
+    supervisor.registerPromptCacheKeepaliveViewer(process);
 
-  subscriptions.set(subscriptionId, cleanup);
+  subscriptions.set(subscriptionId, () => {
+    cleanupPromptCacheKeepalive();
+    cleanup();
+  });
 
   console.log(
     `[WS Relay] Subscribed to session ${sessionId} (${subscriptionId})`,

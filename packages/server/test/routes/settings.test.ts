@@ -401,6 +401,65 @@ describe("Settings Routes", () => {
       expect(mockServerSettingsService.updateSettings).not.toHaveBeenCalled();
     });
 
+    it("accepts provider-scoped prompt-cache keepalive settings", async () => {
+      const routes = createSettingsRoutes({
+        serverSettingsService: mockServerSettingsService,
+      });
+
+      const response = await routes.request("/", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          promptCacheKeepalive: {
+            providers: {
+              claude: {
+                mode: "auto",
+                inactivityMinutes: 40,
+              },
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(mockServerSettingsService.updateSettings).toHaveBeenCalledWith({
+        promptCacheKeepalive: {
+          providers: {
+            claude: {
+              mode: "auto",
+              inactivityMinutes: 40,
+            },
+          },
+        },
+      });
+    });
+
+    it("rejects invalid prompt-cache keepalive settings", async () => {
+      const routes = createSettingsRoutes({
+        serverSettingsService: mockServerSettingsService,
+      });
+
+      const response = await routes.request("/", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          promptCacheKeepalive: {
+            providers: {
+              claude: {
+                mode: "hidden-message",
+                inactivityMinutes: 0,
+              },
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      const json = await response.json();
+      expect(json.error).toContain("promptCacheKeepalive must configure");
+      expect(mockServerSettingsService.updateSettings).not.toHaveBeenCalled();
+    });
+
     it("accepts public share feature gating", async () => {
       const routes = createSettingsRoutes({
         serverSettingsService: mockServerSettingsService,

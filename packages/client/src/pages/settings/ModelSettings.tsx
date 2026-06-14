@@ -1,11 +1,15 @@
 import {
+  DEFAULT_PROMPT_CACHE_KEEPALIVE_INACTIVITY_MINUTES,
   HELPER_SIDE_MODEL_CHEAPEST,
   HELPER_SIDE_MODEL_SAME_AS_MAIN,
+  PROMPT_CACHE_KEEPALIVE_MODES,
   PROMPT_SUGGESTION_MODES,
   type NewSessionDefaults,
   resolveModel,
   type ModelInfo,
   type PermissionMode,
+  type PromptCacheKeepaliveMode,
+  type PromptCacheKeepaliveSettings,
   type PromptSuggestionMode,
   type ProviderInfo,
   type ProviderName,
@@ -43,6 +47,9 @@ import { ThinkingControlsPanel } from "../../components/ThinkingControls";
 const RECAP_MODE_ORDER: RecapMode[] = ["off", "native", "side-session"];
 const PROMPT_SUGGESTION_MODE_ORDER: PromptSuggestionMode[] = [
   ...PROMPT_SUGGESTION_MODES,
+];
+const PROMPT_CACHE_KEEPALIVE_MODE_ORDER: PromptCacheKeepaliveMode[] = [
+  ...PROMPT_CACHE_KEEPALIVE_MODES,
 ];
 
 function getPreferredProvider(
@@ -168,6 +175,34 @@ function getDefaultHelperSideModel(
   return HELPER_SIDE_MODEL_CHEAPEST;
 }
 
+function getProviderPromptCacheKeepaliveSetting(
+  provider: ProviderInfo | null | undefined,
+  settings: PromptCacheKeepaliveSettings | null | undefined,
+): {
+  mode: PromptCacheKeepaliveMode;
+  inactivityMinutes: number;
+} {
+  const capability = provider?.promptCacheKeepalive;
+  const saved =
+    provider && settings?.providers
+      ? settings.providers[provider.name]
+      : undefined;
+  return {
+    mode: saved?.mode ?? capability?.defaultMode ?? "off",
+    inactivityMinutes:
+      saved?.inactivityMinutes ??
+      capability?.defaultInactivityMinutes ??
+      DEFAULT_PROMPT_CACHE_KEEPALIVE_INACTIVITY_MINUTES,
+  };
+}
+
+function normalizeKeepaliveMinutes(value: number): number | null {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  return Math.min(1440, Math.max(1, Math.round(value)));
+}
+
 export function ModelSettings() {
   const { t } = useI18n();
   const { showToast } = useToastContext();
@@ -202,6 +237,7 @@ export function ModelSettings() {
             thinkingMode,
             showThinking,
             newSessionDefaults: settings.newSessionDefaults ?? {},
+            promptCacheKeepalive: settings.promptCacheKeepalive ?? {},
           }
         : null,
     [settings, model, effortLevel, thinkingMode, showThinking],
@@ -213,6 +249,7 @@ export function ModelSettings() {
       setThinkingMode(snapshot.thinkingMode);
       setShowThinking(snapshot.showThinking);
       void updateSetting("newSessionDefaults", snapshot.newSessionDefaults);
+      void updateSetting("promptCacheKeepalive", snapshot.promptCacheKeepalive);
     },
     [setModel, setEffortLevel, setThinkingMode, setShowThinking, updateSetting],
   );
@@ -242,6 +279,10 @@ export function ModelSettings() {
   const selectedPromptSuggestionMode = getDefaultPromptSuggestionMode(
     selectedProvider,
     savedDefaults,
+  );
+  const selectedPromptCacheKeepalive = getProviderPromptCacheKeepaliveSetting(
+    selectedProvider,
+    settings?.promptCacheKeepalive,
   );
   const selectedHelperSideModel = getDefaultHelperSideModel(
     helperSelectableModels,
@@ -309,6 +350,22 @@ export function ModelSettings() {
       off: t("promptSuggestionModeOffDescription"),
       native: t("promptSuggestionModeNativeDescription"),
     };
+  const promptCacheKeepaliveModeLabels: Record<
+    PromptCacheKeepaliveMode,
+    string
+  > = {
+    auto: t("promptCacheKeepaliveModeAuto"),
+    off: t("promptCacheKeepaliveModeOff"),
+  };
+  const promptCacheKeepaliveModeDescriptions: Record<
+    PromptCacheKeepaliveMode,
+    string
+  > = {
+    auto: t("promptCacheKeepaliveModeAutoDescription", {
+      minutes: selectedPromptCacheKeepalive.inactivityMinutes,
+    }),
+    off: t("promptCacheKeepaliveModeOffDescription"),
+  };
   const supportsPermissionMode =
     selectedProvider?.supportsPermissionMode ?? true;
   const supportsThinkingToggle =
@@ -323,6 +380,9 @@ export function ModelSettings() {
     (modeValue) =>
       providerSupportsPromptSuggestionMode(selectedProvider, modeValue),
   );
+  const showPromptCacheKeepalive =
+    selectedProvider?.promptCacheKeepalive?.supportsNoContextPollutionNudge ===
+    true;
   const modelOptions: FilterOption<string>[] = selectedModels.map((option) => {
     const label = option.size
       ? `${option.name} (${(option.size / (1024 * 1024 * 1024)).toFixed(1)} GB)`
@@ -371,6 +431,35 @@ export function ModelSettings() {
     } catch (err) {
       showToast(
         err instanceof Error ? err.message : t("newSessionDefaultsSaveError"),
+        "error",
+      );
+    }
+  };
+
+  const updatePromptCacheKeepalive = async (
+    updates: Partial<{
+      mode: PromptCacheKeepaliveMode;
+      inactivityMinutes: number;
+    }>,
+  ): Promise<void> => {
+    if (!selectedProvider) return;
+
+    const current = settings?.promptCacheKeepalive ?? {};
+    const providersByName = { ...(current.providers ?? {}) };
+    providersByName[selectedProvider.name] = {
+      ...(providersByName[selectedProvider.name] ?? {}),
+      ...updates,
+    };
+
+    try {
+      await updateSetting("promptCacheKeepalive", {
+        ...current,
+        providers: providersByName,
+      });
+      showToast(t("promptCacheKeepaliveSaved"), "success");
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : t("promptCacheKeepaliveSaveError"),
         "error",
       );
     }
@@ -492,6 +581,76 @@ export function ModelSettings() {
                 t={t}
                 className="thinking-controls-panel--inline session-default-thinking-controls"
               />
+            </div>
+          )}
+
+          {showPromptCacheKeepalive && (
+            <div className="new-session-helper-section session-default-cache-keepalive-section">
+              <h3>{t("promptCacheKeepaliveTitle")}</h3>
+              <p className="session-default-section-description">
+                {t("promptCacheKeepaliveDescription", {
+                  provider: selectedProvider.displayName,
+                })}
+              </p>
+              <div className="new-session-helper-options">
+                {PROMPT_CACHE_KEEPALIVE_MODE_ORDER.map((modeValue) => (
+                  <button
+                    key={modeValue}
+                    type="button"
+                    className={`new-session-helper-option ${
+                      selectedPromptCacheKeepalive.mode === modeValue
+                        ? "selected"
+                        : ""
+                    }`}
+                    onClick={() =>
+                      void updatePromptCacheKeepalive({ mode: modeValue })
+                    }
+                    disabled={settingsLoading}
+                    title={promptCacheKeepaliveModeDescriptions[modeValue]}
+                  >
+                    <span
+                      className={`mode-option-dot keepalive-${modeValue}`}
+                    />
+                    <span>{promptCacheKeepaliveModeLabels[modeValue]}</span>
+                  </button>
+                ))}
+              </div>
+              <label className="prompt-cache-keepalive-cadence">
+                <span>{t("promptCacheKeepaliveCadenceLabel")}</span>
+                <input
+                  key={`${selectedProvider.name}-${selectedPromptCacheKeepalive.inactivityMinutes}`}
+                  type="number"
+                  min={1}
+                  max={1440}
+                  step={1}
+                  defaultValue={selectedPromptCacheKeepalive.inactivityMinutes}
+                  disabled={
+                    settingsLoading ||
+                    selectedPromptCacheKeepalive.mode === "off"
+                  }
+                  aria-label={t("promptCacheKeepaliveCadenceAria")}
+                  onBlur={(event) => {
+                    const minutes = normalizeKeepaliveMinutes(
+                      Number(event.currentTarget.value),
+                    );
+                    if (minutes === null) {
+                      event.currentTarget.value = String(
+                        selectedPromptCacheKeepalive.inactivityMinutes,
+                      );
+                      return;
+                    }
+                    event.currentTarget.value = String(minutes);
+                    if (
+                      minutes !== selectedPromptCacheKeepalive.inactivityMinutes
+                    ) {
+                      void updatePromptCacheKeepalive({
+                        inactivityMinutes: minutes,
+                      });
+                    }
+                  }}
+                />
+                <span>{t("promptCacheKeepaliveCadenceUnit")}</span>
+              </label>
             </div>
           )}
 

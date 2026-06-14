@@ -30,7 +30,10 @@ import {
   type DeferredDeliverySettings,
   resolveDeferredDeliverySettings,
 } from "./deferredDeliverySettings.js";
-import type { AgentProvider } from "../sdk/providers/types.js";
+import type {
+  AgentProvider,
+  PromptCacheRefreshResult,
+} from "../sdk/providers/types.js";
 import {
   expandSlashCommandEmulation,
   isSlashCommandSubmission,
@@ -88,6 +91,9 @@ type PendingRecapRequest = {
   provider: AgentProvider;
   sinceMs: number | null;
 };
+type PromptCacheKeepaliveLease = {
+  getInactivityMs: () => number | null;
+};
 
 function isPatientDeferredEntry(entry: DeferredQueueEntry): boolean {
   return entry.message.metadata?.deliveryIntent === "patient";
@@ -103,6 +109,8 @@ function patientPatienceMsForEntry(entry: DeferredQueueEntry): number {
 
 const CODEX_NATIVE_SLASH_COMMAND_NAMES = new Set(["compact", "goal"]);
 const ASK_USER_QUESTION_TOOL_NAME = "AskUserQuestion";
+const PROMPT_CACHE_KEEPALIVE_RECHECK_MS = 30_000;
+const PROMPT_CACHE_KEEPALIVE_MIN_DELAY_MS = 1_000;
 
 function isAskUserQuestionTool(toolName: string): boolean {
   return toolName === ASK_USER_QUESTION_TOOL_NAME;
@@ -144,6 +152,12 @@ function getKnownNativeSlashCommands(
   provider: ProviderName,
 ): ReadonlySet<string> | undefined {
   return provider === "codex" ? CODEX_NATIVE_SLASH_COMMAND_NAMES : undefined;
+}
+
+function parseIsoMs(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
 }
 
 /**
@@ -281,6 +295,10 @@ export interface ProcessConstructorOptions extends ProcessOptions {
   getProviderActivityFn?: () => ProviderActivitySnapshot;
   /** Provider-owned work that should retain an otherwise idle process. */
   getProviderRetentionFn?: () => ProviderRetentionSnapshot;
+  /** Provider no-context-pollution prompt-cache refresh action. */
+  refreshPromptCacheFn?: (options: {
+    sessionId: string;
+  }) => Promise<PromptCacheRefreshResult>;
   /** Function to change max thinking tokens at runtime (SDK 0.2.7+) */
   setMaxThinkingTokensFn?: (tokens: number | null) => Promise<void>;
   /** Function to interrupt current turn gracefully (SDK 0.2.7+) */
@@ -439,9 +457,19 @@ export class Process {
   /** Provider-specific active liveness probe, when available. */
   private probeLivenessFn: (() => Promise<ProviderLivenessProbeResult>) | null;
   private getProviderActivityFn: (() => ProviderActivitySnapshot) | null;
-  private getProviderRetentionFn:
-    | (() => ProviderRetentionSnapshot)
+  private getProviderRetentionFn: (() => ProviderRetentionSnapshot) | null =
+    null;
+  private refreshPromptCacheFn:
+    | ((options: { sessionId: string }) => Promise<PromptCacheRefreshResult>)
     | null = null;
+  private promptCacheKeepaliveLeases = new Map<
+    string,
+    PromptCacheKeepaliveLease
+  >();
+  private promptCacheKeepaliveTimer: ReturnType<typeof setTimeout> | null =
+    null;
+  private promptCacheKeepaliveInFlight = false;
+  private lastPromptCacheKeepaliveAt: Date | null = null;
   private lastWakeReason: SessionWakeReasonSnapshot | null = null;
   private _lastLivenessProbe: LivenessProbeResult | null = null;
   private _livenessProbeInFlight: Promise<LivenessProbeResult | null> | null =
@@ -501,6 +529,7 @@ export class Process {
     this.probeLivenessFn = options.probeLivenessFn ?? null;
     this.getProviderActivityFn = options.getProviderActivityFn ?? null;
     this.getProviderRetentionFn = options.getProviderRetentionFn ?? null;
+    this.refreshPromptCacheFn = options.refreshPromptCacheFn ?? null;
     this._recapMode =
       options.recapMode ?? (options.recapsEnabled ? "side-session" : "off");
     this._promptSuggestionMode = options.promptSuggestionMode ?? "off";
@@ -676,6 +705,175 @@ export class Process {
     this.emit({ type: "liveness-update" });
     if (this._state.type === "idle") {
       this.rescheduleIdleTimerForCurrentIdlePeriod();
+    }
+  }
+
+  supportsPromptCacheKeepalive(): boolean {
+    return this.refreshPromptCacheFn !== null;
+  }
+
+  registerPromptCacheKeepaliveLease(
+    lease: PromptCacheKeepaliveLease,
+  ): () => void {
+    if (!this.refreshPromptCacheFn) {
+      return () => {};
+    }
+    const leaseId = randomUUID();
+    this.promptCacheKeepaliveLeases.set(leaseId, lease);
+    this.schedulePromptCacheKeepalive();
+    return () => {
+      this.promptCacheKeepaliveLeases.delete(leaseId);
+      if (this.promptCacheKeepaliveLeases.size === 0) {
+        this.clearPromptCacheKeepaliveTimer();
+      } else {
+        this.schedulePromptCacheKeepalive();
+      }
+    };
+  }
+
+  private hasPromptCacheKeepaliveLease(): boolean {
+    return this.promptCacheKeepaliveLeases.size > 0;
+  }
+
+  private resolvePromptCacheKeepaliveInactivityMs(): number | null {
+    let resolved: number | null = null;
+    for (const lease of this.promptCacheKeepaliveLeases.values()) {
+      const value = lease.getInactivityMs();
+      if (value === null || !Number.isFinite(value) || value <= 0) {
+        continue;
+      }
+      resolved = resolved === null ? value : Math.min(resolved, value);
+    }
+    return resolved;
+  }
+
+  private schedulePromptCacheKeepalive(): void {
+    this.clearPromptCacheKeepaliveTimer();
+    if (
+      !this.refreshPromptCacheFn ||
+      this.promptCacheKeepaliveLeases.size === 0 ||
+      this._state.type === "terminated"
+    ) {
+      return;
+    }
+
+    const inactivityMs = this.resolvePromptCacheKeepaliveInactivityMs();
+    if (inactivityMs === null) {
+      return;
+    }
+
+    const now = Date.now();
+    const dueInMs = this.getPromptCacheKeepaliveDueInMs(now, inactivityMs);
+    const timer = setTimeout(
+      () => {
+        this.promptCacheKeepaliveTimer = null;
+        void this.runPromptCacheKeepalive();
+      },
+      Math.max(PROMPT_CACHE_KEEPALIVE_MIN_DELAY_MS, dueInMs),
+    );
+    timer.unref?.();
+    this.promptCacheKeepaliveTimer = timer;
+  }
+
+  private getPromptCacheKeepaliveDueInMs(
+    now: number,
+    inactivityMs: number,
+  ): number {
+    if (this._state.type !== "idle" || this.queueDepth > 0) {
+      return PROMPT_CACHE_KEEPALIVE_RECHECK_MS;
+    }
+    if (this.isProcessAlive === false) {
+      return PROMPT_CACHE_KEEPALIVE_RECHECK_MS;
+    }
+
+    const liveness = this.getLivenessSnapshot(new Date(now));
+    if (liveness.derivedStatus !== "verified-idle") {
+      return PROMPT_CACHE_KEEPALIVE_RECHECK_MS;
+    }
+
+    const candidates = [
+      this._state.since.getTime(),
+      this.lastPromptCacheKeepaliveAt?.getTime() ?? null,
+      parseIsoMs(liveness.lastProviderMessageAt),
+      parseIsoMs(liveness.lastRawProviderEventAt),
+    ].filter((value): value is number => value !== null);
+    const anchorMs =
+      candidates.length > 0
+        ? Math.max(...candidates)
+        : this.startedAt.getTime();
+    return Math.max(0, anchorMs + inactivityMs - now);
+  }
+
+  private async runPromptCacheKeepalive(): Promise<void> {
+    if (this.promptCacheKeepaliveInFlight) {
+      this.schedulePromptCacheKeepalive();
+      return;
+    }
+    const inactivityMs = this.resolvePromptCacheKeepaliveInactivityMs();
+    if (
+      !this.refreshPromptCacheFn ||
+      inactivityMs === null ||
+      this.promptCacheKeepaliveLeases.size === 0
+    ) {
+      return;
+    }
+
+    const now = Date.now();
+    if (this.getPromptCacheKeepaliveDueInMs(now, inactivityMs) > 0) {
+      this.schedulePromptCacheKeepalive();
+      return;
+    }
+
+    const log = getLogger();
+    this.promptCacheKeepaliveInFlight = true;
+    try {
+      const result = await this.refreshPromptCacheFn({
+        sessionId: this._sessionId,
+      });
+      if (result.refreshed) {
+        this.lastPromptCacheKeepaliveAt = new Date();
+        log.info(
+          {
+            event: "prompt_cache_keepalive_refreshed",
+            sessionId: this._sessionId,
+            processId: this.id,
+            projectId: this.projectId,
+            provider: this.provider,
+            mode: result.mode,
+            inactivityMinutes: Math.round(inactivityMs / 60_000),
+            usage: result.usage,
+          },
+          `Prompt-cache keepalive refreshed: ${this._sessionId}`,
+        );
+      } else {
+        log.warn(
+          {
+            event: "prompt_cache_keepalive_noop",
+            sessionId: this._sessionId,
+            processId: this.id,
+            projectId: this.projectId,
+            provider: this.provider,
+            mode: result.mode,
+            detail: result.detail,
+          },
+          `Prompt-cache keepalive did not refresh: ${this._sessionId}`,
+        );
+      }
+    } catch (error) {
+      log.warn(
+        {
+          event: "prompt_cache_keepalive_failed",
+          sessionId: this._sessionId,
+          processId: this.id,
+          projectId: this.projectId,
+          provider: this.provider,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        `Prompt-cache keepalive failed: ${this._sessionId}`,
+      );
+    } finally {
+      this.promptCacheKeepaliveInFlight = false;
+      this.schedulePromptCacheKeepalive();
     }
   }
 
@@ -1089,6 +1287,7 @@ export class Process {
     );
 
     this.clearIdleTimer();
+    this.clearPromptCacheKeepaliveTimer();
     this.stopBucketSwapTimer();
     this.iteratorDone = true;
 
@@ -2465,6 +2664,7 @@ export class Process {
 
   async abort(): Promise<void> {
     this.clearIdleTimer();
+    this.clearPromptCacheKeepaliveTimer();
     this.stopBucketSwapTimer();
 
     // Call the SDK's abort function if available
@@ -3090,46 +3290,53 @@ export class Process {
 
   private startIdleTimer(delayMs = this.idleTimeoutMs): void {
     this.clearIdleTimer();
-    this.idleTimer = setTimeout(() => {
-      this.idleTimer = null;
+    this.idleTimer = setTimeout(
+      () => {
+        this.idleTimer = null;
 
-      // State may have changed while the timer was pending.
-      if (this._state.type !== "idle") {
-        return;
-      }
+        // State may have changed while the timer was pending.
+        if (this._state.type !== "idle") {
+          return;
+        }
 
-      const retainedByFeature =
-        this.shouldRetainIdleProcess?.(this._sessionId) ?? false;
-      const providerRetention = this.getProviderRetentionSnapshot();
-      if (
-        this.hasLiveDeltaSubscribers() ||
-        retainedByFeature ||
-        providerRetention.retained
-      ) {
-        getLogger().debug(
-          {
-            event: "idle_cleanup_deferred",
-            sessionId: this._sessionId,
-            processId: this.id,
-            projectId: this.projectId,
-            idleTimeoutMs: this.idleTimeoutMs,
-            liveDeltaSubscriberCount: this.liveDeltaSubscriberCount,
-            retainedByFeature,
-            retainedByProvider: providerRetention.retained,
-            providerRetentionReasons: providerRetention.reasons,
-            providerBackgroundTaskCount:
-              providerRetention.backgroundTaskCount,
-            providerSessionCronCount: providerRetention.sessionCronCount,
-            providerLiveTaskCount: providerRetention.liveTaskCount,
-          },
-          `Idle cleanup deferred: ${this._sessionId} is explicitly retained`,
-        );
-        this.startIdleTimer();
-        return;
-      }
+        const retainedByFeature =
+          this.shouldRetainIdleProcess?.(this._sessionId) ?? false;
+        const retainedByPromptCacheKeepalive =
+          this.hasPromptCacheKeepaliveLease();
+        const providerRetention = this.getProviderRetentionSnapshot();
+        if (
+          this.hasLiveDeltaSubscribers() ||
+          retainedByFeature ||
+          retainedByPromptCacheKeepalive ||
+          providerRetention.retained
+        ) {
+          getLogger().debug(
+            {
+              event: "idle_cleanup_deferred",
+              sessionId: this._sessionId,
+              processId: this.id,
+              projectId: this.projectId,
+              idleTimeoutMs: this.idleTimeoutMs,
+              liveDeltaSubscriberCount: this.liveDeltaSubscriberCount,
+              retainedByFeature,
+              retainedByPromptCacheKeepalive,
+              retainedByProvider: providerRetention.retained,
+              providerRetentionReasons: providerRetention.reasons,
+              providerBackgroundTaskCount:
+                providerRetention.backgroundTaskCount,
+              providerSessionCronCount: providerRetention.sessionCronCount,
+              providerLiveTaskCount: providerRetention.liveTaskCount,
+            },
+            `Idle cleanup deferred: ${this._sessionId} is explicitly retained`,
+          );
+          this.startIdleTimer();
+          return;
+        }
 
-      this.reapIdleProcess();
-    }, Math.max(0, delayMs));
+        this.reapIdleProcess();
+      },
+      Math.max(0, delayMs),
+    );
     this.idleTimer.unref?.();
   }
 
@@ -3143,6 +3350,7 @@ export class Process {
 
   private reapIdleProcess(): void {
     this.idleReapInProgress = true;
+    this.clearPromptCacheKeepaliveTimer();
     this.stopBucketSwapTimer();
     this.iteratorDone = true;
 
@@ -3168,10 +3376,18 @@ export class Process {
     }
   }
 
+  private clearPromptCacheKeepaliveTimer(): void {
+    if (this.promptCacheKeepaliveTimer) {
+      clearTimeout(this.promptCacheKeepaliveTimer);
+      this.promptCacheKeepaliveTimer = null;
+    }
+  }
+
   private setState(state: ProcessState): void {
     this._state = state;
     this._lastStateChangeTime = new Date();
     this.emit({ type: "state-change", state });
+    this.schedulePromptCacheKeepalive();
   }
 
   private emit(event: ProcessEvent): void {

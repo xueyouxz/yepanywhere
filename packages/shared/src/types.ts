@@ -123,6 +123,31 @@ export type RecapMode = (typeof RECAP_MODES)[number];
 export const PROMPT_SUGGESTION_MODES = ["off", "native"] as const;
 export type PromptSuggestionMode = (typeof PROMPT_SUGGESTION_MODES)[number];
 
+export const PROMPT_CACHE_KEEPALIVE_MODES = ["auto", "off"] as const;
+export type PromptCacheKeepaliveMode =
+  (typeof PROMPT_CACHE_KEEPALIVE_MODES)[number];
+export const DEFAULT_PROMPT_CACHE_KEEPALIVE_INACTIVITY_MINUTES = 40;
+
+export interface PromptCacheKeepaliveProviderInfo {
+  /** Whether this provider can refresh/cache-touch without polluting session context. */
+  supportsNoContextPollutionNudge: boolean;
+  /** Default mode for capable providers when no server setting is saved. */
+  defaultMode: PromptCacheKeepaliveMode;
+  /** Default idle cadence in minutes when no server setting overrides it. */
+  defaultInactivityMinutes: number;
+}
+
+export interface PromptCacheKeepaliveProviderSetting {
+  mode?: PromptCacheKeepaliveMode;
+  inactivityMinutes?: number;
+}
+
+export interface PromptCacheKeepaliveSettings {
+  providers?: Partial<
+    Record<ProviderName, PromptCacheKeepaliveProviderSetting>
+  >;
+}
+
 export const HELPER_SIDE_MODEL_SAME_AS_MAIN = "same-as-main" as const;
 export const HELPER_SIDE_MODEL_CHEAPEST = "cheapest" as const;
 export const HELPER_SIDE_MODEL_TARGET_PREFIX = "helper-target:" as const;
@@ -209,6 +234,8 @@ export interface ProviderInfo {
   supportsNativeRecaps?: boolean;
   /** Whether this provider emits prompt suggestions in its ordinary protocol. */
   supportsNativePromptSuggestions?: boolean;
+  /** Prompt-cache keepalive capability exposed for provider-economics UI. */
+  promptCacheKeepalive?: PromptCacheKeepaliveProviderInfo;
   /**
    * Whether this provider has a real transcript-fork primitive (new
    * resumable session from a prefix of an existing one). Default: false;

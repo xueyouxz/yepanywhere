@@ -20,9 +20,11 @@ import {
   query,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
+  DEFAULT_PROMPT_CACHE_KEEPALIVE_INACTIVITY_MINUTES,
   HELPER_SIDE_MODEL_CHEAPEST,
   type EffortLevel,
   type ModelInfo,
+  type PromptCacheKeepaliveProviderInfo,
   type SlashCommand,
   getModelContextWindow,
 } from "@yep-anywhere/shared";
@@ -50,6 +52,7 @@ import type {
   AgentProvider,
   AgentSession,
   AuthStatus,
+  PromptCacheRefreshResult,
   ProviderName,
   StartSessionOptions,
 } from "./types.js";
@@ -65,6 +68,8 @@ type ClaudeSdkModelInfo = Awaited<ReturnType<Query["supportedModels"]>>[number];
 const USE_SPAWN_WRAPPER = true;
 const CLAUDE_LIVENESS_PROBE_TIMEOUT_MS = 5000;
 const CLAUDE_LIVENESS_PROBE_SOURCE = "claude:control/mcp_status";
+const CLAUDE_PROMPT_CACHE_KEEPALIVE_TIMEOUT_MS = 60_000;
+const CLAUDE_PROMPT_CACHE_KEEPALIVE_MAX_BUDGET_USD = 0.02;
 const DEFAULT_CLAUDE_LOGIN_COMMAND = "claude auth login --claudeai";
 const CLAUDE_EFFORT_LEVELS: EffortLevel[] = [
   "low",
@@ -168,6 +173,53 @@ function parseCommandLines(stdout: string): string[] {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+function numericField(source: unknown, field: string): number | undefined {
+  if (!source || typeof source !== "object") {
+    return undefined;
+  }
+  const value = (source as Record<string, unknown>)[field];
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function extractPromptCacheRefreshUsage(
+  message: AgentSDKMessage,
+): PromptCacheRefreshResult["usage"] | undefined {
+  const record = message as {
+    usage?: unknown;
+    modelUsage?: unknown;
+    message?: { usage?: unknown };
+  };
+  const usage =
+    record.usage ?? record.modelUsage ?? record.message?.usage ?? null;
+  if (!usage) {
+    return undefined;
+  }
+
+  const result: NonNullable<PromptCacheRefreshResult["usage"]> = {};
+  const inputTokens =
+    numericField(usage, "input_tokens") ?? numericField(usage, "inputTokens");
+  const outputTokens =
+    numericField(usage, "output_tokens") ?? numericField(usage, "outputTokens");
+  const cacheReadTokens =
+    numericField(usage, "cache_read_input_tokens") ??
+    numericField(usage, "cached_input_tokens") ??
+    numericField(usage, "cacheReadTokens");
+  const cacheCreationTokens =
+    numericField(usage, "cache_creation_input_tokens") ??
+    numericField(usage, "cacheCreationTokens");
+
+  if (inputTokens !== undefined) result.inputTokens = inputTokens;
+  if (outputTokens !== undefined) result.outputTokens = outputTokens;
+  if (cacheReadTokens !== undefined) result.cacheReadTokens = cacheReadTokens;
+  if (cacheCreationTokens !== undefined) {
+    result.cacheCreationTokens = cacheCreationTokens;
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 function safeMtimeMs(path: string): number {
@@ -563,6 +615,11 @@ export class ClaudeProvider implements AgentProvider {
   readonly supportsSteerNow = true;
   readonly supportsRecaps = true;
   readonly supportsNativePromptSuggestions = true;
+  readonly promptCacheKeepalive?: PromptCacheKeepaliveProviderInfo = {
+    supportsNoContextPollutionNudge: true,
+    defaultMode: "auto" as const,
+    defaultInactivityMinutes: DEFAULT_PROMPT_CACHE_KEEPALIVE_INACTIVITY_MINUTES,
+  };
 
   /**
    * Check if Claude SDK is available.
@@ -826,9 +883,7 @@ export class ClaudeProvider implements AgentProvider {
         ),
       ]);
 
-      return mergeClaudeModels(
-        models.map((model) => mapClaudeSdkModel(model)),
-      );
+      return mergeClaudeModels(models.map((model) => mapClaudeSdkModel(model)));
     } finally {
       abortController.abort();
     }
@@ -965,6 +1020,96 @@ export class ClaudeProvider implements AgentProvider {
         throw new Error("Recap generation returned empty text");
       }
       return cleaned;
+    } finally {
+      clearTimeout(timeout);
+      abortController.abort();
+    }
+  }
+
+  async refreshPromptCache(options: {
+    sessionId: string;
+    cwd: string;
+    model?: string;
+    thinking?: StartSessionOptions["thinking"];
+    effort?: StartSessionOptions["effort"];
+    globalInstructions?: string;
+    executor?: string;
+    remoteEnv?: Record<string, string>;
+    pathToClaudeCodeExecutable?: string;
+    env: Record<string, string | undefined>;
+  }): Promise<PromptCacheRefreshResult> {
+    const abortController = new AbortController();
+    const timeout = setTimeout(
+      () => abortController.abort(),
+      CLAUDE_PROMPT_CACHE_KEEPALIVE_TIMEOUT_MS,
+    );
+    timeout.unref?.();
+
+    async function* singlePrompt(): AsyncGenerator<{
+      type: "user";
+      message: { role: "user"; content: string };
+      parent_tool_use_id: null;
+      session_id: string;
+    }> {
+      yield {
+        type: "user",
+        message: {
+          role: "user",
+          content: "Prompt-cache keepalive only. Reply exactly: OK.",
+        },
+        parent_tool_use_id: null,
+        session_id: options.sessionId,
+      };
+    }
+
+    const spawnClaudeCodeProcess = options.executor
+      ? createRemoteSpawn({
+          host: options.executor,
+          remoteEnv: options.remoteEnv,
+        })
+      : undefined;
+
+    try {
+      const sdkQuery = query({
+        prompt: singlePrompt(),
+        options: {
+          cwd: options.cwd,
+          resume: options.sessionId,
+          abortController,
+          permissionMode: "default",
+          canUseTool: async () => ({
+            behavior: "deny" as const,
+            message: "Prompt-cache keepalive does not run tools",
+            interrupt: true,
+          }),
+          systemPrompt: this.getSystemPrompt(options.globalInstructions),
+          settingSources: ["user", "project", "local"],
+          includePartialMessages: false,
+          persistSession: false,
+          maxTurns: 1,
+          maxBudgetUsd: CLAUDE_PROMPT_CACHE_KEEPALIVE_MAX_BUDGET_USD,
+          model: options.model,
+          thinking: options.thinking,
+          effort: options.effort,
+          pathToClaudeCodeExecutable: options.pathToClaudeCodeExecutable,
+          env: options.env,
+          spawnClaudeCodeProcess,
+        },
+      });
+
+      let usage: PromptCacheRefreshResult["usage"];
+      for await (const message of sdkQuery as AsyncIterable<AgentSDKMessage>) {
+        usage = extractPromptCacheRefreshUsage(message) ?? usage;
+        if (message.type === "result") {
+          break;
+        }
+      }
+
+      return {
+        mode: "no-context-pollution-nudge",
+        refreshed: true,
+        usage,
+      };
     } finally {
       clearTimeout(timeout);
       abortController.abort();
@@ -1344,6 +1489,19 @@ export class ClaudeProvider implements AgentProvider {
         return (capturedProcess as ChildProcess | null)?.pid;
       },
       getProviderRetention: () => providerRetention.getSnapshot(),
+      refreshPromptCache: ({ sessionId }) =>
+        this.refreshPromptCache({
+          sessionId,
+          cwd: effectiveCwd,
+          model: options.model,
+          thinking: options.thinking,
+          effort: options.effort,
+          globalInstructions: options.globalInstructions,
+          executor: options.executor,
+          remoteEnv,
+          pathToClaudeCodeExecutable,
+          env: claudeEnv,
+        }),
       publishAgentctlSessionId: (sessionId: string) => {
         agentctlSessionEnvBridge?.publishSessionId(sessionId);
       },
