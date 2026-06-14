@@ -1230,6 +1230,11 @@ export function MessageInputToolbarView({
               onGrokAudioSettingsChange={
                 speechControl.onGrokAudioSettingsChange
               }
+              onPointerNearTrigger={() =>
+                speechControl.voiceButton?.kind === "live"
+                  ? speechControl.voiceButton.ref?.current?.prewarm?.()
+                  : undefined
+              }
               trigger={
                 <VoiceInputButton
                   ref={speechControl.voiceButton.ref}

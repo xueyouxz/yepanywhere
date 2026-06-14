@@ -34,6 +34,8 @@ export interface VoiceInputButtonRef {
   stopAndFinalize: () => string;
   /** Toggle listening on/off */
   toggle: () => void;
+  /** Speculatively warm capture resources before the first click. */
+  prewarm: () => void;
   /** Whether currently listening */
   isListening: boolean;
   /** Whether voice input is available (supported and enabled) */
@@ -93,7 +95,7 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
   } = useModelSettings();
   const { version: versionInfo } = useVersion();
   const basePath = useRemoteBasePath();
-  const { keepMicWarm } = useSpeechCaptureSettings();
+  const { keepMicWarm, micDeviceId } = useSpeechCaptureSettings();
   const serverVoiceEnabled =
     versionInfo?.capabilities?.includes("voiceInput") ?? true;
   const speechMethod = useMemo(
@@ -157,6 +159,7 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
     status,
     toggleListening,
     stopListening,
+    prewarm,
     error,
     interimTranscript,
   } = useSpeechRecognition({
@@ -166,6 +169,7 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
     serverStreaming,
     smartTurn: serverStreaming ? smartTurn : undefined,
     keepMicWarm,
+    micDeviceId,
     onResult: handleResult,
     onInterimResult: handleInterim,
   });
@@ -189,6 +193,7 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
         return pending;
       },
       toggle: toggleListening,
+      prewarm,
       isListening: isActive,
       isAvailable,
     }),
@@ -197,6 +202,7 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
       isListening,
       isStarting,
       isActive,
+      prewarm,
       stopListening,
       toggleListening,
       isAvailable,

@@ -81,7 +81,7 @@ Backends should implement a common `SpeechBackend` contract:
   same transport as ordinary YA API calls.
 - When the selected server backend advertises `streaming: true`,
   `YaServerProvider` captures microphone audio through Web Audio, downsamples it
-  to 24 kHz signed PCM16 little-endian, and sends binary frames to
+  to 16 kHz signed PCM16 little-endian, and sends binary frames to
   `/api/speech/ws`. Interim and chunk-final events update the composer
   preview; only utterance-final streaming partials commit transcript deltas.
   Clicking stop commits the currently visible preview before ignoring
@@ -96,7 +96,7 @@ Backends should implement a common `SpeechBackend` contract:
   `smart_turn` threshold and `smart_turn_timeout` parameters. The client shows
   Smart Turn controls only when the selected backend advertises that capability.
 - Grok STT has an explicit browser-to-YA audio uplink setting. The default
-  PCM16 mode captures Web Audio in the browser and sends raw 24 kHz PCM16
+  PCM16 mode captures Web Audio in the browser and sends raw 16 kHz PCM16
   frames to YA for streaming recognition. The comparative browser-compressed
   mode uses the browser's MediaRecorder output and the batch transcription
   route; compressed MediaRecorder audio may be equivalent in practice, but YA
@@ -256,7 +256,7 @@ client through `fetchJSON("/speech/transcribe", ...)`.
   `send`.
 - With Grok STT selected, the audio uplink setting defaults to PCM16 and the
   WebSocket start frame advertises `mimeType:
-  "audio/pcm;rate=24000;encoding=s16le"`, `sampleRate: 24000`, and
+  "audio/pcm;rate=16000;encoding=s16le"`, `sampleRate: 16000`, and
   `encoding: "pcm"`. Switching to browser-compressed mode uses the
   MediaRecorder batch path and hides Smart Turn because that path has no
   streaming `speech_final` events.

@@ -26,6 +26,8 @@ export interface UseSpeechRecognitionOptions {
   smartTurn?: SpeechSmartTurnSettings;
   /** Keep the mic device warm between dictations (skips getUserMedia cold-open). */
   keepMicWarm?: boolean;
+  /** Browser-local microphone device id for YA-server capture. */
+  micDeviceId?: string | null;
   /** Callback when final transcript is available. */
   onResult?: (
     transcript: string,
@@ -50,6 +52,7 @@ export interface UseSpeechRecognitionReturn {
   startListening: () => void;
   stopListening: () => void;
   toggleListening: () => void;
+  prewarm: () => void;
   error: string | null;
 }
 
@@ -62,6 +65,7 @@ function createProvider(
     serverStreaming?: boolean;
     smartTurn?: SpeechSmartTurnSettings;
     keepMicWarm?: boolean;
+    micDeviceId?: string | null;
     onResult?: (
       t: string,
       metadata?: SpeechTranscriptionResultMetadata,
@@ -95,6 +99,7 @@ export function useSpeechRecognition(
     serverStreaming,
     smartTurn,
     keepMicWarm,
+    micDeviceId,
     onResult,
     onInterimResult,
     onEnd,
@@ -119,6 +124,7 @@ export function useSpeechRecognition(
   const serverStreamingRef = useRef(serverStreaming);
   const smartTurnRef = useRef(smartTurn);
   const keepMicWarmRef = useRef(keepMicWarm);
+  const micDeviceIdRef = useRef(micDeviceId);
 
   const providerRef = useRef<SpeechProvider | null>(null);
   if (providerRef.current === null) {
@@ -131,6 +137,7 @@ export function useSpeechRecognition(
         serverStreaming: serverStreamingRef.current,
         smartTurn: smartTurnRef.current,
         keepMicWarm: keepMicWarmRef.current,
+        micDeviceId: micDeviceIdRef.current,
         onResult: (t, metadata) => onResultRef.current?.(t, metadata),
         onInterimResult: (t) => onInterimResultRef.current?.(t),
         onEnd: () => onEndRef.current?.(),
@@ -155,7 +162,8 @@ export function useSpeechRecognition(
       speechMethod === speechMethodRef.current &&
       serverStreaming === serverStreamingRef.current &&
       smartTurn === smartTurnRef.current &&
-      keepMicWarm === keepMicWarmRef.current
+      keepMicWarm === keepMicWarmRef.current &&
+      micDeviceId === micDeviceIdRef.current
     ) {
       return;
     }
@@ -164,6 +172,7 @@ export function useSpeechRecognition(
     serverStreamingRef.current = serverStreaming;
     smartTurnRef.current = smartTurn;
     keepMicWarmRef.current = keepMicWarm;
+    micDeviceIdRef.current = micDeviceId;
 
     const old = providerRef.current;
     old?.dispose();
@@ -174,6 +183,7 @@ export function useSpeechRecognition(
       serverStreaming,
       smartTurn,
       keepMicWarm,
+      micDeviceId,
       onResult: (t, metadata) => onResultRef.current?.(t, metadata),
       onInterimResult: (t) => onInterimResultRef.current?.(t),
       onEnd: () => onEndRef.current?.(),
@@ -182,7 +192,15 @@ export function useSpeechRecognition(
     providerRef.current = next;
     setState(next.getState());
     next.subscribe(setState);
-  }, [speechMethod, basePath, lang, serverStreaming, smartTurn, keepMicWarm]);
+  }, [
+    speechMethod,
+    basePath,
+    lang,
+    serverStreaming,
+    smartTurn,
+    keepMicWarm,
+    micDeviceId,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -210,6 +228,10 @@ export function useSpeechRecognition(
     }
   }, []);
 
+  const prewarm = useCallback(() => {
+    providerRef.current?.prewarm?.();
+  }, []);
+
   return {
     isSupported: providerRef.current?.isSupported ?? false,
     isListening: state.isListening,
@@ -218,6 +240,7 @@ export function useSpeechRecognition(
     startListening,
     stopListening,
     toggleListening,
+    prewarm,
     error: state.error,
   };
 }

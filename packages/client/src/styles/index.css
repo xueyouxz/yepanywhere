@@ -4923,6 +4923,24 @@ a.sidebar-nav-item {
   line-height: 1.3;
 }
 
+.speech-mic-device-select {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.15rem;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  font-size: var(--font-size-sm);
+}
+
+.speech-mic-device-error {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.3;
+}
+
 .speech-smart-turn--compact {
   position: relative;
   flex: 0 0 auto;

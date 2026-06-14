@@ -97,19 +97,19 @@ console marks (`start` -> `getUserMedia call` -> `getUserMedia ready` ->
 with `frame peak~0.003` means the **wrong input device** was selected, not a
 code fault.
 
-Planned, both as STT settings (`pluggable-speech-recognition.md` covers the
+Implemented as STT settings (`pluggable-speech-recognition.md` covers the
 settings surface):
 
-- **Mic device picker.** Add an explicit native input-device chooser to the
+- **Mic device picker.** An explicit native input-device chooser lives in the
   shared `SpeechControlMenu` STT options surface (the mic-attached menu reused
-  by the new-session composer and message toolbar). Enumerate
-  `audioinput` devices, store the browser-local selected `deviceId`, and pass
-  it to `getUserMedia` for both warm-mic pre-open and per-dictation capture.
-  Fixes silent capture from a wrong default device, and lets the user avoid a
-  slow-opening device. Do **not** expose low-level capture params such as
-  downsampling, mono mixing, sample size, or AudioContext sample rate in that
-  UI; those remain browser/Web Audio responsibilities governed by the capture
-  contracts above.
+  by the new-session composer and message toolbar). It enumerates
+  `audioinput` devices, stores the browser-local selected `deviceId`, and
+  passes it to `getUserMedia` for both warm-mic pre-open and per-dictation
+  capture. Fixes silent capture from a wrong default device, and lets the user
+  avoid a slow-opening device. Do **not** expose low-level capture params such
+  as downsampling, mono mixing, sample size, or AudioContext sample rate in
+  that UI; those remain browser/Web Audio responsibilities governed by the
+  capture contracts above.
 - **Warm-mic option (implemented, opt-in, default off).** A **standalone**
   browser-local setting that
   applies to **all server-mediated speech recognition** (every backend, both
@@ -125,13 +125,22 @@ settings surface):
   tradeoff of enabling it. Do **not** use a short idle TTL that silently
   re-incurs the cold-open. Release only on provider dispose, option-off,
   backend/device change, or tab close. Default off keeps no speculative capture.
-  Implementation detail: when Chrome already has microphone permission, provider
-  construction pre-opens the stream; otherwise the first click still performs
-  the permission/device open, then subsequent dictations reuse the warm stream.
+  Implementation detail: initial warm acquisition is triggered idempotently
+  when a desktop mouse pointer nears the mic control (the clickable rect plus
+  margin), using the currently selected mic device. If Chrome microphone
+  permission is not already granted, the first click still performs the
+  permission/device open; subsequent dictations reuse the warm stream.
 
 The cold-open cannot be eliminated for the *first* use without prewarming
 before the click (mic indicator before intent), which is exactly why warm-mic
 is an explicit option rather than default behavior.
+
+WebSocket policy: create a fresh `/api/speech/ws` per dictation on click,
+parallel with `getUserMedia`, and close it on final/error/stop so close remains
+a clean utterance boundary. If future `[YaSTT]` timing shows `ws open` is a
+material latency source, the correct optimization is a short-freshness
+speculative pre-open that is dropped when too old, not reuse of an arbitrarily
+idle STT socket.
 
 ## Mobile: "turns yellow, never red" (open, unresolved)
 
@@ -179,11 +188,11 @@ Next diagnostic step (not yet done): enable **Remote Log Collection**
   streaming-only controls (contract #1); capture from mic-on with handshake
   buffering (#2); first-frame-gated `listening` + watchdog (#3); EC/NS/AGC off
   + `channelCount: 1` (#4); resampler at-least-1-sample span (#5); `onError`/timeout
-  salvage + request-id guard (#6); browser-local warm-mic option; `[YaSTT]`
+  salvage + request-id guard (#6); browser-local warm-mic option with
+  pointer-near initial prewarm; browser-local mic device picker; `[YaSTT]`
   diagnostics.
-- **Open / not implemented:** mobile "never red" (above); mic device picker;
-  AudioWorklet mode. The non-AudioWorklet path already sends 16 kHz PCM16 in
-  100 ms chunks.
+- **Open / not implemented:** mobile "never red" (above); AudioWorklet mode.
+  The non-AudioWorklet path already sends 16 kHz PCM16 in 100 ms chunks.
 
 ## Diagnostics
 

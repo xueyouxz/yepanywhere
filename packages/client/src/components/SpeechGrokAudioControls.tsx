@@ -19,7 +19,7 @@ const UPLINK_OPTIONS: Array<{
   {
     value: "pcm16",
     label: "PCM16",
-    description: "Send raw 24 kHz PCM16 from browser to YA.",
+    description: "Send raw 16 kHz PCM16 from browser to YA.",
   },
   {
     value: "browser-compressed",

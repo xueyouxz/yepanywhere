@@ -157,6 +157,49 @@ describe("YA server speech provider", () => {
     expect(provider.getState().status).toBe("idle");
   });
 
+  it("passes the selected microphone device to batch capture", async () => {
+    const fakeStream = {
+      getTracks: () => [],
+    } as unknown as MediaStream;
+    const getUserMedia = vi.fn(async () => fakeStream);
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia },
+    });
+    vi.stubGlobal(
+      "MediaRecorder",
+      class FakeMediaRecorder {
+        static isTypeSupported() {
+          return true;
+        }
+
+        state: RecordingState = "inactive";
+        onstop: (() => void) | null = null;
+
+        start() {
+          this.state = "recording";
+        }
+
+        stop() {
+          this.state = "inactive";
+          this.onstop?.();
+        }
+      },
+    );
+
+    const provider = new YaServerProvider("ya-dummy", "", {
+      micDeviceId: "usb-mic",
+    });
+    provider.start();
+    await Promise.resolve();
+
+    expect(getUserMedia).toHaveBeenCalledWith({
+      audio: { deviceId: { exact: "usb-mic" } },
+    });
+
+    provider.dispose();
+  });
+
   it("commits utterance-final streaming partials as transcript deltas", async () => {
     const stopTrack = vi.fn();
     const fakeStream = {
@@ -900,6 +943,7 @@ describe("YA server speech provider", () => {
 
     const provider = new YaServerProvider("ya-grok", "", {
       serverStreaming: true,
+      micDeviceId: "usb-mic",
     });
     provider.start();
     await Promise.resolve();
@@ -914,6 +958,7 @@ describe("YA server speech provider", () => {
     });
     expect(getUserMedia).toHaveBeenCalledWith({
       audio: expect.objectContaining({
+        deviceId: { exact: "usb-mic" },
         channelCount: { ideal: 1 },
         sampleRate: { ideal: 16_000 },
         sampleSize: { ideal: 16 },
@@ -1069,7 +1114,7 @@ describe("YA server speech provider", () => {
     expect(stopTrack).toHaveBeenCalledTimes(1);
   });
 
-  it("stops a pending warm mic pre-open if disposed before it resolves", async () => {
+  it("stops a pending pointer-near warm mic pre-open if disposed before it resolves", async () => {
     const media = deferred<MediaStream>();
     const stopTrack = vi.fn();
     const fakeStream = {
@@ -1092,11 +1137,20 @@ describe("YA server speech provider", () => {
     const provider = new YaServerProvider("ya-grok", "", {
       serverStreaming: true,
       keepMicWarm: true,
+      micDeviceId: "usb-mic",
     });
+    provider.prewarm();
+    provider.prewarm();
     await Promise.resolve();
     await Promise.resolve();
     expect(query).toHaveBeenCalledWith({ name: "microphone" });
+    expect(query).toHaveBeenCalledTimes(1);
     expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(getUserMedia).toHaveBeenCalledWith({
+      audio: expect.objectContaining({
+        deviceId: { exact: "usb-mic" },
+      }),
+    });
 
     provider.dispose();
     media.resolve(fakeStream);

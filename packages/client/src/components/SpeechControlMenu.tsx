@@ -4,6 +4,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -11,6 +12,7 @@ import {
 import type { FilterOption } from "./FilterDropdown";
 import { SpeechGrokAudioControls } from "./SpeechGrokAudioControls";
 import { SpeechSmartTurnControls } from "./SpeechSmartTurnControls";
+import { useSpeechCaptureSettings } from "../hooks/useSpeechCaptureSettings";
 import type { SpeechMethodId } from "../lib/speechProviders/methods";
 import type {
   GrokSpeechAudioSettings,
@@ -28,9 +30,19 @@ interface SpeechControlMenuProps {
   smartTurnDisabled?: boolean;
   grokAudioSettings?: GrokSpeechAudioSettings;
   onGrokAudioSettingsChange?: (settings: GrokSpeechAudioSettings) => void;
+  onPointerNearTrigger?: () => void;
 }
 
 const LONG_PRESS_MS = 500;
+const POINTER_NEAR_MARGIN_PX = 32;
+
+function getMediaDevices(): MediaDevices | null {
+  return typeof navigator !== "undefined" ? navigator.mediaDevices : null;
+}
+
+function audioInputLabel(device: MediaDeviceInfo, index: number): string {
+  return device.label || `Microphone ${index + 1}`;
+}
 
 export function SpeechControlMenu({
   trigger,
@@ -43,12 +55,18 @@ export function SpeechControlMenu({
   smartTurnDisabled = false,
   grokAudioSettings,
   onGrokAudioSettingsChange,
+  onPointerNearTrigger,
 }: SpeechControlMenuProps) {
+  const micDeviceSelectId = useId();
+  const { micDeviceId, setMicDeviceId } = useSpeechCaptureSettings();
   const [open, setOpen] = useState(false);
+  const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
+  const [micDeviceError, setMicDeviceError] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressOpenedRef = useRef(false);
+  const pointerNearRef = useRef(false);
   const selectedMethodLabel = useMemo(
     () =>
       methodOptions.find((option) => option.value === selectedMethod)?.label ??
@@ -61,8 +79,15 @@ export function SpeechControlMenu({
     !!onGrokAudioSettingsChange;
   const showSmartTurnControls =
     !!smartTurnSettings && !!onSmartTurnSettingsChange;
+  const showMicDeviceControls = selectedMethod !== "browser-native";
   const hasOptions =
-    showMethodSelector || showGrokAudioControls || showSmartTurnControls;
+    showMethodSelector ||
+    showMicDeviceControls ||
+    showGrokAudioControls ||
+    showSmartTurnControls;
+  const selectedMicDeviceUnavailable =
+    !!micDeviceId &&
+    !micDevices.some((device) => device.deviceId === micDeviceId);
 
   const clearLongPress = useCallback(() => {
     if (longPressTimerRef.current) {
@@ -76,6 +101,66 @@ export function SpeechControlMenu({
       setOpen(false);
     }
   }, [hasOptions]);
+
+  const refreshMicDevices = useCallback(async () => {
+    const mediaDevices = getMediaDevices();
+    if (typeof mediaDevices?.enumerateDevices !== "function") {
+      setMicDevices([]);
+      setMicDeviceError("Microphone list unavailable");
+      return;
+    }
+
+    try {
+      const devices = await mediaDevices.enumerateDevices();
+      setMicDevices(
+        devices.filter(
+          (device) => device.kind === "audioinput" && device.deviceId,
+        ),
+      );
+      setMicDeviceError(null);
+    } catch {
+      setMicDevices([]);
+      setMicDeviceError("Microphone list unavailable");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open || !showMicDeviceControls) return;
+    void refreshMicDevices();
+
+    const mediaDevices = getMediaDevices();
+    if (typeof mediaDevices?.addEventListener !== "function") return;
+    mediaDevices.addEventListener("devicechange", refreshMicDevices);
+    return () =>
+      mediaDevices.removeEventListener?.("devicechange", refreshMicDevices);
+  }, [open, refreshMicDevices, showMicDeviceControls]);
+
+  useEffect(() => {
+    if (!onPointerNearTrigger) return;
+
+    const handlePointerMove = (event: globalThis.PointerEvent) => {
+      if (event.pointerType && event.pointerType !== "mouse") return;
+      const rect = rootRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const near =
+        event.clientX >= rect.left - POINTER_NEAR_MARGIN_PX &&
+        event.clientX <= rect.right + POINTER_NEAR_MARGIN_PX &&
+        event.clientY >= rect.top - POINTER_NEAR_MARGIN_PX &&
+        event.clientY <= rect.bottom + POINTER_NEAR_MARGIN_PX;
+      if (!near) {
+        pointerNearRef.current = false;
+        return;
+      }
+      if (pointerNearRef.current) return;
+      pointerNearRef.current = true;
+      onPointerNearTrigger();
+    };
+
+    window.addEventListener("pointermove", handlePointerMove, {
+      passive: true,
+    });
+    return () => window.removeEventListener("pointermove", handlePointerMove);
+  }, [onPointerNearTrigger]);
 
   useEffect(() => {
     return clearLongPress;
@@ -224,6 +309,40 @@ export function SpeechControlMenu({
                   );
                 })}
               </div>
+            </section>
+          )}
+          {showMicDeviceControls && (
+            <section className="speech-options-section">
+              <label
+                className="speech-options-section-title"
+                htmlFor={micDeviceSelectId}
+              >
+                Microphone
+              </label>
+              <select
+                id={micDeviceSelectId}
+                className="speech-mic-device-select"
+                value={micDeviceId ?? ""}
+                onChange={(event) =>
+                  setMicDeviceId(event.currentTarget.value || null)
+                }
+                onFocus={() => void refreshMicDevices()}
+              >
+                <option value="">System default</option>
+                {selectedMicDeviceUnavailable && micDeviceId && (
+                  <option value={micDeviceId}>
+                    Selected microphone unavailable
+                  </option>
+                )}
+                {micDevices.map((device, index) => (
+                  <option key={device.deviceId} value={device.deviceId}>
+                    {audioInputLabel(device, index)}
+                  </option>
+                ))}
+              </select>
+              {micDeviceError && (
+                <div className="speech-mic-device-error">{micDeviceError}</div>
+              )}
             </section>
           )}
           {showGrokAudioControls && (

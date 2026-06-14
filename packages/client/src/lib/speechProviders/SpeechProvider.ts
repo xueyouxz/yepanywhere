@@ -103,6 +103,8 @@ export interface SpeechProviderOptions extends SpeechProviderEvents {
   smartTurn?: SpeechSmartTurnSettings;
   /** Keep the mic device warm between dictations (skips getUserMedia cold-open). */
   keepMicWarm?: boolean;
+  /** Browser-local microphone device id for YA-server capture. */
+  micDeviceId?: string | null;
 }
 
 /** Subscriber callback receiving the latest state snapshot. */
@@ -136,6 +138,9 @@ export interface SpeechProvider {
 
   /** End the current session. No-op if not listening. */
   stop(): void;
+
+  /** Speculatively acquire reusable resources before the user clicks. */
+  prewarm?(): void;
 
   /** Release all resources. Provider must not be used after dispose(). */
   dispose(): void;

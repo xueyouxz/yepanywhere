@@ -158,9 +158,18 @@ function speechWsUrl(basePath: string): string {
   return url.toString();
 }
 
-function streamingMicConstraints(): MediaStreamConstraints {
+function selectedMicDeviceConstraint(
+  micDeviceId: string | null | undefined,
+): Pick<MediaTrackConstraints, "deviceId"> {
+  return micDeviceId ? { deviceId: { exact: micDeviceId } } : {};
+}
+
+function streamingMicConstraints(
+  micDeviceId: string | null | undefined,
+): MediaStreamConstraints {
   return {
     audio: {
+      ...selectedMicDeviceConstraint(micDeviceId),
       // Mono: a proper downmix of the capture device, which transcribes
       // better than reading one channel of a stereo stream. (Dropping this to
       // chase the cold-open latency hurt recognition quality, so keep it.)
@@ -181,6 +190,14 @@ function streamingMicConstraints(): MediaStreamConstraints {
       autoGainControl: false,
     },
   };
+}
+
+function batchMicConstraints(
+  micDeviceId: string | null | undefined,
+): MediaStreamConstraints {
+  return micDeviceId
+    ? { audio: selectedMicDeviceConstraint(micDeviceId) }
+    : { audio: true };
 }
 
 function getWordText(word: SpeechWordTimestamp | undefined): string {
@@ -388,6 +405,7 @@ export class YaServerProvider implements SpeechProvider {
   private stream: MediaStream | null = null;
   private warmStream: MediaStream | null = null;
   private warmStreamRequest: Promise<MediaStream> | null = null;
+  private prewarmRequest: Promise<void> | null = null;
   private ws: WebSocket | null = null;
   private audioContext: AudioContext | null = null;
   private audioSource: MediaStreamAudioSourceNode | null = null;
@@ -427,7 +445,6 @@ export class YaServerProvider implements SpeechProvider {
       typeof window !== "undefined" &&
       hasMic &&
       (options.serverStreaming ? hasStreamingCapture : hasBatchCapture);
-    this.maybePrewarmMic();
   }
 
   getState(): SpeechProviderState {
@@ -489,16 +506,24 @@ export class YaServerProvider implements SpeechProvider {
 
   private getCaptureConstraints(): MediaStreamConstraints {
     return this.options.serverStreaming
-      ? streamingMicConstraints()
-      : { audio: true };
+      ? streamingMicConstraints(this.options.micDeviceId)
+      : batchMicConstraints(this.options.micDeviceId);
   }
 
-  private maybePrewarmMic(): void {
+  prewarm(): void {
     if (this.options.keepMicWarm !== true || !this.isSupported) return;
+    if (
+      this.state.isListening ||
+      this.state.status === "starting" ||
+      this.state.status === "receiving"
+    ) {
+      return;
+    }
     const permissions = navigator.permissions;
     if (typeof permissions?.query !== "function") return;
+    if (this.prewarmRequest) return;
 
-    void permissions
+    this.prewarmRequest = permissions
       .query({ name: "microphone" as PermissionName })
       .then((status) => {
         if (status.state !== "granted" || this.disposed) return;
@@ -511,7 +536,10 @@ export class YaServerProvider implements SpeechProvider {
           },
         );
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        this.prewarmRequest = null;
+      });
   }
 
   start(): void {

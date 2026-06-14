@@ -1533,6 +1533,7 @@ export function NewSessionForm({
                 ? setGrokSpeechAudioSettings
                 : undefined
             }
+            onPointerNearTrigger={() => voiceButtonRef.current?.prewarm?.()}
             trigger={
               <VoiceInputButton
                 ref={voiceButtonRef}
