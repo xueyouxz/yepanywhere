@@ -52,6 +52,8 @@ export const MODEL_OPTIONS: { value: ModelOption; label: string }[] = [
 
 export { EFFORT_LEVEL_OPTIONS };
 
+const MAX_SPEECH_SMART_TURN_TIMEOUT_MS = 10000;
+
 function loadModel(): ModelOption {
   const stored = getServerScoped("model", LEGACY_KEYS.model);
   if (stored && MODEL_OPTIONS.some((option) => option.value === stored)) {
@@ -201,7 +203,13 @@ function cleanSpeechSmartTurnSettings(
     timeoutMs:
       typeof settings.timeoutMs === "number" &&
       Number.isFinite(settings.timeoutMs)
-        ? Math.round(clampNumber(settings.timeoutMs, 0, 5000))
+        ? Math.round(
+            clampNumber(
+              settings.timeoutMs,
+              0,
+              MAX_SPEECH_SMART_TURN_TIMEOUT_MS,
+            ),
+          )
         : DEFAULT_SPEECH_SMART_TURN_SETTINGS.timeoutMs,
   };
 }

@@ -911,8 +911,6 @@
   "speechSettingsBackendDescription": "Wird von neuen Sitzungen und aktiven Composern verwendet, solange keine zukünftige Überschreibung pro Sitzung hinzugefügt wird.",
   "speechSettingsBackendPlaceholder": "STT-Backend auswählen",
   "speechSettingsNoServerBackends": "Derzeit werden keine serverseitig gerouteten STT-Backends angekündigt; browsernative Erkennung bleibt verfügbar, wenn sie unterstützt wird.",
-  "speechSettingsGrokAudioTitle": "Grok-STT-Audio",
-  "speechSettingsGrokAudioDescription": "Wähle, ob Grok STT rohes PCM16 vom Browser an YA sendet oder die komprimierte Batch-Aufnahme des Browsers verwendet.",
   "speechSettingsSmartTurnTitle": "Smart-Turn-Steuerung",
   "speechSettingsSmartTurnDescription": "{backend} kann nach einer diktierten Pause senden, abbrechen oder warten, wenn das ausgewählte STT-Backend dies unterstützt.",
   "speechSettingsSmartTurnRequiresPcm": "Smart Turn erfordert den Grok-STT-PCM16-Streaming-Uplink.",

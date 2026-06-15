@@ -344,7 +344,7 @@ describe("speech routes", () => {
           smartTurn: {
             enabled: true,
             threshold: 0.7,
-            timeoutMs: 3000,
+            timeoutMs: 10000,
           },
         }),
       );
@@ -379,7 +379,7 @@ describe("speech routes", () => {
       });
       expect(backend.options?.sampleRate).toBe(16000);
       expect(backend.options?.smartTurnThreshold).toBe(0.7);
-      expect(backend.options?.smartTurnTimeoutMs).toBe(3000);
+      expect(backend.options?.smartTurnTimeoutMs).toBe(10000);
       const metadataPath = await findRetainedMetadata(
         dataDir,
         final.transcriptionId,

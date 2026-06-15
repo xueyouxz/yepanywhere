@@ -64,10 +64,162 @@ export function computeSpeechDelta(
   return latestFinal;
 }
 
-export function appendSpeechTranscript(base: string, transcript: string): string {
-  const trimmedTranscript = transcript.trim();
-  if (!trimmedTranscript) return base;
+const NO_SPACE_BEFORE_TRANSCRIPT = /^[,.;:!?%)]/;
 
-  const trimmedBase = base.trimEnd();
-  return trimmedBase ? `${trimmedBase} ${trimmedTranscript}` : trimmedTranscript;
+export function getSpeechTranscriptSeparator(
+  base: string,
+  transcript: string,
+): "" | " " {
+  if (!base.trimEnd() || !transcript.trim()) return "";
+  return NO_SPACE_BEFORE_TRANSCRIPT.test(transcript.trim()) ? "" : " ";
+}
+
+export interface SpeechTranscriptInsertion {
+  text: string;
+  cursor: number;
+}
+
+export interface SpeechTranscriptReplacement extends SpeechTranscriptInsertion {
+  replacementStart: number;
+  replacementEnd: number;
+  insertedLength: number;
+}
+
+export interface SpeechTranscriptInsertionParts {
+  before: string;
+  separatorBefore: "" | " ";
+  transcript: string;
+  separatorAfter: "" | " ";
+  after: string;
+  text: string;
+  cursor: number;
+}
+
+export function getSpeechTranscriptInsertionParts(
+  base: string,
+  transcript: string,
+  index: number,
+): SpeechTranscriptInsertionParts {
+  const trimmedTranscript = transcript.trim();
+  const clampedIndex = Math.max(0, Math.min(index, base.length));
+  const before = base.slice(0, clampedIndex).trimEnd();
+  const after = base.slice(clampedIndex).trimStart();
+  if (!trimmedTranscript) {
+    return {
+      before,
+      separatorBefore: "",
+      transcript: "",
+      separatorAfter: "",
+      after,
+      text: base,
+      cursor: clampedIndex,
+    };
+  }
+
+  const separatorBefore = getSpeechTranscriptSeparator(
+    before,
+    trimmedTranscript,
+  );
+  const separatorAfter = getSpeechTranscriptSeparator(trimmedTranscript, after);
+  const insertedText = `${separatorBefore}${trimmedTranscript}`;
+
+  return {
+    before,
+    separatorBefore,
+    transcript: trimmedTranscript,
+    separatorAfter,
+    after,
+    text: `${before}${insertedText}${separatorAfter}${after}`,
+    cursor: before.length + insertedText.length,
+  };
+}
+
+export function insertSpeechTranscriptAt(
+  base: string,
+  transcript: string,
+  index: number,
+): SpeechTranscriptInsertion {
+  const insertion = getSpeechTranscriptInsertionParts(base, transcript, index);
+  return {
+    text: insertion.text,
+    cursor: insertion.cursor,
+  };
+}
+
+export function replaceSpeechTranscriptBefore(
+  base: string,
+  transcript: string,
+  index: number,
+  previousChars: number,
+): SpeechTranscriptReplacement {
+  const replacementEnd = Math.max(0, Math.min(index, base.length));
+  const replacementStart = Math.max(
+    0,
+    replacementEnd - Math.max(0, previousChars),
+  );
+  const baseWithoutReplacement = `${base.slice(0, replacementStart)}${base.slice(replacementEnd)}`;
+  const insertion = getSpeechTranscriptInsertionParts(
+    baseWithoutReplacement,
+    transcript,
+    replacementStart,
+  );
+  return {
+    ...insertion,
+    replacementStart,
+    replacementEnd,
+    insertedLength:
+      insertion.text.length - (base.length - (replacementEnd - replacementStart)),
+  };
+}
+
+export function appendSpeechTranscript(base: string, transcript: string): string {
+  return insertSpeechTranscriptAt(base, transcript, base.length).text;
+}
+
+export function mapTextIndexThroughEdit(
+  previousText: string,
+  nextText: string,
+  index: number,
+): number {
+  const clampedIndex = Math.max(0, Math.min(index, previousText.length));
+  let prefixLength = 0;
+  const commonLimit = Math.min(previousText.length, nextText.length);
+  while (
+    prefixLength < commonLimit &&
+    previousText[prefixLength] === nextText[prefixLength]
+  ) {
+    prefixLength += 1;
+  }
+
+  if (clampedIndex <= prefixLength) return clampedIndex;
+
+  let suffixLength = 0;
+  while (
+    suffixLength < previousText.length - prefixLength &&
+    suffixLength < nextText.length - prefixLength &&
+    previousText[previousText.length - 1 - suffixLength] ===
+      nextText[nextText.length - 1 - suffixLength]
+  ) {
+    suffixLength += 1;
+  }
+
+  const previousEditEnd = previousText.length - suffixLength;
+  const nextEditEnd = nextText.length - suffixLength;
+  if (clampedIndex >= previousEditEnd) {
+    return clampedIndex + (nextText.length - previousText.length);
+  }
+  return nextEditEnd;
+}
+
+export function removeTextRange(
+  text: string,
+  start: number,
+  end: number,
+): SpeechTranscriptInsertion {
+  const clampedStart = Math.max(0, Math.min(start, text.length));
+  const clampedEnd = Math.max(clampedStart, Math.min(end, text.length));
+  return {
+    text: `${text.slice(0, clampedStart)}${text.slice(clampedEnd)}`,
+    cursor: clampedStart,
+  };
 }

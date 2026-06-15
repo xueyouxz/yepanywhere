@@ -76,6 +76,8 @@ export interface SpeechWordTimestamp {
 export interface SpeechTranscriptionResultMetadata {
   transcriptionId?: string;
   smartTurnCommand?: SpeechTurnCommand;
+  /** Replace this many characters immediately before the current speech range. */
+  replacePreviousTranscriptChars?: number;
 }
 
 /** Events emitted by a provider during a listening session. */

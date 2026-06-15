@@ -3,7 +3,6 @@ import {
   FilterDropdown,
   type FilterOption,
 } from "../../components/FilterDropdown";
-import { SpeechGrokAudioControls } from "../../components/SpeechGrokAudioControls";
 import { SpeechSmartTurnControls } from "../../components/SpeechSmartTurnControls";
 import { useModelSettings } from "../../hooks/useModelSettings";
 import { useRemoteBasePath } from "../../hooks/useRemoteBasePath";
@@ -34,8 +33,6 @@ export function SpeechSettings() {
     setSpeechMethod,
     speechSmartTurnSettings,
     setSpeechSmartTurnSettings,
-    grokSpeechAudioSettings,
-    setGrokSpeechAudioSettings,
   } = useModelSettings();
   const { keepMicWarm, setKeepMicWarm } = useSpeechCaptureSettings();
   const [browserXaiKey, setBrowserXaiKey] = useState(() =>
@@ -48,14 +45,12 @@ export function SpeechSettings() {
       voiceInputEnabled,
       speechMethod,
       speechSmartTurnSettings,
-      grokSpeechAudioSettings,
       keepMicWarm,
     }),
     [
       voiceInputEnabled,
       speechMethod,
       speechSmartTurnSettings,
-      grokSpeechAudioSettings,
       keepMicWarm,
     ],
   );
@@ -64,14 +59,12 @@ export function SpeechSettings() {
       setVoiceInputEnabled(snapshot.voiceInputEnabled);
       setSpeechMethod(snapshot.speechMethod);
       setSpeechSmartTurnSettings(snapshot.speechSmartTurnSettings);
-      setGrokSpeechAudioSettings(snapshot.grokSpeechAudioSettings);
       setKeepMicWarm(snapshot.keepMicWarm);
     },
     [
       setVoiceInputEnabled,
       setSpeechMethod,
       setSpeechSmartTurnSettings,
-      setGrokSpeechAudioSettings,
       setKeepMicWarm,
     ],
   );
@@ -103,23 +96,14 @@ export function SpeechSettings() {
   const selectedBackendCanStream = canSpeechMethodStream({
     methodId: selectedBackend,
     serverCapabilities: versionInfo?.voiceBackendCapabilities,
-    grokSpeechAudioSettings,
     relayTransport,
     relayedServerSpeechAvailable: !selectedBackendServerRouted,
   });
   const supportsSelectedSmartTurn =
     selectedBackendCanStream &&
     selectedBackendCapabilities.smartTurn === true;
-  const showGrokAudioSettings =
-    !relayTransport && selectedBackend === "ya-grok";
-  const smartTurnRequiresPcm =
-    !relayTransport &&
-    selectedBackend === "ya-grok" &&
-    grokSpeechAudioSettings.uplinkMode !== "pcm16" &&
-    selectedBackendCapabilities.smartTurn === true;
-  const smartTurnUnavailableHint = smartTurnRequiresPcm
-    ? t("speechSettingsSmartTurnRequiresPcm")
-    : relayTransport && selectedBackend !== "browser-native"
+  const smartTurnUnavailableHint =
+    relayTransport && selectedBackend !== "browser-native"
       ? t("speechSettingsStreamingRelayUnavailable")
       : t("speechSettingsSmartTurnUnavailable", {
           backend: selectedBackendLabel,
@@ -180,18 +164,6 @@ export function SpeechSettings() {
           </div>
         </div>
 
-        {showGrokAudioSettings && (
-          <div className="settings-item model-settings-item">
-            <div className="settings-item-info">
-              <strong>{t("speechSettingsGrokAudioTitle")}</strong>
-              <p>{t("speechSettingsGrokAudioDescription")}</p>
-            </div>
-            <SpeechGrokAudioControls
-              settings={grokSpeechAudioSettings}
-              onChange={setGrokSpeechAudioSettings}
-            />
-          </div>
-        )}
         {relayTransport && selectedBackend === "ya-grok" && (
           <p className="settings-hint">
             {t("speechSettingsStreamingRelayUnavailable")}

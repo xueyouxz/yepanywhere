@@ -7,6 +7,7 @@ import { YaServerProvider } from "../lib/speechProviders/YaServerProvider";
 import {
   XAI_DIRECT_BATCH_SPEECH_METHOD,
   XAI_DIRECT_STREAMING_SPEECH_METHOD,
+  getServerBackendIdForSpeechMethod,
 } from "../lib/speechProviders/methods";
 import {
   SPEECH_STATUS_LABELS as PROVIDER_SPEECH_STATUS_LABELS,
@@ -92,7 +93,11 @@ function createProvider(
     return new DirectXaiSpeechProvider(events);
   }
   if (speechMethod && speechMethod !== "browser-native") {
-    return new YaServerProvider(speechMethod, basePath, events);
+    return new YaServerProvider(
+      getServerBackendIdForSpeechMethod(speechMethod),
+      basePath,
+      events,
+    );
   }
   return new BrowserNativeProvider({ lang: events.lang, ...events });
 }

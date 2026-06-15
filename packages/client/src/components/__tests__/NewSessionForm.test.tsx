@@ -15,7 +15,10 @@ import {
   useState,
 } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { XAI_DIRECT_STREAMING_SPEECH_METHOD } from "../../lib/speechProviders/methods";
+import {
+  YA_GROK_BATCH_SPEECH_METHOD,
+  XAI_DIRECT_STREAMING_SPEECH_METHOD,
+} from "../../lib/speechProviders/methods";
 import { NewSessionForm } from "../NewSessionForm";
 
 const {
@@ -886,7 +889,7 @@ describe("NewSessionForm", () => {
     expect(mockVoiceToggle).toHaveBeenCalledTimes(1);
   });
 
-  it("offers Grok audio uplink choice before Smart Turn controls", () => {
+  it("offers YA-routed Grok batch as a top-level method", () => {
     versionState.version = {
       voiceBackends: ["ya-grok"],
       voiceBackendCapabilities: {
@@ -900,9 +903,8 @@ describe("NewSessionForm", () => {
       threshold: 0.95,
       timeoutMs: 3000,
     };
-    modelSettingsState.grokSpeechAudioSettings = {
-      uplinkMode: "browser-compressed",
-    };
+    modelSettingsState.speechMethod = YA_GROK_BATCH_SPEECH_METHOD;
+    modelSettingsState.hasStoredSpeechMethod = true;
 
     render(
       <NewSessionForm
@@ -913,16 +915,20 @@ describe("NewSessionForm", () => {
     );
 
     fireEvent.contextMenu(screen.getByText("voice"));
-    expect(screen.getByText("Grok STT audio")).toBeDefined();
     expect(
-      (screen.getByLabelText("Batch") as HTMLInputElement).checked,
-    ).toBe(true);
+      screen.getByRole("radio", {
+        name: /^Grok STT through YA batch Browser sends a complete compressed recording through YA to xAI\.$/,
+      }).getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(screen.queryByText("Grok STT audio")).toBeNull();
     expect(screen.queryByText("Smart Turn")).toBeNull();
 
-    fireEvent.click(screen.getByLabelText("PCM16"));
-    expect(mockSetGrokSpeechAudioSettings).toHaveBeenCalledWith({
-      uplinkMode: "pcm16",
-    });
+    fireEvent.click(
+      screen.getByRole("radio", {
+        name: /^Grok STT through YA Browser streams PCM audio through YA to xAI\.$/,
+      }),
+    );
+    expect(mockSetSpeechMethod).toHaveBeenCalledWith("ya-grok");
   });
 
   it("shows Smart Turn for direct Grok streaming without server capabilities", () => {
@@ -953,7 +959,7 @@ describe("NewSessionForm", () => {
     expect(screen.queryByText("Grok STT audio")).toBeNull();
   });
 
-  it("keeps Grok audio controls visible in relay mode", () => {
+  it("keeps YA-routed Grok batch selectable in relay mode", () => {
     remoteBasePathState.basePath = "/ygraehl";
     versionState.version = {
       voiceBackends: ["ya-grok"],
@@ -961,11 +967,8 @@ describe("NewSessionForm", () => {
         "ya-grok": { streaming: true, smartTurn: true },
       },
     };
-    modelSettingsState.speechMethod = "browser-native";
-    modelSettingsState.hasStoredSpeechMethod = false;
-    modelSettingsState.grokSpeechAudioSettings = {
-      uplinkMode: "browser-compressed",
-    };
+    modelSettingsState.speechMethod = YA_GROK_BATCH_SPEECH_METHOD;
+    modelSettingsState.hasStoredSpeechMethod = true;
 
     render(
       <NewSessionForm
@@ -977,10 +980,12 @@ describe("NewSessionForm", () => {
 
     fireEvent.contextMenu(screen.getByText("voice"));
 
-    expect(screen.getByText("Grok STT audio")).toBeDefined();
     expect(
-      (screen.getByLabelText("Batch") as HTMLInputElement).checked,
-    ).toBe(true);
+      screen.getByRole("radio", {
+        name: /^Grok STT through YA batch Browser sends a complete compressed recording through YA to xAI\.$/,
+      }).getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(screen.queryByText("Grok STT audio")).toBeNull();
   });
 
   it("defaults prompt suggestions off when the provider lacks native support", async () => {

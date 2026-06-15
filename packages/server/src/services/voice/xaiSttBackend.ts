@@ -26,6 +26,7 @@ interface XaiSttStreamEvent {
   message?: string;
   is_final?: boolean;
   speech_final?: boolean;
+  start?: number;
   duration?: number;
   words?: SpeechWordTimestamp[];
 }
@@ -218,6 +219,8 @@ export class XaiSttBackend implements SpeechBackend {
           text,
           isFinal: event.is_final,
           speechFinal: event.speech_final,
+          start: event.start,
+          duration: event.duration,
           words: event.words,
         });
         return;

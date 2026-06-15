@@ -13,10 +13,10 @@ replacement for YA-mediated speech in general:
 - **Hosted Grok prefers browser -> xAI.** For xAI STT, sending audio through
   browser -> relay -> YA server -> xAI adds latency and failure surface without
   much benefit in the private-server deployment. The browser already has
-  outbound HTTPS/WSS connectivity to xAI. Direct Grok should be selectable and
-  persistable now; making it an automatic hosted default needs an advertised
-  client-key or browser-key availability signal so unconfigured installs do not
-  default into a dead mic.
+  outbound HTTPS/WSS connectivity to xAI. When the server advertises `ya-grok`,
+  the client defaults to direct Grok streaming because an authenticated private
+  client can use either its browser-local key or a server-minted short-lived
+  xAI client secret without exposing the long-lived server key.
 - **Server-local STT stays YA-mediated.** Local Whisper or another recognizer
   running on the YA host still requires browser audio to reach YA. The
   server-mediated flow remains important for local models, audit/tuning,
@@ -35,11 +35,13 @@ replacement for YA-mediated speech in general:
   keys. A public viewer using a browser-local personal xAI key would be outside
   YA server credit delegation.
 - **Browser-local personal key is supported.** A client may configure its own
-  xAI key in browser-local storage instead of borrowing the server key.
+  xAI key in browser-local storage instead of borrowing server credentials.
+  That browser-local key is not sent to the YA server.
 - **Upstream default is no key exposure.** Sharing a server STT key with
   clients must be an explicit operator setting, not implied by
-  `YA_stt__XAI_API_KEY` existing. This preserves upstream trust while allowing
-  the private deployment to opt in.
+  `YA_stt__XAI_API_KEY` existing. Minting a short-lived xAI client secret for
+  authenticated private clients does not reveal the long-lived key. Long-lived
+  key sharing remains a separate explicit opt-in for direct batch.
 
 ## Current xAI API Facts
 
@@ -122,9 +124,11 @@ Rename the Grok audio choices around behavior, not implementation detail:
   Smart Turn when xAI streaming auth works in the browser.
 - **Grok batch, non-streaming, direct to xAI.** Uses `MediaRecorder` output and
   `POST /v1/stt`; no streaming drafts and no Smart Turn.
-- **Grok through YA server.** Keep as an advanced/debug/server-mediated option
-  for direct localhost/tunnel use and future comparisons. Hosted deployments
-  can choose direct as their default once key availability is explicit.
+- **Grok streaming through YA.** Uses 16 kHz PCM16 frames from browser to YA,
+  then YA to xAI. Keep as an advanced/debug/server-mediated option for direct
+  localhost/tunnel use and future comparisons.
+- **Grok batch through YA.** Uses a complete browser `MediaRecorder` recording
+  through YA and is labeled batch/non-streaming.
 
 The mic button must provide immediate feedback even when auth/capture fails:
 `starting` on click, then either listening/receiving or a visible error naming
@@ -155,6 +159,11 @@ Current implementation, 2026-06-15:
 - Direct streaming and direct batch are selectable in the STT backend menu and
   can be saved like any other speech method; direct batch is explicitly labeled
   non-streaming.
+- When `ya-grok` is advertised and no explicit local speech method is stored,
+  the client defaults to `Grok STT direct` rather than Grok through YA.
+- Grok through YA is also split into `Grok STT through YA` and
+  `Grok STT through YA batch` top-level methods, not a nested PCM/batch
+  setting inside one method.
 
 1. **Direct batch first.** Ship a browser provider that records a complete
    utterance with `MediaRecorder` and posts it directly to `POST /v1/stt` with
@@ -175,11 +184,9 @@ Current implementation, 2026-06-15:
 5. **Ship direct streaming.** Use the existing 16 kHz PCM16 chunker
    discipline: no per-audio-frame allocation, 100 ms frames, `audio.done` on
    stop, and first-audio-frame gated "listening" state.
-6. **Keep server-mediated paths selectable.** Existing `ya-grok` through YA
-   and `ya-whisper` remain available where configured, especially for direct
-   localhost/tunnel usage and local server STT. Once the client can distinguish
-   an actually usable direct credential path, hosted Grok can prefer direct
-   without making unconfigured installs fail late.
+6. **Keep server-mediated paths selectable.** Existing `ya-grok` through YA,
+   `ya-grok-batch`, and `ya-whisper` remain available where configured,
+   especially for direct localhost/tunnel usage and local server STT.
 7. **Record cost and retention semantics.** Direct-to-xAI audio is not retained
    by YA unless separately captured for audit. Server-mediated paths keep the
    existing retention contract.
@@ -198,8 +205,9 @@ Acceptance for the immediate hosted relief path:
 - Batch mode visibly says non-streaming and produces final text or a visible
   xAI/CORS/auth error.
 - Streaming mode, when available, shows yellow immediately after click, red
-  only after first audio frame, interim drafts while xAI emits partials, and
-  final text on `transcript.done`.
+  only after first audio frame, tentative drafts while xAI emits mutable
+  partials, committed draft text when xAI emits chunk-final partials, and final
+  metadata on `transcript.done`.
 - Devtools/network or server logs demonstrate that audio goes browser -> xAI,
   not browser -> YA, for direct xAI modes.
 - Direct xAI failures do not regress server-mediated `ya-whisper` or direct

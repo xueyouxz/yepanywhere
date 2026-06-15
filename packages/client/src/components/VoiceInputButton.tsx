@@ -25,8 +25,6 @@ import {
   type SpeechMethodId,
 } from "../lib/speechProviders/methods";
 import {
-  DEFAULT_GROK_SPEECH_AUDIO_SETTINGS,
-  type GrokSpeechAudioSettings,
   type SpeechSmartTurnSettings,
   type SpeechTranscriptionContext,
   type SpeechTranscriptionResultMetadata,
@@ -65,8 +63,6 @@ interface VoiceInputButtonProps {
   getTranscriptionContext?: () => SpeechTranscriptionContext | undefined;
   /** Smart Turn settings for streaming STT backends that support it. */
   smartTurn?: SpeechSmartTurnSettings;
-  /** Grok STT browser-to-YA audio format preference. */
-  grokSpeechAudioSettings?: GrokSpeechAudioSettings;
 }
 
 /**
@@ -85,7 +81,6 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
     speechMethod: selectedSpeechMethod,
     getTranscriptionContext,
     smartTurn,
-    grokSpeechAudioSettings: selectedGrokSpeechAudioSettings,
   }: VoiceInputButtonProps,
   ref: ForwardedRef<VoiceInputButtonRef>,
 ) {
@@ -94,7 +89,6 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
     voiceInputEnabled,
     speechMethod: storedSpeechMethod,
     hasStoredSpeechMethod,
-    grokSpeechAudioSettings: storedGrokSpeechAudioSettings,
   } = useModelSettings();
   const { version: versionInfo } = useVersion();
   const connection = useConnection();
@@ -117,10 +111,6 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
       hasStoredSpeechMethod,
     ],
   );
-  const grokSpeechAudioSettings =
-    selectedGrokSpeechAudioSettings ??
-    storedGrokSpeechAudioSettings ??
-    DEFAULT_GROK_SPEECH_AUDIO_SETTINGS;
   const relayTransport = basePath !== "";
   const openRelayedSpeechSocket = useMemo(() => {
     const openSpeechSocket = connection.openSpeechSocket;
@@ -131,7 +121,6 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
   const serverStreaming = canSpeechMethodStream({
     methodId: speechMethod,
     serverCapabilities: versionInfo?.voiceBackendCapabilities,
-    grokSpeechAudioSettings,
     relayTransport,
     relayedServerSpeechAvailable:
       !speechMethodServerRouted || openRelayedSpeechSocket !== undefined,

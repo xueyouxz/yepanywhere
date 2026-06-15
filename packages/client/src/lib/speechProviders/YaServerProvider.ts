@@ -1,9 +1,6 @@
 import { fetchJSON } from "../../api/client";
 import type { ConnectionSpeechSocket } from "../connection/types";
-import {
-  appendSpeechTranscript,
-  computeSpeechDelta,
-} from "../speechRecognition";
+import { appendSpeechTranscript } from "../speechRecognition";
 import {
   INITIAL_SPEECH_STATE,
   type SpeechProvider,
@@ -65,6 +62,8 @@ interface SpeechWsMessage {
   transcriptionId?: string;
   isFinal?: boolean;
   speechFinal?: boolean;
+  start?: number;
+  duration?: number;
   words?: SpeechWordTimestamp[];
 }
 
@@ -83,6 +82,7 @@ const STREAM_MIME_TYPE = `audio/pcm;rate=${STREAM_SAMPLE_RATE};encoding=s16le`;
 // a real error instead of ending silently with no transcript.
 const AUDIO_FLOW_TIMEOUT_MS = 3500;
 const SMART_TURN_COMMAND_PAUSE_SECONDS = 0.5;
+const STREAMING_AUDIO_SPAN_EPSILON_SECONDS = 0.02;
 const SMART_TURN_COMMANDS = new Set<SpeechTurnCommand>([
   "send",
   "cancel",
@@ -92,45 +92,12 @@ const SMART_TURN_COMMANDS = new Set<SpeechTurnCommand>([
 interface SmartTurnDecision {
   command: SpeechTurnCommand;
   transcript: string;
+  recognizedCommand: boolean;
 }
 
-function normalizeTranscriptForComparison(transcript: string): string {
-  return transcript.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-function shouldPreferStreamingPreviewForSpeechFinal(
-  speechFinalTranscript: string,
-  previewTranscript: string,
-): boolean {
-  const speechFinal = normalizeTranscriptForComparison(speechFinalTranscript);
-  const preview = normalizeTranscriptForComparison(previewTranscript);
-  if (!speechFinal || !preview || speechFinal === preview) return false;
-
-  const speechFinalWords = speechFinal.split(" ");
-  const previewWords = new Set(preview.split(" "));
-  const speechFinalLooksFragment =
-    speechFinal.length <= 12 || speechFinalWords.length <= 2;
-  const previewLooksFuller =
-    preview.length >= speechFinal.length + 8 && previewWords.size >= 2;
-  const finalTextAppearsInPreview =
-    preview.includes(speechFinal) ||
-    speechFinalWords.every((word) => previewWords.has(word));
-
-  return (
-    speechFinalLooksFragment && previewLooksFuller && finalTextAppearsInPreview
-  );
-}
-
-function chooseSmartTurnTranscript(
-  speechFinalTranscript: string,
-  previewTranscript: string,
-): string {
-  return shouldPreferStreamingPreviewForSpeechFinal(
-    speechFinalTranscript,
-    previewTranscript,
-  )
-    ? previewTranscript.trim()
-    : speechFinalTranscript.trim();
+interface StreamingTranscriptSpan {
+  start: number;
+  end: number;
 }
 
 function getAudioContextConstructor(): typeof AudioContext | null {
@@ -176,10 +143,17 @@ function normalizeSmartTurnCommand(word: string): SpeechTurnCommand | null {
   const normalized = word
     .trim()
     .toLowerCase()
-    .replace(/^[^a-z]+|[^a-z]+$/g, "");
+    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "");
   return SMART_TURN_COMMANDS.has(normalized as SpeechTurnCommand)
     ? (normalized as SpeechTurnCommand)
     : null;
+}
+
+function getTrailingTranscriptCommand(
+  transcript: string,
+): SpeechTurnCommand | null {
+  const match = transcript.match(/[a-z0-9]+[^a-z0-9]*$/i);
+  return normalizeSmartTurnCommand(match?.[0] ?? "");
 }
 
 function getWordStart(word: SpeechWordTimestamp | undefined): number | null {
@@ -204,14 +178,16 @@ function getWordEnd(word: SpeechWordTimestamp | undefined): number | null {
   return null;
 }
 
-function hasPauseBeforeFinalWord(words: SpeechWordTimestamp[]): boolean {
-  if (words.length <= 1) return true;
+function getPauseBeforeFinalWordSeconds(
+  words: SpeechWordTimestamp[],
+): number | null {
+  if (words.length <= 1) return Number.POSITIVE_INFINITY;
   const last = words.at(-1);
   const previous = words.at(-2);
   const lastStart = getWordStart(last);
   const previousEnd = getWordEnd(previous);
-  if (lastStart === null || previousEnd === null) return false;
-  return lastStart - previousEnd > SMART_TURN_COMMAND_PAUSE_SECONDS;
+  if (lastStart === null || previousEnd === null) return null;
+  return lastStart - previousEnd;
 }
 
 function stripTrailingCommandWord(
@@ -220,7 +196,10 @@ function stripTrailingCommandWord(
 ): string {
   const escaped = command.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return transcript
-    .replace(new RegExp(`(?:^|\\s)${escaped}[.!?,;:]*\\s*$`, "i"), "")
+    .replace(
+      new RegExp(`(?:^|\\s)[^a-z0-9]*${escaped}[^a-z0-9]*\\s*$`, "i"),
+      "",
+    )
     .trim();
 }
 
@@ -230,15 +209,76 @@ function decideSmartTurn(
 ): SmartTurnDecision {
   const trimmed = transcript.trim();
   const finalWord = words?.at(-1);
-  const command = normalizeSmartTurnCommand(getWordText(finalWord));
-  if (command && words && hasPauseBeforeFinalWord(words)) {
+  const wordCommand = normalizeSmartTurnCommand(getWordText(finalWord));
+  const transcriptCommand = getTrailingTranscriptCommand(trimmed);
+  const command = wordCommand ?? transcriptCommand;
+  const pauseSeconds =
+    wordCommand && words ? getPauseBeforeFinalWordSeconds(words) : null;
+  const commandIsAllowed =
+    command !== null &&
+    (pauseSeconds === null ||
+      pauseSeconds > SMART_TURN_COMMAND_PAUSE_SECONDS);
+
+  if (command && commandIsAllowed) {
     return {
       command,
+      recognizedCommand: true,
       transcript:
         command === "cancel" ? "" : stripTrailingCommandWord(trimmed, command),
     };
   }
-  return { command: "send", transcript: trimmed };
+  return { command: "send", transcript: trimmed, recognizedCommand: false };
+}
+
+function getStreamingMessageSpan(
+  message: SpeechWsMessage,
+): StreamingTranscriptSpan | null {
+  if (
+    typeof message.start === "number" &&
+    Number.isFinite(message.start) &&
+    typeof message.duration === "number" &&
+    Number.isFinite(message.duration) &&
+    message.duration >= 0
+  ) {
+    return {
+      start: message.start,
+      end: message.start + message.duration,
+    };
+  }
+
+  const words = message.words ?? [];
+  const firstStart = getWordStart(words[0]);
+  const lastEnd = getWordEnd(words.at(-1));
+  if (firstStart === null || lastEnd === null || lastEnd < firstStart) {
+    return null;
+  }
+  return { start: firstStart, end: lastEnd };
+}
+
+function getTranscriptFromWords(words: readonly SpeechWordTimestamp[]): string {
+  return words.reduce(
+    (transcript, word) => appendSpeechTranscript(transcript, getWordText(word)),
+    "",
+  );
+}
+
+function getTranscriptAfterAudioTime(
+  words: readonly SpeechWordTimestamp[] | undefined,
+  audioTimeSeconds: number,
+): string | null {
+  if (!words?.length) return null;
+  const tailWords = words.filter((word) => {
+    const start = getWordStart(word);
+    if (start !== null) {
+      return start >= audioTimeSeconds - STREAMING_AUDIO_SPAN_EPSILON_SECONDS;
+    }
+    const end = getWordEnd(word);
+    return (
+      end !== null &&
+      end > audioTimeSeconds + STREAMING_AUDIO_SPAN_EPSILON_SECONDS
+    );
+  });
+  return getTranscriptFromWords(tailWords);
 }
 
 const IS_LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
@@ -382,7 +422,7 @@ export class YaServerProvider implements SpeechProvider {
   private submitOnStop = false;
   private streamingFinalReceived = false;
   private streamingCommittedTranscript = "";
-  private streamingPreviewBaseTranscript = "";
+  private streamingCommittedAudioEnd: number | null = null;
   private streamingCurrentPreviewTranscript = "";
   private streamingStopRequested = false;
   private pendingSmartTurnCommand: SpeechTurnCommand | null = null;
@@ -607,7 +647,7 @@ export class YaServerProvider implements SpeechProvider {
     this.mimeType = STREAM_MIME_TYPE;
     this.streamingFinalReceived = false;
     this.streamingCommittedTranscript = "";
-    this.streamingPreviewBaseTranscript = "";
+    this.streamingCommittedAudioEnd = null;
     this.streamingCurrentPreviewTranscript = "";
     this.streamingStopRequested = false;
     this.pendingSmartTurnCommand = null;
@@ -785,7 +825,7 @@ export class YaServerProvider implements SpeechProvider {
         return;
       }
       const message =
-        "No microphone audio detected. Check mic permissions, or switch Grok STT audio to Batch mode in the speech menu.";
+        "No microphone audio detected. Check mic permissions, or switch to Grok STT through YA batch in the speech menu.";
       this.cleanupStreamingMedia();
       this.setState({
         status: "error",
@@ -819,16 +859,17 @@ export class YaServerProvider implements SpeechProvider {
     if (message.type === "interim") {
       const transcript = message.text ?? "";
       if (this.streamingStopRequested) return;
+      const span = getStreamingMessageSpan(message);
       if (message.speechFinal) {
         if (this.options.smartTurn?.enabled === true) {
-          this.handleSmartTurnSpeechFinal(transcript, message.words);
+          this.handleSmartTurnSpeechFinal(transcript, message.words, span);
           return;
         }
-        this.commitStreamingTranscript(transcript);
+        this.commitStreamingTranscript(transcript, undefined, span, message.words);
         return;
       }
       if (message.isFinal) {
-        this.setStreamingPreviewBase(transcript);
+        this.commitStreamingTranscript(transcript, undefined, span, message.words);
         return;
       }
       this.setStreamingPreview(transcript);
@@ -911,18 +952,18 @@ export class YaServerProvider implements SpeechProvider {
   private handleSmartTurnSpeechFinal(
     transcript: string,
     words: SpeechWordTimestamp[] | undefined,
+    span: StreamingTranscriptSpan | null,
   ): void {
-    const decision = decideSmartTurn(
-      chooseSmartTurnTranscript(
-        transcript,
-        this.streamingCurrentPreviewTranscript,
-      ),
-      words,
-    );
+    const decision = decideSmartTurn(transcript, words);
     this.pendingSmartTurnCommand = decision.command;
 
     if (decision.command !== "cancel") {
-      this.commitStreamingTranscript(decision.transcript);
+      this.commitStreamingTranscript(
+        decision.transcript,
+        undefined,
+        span,
+        decision.recognizedCommand ? words?.slice(0, -1) : words,
+      );
     } else {
       this.clearStreamingPreview();
     }
@@ -938,33 +979,8 @@ export class YaServerProvider implements SpeechProvider {
     }
   }
 
-  private getStreamingTranscriptDelta(transcript: string): string {
-    const latest = transcript.trim();
-    if (!latest) return "";
-    return computeSpeechDelta(
-      latest,
-      this.streamingCommittedTranscript,
-    ).trimStart();
-  }
-
-  private buildStreamingPreview(transcript: string): string {
-    const latest = transcript.trim();
-    if (!latest) return this.streamingPreviewBaseTranscript;
-    if (!this.streamingPreviewBaseTranscript) return latest;
-    if (latest.startsWith(this.streamingPreviewBaseTranscript)) return latest;
-    return appendSpeechTranscript(this.streamingPreviewBaseTranscript, latest);
-  }
-
   private setStreamingPreview(transcript: string): void {
-    const preview = this.buildStreamingPreview(transcript);
-    this.streamingCurrentPreviewTranscript = preview;
-    this.setState({ interimTranscript: preview });
-    this.options.onInterimResult?.(preview);
-  }
-
-  private setStreamingPreviewBase(transcript: string): void {
-    const preview = this.buildStreamingPreview(transcript);
-    this.streamingPreviewBaseTranscript = preview;
+    const preview = transcript.trim();
     this.streamingCurrentPreviewTranscript = preview;
     this.setState({ interimTranscript: preview });
     this.options.onInterimResult?.(preview);
@@ -977,7 +993,6 @@ export class YaServerProvider implements SpeechProvider {
   }
 
   private clearStreamingPreview(): void {
-    this.streamingPreviewBaseTranscript = "";
     this.streamingCurrentPreviewTranscript = "";
     this.setState({ interimTranscript: "" });
     this.options.onInterimResult?.("");
@@ -986,23 +1001,43 @@ export class YaServerProvider implements SpeechProvider {
   private commitStreamingTranscript(
     transcript: string,
     metadata?: SpeechTranscriptionResultMetadata,
+    span?: StreamingTranscriptSpan | null,
+    words?: SpeechWordTimestamp[],
   ): boolean {
-    const latest = transcript.trim();
-    const delta = this.getStreamingTranscriptDelta(latest).trim();
+    let latest = transcript.trim();
 
     this.setState({ interimTranscript: "" });
     this.options.onInterimResult?.("");
 
-    if (!latest || !delta) return false;
+    const committedAudioEnd = this.streamingCommittedAudioEnd;
+    if (
+      span &&
+      committedAudioEnd !== null &&
+      span.start < committedAudioEnd - STREAMING_AUDIO_SPAN_EPSILON_SECONDS
+    ) {
+      const tail = getTranscriptAfterAudioTime(words, committedAudioEnd);
+      if (tail !== null) {
+        latest = tail.trim();
+      } else if (
+        span.end <=
+        committedAudioEnd + STREAMING_AUDIO_SPAN_EPSILON_SECONDS
+      ) {
+        latest = "";
+      }
+    }
 
-    this.streamingCommittedTranscript = latest.startsWith(
+    if (span && (!committedAudioEnd || span.end > committedAudioEnd)) {
+      this.streamingCommittedAudioEnd = span.end;
+    }
+
+    if (!latest) return false;
+
+    this.streamingCommittedTranscript = appendSpeechTranscript(
       this.streamingCommittedTranscript,
-    )
-      ? latest
-      : appendSpeechTranscript(this.streamingCommittedTranscript, delta);
-    this.streamingPreviewBaseTranscript = "";
+      latest,
+    );
     this.streamingCurrentPreviewTranscript = "";
-    this.options.onResult?.(delta, metadata);
+    this.options.onResult?.(latest, metadata);
     return true;
   }
 

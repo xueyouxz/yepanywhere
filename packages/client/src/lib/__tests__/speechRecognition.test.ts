@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   type SpeechResult,
+  appendSpeechTranscript,
   computeSpeechDelta,
+  getSpeechTranscriptInsertionParts,
+  getSpeechTranscriptSeparator,
+  insertSpeechTranscriptAt,
+  mapTextIndexThroughEdit,
   processSpeechResults,
+  replaceSpeechTranscriptBefore,
+  removeTextRange,
 } from "../speechRecognition";
 
 describe("processSpeechResults", () => {
@@ -97,5 +104,74 @@ describe("computeSpeechDelta", () => {
       // "Hello" doesn't start with "hello" so treated as new utterance
       expect(computeSpeechDelta("Hello world", "hello")).toBe("Hello world");
     });
+  });
+});
+
+describe("appendSpeechTranscript", () => {
+  it("separates ordinary transcript chunks with one space", () => {
+    expect(appendSpeechTranscript("hello", "world")).toBe("hello world");
+  });
+
+  it("does not insert a space before punctuation chunks", () => {
+    expect(appendSpeechTranscript("hello", ", world")).toBe("hello, world");
+    expect(appendSpeechTranscript("hello", ".")).toBe("hello.");
+  });
+
+  it("uses the same separator helper as speech draft mirrors", () => {
+    expect(getSpeechTranscriptSeparator("hello", "world")).toBe(" ");
+    expect(getSpeechTranscriptSeparator("hello", ", world")).toBe("");
+  });
+});
+
+describe("speech transcript text edits", () => {
+  it("inserts transcript at a selected replacement point", () => {
+    expect(insertSpeechTranscriptAt("Fix this please", "exactly", 4)).toEqual({
+      text: "Fix exactly this please",
+      cursor: "Fix exactly".length,
+    });
+  });
+
+  it("returns inline mirror parts for a speech-owned insertion point", () => {
+    expect(
+      getSpeechTranscriptInsertionParts("hello world", "there", 5),
+    ).toEqual({
+      before: "hello",
+      separatorBefore: " ",
+      transcript: "there",
+      separatorAfter: " ",
+      after: "world",
+      text: "hello there world",
+      cursor: "hello there".length,
+    });
+  });
+
+  it("replaces a provider-owned finalized suffix without text matching", () => {
+    expect(
+      replaceSpeechTranscriptBefore(
+        "prefix Testing.",
+        "Testing. again.",
+        "prefix Testing.".length,
+        "Testing.".length,
+      ),
+    ).toMatchObject({
+      text: "prefix Testing. again.",
+      cursor: "prefix Testing. again.".length,
+      replacementStart: "prefix ".length,
+      replacementEnd: "prefix Testing.".length,
+      insertedLength: "Testing. again.".length,
+    });
+  });
+
+  it("removes a speech-owned range for cancel", () => {
+    expect(removeTextRange("alpha speech beta", 6, 12)).toEqual({
+      text: "alpha  beta",
+      cursor: 6,
+    });
+  });
+
+  it("maps a speech-owned range across user edits before it", () => {
+    expect(mapTextIndexThroughEdit("alpha beta", "alpha edited beta", 10)).toBe(
+      17,
+    );
   });
 });

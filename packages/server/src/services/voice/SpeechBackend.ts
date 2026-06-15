@@ -87,6 +87,8 @@ export interface SpeechStreamPartial {
   text: string;
   isFinal?: boolean;
   speechFinal?: boolean;
+  start?: number;
+  duration?: number;
   words?: SpeechWordTimestamp[];
 }
 

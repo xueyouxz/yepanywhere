@@ -348,7 +348,7 @@ describe("Settings Routes", () => {
               speechSmartTurnSettings: {
                 enabled: true,
                 threshold: 0.91,
-                timeoutMs: 750,
+                timeoutMs: 10000,
               },
             },
             sessionToolbarVisibility: {
@@ -367,7 +367,7 @@ describe("Settings Routes", () => {
             speechSmartTurnSettings: {
               enabled: true,
               threshold: 0.91,
-              timeoutMs: 750,
+              timeoutMs: 10000,
             },
           },
           sessionToolbarVisibility: {

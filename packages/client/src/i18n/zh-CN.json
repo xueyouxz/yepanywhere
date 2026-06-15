@@ -911,8 +911,6 @@
   "speechSettingsBackendDescription": "新会话和活跃输入框会使用它，除非以后添加按会话覆盖。",
   "speechSettingsBackendPlaceholder": "选择 STT 后端",
   "speechSettingsNoServerBackends": "当前没有公布任何由服务器路由的 STT 后端；支持时仍可使用浏览器原生识别。",
-  "speechSettingsGrokAudioTitle": "Grok STT 音频",
-  "speechSettingsGrokAudioDescription": "选择 Grok STT 是从浏览器向 YA 发送原始 PCM16，还是使用浏览器的压缩批量录音。",
   "speechSettingsSmartTurnTitle": "Smart Turn 控制",
   "speechSettingsSmartTurnDescription": "所选 STT 后端支持时，{backend} 可在听写暂停后发送、取消或等待。",
   "speechSettingsSmartTurnRequiresPcm": "Smart Turn 需要 Grok STT PCM16 流式上行链路。",

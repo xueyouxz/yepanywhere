@@ -18,6 +18,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -80,7 +81,16 @@ import type {
   SpeechTranscriptionContext,
   SpeechTranscriptionResultMetadata,
 } from "../lib/speechProviders/SpeechProvider";
-import { appendSpeechTranscript } from "../lib/speechRecognition";
+import {
+  getSpeechTranscriptInsertionParts,
+  mapTextIndexThroughEdit,
+  replaceSpeechTranscriptBefore,
+  removeTextRange,
+} from "../lib/speechRecognition";
+import {
+  captureTextareaAppendSelection,
+  restoreTextareaReplacementSelection,
+} from "../lib/textareaSelection";
 import { isVoiceInputShortcut } from "../lib/voiceInputShortcut";
 import { useVersion } from "../hooks/useVersion";
 import { shortenPath } from "../lib/text";
@@ -95,6 +105,16 @@ interface PendingFile {
   id: string;
   file: File;
   previewUrl?: string;
+}
+
+interface SpeechInsertionRange {
+  start: number;
+  end: number;
+}
+
+interface PendingTextareaSelectionRestore {
+  value: string;
+  restore: (textarea: HTMLTextAreaElement) => void;
 }
 
 const RECAP_MODE_ORDER: RecapMode[] = ["off", "native", "side-session"];
@@ -366,6 +386,9 @@ export function NewSessionForm({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const voiceButtonRef = useRef<VoiceInputButtonRef>(null);
   const speechTurnIdRef = useRef<string | null>(null);
+  const speechInsertionRangeRef = useRef<SpeechInsertionRange | null>(null);
+  const pendingTextareaSelectionRef =
+    useRef<PendingTextareaSelectionRestore | null>(null);
   const hasInitializedDefaultsRef = useRef(false);
   const hasUserCustomizedDefaultsRef = useRef(false);
   const preferredPromptSuggestionModeRef =
@@ -384,8 +407,6 @@ export function NewSessionForm({
     setSpeechMethod,
     speechSmartTurnSettings,
     setSpeechSmartTurnSettings,
-    grokSpeechAudioSettings,
-    setGrokSpeechAudioSettings,
   } = useModelSettings();
 
   // Connection for uploads (uses WebSocket when enabled)
@@ -894,30 +915,12 @@ export function NewSessionForm({
   const selectedSpeechCanStream = canSpeechMethodStream({
     methodId: selectedSpeechMethod,
     serverCapabilities: versionInfo?.voiceBackendCapabilities,
-    grokSpeechAudioSettings,
   });
   const supportsSelectedSpeechSmartTurn =
     selectedSpeechCanStream &&
     selectedSpeechMethodCapabilities.smartTurn === true;
   const activeSpeechSmartTurnSettings: SpeechSmartTurnSettings | undefined =
     supportsSelectedSpeechSmartTurn ? speechSmartTurnSettings : undefined;
-  const showGrokSpeechAudioControls = selectedSpeechMethod === "ya-grok";
-
-  // Combined display text: committed text + interim transcript
-  const displayText = interimTranscript
-    ? message + (message.trimEnd() ? " " : "") + interimTranscript
-    : message;
-
-  // Auto-scroll textarea when voice input updates (interim transcript changes)
-  // Browser handles scrolling for normal typing, but programmatic updates need explicit scroll
-  useEffect(() => {
-    if (interimTranscript) {
-      const textarea = textareaRef.current;
-      if (textarea) {
-        textarea.scrollTop = textarea.scrollHeight;
-      }
-    }
-  }, [interimTranscript]);
 
   // Focus textarea on mount if autoFocus is enabled
   useEffect(() => {
@@ -925,6 +928,14 @@ export function NewSessionForm({
       textareaRef.current?.focus();
     }
   }, [autoFocus]);
+
+  useLayoutEffect(() => {
+    const pending = pendingTextareaSelectionRef.current;
+    const textarea = textareaRef.current;
+    if (!pending || !textarea || textarea.value !== pending.value) return;
+    pendingTextareaSelectionRef.current = null;
+    pending.restore(textarea);
+  }, [message]);
 
   // Check for opt-in new-session prefill on mount.
   useEffect(() => {
@@ -1405,33 +1416,127 @@ export function NewSessionForm({
   };
 
   // Voice input handlers
+  const handleListeningStart = useCallback(() => {
+    const textarea = textareaRef.current;
+    const current = draftControls.getDraft();
+    const selectionStart = Math.max(
+      0,
+      Math.min(textarea?.selectionStart ?? current.length, current.length),
+    );
+    const selectionEnd = Math.max(
+      selectionStart,
+      Math.min(textarea?.selectionEnd ?? selectionStart, current.length),
+    );
+    const nextMessage =
+      selectionStart === selectionEnd
+        ? current
+        : `${current.slice(0, selectionStart)}${current.slice(selectionEnd)}`;
+
+    speechInsertionRangeRef.current = {
+      start: selectionStart,
+      end: selectionStart,
+    };
+    if (nextMessage !== current) {
+      pendingTextareaSelectionRef.current = {
+        value: nextMessage,
+        restore: (currentTextarea) => {
+          currentTextarea.focus();
+          currentTextarea.setSelectionRange(selectionStart, selectionStart);
+        },
+      };
+      draftControls.setDraft(nextMessage);
+    } else if (textarea) {
+      textarea.focus();
+      textarea.setSelectionRange(selectionStart, selectionStart);
+    }
+    setInterimTranscript("");
+  }, [draftControls]);
+
   const handleVoiceTranscript = useCallback(
     (transcript: string, metadata?: SpeechTranscriptionResultMetadata) => {
       if (metadata?.smartTurnCommand === "cancel") {
+        const current = draftControls.getDraft();
+        const range = speechInsertionRangeRef.current;
+        if (range) {
+          const next = removeTextRange(current, range.start, range.end);
+          if (next.text !== current) {
+            const selection = captureTextareaAppendSelection(
+              textareaRef.current,
+              current,
+            );
+            pendingTextareaSelectionRef.current = {
+              value: next.text,
+              restore: (textarea) => {
+                restoreTextareaReplacementSelection(
+                  textarea,
+                  selection,
+                  next.text,
+                  range.start,
+                  range.end,
+                  0,
+                );
+              },
+            };
+            draftControls.setDraft(next.text);
+          } else {
+            pendingTextareaSelectionRef.current = null;
+          }
+        }
+        speechInsertionRangeRef.current = null;
         setInterimTranscript("");
         return;
       }
 
       const current = draftControls.getDraft();
       const trimmedTranscript = transcript.trim();
-      const nextMessage = trimmedTranscript
-        ? appendSpeechTranscript(current, trimmedTranscript)
-        : current;
+      const speechRange = speechInsertionRangeRef.current;
+      const replacement = replaceSpeechTranscriptBefore(
+        current,
+        trimmedTranscript,
+        speechRange?.end ?? current.length,
+        speechRange
+          ? (metadata?.replacePreviousTranscriptChars ?? 0)
+          : 0,
+      );
+      const nextMessage =
+        trimmedTranscript || metadata?.replacePreviousTranscriptChars
+          ? replacement.text
+          : current;
+      const shouldRestoreSelection = metadata?.smartTurnCommand !== "send";
       if (nextMessage !== current) {
+        const selection = shouldRestoreSelection
+          ? captureTextareaAppendSelection(textareaRef.current, current)
+          : null;
+        pendingTextareaSelectionRef.current = shouldRestoreSelection
+          ? {
+              value: nextMessage,
+              restore: (textarea) => {
+                restoreTextareaReplacementSelection(
+                  textarea,
+                  selection,
+                  nextMessage,
+                  replacement.replacementStart,
+                  replacement.replacementEnd,
+                  replacement.insertedLength,
+                );
+              },
+            }
+          : null;
         draftControls.setDraft(nextMessage);
+        if (speechRange) {
+          speechInsertionRangeRef.current = {
+            start: speechRange.start,
+            end: replacement.cursor,
+          };
+        }
       }
       setInterimTranscript("");
+      if (metadata?.smartTurnCommand) {
+        speechInsertionRangeRef.current = null;
+      }
       if (metadata?.smartTurnCommand === "send") {
         void handleStartSession(nextMessage);
       }
-      // Scroll to bottom after committing voice transcript
-      // Use setTimeout to ensure state update has rendered
-      setTimeout(() => {
-        const textarea = textareaRef.current;
-        if (textarea) {
-          textarea.scrollTop = textarea.scrollHeight;
-        }
-      }, 0);
     },
     [draftControls, handleStartSession],
   );
@@ -1450,14 +1555,20 @@ export function NewSessionForm({
       const wasActive = voice.isListening;
       voice.toggle();
       if (!wasActive) {
-        textareaRef.current?.focus();
+        handleListeningStart();
       }
     },
-    [],
+    [handleListeningStart],
   );
 
   const hasContent = message.trim() || pendingFiles.length > 0;
   const canStart = Boolean(hasContent);
+  const interimDisplayTranscript = interimTranscript.trim();
+  const interimInsertion = getSpeechTranscriptInsertionParts(
+    message,
+    interimDisplayTranscript,
+    speechInsertionRangeRef.current?.end ?? message.length,
+  );
   const getTranscriptionContext =
     useCallback((): SpeechTranscriptionContext => {
       if (!speechTurnIdRef.current) {
@@ -1472,20 +1583,58 @@ export function NewSessionForm({
   // Shared input area with toolbar (textarea + attach/voice on left, send on right)
   const inputArea = (
     <>
-      <textarea
-        ref={textareaRef}
-        value={displayText}
-        onChange={(e) => {
-          setInterimTranscript("");
-          setMessage(e.target.value);
-        }}
-        onKeyDown={handleKeyDown}
-        onPaste={handlePaste}
-        placeholder={resolvedPlaceholder}
-        disabled={isStarting}
-        rows={rows}
-        className="new-session-form-textarea"
-      />
+      <div
+        className={`speech-draft-field ${interimTranscript ? "has-interim" : ""}`}
+      >
+        <div className="speech-draft-inline">
+          {interimDisplayTranscript && (
+            <div className="speech-draft-mirror" aria-hidden="true">
+              <span>{interimInsertion.before}</span>
+              {interimInsertion.separatorBefore}
+              <span className="speech-interim-inline">
+                {interimInsertion.transcript}
+              </span>
+              {interimInsertion.separatorAfter}
+              <span>{interimInsertion.after}</span>
+            </div>
+          )}
+          <textarea
+            ref={textareaRef}
+            value={message}
+            onChange={(e) => {
+              const nextMessage = e.target.value;
+              const range = speechInsertionRangeRef.current;
+              if (range) {
+                speechInsertionRangeRef.current = {
+                  start: mapTextIndexThroughEdit(
+                    message,
+                    nextMessage,
+                    range.start,
+                  ),
+                  end: mapTextIndexThroughEdit(message, nextMessage, range.end),
+                };
+              }
+              setMessage(nextMessage);
+            }}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            placeholder={resolvedPlaceholder}
+            disabled={isStarting}
+            rows={rows}
+            className="new-session-form-textarea"
+          />
+        </div>
+        {interimTranscript && (
+          <div
+            className="speech-interim-status"
+            role="status"
+            aria-live="polite"
+            aria-label="Tentative speech transcript"
+          >
+            {interimTranscript}
+          </div>
+        )}
+      </div>
       <div className="new-session-form-toolbar">
         <div className="new-session-form-toolbar-left">
           <input
@@ -1526,27 +1675,18 @@ export function NewSessionForm({
                 : undefined
             }
             smartTurnDisabled={isStarting}
-            grokAudioSettings={
-              showGrokSpeechAudioControls ? grokSpeechAudioSettings : undefined
-            }
-            onGrokAudioSettingsChange={
-              showGrokSpeechAudioControls
-                ? setGrokSpeechAudioSettings
-                : undefined
-            }
             onPointerNearTrigger={() => voiceButtonRef.current?.prewarm?.()}
             trigger={
               <VoiceInputButton
                 ref={voiceButtonRef}
                 onTranscript={handleVoiceTranscript}
                 onInterimTranscript={handleInterimTranscript}
-                onListeningStart={() => textareaRef.current?.focus()}
+                onListeningStart={handleListeningStart}
                 disabled={isStarting}
                 className="toolbar-button"
                 speechMethod={selectedSpeechMethod}
                 getTranscriptionContext={getTranscriptionContext}
                 smartTurn={activeSpeechSmartTurnSettings}
-                grokSpeechAudioSettings={grokSpeechAudioSettings}
               />
             }
           />

@@ -61,7 +61,6 @@ import {
   type SpeechMethodId,
 } from "../lib/speechProviders/methods";
 import type {
-  GrokSpeechAudioSettings,
   SpeechSmartTurnSettings,
   SpeechTranscriptionContext,
   SpeechTranscriptionResultMetadata,
@@ -490,7 +489,6 @@ type ToolbarVoiceButtonControl =
       speechMethod: SpeechMethodId;
       getTranscriptionContext?: () => SpeechTranscriptionContext | undefined;
       smartTurn?: SpeechSmartTurnSettings;
-      grokSpeechAudioSettings?: GrokSpeechAudioSettings;
     }
   | {
       kind: "preview";
@@ -505,8 +503,6 @@ interface ToolbarSpeechControl {
   smartTurnSettings?: SpeechSmartTurnSettings;
   onSmartTurnSettingsChange?: (settings: SpeechSmartTurnSettings) => void;
   smartTurnDisabled?: boolean;
-  grokAudioSettings?: GrokSpeechAudioSettings;
-  onGrokAudioSettingsChange?: (settings: GrokSpeechAudioSettings) => void;
   voiceButton?: ToolbarVoiceButtonControl;
 }
 
@@ -1196,10 +1192,6 @@ export function MessageInputToolbarView({
                 speechControl.onSmartTurnSettingsChange
               }
               smartTurnDisabled={speechControl.smartTurnDisabled}
-              grokAudioSettings={speechControl.grokAudioSettings}
-              onGrokAudioSettingsChange={
-                speechControl.onGrokAudioSettingsChange
-              }
               trigger={
                 <button
                   type="button"
@@ -1227,10 +1219,6 @@ export function MessageInputToolbarView({
                 speechControl.onSmartTurnSettingsChange
               }
               smartTurnDisabled={speechControl.smartTurnDisabled}
-              grokAudioSettings={speechControl.grokAudioSettings}
-              onGrokAudioSettingsChange={
-                speechControl.onGrokAudioSettingsChange
-              }
               onPointerNearTrigger={() =>
                 speechControl.voiceButton?.kind === "live"
                   ? speechControl.voiceButton.ref?.current?.prewarm?.()
@@ -1250,9 +1238,6 @@ export function MessageInputToolbarView({
                     speechControl.voiceButton.getTranscriptionContext
                   }
                   smartTurn={speechControl.voiceButton.smartTurn}
-                  grokSpeechAudioSettings={
-                    speechControl.voiceButton.grokSpeechAudioSettings
-                  }
                 />
               }
             />
@@ -2029,8 +2014,6 @@ export function MessageInputToolbar({
     setSpeechMethod,
     speechSmartTurnSettings,
     setSpeechSmartTurnSettings,
-    grokSpeechAudioSettings,
-    setGrokSpeechAudioSettings,
   } = useModelSettings();
   const { version: versionInfo } = useVersion();
   const { providers } = useProviders();
@@ -2266,12 +2249,10 @@ export function MessageInputToolbar({
   const selectedSpeechCanStream = canSpeechMethodStream({
     methodId: selectedSpeechMethod,
     serverCapabilities: versionInfo?.voiceBackendCapabilities,
-    grokSpeechAudioSettings,
   });
   const supportsSelectedSpeechSmartTurn =
     selectedSpeechCanStream &&
     selectedSpeechMethodCapabilities.smartTurn === true;
-  const showGrokSpeechAudioControls = selectedSpeechMethod === "ya-grok";
   const activeSpeechSmartTurnSettings: SpeechSmartTurnSettings | undefined =
     supportsSelectedSpeechSmartTurn ? speechSmartTurnSettings : undefined;
   const showLastActivityChip =
@@ -2519,14 +2500,6 @@ export function MessageInputToolbar({
           ? setSpeechSmartTurnSettings
           : undefined,
         smartTurnDisabled: voiceDisabled,
-        grokAudioSettings:
-          showGrokSpeechAudioControls
-            ? grokSpeechAudioSettings
-            : undefined,
-        onGrokAudioSettingsChange:
-          showGrokSpeechAudioControls
-            ? setGrokSpeechAudioSettings
-            : undefined,
         voiceButton:
           toolbarVisibility.microphone &&
           voiceButtonRef &&
@@ -2542,7 +2515,6 @@ export function MessageInputToolbar({
                 speechMethod: selectedSpeechMethod,
                 getTranscriptionContext,
                 smartTurn: activeSpeechSmartTurnSettings,
-                grokSpeechAudioSettings,
               }
             : undefined,
       }}

@@ -10,14 +10,10 @@ import {
   useState,
 } from "react";
 import type { FilterOption } from "./FilterDropdown";
-import { SpeechGrokAudioControls } from "./SpeechGrokAudioControls";
 import { SpeechSmartTurnControls } from "./SpeechSmartTurnControls";
 import { useSpeechCaptureSettings } from "../hooks/useSpeechCaptureSettings";
 import type { SpeechMethodId } from "../lib/speechProviders/methods";
-import type {
-  GrokSpeechAudioSettings,
-  SpeechSmartTurnSettings,
-} from "../lib/speechProviders/SpeechProvider";
+import type { SpeechSmartTurnSettings } from "../lib/speechProviders/SpeechProvider";
 
 interface SpeechControlMenuProps {
   trigger: ReactNode;
@@ -28,8 +24,6 @@ interface SpeechControlMenuProps {
   smartTurnSettings?: SpeechSmartTurnSettings;
   onSmartTurnSettingsChange?: (settings: SpeechSmartTurnSettings) => void;
   smartTurnDisabled?: boolean;
-  grokAudioSettings?: GrokSpeechAudioSettings;
-  onGrokAudioSettingsChange?: (settings: GrokSpeechAudioSettings) => void;
   onPointerNearTrigger?: () => void;
 }
 
@@ -53,8 +47,6 @@ export function SpeechControlMenu({
   smartTurnSettings,
   onSmartTurnSettingsChange,
   smartTurnDisabled = false,
-  grokAudioSettings,
-  onGrokAudioSettingsChange,
   onPointerNearTrigger,
 }: SpeechControlMenuProps) {
   const micDeviceSelectId = useId();
@@ -73,17 +65,12 @@ export function SpeechControlMenu({
       selectedMethod,
     [methodOptions, selectedMethod],
   );
-  const showGrokAudioControls =
-    selectedMethod === "ya-grok" &&
-    !!grokAudioSettings &&
-    !!onGrokAudioSettingsChange;
   const showSmartTurnControls =
     !!smartTurnSettings && !!onSmartTurnSettingsChange;
   const showMicDeviceControls = selectedMethod !== "browser-native";
   const hasOptions =
     showMethodSelector ||
     showMicDeviceControls ||
-    showGrokAudioControls ||
     showSmartTurnControls;
   const selectedMicDeviceUnavailable =
     !!micDeviceId &&
@@ -269,6 +256,15 @@ export function SpeechControlMenu({
               x
             </button>
           </div>
+          {showSmartTurnControls && (
+            <section className="speech-options-section">
+              <SpeechSmartTurnControls
+                settings={smartTurnSettings}
+                onChange={onSmartTurnSettingsChange}
+                disabled={smartTurnDisabled}
+              />
+            </section>
+          )}
           {showMethodSelector && (
             <section className="speech-options-section">
               <div className="speech-options-section-title">STT backend</div>
@@ -300,7 +296,10 @@ export function SpeechControlMenu({
                           {option.label}
                         </span>
                         {option.description && (
-                          <span className="speech-method-description">
+                          <span
+                            className="speech-method-description"
+                            title={option.description}
+                          >
                             {option.description}
                           </span>
                         )}
@@ -343,24 +342,6 @@ export function SpeechControlMenu({
               {micDeviceError && (
                 <div className="speech-mic-device-error">{micDeviceError}</div>
               )}
-            </section>
-          )}
-          {showGrokAudioControls && (
-            <section className="speech-options-section">
-              <SpeechGrokAudioControls
-                settings={grokAudioSettings}
-                onChange={onGrokAudioSettingsChange}
-                disabled={smartTurnDisabled}
-              />
-            </section>
-          )}
-          {showSmartTurnControls && (
-            <section className="speech-options-section">
-              <SpeechSmartTurnControls
-                settings={smartTurnSettings}
-                onChange={onSmartTurnSettingsChange}
-                disabled={smartTurnDisabled}
-              />
             </section>
           )}
         </div>

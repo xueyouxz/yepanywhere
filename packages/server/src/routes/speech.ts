@@ -21,6 +21,7 @@ import {
 
 const logger = getLogger();
 const DEFAULT_MIME_TYPE = "audio/webm;codecs=opus";
+const MAX_SMART_TURN_TIMEOUT_MS = 10000;
 const XAI_REALTIME_CLIENT_SECRET_URL =
   "https://api.x.ai/v1/realtime/client_secrets";
 
@@ -61,6 +62,8 @@ export interface SpeechServerMsg {
   transcriptionId?: string;
   isFinal?: boolean;
   speechFinal?: boolean;
+  start?: number;
+  duration?: number;
   words?: SpeechWordTimestamp[];
 }
 
@@ -196,7 +199,7 @@ function parseSmartTurnStartOptions(
       : undefined;
   const timeoutMs =
     typeof value.timeoutMs === "number" && Number.isFinite(value.timeoutMs)
-      ? Math.round(clampNumber(value.timeoutMs, 0, 5000))
+      ? Math.round(clampNumber(value.timeoutMs, 0, MAX_SMART_TURN_TIMEOUT_MS))
       : undefined;
   return { enabled: true, threshold, timeoutMs };
 }
@@ -630,6 +633,8 @@ export function createSpeechWebSocketSession(
                   text: event.text,
                   isFinal: event.isFinal,
                   speechFinal: event.speechFinal,
+                  start: event.start,
+                  duration: event.duration,
                   words: event.words,
                 });
               },
@@ -1022,6 +1027,8 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
                       text: event.text,
                       isFinal: event.isFinal,
                       speechFinal: event.speechFinal,
+                      start: event.start,
+                      duration: event.duration,
                       words: event.words,
                     });
                   },

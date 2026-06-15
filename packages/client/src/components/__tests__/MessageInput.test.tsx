@@ -11,7 +11,10 @@ import {
 import { type ComponentProps, useCallback, useMemo, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SESSION_ISEARCH_GUIDE_EVENT } from "../../lib/sessionIsearchGuide";
-import { XAI_DIRECT_STREAMING_SPEECH_METHOD } from "../../lib/speechProviders/methods";
+import {
+  YA_GROK_BATCH_SPEECH_METHOD,
+  XAI_DIRECT_STREAMING_SPEECH_METHOD,
+} from "../../lib/speechProviders/methods";
 import { MessageInput } from "../MessageInput";
 import {
   MessageInputToolbarView,
@@ -27,6 +30,7 @@ const {
   mockSetSpeechSmartTurnSettings,
   mockSetGrokSpeechAudioSettings,
   mockVoiceToggle,
+  voicePropsState,
   remoteBasePathState,
 } = vi.hoisted(() => ({
   versionState: {
@@ -60,6 +64,19 @@ const {
   mockSetSpeechSmartTurnSettings: vi.fn(),
   mockSetGrokSpeechAudioSettings: vi.fn(),
   mockVoiceToggle: vi.fn(),
+  voicePropsState: {
+    current: null as null | {
+      onTranscript?: (
+        text: string,
+        metadata?: {
+          smartTurnCommand?: "cancel" | "send" | "wait";
+          replacePreviousTranscriptChars?: number;
+        },
+      ) => void;
+      onInterimTranscript?: (text: string) => void;
+      onListeningStart?: () => void;
+    },
+  },
   remoteBasePathState: {
     basePath: "",
   },
@@ -233,10 +250,26 @@ vi.mock("../VoiceInputButton", async () => {
 
   return {
     VoiceInputButton: React.forwardRef(
-      (props: { speechMethod?: string }, ref) => {
+      (
+        props: {
+          onTranscript?: (
+            text: string,
+            metadata?: {
+              smartTurnCommand?: "cancel" | "send" | "wait";
+              replacePreviousTranscriptChars?: number;
+            },
+          ) => void;
+          onInterimTranscript?: (text: string) => void;
+          onListeningStart?: () => void;
+          speechMethod?: string;
+        },
+        ref,
+      ) => {
+        voicePropsState.current = props;
         React.useImperativeHandle(ref, () => ({
           stopAndFinalize: () => "",
           toggle: mockVoiceToggle,
+          prewarm: vi.fn(),
           isAvailable: true,
           isListening: false,
         }));
@@ -421,6 +454,7 @@ describe("MessageInput", () => {
     mockSetSpeechSmartTurnSettings.mockReset();
     mockSetGrokSpeechAudioSettings.mockReset();
     mockVoiceToggle.mockReset();
+    voicePropsState.current = null;
     window.localStorage.clear();
   });
 
@@ -513,7 +547,7 @@ describe("MessageInput", () => {
     expect(onToggleEnabled).toHaveBeenCalledTimes(1);
   });
 
-  it("selects the preferred active server STT backend for the mic button", () => {
+  it("selects direct Grok streaming by default when Grok STT is enabled", () => {
     versionState.version = {
       ...versionState.version,
       voiceBackends: ["ya-deepgram", "ya-grok"],
@@ -523,12 +557,17 @@ describe("MessageInput", () => {
 
     expect(
       screen.getByRole("button", { name: "voice" }).dataset.speechMethod,
-    ).toBe("ya-grok");
+    ).toBe(XAI_DIRECT_STREAMING_SPEECH_METHOD);
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "voice" }));
     expect(
       screen.getByRole("radio", {
-        name: /^Grok STT xAI speech-to-text through YA\.$/,
+        name: /^Grok STT through YA Browser streams PCM audio through YA to xAI\.$/,
+      }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("radio", {
+        name: /^Grok STT through YA batch Browser sends a complete compressed recording through YA to xAI\.$/,
       }),
     ).toBeDefined();
     fireEvent.click(screen.getByRole("radio", { name: /Deepgram STT/ }));
@@ -548,7 +587,113 @@ describe("MessageInput", () => {
     expect(mockVoiceToggle).toHaveBeenCalledTimes(1);
   });
 
-  it("shows Grok audio format controls and hides Smart Turn on compressed uplink", () => {
+  it("replaces selected text with speech and cancel removes that range", async () => {
+    const textarea = renderMessageInput() as HTMLTextAreaElement;
+
+    fireEvent.change(textarea, { target: { value: "replace this text" } });
+    textarea.focus();
+    textarea.setSelectionRange(8, 12);
+
+    act(() => {
+      voicePropsState.current?.onListeningStart?.();
+    });
+
+    await waitFor(() => {
+      expect(textarea.value).toBe("replace  text");
+      expect(textarea.selectionStart).toBe(8);
+    });
+
+    act(() => {
+      voicePropsState.current?.onTranscript?.("spoken");
+    });
+
+    await waitFor(() => {
+      expect(textarea.value).toBe("replace spoken text");
+      expect(textarea.selectionStart).toBe("replace spoken".length);
+    });
+
+    act(() => {
+      voicePropsState.current?.onTranscript?.("", {
+        smartTurnCommand: "cancel",
+      });
+    });
+
+    await waitFor(() => {
+      expect(textarea.value).toBe("replace  text");
+      expect(textarea.selectionStart).toBe(8);
+    });
+  });
+
+  it("renders interim speech at the current insertion point", async () => {
+    const textarea = renderMessageInput() as HTMLTextAreaElement;
+
+    fireEvent.change(textarea, { target: { value: "hello world" } });
+    textarea.focus();
+    textarea.setSelectionRange(5, 5);
+
+    act(() => {
+      voicePropsState.current?.onListeningStart?.();
+      voicePropsState.current?.onInterimTranscript?.("there");
+    });
+
+    await waitFor(() => {
+      expect(
+        document.querySelector(".speech-draft-mirror")?.textContent,
+      ).toBe("hello there world");
+      expect(textarea.value).toBe("hello world");
+      expect(textarea.selectionStart).toBe(5);
+    });
+  });
+
+  it("replaces the previous speech-owned span from provider metadata", async () => {
+    const textarea = renderMessageInput() as HTMLTextAreaElement;
+
+    act(() => {
+      voicePropsState.current?.onListeningStart?.();
+      voicePropsState.current?.onTranscript?.("Testing.");
+    });
+
+    await waitFor(() => {
+      expect(textarea.value).toBe("Testing.");
+    });
+
+    act(() => {
+      voicePropsState.current?.onTranscript?.("Testing. again.", {
+        replacePreviousTranscriptChars: "Testing.".length,
+      });
+    });
+
+    await waitFor(() => {
+      expect(textarea.value).toBe("Testing. again.");
+    });
+  });
+
+  it("inserts consecutive final speech chunks at a middle cursor", async () => {
+    const textarea = renderMessageInput() as HTMLTextAreaElement;
+
+    fireEvent.change(textarea, { target: { value: "prefix suffix" } });
+    textarea.focus();
+    textarea.setSelectionRange("prefix".length, "prefix".length);
+
+    act(() => {
+      voicePropsState.current?.onListeningStart?.();
+      voicePropsState.current?.onTranscript?.("first.");
+    });
+
+    await waitFor(() => {
+      expect(textarea.value).toBe("prefix first. suffix");
+    });
+
+    act(() => {
+      voicePropsState.current?.onTranscript?.("second.");
+    });
+
+    await waitFor(() => {
+      expect(textarea.value).toBe("prefix first. second. suffix");
+    });
+  });
+
+  it("shows YA-routed Grok batch as a top-level method without Smart Turn", () => {
     versionState.version = {
       ...versionState.version,
       voiceBackends: ["ya-grok"],
@@ -556,30 +701,31 @@ describe("MessageInput", () => {
         "ya-grok": { streaming: true, smartTurn: true },
       },
     };
-    modelSettingsState.speechMethod = "ya-grok";
+    modelSettingsState.speechMethod = YA_GROK_BATCH_SPEECH_METHOD;
     modelSettingsState.hasStoredSpeechMethod = true;
     modelSettingsState.speechSmartTurnSettings = {
       enabled: true,
       threshold: 0.95,
       timeoutMs: 3000,
     };
-    modelSettingsState.grokSpeechAudioSettings = {
-      uplinkMode: "browser-compressed",
-    };
 
     renderMessageInput();
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "voice" }));
-    expect(screen.getByText("Grok STT audio")).toBeDefined();
     expect(
-      (screen.getByLabelText("Batch") as HTMLInputElement).checked,
-    ).toBe(true);
+      screen.getByRole("radio", {
+        name: /^Grok STT through YA batch Browser sends a complete compressed recording through YA to xAI\.$/,
+      }).getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(screen.queryByText("Grok STT audio")).toBeNull();
     expect(screen.queryByText("Smart Turn")).toBeNull();
 
-    fireEvent.click(screen.getByLabelText("PCM16"));
-    expect(mockSetGrokSpeechAudioSettings).toHaveBeenCalledWith({
-      uplinkMode: "pcm16",
-    });
+    fireEvent.click(
+      screen.getByRole("radio", {
+        name: /^Grok STT through YA Browser streams PCM audio through YA to xAI\.$/,
+      }),
+    );
+    expect(mockSetSpeechMethod).toHaveBeenCalledWith("ya-grok");
   });
 
   it("shows Smart Turn for direct Grok streaming without server capabilities", () => {
@@ -605,7 +751,7 @@ describe("MessageInput", () => {
     expect(screen.queryByText("Grok STT audio")).toBeNull();
   });
 
-  it("keeps Grok audio controls visible in relay mode", () => {
+  it("keeps YA-routed Grok batch selectable in relay mode", () => {
     remoteBasePathState.basePath = "/ygraehl";
     versionState.version = {
       ...versionState.version,
@@ -614,20 +760,19 @@ describe("MessageInput", () => {
         "ya-grok": { streaming: true, smartTurn: true },
       },
     };
-    modelSettingsState.speechMethod = "ya-grok";
+    modelSettingsState.speechMethod = YA_GROK_BATCH_SPEECH_METHOD;
     modelSettingsState.hasStoredSpeechMethod = true;
-    modelSettingsState.grokSpeechAudioSettings = {
-      uplinkMode: "browser-compressed",
-    };
 
     renderMessageInput();
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "voice" }));
 
-    expect(screen.getByText("Grok STT audio")).toBeDefined();
+    expect(screen.queryByText("Grok STT audio")).toBeNull();
     expect(
-      (screen.getByLabelText("Batch") as HTMLInputElement).checked,
-    ).toBe(true);
+      screen.getByRole("radio", {
+        name: /^Grok STT through YA batch Browser sends a complete compressed recording through YA to xAI\.$/,
+      }).getAttribute("aria-checked"),
+    ).toBe("true");
   });
 
   it("keeps Up as native navigation when the composer has text", () => {

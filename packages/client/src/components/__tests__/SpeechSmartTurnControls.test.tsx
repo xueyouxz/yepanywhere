@@ -42,4 +42,28 @@ describe("SpeechSmartTurnControls", () => {
 
     expect(checkbox.checked).toBe(true);
   });
+
+  it("allows Smart Turn timeout up to 10 seconds", () => {
+    render(
+      <I18nProvider>
+        <SmartTurnHarness />
+      </I18nProvider>,
+    );
+
+    expect(screen.getByText("1 requires perfect confidence.")).toBeDefined();
+    expect(screen.getByLabelText("Timeout").getAttribute("max")).toBe(
+      "10000",
+    );
+    expect(
+      screen
+        .getByLabelText("Smart Turn timeout milliseconds")
+        .getAttribute("max"),
+    ).toBe("10000");
+    fireEvent.click(screen.getByRole("checkbox", { name: /Smart Turn/ }));
+    expect(
+      screen.getByText(
+        "Timeout is the max wait. At turn end, say send, cancel, or wait; no command means send.",
+      ),
+    ).toBeDefined();
+  });
 });

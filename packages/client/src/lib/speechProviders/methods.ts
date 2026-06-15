@@ -10,25 +10,27 @@ import {
   detectBrowserNativeLabel,
   formatBrowserNativeLabel,
 } from "./browserNativeLabel";
-import type { GrokSpeechAudioSettings } from "./SpeechProvider";
 
 export type SpeechMethodId = string;
 
 export const DEFAULT_SPEECH_METHOD: SpeechMethodId = "browser-native";
+export const YA_GROK_STREAMING_SPEECH_METHOD: SpeechMethodId = "ya-grok";
+export const YA_GROK_BATCH_SPEECH_METHOD: SpeechMethodId = "ya-grok-batch";
 export const XAI_DIRECT_STREAMING_SPEECH_METHOD: SpeechMethodId =
   "xai-grok-direct-streaming";
 export const XAI_DIRECT_BATCH_SPEECH_METHOD: SpeechMethodId =
   "xai-grok-direct-batch";
 
 const SERVER_BACKEND_PREFERENCE = ["ya-grok", "ya-deepgram"] as const;
+const YA_GROK_BACKEND_ID = "ya-grok";
 
 const SERVER_BACKEND_LABELS: Record<
   string,
   { label: string; description: string }
 > = {
   "ya-grok": {
-    label: "Grok STT",
-    description: "xAI speech-to-text through YA.",
+    label: "Grok STT through YA",
+    description: "Browser streams PCM audio through YA to xAI.",
   },
   "ya-deepgram": {
     label: "Deepgram STT",
@@ -42,6 +44,15 @@ const SERVER_BACKEND_LABELS: Record<
     label: "Dummy STT",
     description: "Test speech backend through YA.",
   },
+};
+
+const YA_GROK_BATCH_METHOD: SpeechMethodDescriptor = {
+  id: YA_GROK_BATCH_SPEECH_METHOD,
+  label: "Grok STT through YA batch",
+  description:
+    "Browser sends a complete compressed recording through YA to xAI.",
+  clientSupported: true,
+  serverRouted: true,
 };
 
 export interface SpeechMethodDescriptor {
@@ -143,6 +154,14 @@ export function isServerRoutedSpeechMethod(methodId: SpeechMethodId): boolean {
   );
 }
 
+export function getServerBackendIdForSpeechMethod(
+  methodId: SpeechMethodId,
+): string {
+  return methodId === YA_GROK_BATCH_SPEECH_METHOD
+    ? YA_GROK_BACKEND_ID
+    : methodId;
+}
+
 export function getSpeechMethodCapabilities(
   methodId: SpeechMethodId,
   serverCapabilities: Readonly<Record<string, SpeechMethodCapabilities>> = {},
@@ -153,16 +172,18 @@ export function getSpeechMethodCapabilities(
   if (methodId === DEFAULT_SPEECH_METHOD) {
     return {};
   }
-  if (methodId === XAI_DIRECT_BATCH_SPEECH_METHOD) {
+  if (
+    methodId === XAI_DIRECT_BATCH_SPEECH_METHOD ||
+    methodId === YA_GROK_BATCH_SPEECH_METHOD
+  ) {
     return {};
   }
-  return serverCapabilities[methodId] ?? {};
+  return serverCapabilities[getServerBackendIdForSpeechMethod(methodId)] ?? {};
 }
 
 export interface SpeechMethodStreamingOptions {
   methodId: SpeechMethodId;
   serverCapabilities?: Readonly<Record<string, SpeechMethodCapabilities>>;
-  grokSpeechAudioSettings?: GrokSpeechAudioSettings;
   relayTransport?: boolean;
   relayedServerSpeechAvailable?: boolean;
 }
@@ -170,7 +191,6 @@ export interface SpeechMethodStreamingOptions {
 export function canSpeechMethodStream({
   methodId,
   serverCapabilities,
-  grokSpeechAudioSettings,
   relayTransport = false,
   relayedServerSpeechAvailable = false,
 }: SpeechMethodStreamingOptions): boolean {
@@ -184,10 +204,7 @@ export function canSpeechMethodStream({
   ) {
     return false;
   }
-  if (
-    methodId === "ya-grok" &&
-    grokSpeechAudioSettings?.uplinkMode === "browser-compressed"
-  ) {
+  if (methodId === YA_GROK_BATCH_SPEECH_METHOD) {
     return false;
   }
   return (
@@ -219,10 +236,22 @@ export function getOrderedServerSpeechBackends(
     .map(({ id }) => id);
 }
 
+function getAvailableSpeechMethodIds(
+  serverBackends: readonly string[] = [],
+): SpeechMethodId[] {
+  return getOrderedServerSpeechBackends(serverBackends).flatMap((id) =>
+    id === YA_GROK_BACKEND_ID ? [id, YA_GROK_BATCH_SPEECH_METHOD] : [id],
+  );
+}
+
 export function getPreferredSpeechMethod(
   serverBackends: readonly string[] = [],
 ): SpeechMethodId {
-  return getOrderedServerSpeechBackends(serverBackends)[0] ?? DEFAULT_SPEECH_METHOD;
+  const orderedServerBackends = getOrderedServerSpeechBackends(serverBackends);
+  if (orderedServerBackends.includes(YA_GROK_BACKEND_ID)) {
+    return XAI_DIRECT_STREAMING_SPEECH_METHOD;
+  }
+  return orderedServerBackends[0] ?? DEFAULT_SPEECH_METHOD;
 }
 
 export function resolveSpeechMethod(
@@ -236,7 +265,7 @@ export function resolveSpeechMethod(
 
   const activeServerBackends = getOrderedServerSpeechBackends(serverBackends);
   if (!hasStoredMethod) {
-    return activeServerBackends[0] ?? DEFAULT_SPEECH_METHOD;
+    return getPreferredSpeechMethod(serverBackends);
   }
 
   if (storedMethod === DEFAULT_SPEECH_METHOD) {
@@ -250,7 +279,7 @@ export function resolveSpeechMethod(
     return storedMethod;
   }
 
-  return activeServerBackends.includes(storedMethod)
+  return getAvailableSpeechMethodIds(activeServerBackends).includes(storedMethod)
     ? storedMethod
     : DEFAULT_SPEECH_METHOD;
 }
@@ -264,12 +293,17 @@ export function getSpeechMethods(
   serverBackends: readonly string[] = [],
   userAgent?: string,
 ): SpeechMethodDescriptor[] {
-  return [
-    ...getOrderedServerSpeechBackends(serverBackends).map(describeServerBackend),
-    DIRECT_XAI_STREAMING_METHOD,
-    DIRECT_XAI_BATCH_METHOD,
-    describeBrowserNative(userAgent),
-  ];
+  const orderedServerBackends = getOrderedServerSpeechBackends(serverBackends);
+  const serverMethods = orderedServerBackends.flatMap((id) =>
+    id === YA_GROK_BACKEND_ID
+      ? [describeServerBackend(id), YA_GROK_BATCH_METHOD]
+      : [describeServerBackend(id)],
+  );
+  const directMethods = [DIRECT_XAI_STREAMING_METHOD, DIRECT_XAI_BATCH_METHOD];
+  const grokEnabled = orderedServerBackends.includes(YA_GROK_BACKEND_ID);
+  return grokEnabled
+    ? [...directMethods, ...serverMethods, describeBrowserNative(userAgent)]
+    : [...serverMethods, ...directMethods, describeBrowserNative(userAgent)];
 }
 
 /** @deprecated Use getSpeechMethods(serverBackends) instead. */

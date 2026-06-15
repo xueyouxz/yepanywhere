@@ -2,6 +2,7 @@ import {
   type KeyboardEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -13,10 +14,30 @@ import { setRecentProjectId } from "../hooks/useRecentProject";
 import { setNewSessionPrefill } from "../lib/newSessionPrefill";
 import { useRemoteBasePath } from "../hooks/useRemoteBasePath";
 import { useI18n } from "../i18n";
-import { appendSpeechTranscript } from "../lib/speechRecognition";
+import {
+  getSpeechTranscriptInsertionParts,
+  mapTextIndexThroughEdit,
+  replaceSpeechTranscriptBefore,
+  removeTextRange,
+} from "../lib/speechRecognition";
+import {
+  captureTextareaAppendSelection,
+  restoreTextareaReplacementSelection,
+} from "../lib/textareaSelection";
+import type { SpeechTranscriptionResultMetadata } from "../lib/speechProviders/SpeechProvider";
 import { VoiceInputButton } from "./VoiceInputButton";
 
 const FAB_DRAFT_KEY = "fab-draft";
+
+interface SpeechInsertionRange {
+  start: number;
+  end: number;
+}
+
+interface PendingTextareaSelectionRestore {
+  value: string;
+  restore: (textarea: HTMLTextAreaElement) => void;
+}
 
 /**
  * Floating Action Button for quick session creation.
@@ -35,6 +56,15 @@ export function FloatingActionButton() {
   const [interimTranscript, setInterimTranscript] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const speechInsertionRangeRef = useRef<SpeechInsertionRange | null>(null);
+  const pendingTextareaSelectionRef =
+    useRef<PendingTextareaSelectionRestore | null>(null);
+  const interimDisplayTranscript = interimTranscript.trim();
+  const interimInsertion = getSpeechTranscriptInsertionParts(
+    message,
+    interimDisplayTranscript,
+    speechInsertionRangeRef.current?.end ?? message.length,
+  );
 
   // Extract projectId from current URL if we're in a project context
   const projectIdFromUrl = extractProjectIdFromPath(location.pathname);
@@ -53,6 +83,14 @@ export function FloatingActionButton() {
     }
   }, [isExpanded]);
 
+  useLayoutEffect(() => {
+    const pending = pendingTextareaSelectionRef.current;
+    const textarea = textareaRef.current;
+    if (!pending || !textarea || textarea.value !== pending.value) return;
+    pendingTextareaSelectionRef.current = null;
+    pending.restore(textarea);
+  }, [message]);
+
   // Close on click outside
   useEffect(() => {
     if (!isExpanded) return;
@@ -70,25 +108,30 @@ export function FloatingActionButton() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isExpanded]);
 
-  const handleSubmit = useCallback(() => {
-    const trimmed = message.trim();
-    if (!trimmed) return;
+  const handleSubmit = useCallback(
+    (messageOverride?: unknown) => {
+      const trimmed = (
+        typeof messageOverride === "string" ? messageOverride : message
+      ).trim();
+      if (!trimmed) return;
 
-    // Store the message for NewSessionForm to pick up
-    setNewSessionPrefill(trimmed);
-    draftControls.clearDraft();
-    setIsExpanded(false);
+      // Store the message for NewSessionForm to pick up
+      setNewSessionPrefill(trimmed);
+      draftControls.clearDraft();
+      setIsExpanded(false);
 
-    // Navigate to new session page
-    if (projectIdFromUrl) {
-      navigate(
-        `${basePath}/new-session?projectId=${encodeURIComponent(projectIdFromUrl)}`,
-      );
-      return;
-    }
+      // Navigate to new session page
+      if (projectIdFromUrl) {
+        navigate(
+          `${basePath}/new-session?projectId=${encodeURIComponent(projectIdFromUrl)}`,
+        );
+        return;
+      }
 
-    navigate(`${basePath}/new-session`);
-  }, [message, projectIdFromUrl, navigate, draftControls, basePath]);
+      navigate(`${basePath}/new-session`);
+    },
+    [message, projectIdFromUrl, navigate, draftControls, basePath],
+  );
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -111,25 +154,135 @@ export function FloatingActionButton() {
   }, []);
 
   // Voice input handlers
-  const handleVoiceTranscript = useCallback(
-    (transcript: string) => {
-      const current = draftControls.getDraft();
-      const nextMessage = appendSpeechTranscript(current, transcript);
-      if (nextMessage === current) return;
+  const handleListeningStart = useCallback(() => {
+    const textarea = textareaRef.current;
+    const current = draftControls.getDraft();
+    const selectionStart = Math.max(
+      0,
+      Math.min(textarea?.selectionStart ?? current.length, current.length),
+    );
+    const selectionEnd = Math.max(
+      selectionStart,
+      Math.min(textarea?.selectionEnd ?? selectionStart, current.length),
+    );
+    const nextMessage =
+      selectionStart === selectionEnd
+        ? current
+        : `${current.slice(0, selectionStart)}${current.slice(selectionEnd)}`;
+
+    speechInsertionRangeRef.current = {
+      start: selectionStart,
+      end: selectionStart,
+    };
+    if (nextMessage !== current) {
+      pendingTextareaSelectionRef.current = {
+        value: nextMessage,
+        restore: (currentTextarea) => {
+          currentTextarea.focus();
+          currentTextarea.setSelectionRange(selectionStart, selectionStart);
+        },
+      };
       draftControls.setDraft(nextMessage);
+    } else if (textarea) {
+      textarea.focus();
+      textarea.setSelectionRange(selectionStart, selectionStart);
+    }
+    setInterimTranscript("");
+  }, [draftControls]);
+
+  const handleVoiceTranscript = useCallback(
+    (
+      transcript: string,
+      metadata?: SpeechTranscriptionResultMetadata,
+    ) => {
+      if (metadata?.smartTurnCommand === "cancel") {
+        const current = draftControls.getDraft();
+        const range = speechInsertionRangeRef.current;
+        if (range) {
+          const next = removeTextRange(current, range.start, range.end);
+          if (next.text !== current) {
+            const selection = captureTextareaAppendSelection(
+              textareaRef.current,
+              current,
+            );
+            pendingTextareaSelectionRef.current = {
+              value: next.text,
+              restore: (textarea) => {
+                restoreTextareaReplacementSelection(
+                  textarea,
+                  selection,
+                  next.text,
+                  range.start,
+                  range.end,
+                  0,
+                );
+              },
+            };
+            draftControls.setDraft(next.text);
+          } else {
+            pendingTextareaSelectionRef.current = null;
+          }
+        }
+        speechInsertionRangeRef.current = null;
+        setInterimTranscript("");
+        return;
+      }
+
+      const current = draftControls.getDraft();
+      const trimmedTranscript = transcript.trim();
+      const speechRange = speechInsertionRangeRef.current;
+      const replacement = replaceSpeechTranscriptBefore(
+        current,
+        trimmedTranscript,
+        speechRange?.end ?? current.length,
+        speechRange
+          ? (metadata?.replacePreviousTranscriptChars ?? 0)
+          : 0,
+      );
+      const nextMessage =
+        trimmedTranscript || metadata?.replacePreviousTranscriptChars
+          ? replacement.text
+          : current;
+      if (nextMessage !== current) {
+        const selection = captureTextareaAppendSelection(
+          textareaRef.current,
+          current,
+        );
+        pendingTextareaSelectionRef.current = {
+          value: nextMessage,
+          restore: (textarea) => {
+            restoreTextareaReplacementSelection(
+              textarea,
+              selection,
+              nextMessage,
+              replacement.replacementStart,
+              replacement.replacementEnd,
+              replacement.insertedLength,
+            );
+          },
+        };
+        draftControls.setDraft(nextMessage);
+        if (speechRange) {
+          speechInsertionRangeRef.current = {
+            start: speechRange.start,
+            end: replacement.cursor,
+          };
+        }
+      }
       setInterimTranscript("");
+      if (metadata?.smartTurnCommand) {
+        speechInsertionRangeRef.current = null;
+      }
+      if (metadata?.smartTurnCommand === "send") {
+        handleSubmit(nextMessage);
+      }
     },
-    [draftControls],
+    [draftControls, handleSubmit],
   );
 
   const handleInterimTranscript = useCallback((transcript: string) => {
     setInterimTranscript(transcript);
   }, []);
-
-  // Combined display text: committed text + interim transcript
-  const displayText = interimTranscript
-    ? message + (message.trimEnd() ? " " : "") + interimTranscript
-    : message;
 
   // Hide (but don't unmount) when not visible, on new-session page, or while
   // supervising an active session. On session pages it duplicates the sidebar
@@ -162,22 +315,65 @@ export function FloatingActionButton() {
       {/* Input panel appears above the button */}
       {isExpanded && (
         <div className="fab-input-panel">
-          <textarea
-            ref={textareaRef}
-            value={displayText}
-            onChange={(e) => {
-              setInterimTranscript("");
-              setMessage(e.target.value);
-            }}
-            onKeyDown={handleKeyDown}
-            placeholder={t("fabPlaceholder")}
-            className="fab-textarea"
-            rows={3}
-          />
+          <div
+            className={`speech-draft-field ${interimTranscript ? "has-interim" : ""}`}
+          >
+            <div className="speech-draft-inline">
+              {interimDisplayTranscript && (
+                <div className="speech-draft-mirror" aria-hidden="true">
+                  <span>{interimInsertion.before}</span>
+                  {interimInsertion.separatorBefore}
+                  <span className="speech-interim-inline">
+                    {interimInsertion.transcript}
+                  </span>
+                  {interimInsertion.separatorAfter}
+                  <span>{interimInsertion.after}</span>
+                </div>
+              )}
+              <textarea
+                ref={textareaRef}
+                value={message}
+                onChange={(e) => {
+                  const nextMessage = e.target.value;
+                  const range = speechInsertionRangeRef.current;
+                  if (range) {
+                    speechInsertionRangeRef.current = {
+                      start: mapTextIndexThroughEdit(
+                        message,
+                        nextMessage,
+                        range.start,
+                      ),
+                      end: mapTextIndexThroughEdit(
+                        message,
+                        nextMessage,
+                        range.end,
+                      ),
+                    };
+                  }
+                  setMessage(nextMessage);
+                }}
+                onKeyDown={handleKeyDown}
+                placeholder={t("fabPlaceholder")}
+                className="fab-textarea"
+                rows={3}
+              />
+            </div>
+            {interimTranscript && (
+              <div
+                className="speech-interim-status"
+                role="status"
+                aria-live="polite"
+                aria-label="Tentative speech transcript"
+              >
+                {interimTranscript}
+              </div>
+            )}
+          </div>
           <div className="fab-input-toolbar">
             <VoiceInputButton
               onTranscript={handleVoiceTranscript}
               onInterimTranscript={handleInterimTranscript}
+              onListeningStart={handleListeningStart}
               className="toolbar-button"
             />
             <button

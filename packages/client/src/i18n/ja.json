@@ -911,8 +911,6 @@
   "speechSettingsBackendDescription": "今後セッションごとの上書きが追加されるまでは、新しいセッションとアクティブなコンポーザーで使われます。",
   "speechSettingsBackendPlaceholder": "STT バックエンドを選択",
   "speechSettingsNoServerBackends": "サーバー経由の STT バックエンドは現在公開されていません。サポートされている場合は、ブラウザネイティブの認識を引き続き利用できます。",
-  "speechSettingsGrokAudioTitle": "Grok STT 音声",
-  "speechSettingsGrokAudioDescription": "Grok STT がブラウザから YA へ生の PCM16 を送信するか、ブラウザの圧縮バッチ録音を使うかを選択します。",
   "speechSettingsSmartTurnTitle": "Smart Turn 制御",
   "speechSettingsSmartTurnDescription": "{backend} は、選択した STT バックエンドが対応している場合、音声入力中の一時停止後に送信、キャンセル、待機できます。",
   "speechSettingsSmartTurnRequiresPcm": "Smart Turn には Grok STT PCM16 ストリーミングアップリンクが必要です。",

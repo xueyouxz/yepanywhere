@@ -77,6 +77,7 @@ const SPEECH_CLIENT_DEFAULT_KEYS = [
   "speechSmartTurnSettings",
   "grokSpeechAudioSettings",
 ] as const;
+const MAX_SPEECH_SMART_TURN_TIMEOUT_MS = 10000;
 
 export interface SettingsRoutesDeps {
   serverSettingsService: ServerSettingsService;
@@ -398,7 +399,7 @@ function parseSpeechSmartTurnClientDefault(
     raw.threshold < 0 ||
     raw.threshold > 1 ||
     raw.timeoutMs < 0 ||
-    raw.timeoutMs > 5000
+    raw.timeoutMs > MAX_SPEECH_SMART_TURN_TIMEOUT_MS
   ) {
     return null;
   }

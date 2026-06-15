@@ -12,6 +12,7 @@ import {
   type KeyboardEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -29,8 +30,17 @@ import type {
   SpeechTranscriptionContext,
   SpeechTranscriptionResultMetadata,
 } from "../lib/speechProviders/SpeechProvider";
-import { appendSpeechTranscript } from "../lib/speechRecognition";
+import {
+  getSpeechTranscriptInsertionParts,
+  mapTextIndexThroughEdit,
+  replaceSpeechTranscriptBefore,
+  removeTextRange,
+} from "../lib/speechRecognition";
 import { getSlashCommandMenuParts } from "../lib/slashCommands";
+import {
+  captureTextareaAppendSelection,
+  restoreTextareaReplacementSelection,
+} from "../lib/textareaSelection";
 import { isVoiceInputShortcut } from "../lib/voiceInputShortcut";
 import type { ContextUsage, PermissionMode } from "../types";
 import { AttachmentChip } from "./AttachmentChip";
@@ -52,6 +62,16 @@ export interface MessageSubmissionMetadata {
   steerNow?: boolean;
   composition: UserMessageCompositionMetadata;
   speech?: UserMessageSpeechMetadata;
+}
+
+interface SpeechInsertionRange {
+  start: number;
+  end: number;
+}
+
+interface PendingTextareaSelectionRestore {
+  value: string;
+  restore: (textarea: HTMLTextAreaElement) => void;
 }
 
 /** Format file size in human-readable form */
@@ -235,6 +255,9 @@ export function MessageInput({
   const lastEditedAtRef = useRef<string | null>(null);
   const speechTurnIdRef = useRef<string | null>(null);
   const speechTranscriptionIdsRef = useRef<string[]>([]);
+  const speechInsertionRangeRef = useRef<SpeechInsertionRange | null>(null);
+  const pendingTextareaSelectionRef =
+    useRef<PendingTextareaSelectionRestore | null>(null);
   // User-controlled collapse state (independent of external collapse from approval panel)
   const [userCollapsed, setUserCollapsed] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState("");
@@ -242,22 +265,6 @@ export function MessageInput({
     null,
   );
   const [selectedSlashIndex, setSelectedSlashIndex] = useState(0);
-
-  // Combined display text: committed text + interim transcript
-  const displayText = interimTranscript
-    ? text + (text.trimEnd() ? " " : "") + interimTranscript
-    : text;
-
-  // Auto-scroll textarea when voice input updates (interim transcript changes)
-  // Browser handles scrolling for normal typing, but programmatic updates need explicit scroll
-  useEffect(() => {
-    if (interimTranscript) {
-      const textarea = textareaRef.current;
-      if (textarea) {
-        textarea.scrollTop = textarea.scrollHeight;
-      }
-    }
-  }, [interimTranscript]);
 
   // Panel is collapsed if user collapsed it OR if externally collapsed (approval panel showing)
   const collapsed = userCollapsed || externalCollapsed;
@@ -275,6 +282,12 @@ export function MessageInput({
     dismissedSlashQuery !== slashQuery &&
     matchingSlashCommands.length > 0;
   const canSubmit = !!(text.trim() || attachments.length > 0);
+  const interimDisplayTranscript = interimTranscript.trim();
+  const interimInsertion = getSpeechTranscriptInsertionParts(
+    text,
+    interimDisplayTranscript,
+    speechInsertionRangeRef.current?.end ?? text.length,
+  );
 
   useEffect(() => {
     setSelectedSlashIndex(0);
@@ -466,6 +479,14 @@ export function MessageInput({
     onDraftControlsReady?.(controls);
   }, [controls, onDraftControlsReady]);
 
+  useLayoutEffect(() => {
+    const pending = pendingTextareaSelectionRef.current;
+    const textarea = textareaRef.current;
+    if (!pending || !textarea || textarea.value !== pending.value) return;
+    pendingTextareaSelectionRef.current = null;
+    pending.restore(textarea);
+  }, [text]);
+
   const handleSubmit = useCallback(
     (
       messageOverride?: unknown,
@@ -578,7 +599,7 @@ export function MessageInput({
     (allowExistingText = false) => {
       if (
         disabled ||
-        (!allowExistingText && displayText.trim()) ||
+        (!allowExistingText && text.trim()) ||
         attachments.length > 0 ||
         uploadProgress.length > 0
       ) {
@@ -594,8 +615,8 @@ export function MessageInput({
     [
       attachments.length,
       disabled,
-      displayText,
       onRecallLastSubmission,
+      text,
       uploadProgress.length,
     ],
   );
@@ -840,6 +861,46 @@ export function MessageInput({
   };
 
   // Voice input handlers
+  const handleListeningStart = useCallback(() => {
+    const textarea = textareaRef.current;
+    const currentText = controls.getDraft();
+    const selectionStart = Math.max(
+      0,
+      Math.min(
+        textarea?.selectionStart ?? currentText.length,
+        currentText.length,
+      ),
+    );
+    const selectionEnd = Math.max(
+      selectionStart,
+      Math.min(textarea?.selectionEnd ?? selectionStart, currentText.length),
+    );
+    const nextText =
+      selectionStart === selectionEnd
+        ? currentText
+        : `${currentText.slice(0, selectionStart)}${currentText.slice(selectionEnd)}`;
+
+    speechInsertionRangeRef.current = {
+      start: selectionStart,
+      end: selectionStart,
+    };
+    if (nextText !== currentText) {
+      pendingTextareaSelectionRef.current = {
+        value: nextText,
+        restore: (currentTextarea) => {
+          currentTextarea.focus();
+          currentTextarea.setSelectionRange(selectionStart, selectionStart);
+        },
+      };
+      noteComposerEdit(nextText);
+      controls.setDraft(nextText);
+    } else if (textarea) {
+      textarea.focus();
+      textarea.setSelectionRange(selectionStart, selectionStart);
+    }
+    setInterimTranscript("");
+  }, [controls, noteComposerEdit]);
+
   const handleVoiceTranscript = useCallback(
     (transcript: string, metadata?: SpeechTranscriptionResultMetadata) => {
       // Append transcript to existing text with space separator
@@ -852,30 +913,89 @@ export function MessageInput({
         ];
       }
       if (metadata?.smartTurnCommand === "cancel") {
+        const currentText = controls.getDraft();
+        const range = speechInsertionRangeRef.current;
+        if (range) {
+          const next = removeTextRange(currentText, range.start, range.end);
+          if (next.text !== currentText) {
+            const selection = captureTextareaAppendSelection(
+              textareaRef.current,
+              currentText,
+            );
+            pendingTextareaSelectionRef.current = {
+              value: next.text,
+              restore: (textarea) => {
+                restoreTextareaReplacementSelection(
+                  textarea,
+                  selection,
+                  next.text,
+                  range.start,
+                  range.end,
+                  0,
+                );
+              },
+            };
+            noteComposerEdit(next.text);
+            controls.setDraft(next.text);
+          } else {
+            pendingTextareaSelectionRef.current = null;
+          }
+        }
+        speechInsertionRangeRef.current = null;
         setInterimTranscript("");
         return;
       }
 
       const currentText = controls.getDraft();
-      const nextText = trimmedTranscript
-        ? appendSpeechTranscript(currentText, trimmedTranscript)
-        : currentText;
+      const speechRange = speechInsertionRangeRef.current;
+      const replacement = replaceSpeechTranscriptBefore(
+        currentText,
+        trimmedTranscript,
+        speechRange?.end ?? currentText.length,
+        speechRange
+          ? (metadata?.replacePreviousTranscriptChars ?? 0)
+          : 0,
+      );
+      const nextText =
+        trimmedTranscript || metadata?.replacePreviousTranscriptChars
+          ? replacement.text
+          : currentText;
+      const shouldRestoreSelection = metadata?.smartTurnCommand !== "send";
       if (nextText !== currentText) {
+        const selection = shouldRestoreSelection
+          ? captureTextareaAppendSelection(textareaRef.current, currentText)
+          : null;
+        pendingTextareaSelectionRef.current = shouldRestoreSelection
+          ? {
+              value: nextText,
+              restore: (textarea) => {
+                restoreTextareaReplacementSelection(
+                  textarea,
+                  selection,
+                  nextText,
+                  replacement.replacementStart,
+                  replacement.replacementEnd,
+                  replacement.insertedLength,
+                );
+              },
+            }
+          : null;
         noteComposerEdit(nextText);
         controls.setDraft(nextText);
+        if (speechRange) {
+          speechInsertionRangeRef.current = {
+            start: speechRange.start,
+            end: replacement.cursor,
+          };
+        }
       }
       setInterimTranscript("");
+      if (metadata?.smartTurnCommand) {
+        speechInsertionRangeRef.current = null;
+      }
       if (metadata?.smartTurnCommand === "send") {
         handleSubmit(nextText);
       }
-      // Scroll to bottom after committing voice transcript
-      // Use setTimeout to ensure state update has rendered
-      setTimeout(() => {
-        const textarea = textareaRef.current;
-        if (textarea) {
-          textarea.scrollTop = textarea.scrollHeight;
-        }
-      }, 0);
     },
     [controls, handleSubmit, noteComposerEdit],
   );
@@ -894,10 +1014,10 @@ export function MessageInput({
       const wasActive = voice.isListening;
       voice.toggle();
       if (!wasActive) {
-        textareaRef.current?.focus();
+        handleListeningStart();
       }
     },
-    [],
+    [handleListeningStart],
   );
 
   return (
@@ -935,31 +1055,71 @@ export function MessageInput({
       <div
         className={`message-input ${collapsed ? "message-input-collapsed" : ""} ${interimTranscript ? "voice-recording" : ""}`}
       >
-        <textarea
-          ref={textareaRef}
-          value={displayText}
-          onChange={(e) => {
-            // If user edits while recording, only update committed text
-            // This clears interim since they're now typing
-            const nextText = e.target.value;
-            setInterimTranscript("");
-            noteComposerEdit(nextText);
-            setText(nextText);
-            const nextSlashQuery = getLeadingSlashQuery(nextText);
-            if (nextSlashQuery !== dismissedSlashQuery) {
-              setDismissedSlashQuery(null);
-            }
-          }}
-          onBlur={controls.flushDraft}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          enterKeyHint="send"
-          placeholder={
-            externalCollapsed ? t("messageInputContinueAbove") : placeholder
-          }
-          disabled={disabled}
-          rows={collapsed ? 1 : 3}
-        />
+        <div
+          className={`speech-draft-field ${interimTranscript ? "has-interim" : ""}`}
+        >
+          <div className="speech-draft-inline">
+            {interimDisplayTranscript && (
+              <div className="speech-draft-mirror" aria-hidden="true">
+                <span>{interimInsertion.before}</span>
+                {interimInsertion.separatorBefore}
+                <span className="speech-interim-inline">
+                  {interimInsertion.transcript}
+                </span>
+                {interimInsertion.separatorAfter}
+                <span>{interimInsertion.after}</span>
+              </div>
+            )}
+            <textarea
+              ref={textareaRef}
+              value={text}
+              onChange={(e) => {
+                const nextText = e.target.value;
+                if (speechInsertionRangeRef.current) {
+                  speechInsertionRangeRef.current = {
+                    start: mapTextIndexThroughEdit(
+                      text,
+                      nextText,
+                      speechInsertionRangeRef.current.start,
+                    ),
+                    end: mapTextIndexThroughEdit(
+                      text,
+                      nextText,
+                      speechInsertionRangeRef.current.end,
+                    ),
+                  };
+                }
+                noteComposerEdit(nextText);
+                setText(nextText);
+                const nextSlashQuery = getLeadingSlashQuery(nextText);
+                if (nextSlashQuery !== dismissedSlashQuery) {
+                  setDismissedSlashQuery(null);
+                }
+              }}
+              onBlur={controls.flushDraft}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              enterKeyHint="send"
+              placeholder={
+                externalCollapsed
+                  ? t("messageInputContinueAbove")
+                  : placeholder
+              }
+              disabled={disabled}
+              rows={collapsed ? 1 : 3}
+            />
+          </div>
+          {interimTranscript && (
+            <div
+              className="speech-interim-status"
+              role="status"
+              aria-live="polite"
+              aria-label="Tentative speech transcript"
+            >
+              {interimTranscript}
+            </div>
+          )}
+        </div>
 
         {showSlashSuggestions && (
           <div
@@ -1113,7 +1273,7 @@ export function MessageInput({
             voiceButtonRef={voiceButtonRef}
             onVoiceTranscript={handleVoiceTranscript}
             onInterimTranscript={handleInterimTranscript}
-            onListeningStart={() => textareaRef.current?.focus()}
+            onListeningStart={handleListeningStart}
             voiceDisabled={disabled}
             getTranscriptionContext={getTranscriptionContext}
             slashCommands={slashCommands}

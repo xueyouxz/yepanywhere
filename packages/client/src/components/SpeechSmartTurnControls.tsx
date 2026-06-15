@@ -5,6 +5,8 @@ import {
   type SpeechSmartTurnSettings,
 } from "../lib/speechProviders/SpeechProvider";
 
+const MAX_SMART_TURN_TIMEOUT_MS = 10000;
+
 interface SpeechSmartTurnControlsProps {
   settings: SpeechSmartTurnSettings;
   onChange: (settings: SpeechSmartTurnSettings) => void;
@@ -29,7 +31,9 @@ function cleanSettings(
     timeoutMs:
       typeof settings.timeoutMs === "number" &&
       Number.isFinite(settings.timeoutMs)
-        ? Math.round(clampNumber(settings.timeoutMs, 0, 5000))
+        ? Math.round(
+            clampNumber(settings.timeoutMs, 0, MAX_SMART_TURN_TIMEOUT_MS),
+          )
         : DEFAULT_SPEECH_SMART_TURN_SETTINGS.timeoutMs,
   };
 }
@@ -43,6 +47,7 @@ export function SpeechSmartTurnControls({
   const { t } = useI18n();
   const id = useId();
   const thresholdId = `${id}-threshold`;
+  const thresholdHintId = `${id}-threshold-hint`;
   const timeoutId = `${id}-timeout`;
   const clean = cleanSettings(settings);
   const update = (patch: Partial<SpeechSmartTurnSettings>) => {
@@ -94,8 +99,12 @@ export function SpeechSmartTurnControls({
           onFocus={activate}
           onPointerDown={activate}
           onChange={handleThresholdChange}
+          aria-describedby={thresholdHintId}
           aria-label="Smart Turn threshold"
         />
+        <span id={thresholdHintId} className="speech-smart-turn-hint">
+          {t("speechSmartTurnThresholdHint")}
+        </span>
       </div>
       <div className="speech-smart-turn-row">
         <label htmlFor={timeoutId}>Timeout</label>
@@ -103,7 +112,7 @@ export function SpeechSmartTurnControls({
           id={timeoutId}
           type="range"
           min="0"
-          max="5000"
+          max="10000"
           step="100"
           value={clean.timeoutMs}
           disabled={disabled}
@@ -114,7 +123,7 @@ export function SpeechSmartTurnControls({
         <input
           type="number"
           min="0"
-          max="5000"
+          max="10000"
           step="100"
           value={clean.timeoutMs}
           disabled={disabled}

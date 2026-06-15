@@ -6,6 +6,8 @@ import { YaServerProvider } from "../speechProviders/YaServerProvider";
 import { releaseSharedSpeechMicStream } from "../speechProviders/sharedMicCapture";
 import {
   DEFAULT_SPEECH_METHOD,
+  YA_GROK_BATCH_SPEECH_METHOD,
+  YA_GROK_STREAMING_SPEECH_METHOD,
   XAI_DIRECT_BATCH_SPEECH_METHOD,
   XAI_DIRECT_STREAMING_SPEECH_METHOD,
   canSpeechMethodStream,
@@ -63,9 +65,37 @@ describe("speech provider method selection", () => {
   it("uses explicit labels for known STT backends", () => {
     expect(
       getSpeechMethods(["ya-deepgram", "ya-grok"])
-        .slice(0, 2)
+        .filter((method) => method.serverRouted)
         .map((method) => method.label),
-    ).toEqual(["Grok STT", "Deepgram STT"]);
+    ).toEqual([
+      "Grok STT through YA",
+      "Grok STT through YA batch",
+      "Deepgram STT",
+    ]);
+  });
+
+  it("exposes YA-routed Grok streaming and batch as top-level methods", () => {
+    expect(
+      getSpeechMethods(["ya-grok"])
+        .map((method) => [method.id, method.label]),
+    ).toEqual([
+      [XAI_DIRECT_STREAMING_SPEECH_METHOD, "Grok STT direct"],
+      [XAI_DIRECT_BATCH_SPEECH_METHOD, "Grok STT direct batch"],
+      [YA_GROK_STREAMING_SPEECH_METHOD, "Grok STT through YA"],
+      [YA_GROK_BATCH_SPEECH_METHOD, "Grok STT through YA batch"],
+      [DEFAULT_SPEECH_METHOD, expect.stringContaining("Browser")],
+    ]);
+    expect(
+      getSpeechMethodCapabilities(YA_GROK_BATCH_SPEECH_METHOD, {
+        "ya-grok": { streaming: true, smartTurn: true },
+      }),
+    ).toEqual({});
+    expect(
+      canSpeechMethodStream({
+        methodId: YA_GROK_BATCH_SPEECH_METHOD,
+        serverCapabilities: { "ya-grok": { streaming: true } },
+      }),
+    ).toBe(false);
   });
 
   it("keeps the direct xAI batch method as an explicit client choice", () => {
@@ -118,9 +148,9 @@ describe("speech provider method selection", () => {
     ).toBe(true);
   });
 
-  it("prefers Grok over Deepgram when no explicit user method is stored", () => {
+  it("prefers direct Grok streaming when Grok STT is enabled", () => {
     expect(getPreferredSpeechMethod(["ya-deepgram", "ya-grok"])).toBe(
-      "ya-grok",
+      XAI_DIRECT_STREAMING_SPEECH_METHOD,
     );
     expect(
       resolveSpeechMethod(
@@ -128,13 +158,16 @@ describe("speech provider method selection", () => {
         ["ya-deepgram", "ya-grok"],
         false,
       ),
-    ).toBe("ya-grok");
+    ).toBe(XAI_DIRECT_STREAMING_SPEECH_METHOD);
   });
 
   it("keeps explicit choices only while they are still available", () => {
     expect(
       resolveSpeechMethod("ya-deepgram", ["ya-grok", "ya-deepgram"], true),
     ).toBe("ya-deepgram");
+    expect(
+      resolveSpeechMethod(YA_GROK_BATCH_SPEECH_METHOD, ["ya-grok"], true),
+    ).toBe(YA_GROK_BATCH_SPEECH_METHOD);
     expect(resolveSpeechMethod(DEFAULT_SPEECH_METHOD, ["ya-grok"], true)).toBe(
       DEFAULT_SPEECH_METHOD,
     );
@@ -373,7 +406,7 @@ describe("YA server speech provider", () => {
     provider.dispose();
   });
 
-  it("commits utterance-final streaming partials as transcript deltas", async () => {
+  it("commits provider-owned streaming final segments", async () => {
     const stopTrack = vi.fn();
     const fakeStream = {
       getTracks: () => [{ stop: stopTrack }],
@@ -488,20 +521,53 @@ describe("YA server speech provider", () => {
     expect(onInterimResult).toHaveBeenLastCalledWith("hel");
     expect(onResult).not.toHaveBeenCalled();
 
-    ws.receive({ type: "interim", text: "hello", isFinal: true });
-    expect(onInterimResult).toHaveBeenLastCalledWith("hello");
-    expect(onResult).not.toHaveBeenCalled();
-
-    ws.receive({ type: "interim", text: "world", isFinal: false });
-    expect(onInterimResult).toHaveBeenLastCalledWith("hello world");
+    ws.receive({
+      type: "interim",
+      text: "hello",
+      isFinal: true,
+      start: 0,
+      duration: 1,
+    });
+    expect(onInterimResult).toHaveBeenLastCalledWith("");
+    expect(onResult).toHaveBeenLastCalledWith("hello", undefined);
 
     ws.receive({
       type: "interim",
-      text: "hello world",
+      text: "Testing.",
+      isFinal: true,
+      start: 1,
+      duration: 1,
+    });
+    expect(onResult).toHaveBeenLastCalledWith("Testing.", undefined);
+
+    ws.receive({
+      type: "interim",
+      text: "Testing.",
+      isFinal: true,
+      start: 2,
+      duration: 1,
+    });
+    expect(onResult).toHaveBeenLastCalledWith("Testing.", undefined);
+    expect(onResult).toHaveBeenCalledTimes(3);
+
+    ws.receive({ type: "interim", text: "world", isFinal: false });
+    expect(onInterimResult).toHaveBeenLastCalledWith("world");
+
+    ws.receive({
+      type: "interim",
+      text: "hello Testing. Testing. world",
       isFinal: true,
       speechFinal: true,
+      start: 0,
+      duration: 4,
+      words: [
+        { word: "hello", start: 0, duration: 0.5 },
+        { word: "Testing.", start: 1, duration: 0.5 },
+        { word: "Testing.", start: 2, duration: 0.5 },
+        { word: "world", start: 3, duration: 0.5 },
+      ],
     });
-    expect(onResult).toHaveBeenLastCalledWith("hello world", undefined);
+    expect(onResult).toHaveBeenLastCalledWith("world", undefined);
 
     ws.receive({
       type: "final",
@@ -516,7 +582,7 @@ describe("YA server speech provider", () => {
     provider.dispose();
   });
 
-  it("uses the fuller preview when Smart Turn speech-final regresses", async () => {
+  it("honors Smart Turn cancel from the provider final segment", async () => {
     const stopTrack = vi.fn();
     const fakeStream = {
       getTracks: () => [{ stop: stopTrack }],
@@ -624,15 +690,15 @@ describe("YA server speech provider", () => {
 
     ws.receive({
       type: "interim",
-      text: "To",
+      text: "Cancel.",
       isFinal: true,
       speechFinal: true,
+      start: 0,
+      duration: 1,
     });
 
-    expect(onResult).toHaveBeenLastCalledWith(
-      "testing speech to text",
-      undefined,
-    );
+    expect(onResult).not.toHaveBeenCalled();
+    expect(onInterimResult).toHaveBeenLastCalledWith("");
     expect(JSON.parse(ws.send.mock.calls.at(-1)?.[0] as string)).toEqual({
       type: "stop",
     });
@@ -640,11 +706,11 @@ describe("YA server speech provider", () => {
     ws.receive({
       type: "final",
       text: "",
-      transcriptionId: "transcription-regressed-final",
+      transcriptionId: "transcription-cancel",
     });
     expect(onResult).toHaveBeenLastCalledWith("", {
-      transcriptionId: "transcription-regressed-final",
-      smartTurnCommand: "send",
+      transcriptionId: "transcription-cancel",
+      smartTurnCommand: "cancel",
     });
 
     provider.dispose();
@@ -777,7 +843,7 @@ describe("YA server speech provider", () => {
     provider.dispose();
   });
 
-  it("applies Smart Turn commands from paused final words", async () => {
+  it("applies Smart Turn commands to provider-owned final segments", async () => {
     const fakeStream = {
       getTracks: () => [{ stop: vi.fn() }],
     } as unknown as MediaStream;
@@ -884,16 +950,42 @@ describe("YA server speech provider", () => {
 
     ws.receive({
       type: "interim",
-      text: "hello send",
+      text: "Are extra spaces appearing for final chunks? I wonder now",
+      isFinal: true,
+      speechFinal: false,
+      start: 0,
+      duration: 4,
+    });
+    expect(onResult).toHaveBeenLastCalledWith(
+      "Are extra spaces appearing for final chunks? I wonder now",
+      undefined,
+    );
+
+    ws.receive({
+      type: "interim",
+      text: "Are extra spaces appearing for final chunks? I wonder now. Second sentence wait",
       isFinal: true,
       speechFinal: true,
+      start: 0,
+      duration: 5.5,
       words: [
-        { word: "hello", start: 0, duration: 0.2 },
-        { word: "send", start: 0.9, duration: 0.2 },
+        { word: "Are", start: 0, duration: 0.2 },
+        { word: "extra", start: 0.3, duration: 0.2 },
+        { word: "spaces", start: 0.6, duration: 0.2 },
+        { word: "appearing", start: 0.9, duration: 0.2 },
+        { word: "for", start: 1.2, duration: 0.2 },
+        { word: "final", start: 1.5, duration: 0.2 },
+        { word: "chunks?", start: 1.8, duration: 0.2 },
+        { word: "I", start: 2.1, duration: 0.2 },
+        { word: "wonder", start: 2.4, duration: 0.2 },
+        { word: "now.", start: 2.7, duration: 0.2 },
+        { word: "Second", start: 4.1, duration: 0.2 },
+        { word: "sentence", start: 4.4, duration: 0.2 },
+        { word: "wait", start: 5.2, duration: 0.2 },
       ],
     });
 
-    expect(onResult).toHaveBeenLastCalledWith("hello", undefined);
+    expect(onResult).toHaveBeenLastCalledWith("Second sentence", undefined);
     expect(JSON.parse(ws.send.mock.calls.at(-1)?.[0] as string)).toEqual({
       type: "stop",
     });
@@ -905,7 +997,7 @@ describe("YA server speech provider", () => {
     });
     expect(onResult).toHaveBeenLastCalledWith("", {
       transcriptionId: "transcription-smart-turn",
-      smartTurnCommand: "send",
+      smartTurnCommand: "wait",
     });
 
     provider.dispose();

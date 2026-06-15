@@ -98,25 +98,51 @@ Backends should implement a common `SpeechBackend` contract:
   `YaServerProvider` captures microphone audio through Web Audio, downsamples it
   to 16 kHz signed PCM16 little-endian, and sends binary frames to
   `/api/speech/ws`. Interim and chunk-final events update the composer
-  preview; only utterance-final streaming partials commit transcript deltas.
+  preview; final partial events commit provider-owned transcript segments into
+  the editable draft without stopping the mic, and utterance-final partials
+  (`speech_final=true`) close or Smart Turn-decide the speech turn.
+  For xAI-style streaming events, YA treats `start` plus `duration` (or word
+  timestamps when needed) as the audio cursor for already-committed final
+  chunks. Once a final chunk is committed, the next mutable target advances to
+  after that chunk; the next final chunk in the same utterance must insert
+  there rather than replacing the prior final text. If a later stitched
+  utterance-final event overlaps already-committed audio, YA uses word
+  timestamps to keep only the text after the committed-audio cursor. Distinct
+  later spans append even if their transcript text is identical. The streaming
+  path must not dedupe or slice by substring comparison.
+  The client does not infer safe sub-spans from punctuation, confidence, or
+  sentence boundaries; safe-to-edit text is only the text already committed by
+  provider event semantics.
   Clicking stop commits the currently visible preview before ignoring
   stop-flush partials, and the final event carries the retained transcription
   id.
-  With Smart Turn enabled, a very short `speech_final` fragment that already
-  appears inside a fuller visible preview is treated as a recognizer regression:
-  the client commits the fuller preview and still uses the Smart Turn final
-  event to stop and send.
+  Interim streaming text is rendered through an inline textarea mirror: it wraps
+  in the same visual compose plane as the committed draft and highlights the
+  mutable tail, but it is not part of the textarea value. The textarea remains
+  the committed draft only, so user edits do not accidentally freeze recognizer
+  text that may still be revised.
+  Appending committed speech deltas must not steal the textarea cursor: if the
+  user is editing earlier committed text, preserve selection and scroll; if the
+  cursor was already at the old end, let it follow the appended speech.
+  Starting the mic also creates a speech-owned insertion range. If committed
+  text is selected, YA deletes that selection first, places the cursor at the
+  deletion point, and inserts final speech deltas there rather than at the end.
+  User edits map the speech-owned range through ordinary textarea changes;
+  edits inside that range remain part of the speech-owned text. A Smart Turn
+  `wait` command leaves the range's committed text in the composer without
+  sending, while `cancel` removes the range and clears the mutable preview.
+  Selection restoration is tied to the committed textarea value update, not to a
+  fixed UI delay.
 - Backends may advertise `smartTurn: true` when their streaming API supports
   ML end-of-turn detection. Grok STT exposes this through the xAI
   `smart_turn` threshold and `smart_turn_timeout` parameters. The client shows
   Smart Turn controls only when the selected backend advertises that capability.
-- Grok STT has an explicit browser-to-YA audio uplink setting. The default
-  PCM16 mode captures Web Audio in the browser and sends raw 16 kHz PCM16
-  frames to YA for streaming recognition. The comparative browser-compressed
-  mode uses the browser's MediaRecorder output and the batch transcription
-  route; compressed MediaRecorder audio may be equivalent in practice, but YA
-  treats that as unverified until compared. Smart Turn depends on Grok
-  streaming and is therefore only active when the Grok uplink mode is PCM16.
+- Grok STT through YA has separate top-level methods for streaming and batch
+  behavior. `ya-grok` captures Web Audio in the browser and sends raw 16 kHz
+  PCM16 frames to YA for streaming recognition. `ya-grok-batch` uses the
+  browser's MediaRecorder output and the batch transcription route. Smart Turn
+  depends on streaming `speech_final` events and is therefore only active for
+  methods whose capabilities advertise both `streaming` and `smartTurn`.
 - `useSpeechRecognition` selects browser-native when the method is
   `browser-native`; `xai-grok-direct-streaming` constructs a direct xAI
   streaming provider; `xai-grok-direct-batch` constructs a direct xAI batch
@@ -136,8 +162,10 @@ Backends should implement a common `SpeechBackend` contract:
   the local explicit value and a partial server client-default update so a later
   browser with no explicit local override inherits the most recent UI choice.
   If neither local nor server default exists, the effective runtime default
-  prefers active server-routed STT over browser-native, with `ya-grok` ranked
-  before `ya-deepgram`; browser-native remains the explicit local escape hatch.
+  prefers direct Grok streaming when `ya-grok` is configured, otherwise active
+  server-routed STT over browser-native, with `ya-deepgram` ranked ahead of
+  unknown server backends. Browser-native remains the explicit local escape
+  hatch.
 - Server config parses `VOICE_INPUT`, `YA_VOICE_BACKENDS`,
   `YA_stt__DEEPGRAM_API_KEY`, `YA_stt__XAI_API_KEY`, `XAI_API_KEY`,
   `WHISPER_MODEL`, `WHISPER_DEVICE`, and `WHISPER_COMPUTE_TYPE`.
@@ -363,32 +391,34 @@ to a local model remains a later optimization after local batch is solid.
 - With `YA_stt__XAI_API_KEY` exported in the YA server environment,
   `/api/version.voiceBackendCapabilities["ya-grok"].streaming` is true, the
   client uses `/api/speech/ws` for Grok STT, interim events update the composer,
-  and the final event includes the retained transcription id.
+  chunk-final events commit locked deltas into the draft, and the final event
+  includes the retained transcription id.
 - With `YA_stt__XAI_API_KEY` exported, the version response advertises
   `voiceBackendCapabilities["ya-grok"].smartTurn: true`. Selecting Grok STT
   shows Smart Turn threshold and timeout controls; selecting browser-native,
   Deepgram, Whisper, or dummy hides those controls unless that backend later
   advertises `smartTurn: true`.
-- With Grok Smart Turn enabled, `speech_final=true` commits the utterance,
-  stops the streaming recognizer, and then applies a paused final command:
+- With Grok Smart Turn enabled, `speech_final=true` commits any remaining
+  uncommitted delta, stops the streaming recognizer, and then applies a paused
+  final command:
   `send` submits, `cancel` discards the speech turn, and `wait` leaves the
   draft for keyboard editing or thought. No recognized command defaults to
   `send`.
-- With Grok STT selected, the audio uplink setting defaults to PCM16 and the
-  WebSocket start frame advertises `mimeType:
-  "audio/pcm;rate=16000;encoding=s16le"`, `sampleRate: 16000`, and
-  `encoding: "pcm"`. Switching to browser-compressed mode uses the
-  MediaRecorder batch path and hides Smart Turn because that path has no
-  streaming `speech_final` events.
+- With `Grok STT through YA` selected, the WebSocket start frame advertises
+  `mimeType: "audio/pcm;rate=16000;encoding=s16le"`, `sampleRate: 16000`, and
+  `encoding: "pcm"`. `Grok STT through YA batch` uses the MediaRecorder batch
+  path and hides Smart Turn because that path has no streaming `speech_final`
+  events.
 - With both `ya-grok` and `ya-deepgram` advertised and no explicit stored
-  speech method, the client selects `ya-grok` as the effective mic backend.
+  speech method, the client selects `Grok STT direct` as the effective mic
+  backend. The through-YA Grok methods remain explicit fallback/debug choices.
 - A successful server-routed transcription emits positive-path logs naming the
   backend and audio metadata without logging transcript text.
 - A successful server-routed transcription writes retained audio plus metadata
   under the configured data directory by default, and the metadata contains the
   returned transcript plus session/client-turn pointers when the client has
   supplied them.
-- A successful streaming transcription writes each interim update, final-ish
+- A successful streaming transcription writes each interim update, chunk-final
   partial, speech-final marker, and final done transcript into retained
   metadata as an ordered one-line-per-event trace.
 - With an advertised backend id not hardcoded in the client, the selector still
