@@ -85,6 +85,18 @@ export interface SpeechTranscriptReplacement extends SpeechTranscriptInsertion {
   insertedLength: number;
 }
 
+export interface SpeechOwnedChunk {
+  start: number;
+  end: number;
+}
+
+export interface SpeechInsertionRange {
+  start: number;
+  end: number;
+  replaceEnd?: number;
+  chunks: SpeechOwnedChunk[];
+}
+
 export interface SpeechTranscriptInsertionParts {
   before: string;
   separatorBefore: "" | " ";
@@ -169,6 +181,139 @@ export function replaceSpeechTranscriptBefore(
     replacementEnd,
     insertedLength:
       insertion.text.length - (base.length - (replacementEnd - replacementStart)),
+  };
+}
+
+export interface SpeechRangeReplacement extends SpeechTranscriptReplacement {
+  range: SpeechInsertionRange;
+}
+
+export function createSpeechInsertionRange(
+  selectionStart: number,
+  selectionEnd: number,
+): SpeechInsertionRange {
+  return {
+    start: selectionStart,
+    end: selectionStart,
+    replaceEnd: selectionEnd > selectionStart ? selectionEnd : undefined,
+    chunks: [],
+  };
+}
+
+export function mapSpeechInsertionRangeThroughEdit(
+  previousText: string,
+  nextText: string,
+  range: SpeechInsertionRange,
+): SpeechInsertionRange {
+  return {
+    start: mapTextIndexThroughEdit(previousText, nextText, range.start),
+    end: mapTextIndexThroughEdit(previousText, nextText, range.end),
+    replaceEnd:
+      range.replaceEnd === undefined
+        ? undefined
+        : mapTextIndexThroughEdit(previousText, nextText, range.replaceEnd),
+    chunks: range.chunks.map((chunk) => ({
+      start: mapTextIndexThroughEdit(previousText, nextText, chunk.start),
+      end: mapTextIndexThroughEdit(previousText, nextText, chunk.end),
+    })),
+  };
+}
+
+function mapChunkAfterReplacement(
+  chunk: SpeechOwnedChunk,
+  replacementStart: number,
+  replacementEnd: number,
+  delta: number,
+): SpeechOwnedChunk | null {
+  if (chunk.end <= replacementStart) return chunk;
+  if (chunk.start >= replacementEnd) {
+    return { start: chunk.start + delta, end: chunk.end + delta };
+  }
+  return null;
+}
+
+export function replaceSpeechTranscriptInRange(
+  base: string,
+  transcript: string,
+  range: SpeechInsertionRange,
+  previousChars: number,
+): SpeechRangeReplacement {
+  const replacementEnd = Math.max(
+    range.end,
+    range.replaceEnd ?? range.end,
+  );
+  const replacementStart = Math.max(
+    0,
+    Math.min(range.end, base.length) - Math.max(0, previousChars),
+  );
+  const clampedReplacementEnd = Math.max(
+    replacementStart,
+    Math.min(replacementEnd, base.length),
+  );
+  const baseWithoutReplacement = `${base.slice(0, replacementStart)}${base.slice(clampedReplacementEnd)}`;
+  const insertion = getSpeechTranscriptInsertionParts(
+    baseWithoutReplacement,
+    transcript,
+    replacementStart,
+  );
+  const insertionStart = insertion.before.length;
+  const insertedLength =
+    insertion.cursor - replacementStart;
+  const delta =
+    insertion.text.length - base.length;
+  const nextChunks = range.chunks
+    .map((chunk) =>
+      mapChunkAfterReplacement(
+        chunk,
+        replacementStart,
+        clampedReplacementEnd,
+        delta,
+      ),
+    )
+    .filter((chunk): chunk is SpeechOwnedChunk => chunk !== null);
+  if (insertedLength > 0) {
+    nextChunks.push({
+      start: insertionStart,
+      end: insertion.cursor,
+    });
+    nextChunks.sort((a, b) => a.start - b.start || a.end - b.end);
+  }
+
+  return {
+    ...insertion,
+    replacementStart,
+    replacementEnd: clampedReplacementEnd,
+    insertedLength,
+    range: {
+      start: range.start,
+      end: insertion.cursor,
+      chunks: nextChunks,
+    },
+  };
+}
+
+export function removeLatestSpeechChunkFromRange(
+  base: string,
+  range: SpeechInsertionRange,
+): SpeechRangeReplacement | null {
+  const latest = range.chunks.at(-1);
+  if (!latest) return null;
+
+  const replacement = removeTextRange(base, latest.start, latest.end);
+  const nextChunks = range.chunks.slice(0, -1);
+  const nextEnd = nextChunks.at(-1)?.end ?? latest.start;
+  return {
+    text: replacement.text,
+    cursor: replacement.cursor,
+    replacementStart: latest.start,
+    replacementEnd: latest.end,
+    insertedLength: 0,
+    range: {
+      start: range.start,
+      end: nextEnd,
+      replaceEnd: range.replaceEnd,
+      chunks: nextChunks,
+    },
   };
 }
 

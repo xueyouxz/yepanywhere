@@ -14,6 +14,7 @@ import {
   getXaiSttCredential,
   type XaiSttCredential,
 } from "./xaiCredentials";
+import { decideBatchSpeechCommand } from "./speechCommands";
 
 const XAI_STT_URL = "https://api.x.ai/v1/stt";
 const DIRECT_STT_TIMEOUT_MS = 30_000;
@@ -290,7 +291,13 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
         error: null,
       });
       if (text) {
-        this.options.onResult?.(text);
+        const decision = decideBatchSpeechCommand(text);
+        this.options.onResult?.(
+          decision.transcript,
+          decision.recognizedCommand
+            ? { smartTurnCommand: decision.command }
+            : undefined,
+        );
       }
       this.options.onEnd?.();
     } catch (err: unknown) {

@@ -17,6 +17,13 @@ import {
   SPEECH_CAPTURE_SAMPLE_RATE,
   stopSpeechStreamTracks,
 } from "./sharedMicCapture";
+import {
+  decideBatchSpeechCommand,
+  getTrailingTranscriptCommand,
+  getWordText,
+  normalizeSpeechCommandWord,
+  stripTrailingCommandWord,
+} from "./speechCommands";
 
 function preferredMimeType(): string {
   const candidates = [
@@ -83,12 +90,6 @@ const STREAM_MIME_TYPE = `audio/pcm;rate=${STREAM_SAMPLE_RATE};encoding=s16le`;
 const AUDIO_FLOW_TIMEOUT_MS = 3500;
 const SMART_TURN_COMMAND_PAUSE_SECONDS = 0.5;
 const STREAMING_AUDIO_SPAN_EPSILON_SECONDS = 0.02;
-const SMART_TURN_COMMANDS = new Set<SpeechTurnCommand>([
-  "send",
-  "cancel",
-  "wait",
-]);
-
 interface SmartTurnDecision {
   command: SpeechTurnCommand;
   transcript: string;
@@ -134,28 +135,6 @@ function speechWsUrl(basePath: string): string {
   return url.toString();
 }
 
-function getWordText(word: SpeechWordTimestamp | undefined): string {
-  if (!word) return "";
-  return word.punctuated_word ?? word.word ?? word.text ?? "";
-}
-
-function normalizeSmartTurnCommand(word: string): SpeechTurnCommand | null {
-  const normalized = word
-    .trim()
-    .toLowerCase()
-    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "");
-  return SMART_TURN_COMMANDS.has(normalized as SpeechTurnCommand)
-    ? (normalized as SpeechTurnCommand)
-    : null;
-}
-
-function getTrailingTranscriptCommand(
-  transcript: string,
-): SpeechTurnCommand | null {
-  const match = transcript.match(/[a-z0-9]+[^a-z0-9]*$/i);
-  return normalizeSmartTurnCommand(match?.[0] ?? "");
-}
-
 function getWordStart(word: SpeechWordTimestamp | undefined): number | null {
   return typeof word?.start === "number" && Number.isFinite(word.start)
     ? word.start
@@ -190,26 +169,13 @@ function getPauseBeforeFinalWordSeconds(
   return lastStart - previousEnd;
 }
 
-function stripTrailingCommandWord(
-  transcript: string,
-  command: SpeechTurnCommand,
-): string {
-  const escaped = command.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return transcript
-    .replace(
-      new RegExp(`(?:^|\\s)[^a-z0-9]*${escaped}[^a-z0-9]*\\s*$`, "i"),
-      "",
-    )
-    .trim();
-}
-
 function decideSmartTurn(
   transcript: string,
   words: SpeechWordTimestamp[] | undefined,
 ): SmartTurnDecision {
   const trimmed = transcript.trim();
   const finalWord = words?.at(-1);
-  const wordCommand = normalizeSmartTurnCommand(getWordText(finalWord));
+  const wordCommand = normalizeSpeechCommandWord(getWordText(finalWord));
   const transcriptCommand = getTrailingTranscriptCommand(trimmed);
   const command = wordCommand ?? transcriptCommand;
   const pauseSeconds =
@@ -955,18 +921,21 @@ export class YaServerProvider implements SpeechProvider {
     span: StreamingTranscriptSpan | null,
   ): void {
     const decision = decideSmartTurn(transcript, words);
+
+    if (decision.recognizedCommand && decision.command === "cancel") {
+      this.clearStreamingPreview();
+      this.options.onResult?.("", { smartTurnCommand: "cancel" });
+      return;
+    }
+
     this.pendingSmartTurnCommand = decision.command;
 
-    if (decision.command !== "cancel") {
-      this.commitStreamingTranscript(
-        decision.transcript,
-        undefined,
-        span,
-        decision.recognizedCommand ? words?.slice(0, -1) : words,
-      );
-    } else {
-      this.clearStreamingPreview();
-    }
+    this.commitStreamingTranscript(
+      decision.transcript,
+      undefined,
+      span,
+      decision.recognizedCommand ? words?.slice(0, -1) : words,
+    );
 
     this.streamingStopRequested = true;
     this.cleanupStreamingMedia();
@@ -1068,9 +1037,14 @@ export class YaServerProvider implements SpeechProvider {
         error: null,
       });
       if (response.text) {
-        this.options.onResult?.(response.text, {
+        const decision = decideBatchSpeechCommand(response.text);
+        const metadata: SpeechTranscriptionResultMetadata = {
           transcriptionId: response.transcriptionId,
-        });
+        };
+        if (decision.recognizedCommand) {
+          metadata.smartTurnCommand = decision.command;
+        }
+        this.options.onResult?.(decision.transcript, metadata);
       }
       this.options.onEnd?.();
     } catch (err: unknown) {

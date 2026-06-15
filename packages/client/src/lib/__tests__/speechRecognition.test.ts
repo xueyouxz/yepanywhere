@@ -3,12 +3,15 @@ import {
   type SpeechResult,
   appendSpeechTranscript,
   computeSpeechDelta,
+  createSpeechInsertionRange,
   getSpeechTranscriptInsertionParts,
   getSpeechTranscriptSeparator,
   insertSpeechTranscriptAt,
   mapTextIndexThroughEdit,
   processSpeechResults,
+  removeLatestSpeechChunkFromRange,
   replaceSpeechTranscriptBefore,
+  replaceSpeechTranscriptInRange,
   removeTextRange,
 } from "../speechRecognition";
 
@@ -166,6 +169,54 @@ describe("speech transcript text edits", () => {
     expect(removeTextRange("alpha speech beta", 6, 12)).toEqual({
       text: "alpha  beta",
       cursor: 6,
+    });
+  });
+
+  it("defers selected text replacement until speech commits", () => {
+    const range = createSpeechInsertionRange(8, 12);
+
+    expect(range).toMatchObject({
+      start: 8,
+      end: 8,
+      replaceEnd: 12,
+      chunks: [],
+    });
+
+    expect(
+      replaceSpeechTranscriptInRange("replace this text", "spoken", range, 0),
+    ).toMatchObject({
+      text: "replace spoken text",
+      cursor: "replace spoken".length,
+      replacementStart: 8,
+      replacementEnd: 12,
+    });
+  });
+
+  it("removes only the latest committed speech chunk", () => {
+    const first = replaceSpeechTranscriptInRange(
+      "prefix suffix",
+      "first.",
+      createSpeechInsertionRange(6, 6),
+      0,
+    );
+    const second = replaceSpeechTranscriptInRange(
+      first.text,
+      "second.",
+      first.range,
+      0,
+    );
+
+    expect(second.text).toBe("prefix first. second. suffix");
+
+    const removal = removeLatestSpeechChunkFromRange(
+      second.text,
+      second.range,
+    );
+
+    expect(removal).toMatchObject({
+      text: "prefix first. suffix",
+      replacementStart: "prefix first.".length,
+      replacementEnd: "prefix first. second.".length,
     });
   });
 

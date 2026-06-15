@@ -9,6 +9,9 @@ Topic: pluggable-speech-recognition
 See also: [direct-xai-speech.md](direct-xai-speech.md) for the hosted Grok
 plan where the browser sends audio directly to xAI and YA only brokers
 explicit credential/config material.
+See also: [mic-button-speech-ui.md](mic-button-speech-ui.md) for the mic
+button's composer insertion, selection replacement, and spoken-command
+behavior across streaming and batch STT.
 
 ## Contract
 

@@ -15,24 +15,22 @@ import { setNewSessionPrefill } from "../lib/newSessionPrefill";
 import { useRemoteBasePath } from "../hooks/useRemoteBasePath";
 import { useI18n } from "../i18n";
 import {
+  createSpeechInsertionRange,
   getSpeechTranscriptInsertionParts,
-  mapTextIndexThroughEdit,
+  mapSpeechInsertionRangeThroughEdit,
+  removeLatestSpeechChunkFromRange,
   replaceSpeechTranscriptBefore,
-  removeTextRange,
+  replaceSpeechTranscriptInRange,
+  type SpeechInsertionRange,
 } from "../lib/speechRecognition";
 import {
   captureTextareaAppendSelection,
   restoreTextareaReplacementSelection,
 } from "../lib/textareaSelection";
 import type { SpeechTranscriptionResultMetadata } from "../lib/speechProviders/SpeechProvider";
-import { VoiceInputButton } from "./VoiceInputButton";
+import { VoiceInputButton, type VoiceInputButtonRef } from "./VoiceInputButton";
 
 const FAB_DRAFT_KEY = "fab-draft";
-
-interface SpeechInsertionRange {
-  start: number;
-  end: number;
-}
 
 interface PendingTextareaSelectionRestore {
   value: string;
@@ -55,6 +53,7 @@ export function FloatingActionButton() {
     useDraftPersistence(FAB_DRAFT_KEY);
   const [interimTranscript, setInterimTranscript] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const voiceButtonRef = useRef<VoiceInputButtonRef>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const speechInsertionRangeRef = useRef<SpeechInsertionRange | null>(null);
   const pendingTextareaSelectionRef =
@@ -138,6 +137,21 @@ export function FloatingActionButton() {
       // Skip Enter during IME composition (e.g. Chinese/Japanese/Korean input)
       if (e.key === "Enter" && e.nativeEvent.isComposing) return;
 
+      if (
+        e.key === "Escape" &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        !e.altKey &&
+        voiceButtonRef.current?.isListening
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        voiceButtonRef.current.stopAndFinalize();
+        setInterimTranscript("");
+        return;
+      }
+
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSubmit();
@@ -165,27 +179,14 @@ export function FloatingActionButton() {
       selectionStart,
       Math.min(textarea?.selectionEnd ?? selectionStart, current.length),
     );
-    const nextMessage =
-      selectionStart === selectionEnd
-        ? current
-        : `${current.slice(0, selectionStart)}${current.slice(selectionEnd)}`;
-
-    speechInsertionRangeRef.current = {
-      start: selectionStart,
-      end: selectionStart,
-    };
-    if (nextMessage !== current) {
-      pendingTextareaSelectionRef.current = {
-        value: nextMessage,
-        restore: (currentTextarea) => {
-          currentTextarea.focus();
-          currentTextarea.setSelectionRange(selectionStart, selectionStart);
-        },
-      };
-      draftControls.setDraft(nextMessage);
-    } else if (textarea) {
+    speechInsertionRangeRef.current = createSpeechInsertionRange(
+      selectionStart,
+      selectionEnd,
+    );
+    pendingTextareaSelectionRef.current = null;
+    if (textarea) {
       textarea.focus();
-      textarea.setSelectionRange(selectionStart, selectionStart);
+      textarea.setSelectionRange(selectionStart, selectionEnd);
     }
     setInterimTranscript("");
   }, [draftControls]);
@@ -198,32 +199,36 @@ export function FloatingActionButton() {
       if (metadata?.smartTurnCommand === "cancel") {
         const current = draftControls.getDraft();
         const range = speechInsertionRangeRef.current;
-        if (range) {
-          const next = removeTextRange(current, range.start, range.end);
-          if (next.text !== current) {
+        const removal = range
+          ? removeLatestSpeechChunkFromRange(current, range)
+          : null;
+        if (removal) {
+          if (removal.text !== current) {
             const selection = captureTextareaAppendSelection(
               textareaRef.current,
               current,
             );
             pendingTextareaSelectionRef.current = {
-              value: next.text,
+              value: removal.text,
               restore: (textarea) => {
                 restoreTextareaReplacementSelection(
                   textarea,
                   selection,
-                  next.text,
-                  range.start,
-                  range.end,
+                  removal.text,
+                  removal.replacementStart,
+                  removal.replacementEnd,
                   0,
                 );
               },
             };
-            draftControls.setDraft(next.text);
+            draftControls.setDraft(removal.text);
+            speechInsertionRangeRef.current = removal.range;
           } else {
             pendingTextareaSelectionRef.current = null;
           }
+        } else {
+          pendingTextareaSelectionRef.current = null;
         }
-        speechInsertionRangeRef.current = null;
         setInterimTranscript("");
         return;
       }
@@ -231,14 +236,24 @@ export function FloatingActionButton() {
       const current = draftControls.getDraft();
       const trimmedTranscript = transcript.trim();
       const speechRange = speechInsertionRangeRef.current;
-      const replacement = replaceSpeechTranscriptBefore(
-        current,
-        trimmedTranscript,
-        speechRange?.end ?? current.length,
-        speechRange
-          ? (metadata?.replacePreviousTranscriptChars ?? 0)
-          : 0,
-      );
+      let nextSpeechRange: SpeechInsertionRange | null = null;
+      const replacement = speechRange
+        ? (() => {
+            const rangeReplacement = replaceSpeechTranscriptInRange(
+              current,
+              trimmedTranscript,
+              speechRange,
+              metadata?.replacePreviousTranscriptChars ?? 0,
+            );
+            nextSpeechRange = rangeReplacement.range;
+            return rangeReplacement;
+          })()
+        : replaceSpeechTranscriptBefore(
+            current,
+            trimmedTranscript,
+            current.length,
+            0,
+          );
       const nextMessage =
         trimmedTranscript || metadata?.replacePreviousTranscriptChars
           ? replacement.text
@@ -262,11 +277,8 @@ export function FloatingActionButton() {
           },
         };
         draftControls.setDraft(nextMessage);
-        if (speechRange) {
-          speechInsertionRangeRef.current = {
-            start: speechRange.start,
-            end: replacement.cursor,
-          };
+        if (nextSpeechRange) {
+          speechInsertionRangeRef.current = nextSpeechRange;
         }
       }
       setInterimTranscript("");
@@ -337,18 +349,12 @@ export function FloatingActionButton() {
                   const nextMessage = e.target.value;
                   const range = speechInsertionRangeRef.current;
                   if (range) {
-                    speechInsertionRangeRef.current = {
-                      start: mapTextIndexThroughEdit(
+                    speechInsertionRangeRef.current =
+                      mapSpeechInsertionRangeThroughEdit(
                         message,
                         nextMessage,
-                        range.start,
-                      ),
-                      end: mapTextIndexThroughEdit(
-                        message,
-                        nextMessage,
-                        range.end,
-                      ),
-                    };
+                        range,
+                      );
                   }
                   setMessage(nextMessage);
                 }}
@@ -371,6 +377,7 @@ export function FloatingActionButton() {
           </div>
           <div className="fab-input-toolbar">
             <VoiceInputButton
+              ref={voiceButtonRef}
               onTranscript={handleVoiceTranscript}
               onInterimTranscript={handleInterimTranscript}
               onListeningStart={handleListeningStart}

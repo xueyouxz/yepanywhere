@@ -3,6 +3,7 @@ import { BrowserNativeProvider } from "../speechProviders/BrowserNativeProvider"
 import { DirectXaiStreamingSpeechProvider } from "../speechProviders/DirectXaiStreamingSpeechProvider";
 import { DirectXaiSpeechProvider } from "../speechProviders/DirectXaiSpeechProvider";
 import { YaServerProvider } from "../speechProviders/YaServerProvider";
+import { decideBatchSpeechCommand } from "../speechProviders/speechCommands";
 import { releaseSharedSpeechMicStream } from "../speechProviders/sharedMicCapture";
 import {
   DEFAULT_SPEECH_METHOD,
@@ -174,6 +175,29 @@ describe("speech provider method selection", () => {
     expect(resolveSpeechMethod("ya-deepgram", ["ya-grok"], true)).toBe(
       DEFAULT_SPEECH_METHOD,
     );
+  });
+});
+
+describe("speech command parsing", () => {
+  it("treats batch send and cancel as whole-batch commands", () => {
+    expect(decideBatchSpeechCommand("replace this send")).toEqual({
+      command: "send",
+      transcript: "replace this",
+      recognizedCommand: true,
+    });
+    expect(decideBatchSpeechCommand('Cancel.')).toEqual({
+      command: "cancel",
+      transcript: "",
+      recognizedCommand: true,
+    });
+  });
+
+  it("does not treat wait as a batch command", () => {
+    expect(decideBatchSpeechCommand("please wait")).toEqual({
+      command: "wait",
+      transcript: "please wait",
+      recognizedCommand: false,
+    });
   });
 });
 
@@ -582,7 +606,7 @@ describe("YA server speech provider", () => {
     provider.dispose();
   });
 
-  it("honors Smart Turn cancel from the provider final segment", async () => {
+  it("honors Smart Turn cancel without stopping streaming", async () => {
     const stopTrack = vi.fn();
     const fakeStream = {
       getTracks: () => [{ stop: stopTrack }],
@@ -697,21 +721,28 @@ describe("YA server speech provider", () => {
       duration: 1,
     });
 
-    expect(onResult).not.toHaveBeenCalled();
-    expect(onInterimResult).toHaveBeenLastCalledWith("");
-    expect(JSON.parse(ws.send.mock.calls.at(-1)?.[0] as string)).toEqual({
-      type: "stop",
-    });
-
-    ws.receive({
-      type: "final",
-      text: "",
-      transcriptionId: "transcription-cancel",
-    });
     expect(onResult).toHaveBeenLastCalledWith("", {
-      transcriptionId: "transcription-cancel",
       smartTurnCommand: "cancel",
     });
+    expect(onInterimResult).toHaveBeenLastCalledWith("");
+    expect(
+      ws.send.mock.calls
+        .map(([payload]) =>
+          typeof payload === "string" ? JSON.parse(payload) : payload,
+        )
+        .some((message) => message?.type === "stop"),
+    ).toBe(false);
+    expect(provider.getState().isListening).toBe(true);
+
+    ws.receive({
+      type: "interim",
+      text: "next phrase",
+      isFinal: true,
+      speechFinal: false,
+      start: 1,
+      duration: 1,
+    });
+    expect(onResult).toHaveBeenLastCalledWith("next phrase", undefined);
 
     provider.dispose();
   });
@@ -1941,7 +1972,7 @@ describe("direct xAI speech provider", () => {
     expect(form.get("language")).toBe("en");
     expect(form.get("file")).toBeInstanceOf(Blob);
     await vi.waitFor(() =>
-      expect(onResult).toHaveBeenCalledWith("direct transcript"),
+      expect(onResult).toHaveBeenCalledWith("direct transcript", undefined),
     );
     expect(onEnd).toHaveBeenCalledTimes(1);
 

@@ -36,4 +36,5 @@
 - vanilla-defaults - Overarching UX theory: first-party-familiar out of the box; YA-novel user-visible behavior is configurable default-off.
 - streaming-speech-capture - Client PCM capture contracts, warm-mic latency, and AudioWorklet follow-up.
 - direct-xai-speech - Hosted Grok STT direct browser-to-xAI data path and explicit client key borrowing.
+- mic-button-speech-ui - Mic button speech insertion, spoken commands, and streaming/batch composer behavior.
 - prompt-cache-keepalive - Open-client-only provider prompt-cache warming and cost/activity bounds.

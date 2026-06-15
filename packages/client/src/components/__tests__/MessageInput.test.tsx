@@ -30,6 +30,8 @@ const {
   mockSetSpeechSmartTurnSettings,
   mockSetGrokSpeechAudioSettings,
   mockVoiceToggle,
+  mockVoiceStopAndFinalize,
+  voiceButtonState,
   voicePropsState,
   remoteBasePathState,
 } = vi.hoisted(() => ({
@@ -64,6 +66,10 @@ const {
   mockSetSpeechSmartTurnSettings: vi.fn(),
   mockSetGrokSpeechAudioSettings: vi.fn(),
   mockVoiceToggle: vi.fn(),
+  mockVoiceStopAndFinalize: vi.fn(() => ""),
+  voiceButtonState: {
+    isListening: false,
+  },
   voicePropsState: {
     current: null as null | {
       onTranscript?: (
@@ -267,11 +273,11 @@ vi.mock("../VoiceInputButton", async () => {
       ) => {
         voicePropsState.current = props;
         React.useImperativeHandle(ref, () => ({
-          stopAndFinalize: () => "",
+          stopAndFinalize: mockVoiceStopAndFinalize,
           toggle: mockVoiceToggle,
           prewarm: vi.fn(),
           isAvailable: true,
-          isListening: false,
+          isListening: voiceButtonState.isListening,
         }));
 
         return (
@@ -454,6 +460,8 @@ describe("MessageInput", () => {
     mockSetSpeechSmartTurnSettings.mockReset();
     mockSetGrokSpeechAudioSettings.mockReset();
     mockVoiceToggle.mockReset();
+    mockVoiceStopAndFinalize.mockReset();
+    voiceButtonState.isListening = false;
     voicePropsState.current = null;
     window.localStorage.clear();
   });
@@ -587,7 +595,7 @@ describe("MessageInput", () => {
     expect(mockVoiceToggle).toHaveBeenCalledTimes(1);
   });
 
-  it("replaces selected text with speech and cancel removes that range", async () => {
+  it("replaces selected text only when speech text commits", async () => {
     const textarea = renderMessageInput() as HTMLTextAreaElement;
 
     fireEvent.change(textarea, { target: { value: "replace this text" } });
@@ -599,8 +607,9 @@ describe("MessageInput", () => {
     });
 
     await waitFor(() => {
-      expect(textarea.value).toBe("replace  text");
+      expect(textarea.value).toBe("replace this text");
       expect(textarea.selectionStart).toBe(8);
+      expect(textarea.selectionEnd).toBe(12);
     });
 
     act(() => {
@@ -619,8 +628,29 @@ describe("MessageInput", () => {
     });
 
     await waitFor(() => {
-      expect(textarea.value).toBe("replace  text");
+      expect(textarea.value).toBe("replace text");
+      expect(textarea.selectionStart).toBe("replace".length);
+    });
+  });
+
+  it("leaves a selected replacement untouched when speech is cancelled first", async () => {
+    const textarea = renderMessageInput() as HTMLTextAreaElement;
+
+    fireEvent.change(textarea, { target: { value: "replace this text" } });
+    textarea.focus();
+    textarea.setSelectionRange(8, 12);
+
+    act(() => {
+      voicePropsState.current?.onListeningStart?.();
+      voicePropsState.current?.onTranscript?.("", {
+        smartTurnCommand: "cancel",
+      });
+    });
+
+    await waitFor(() => {
+      expect(textarea.value).toBe("replace this text");
       expect(textarea.selectionStart).toBe(8);
+      expect(textarea.selectionEnd).toBe(12);
     });
   });
 
@@ -934,6 +964,24 @@ describe("MessageInput", () => {
     fireEvent.keyDown(textarea, { key: "Escape" });
 
     expect(onStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops active voice capture with Escape before stopping the current turn", () => {
+    voiceButtonState.isListening = true;
+    const onStop = vi.fn();
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        isRunning: true,
+        isThinking: true,
+        onStop,
+      },
+    );
+
+    fireEvent.keyDown(textarea, { key: "Escape" });
+
+    expect(mockVoiceStopAndFinalize).toHaveBeenCalledTimes(1);
+    expect(onStop).not.toHaveBeenCalled();
   });
 
   it("leaves Escape alone when the current turn is not stoppable", () => {

@@ -31,10 +31,13 @@ import type {
   SpeechTranscriptionResultMetadata,
 } from "../lib/speechProviders/SpeechProvider";
 import {
+  createSpeechInsertionRange,
   getSpeechTranscriptInsertionParts,
-  mapTextIndexThroughEdit,
+  mapSpeechInsertionRangeThroughEdit,
+  removeLatestSpeechChunkFromRange,
   replaceSpeechTranscriptBefore,
-  removeTextRange,
+  replaceSpeechTranscriptInRange,
+  type SpeechInsertionRange,
 } from "../lib/speechRecognition";
 import { getSlashCommandMenuParts } from "../lib/slashCommands";
 import {
@@ -62,11 +65,6 @@ export interface MessageSubmissionMetadata {
   steerNow?: boolean;
   composition: UserMessageCompositionMetadata;
   speech?: UserMessageSpeechMetadata;
-}
-
-interface SpeechInsertionRange {
-  start: number;
-  end: number;
 }
 
 interface PendingTextareaSelectionRestore {
@@ -684,6 +682,21 @@ export function MessageInput({
       !e.metaKey &&
       !e.shiftKey &&
       !e.altKey &&
+      voiceButtonRef.current?.isListening
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      voiceButtonRef.current.stopAndFinalize();
+      setInterimTranscript("");
+      return;
+    }
+
+    if (
+      e.key === "Escape" &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.shiftKey &&
+      !e.altKey &&
       isRunning &&
       isThinking &&
       onStop
@@ -875,31 +888,17 @@ export function MessageInput({
       selectionStart,
       Math.min(textarea?.selectionEnd ?? selectionStart, currentText.length),
     );
-    const nextText =
-      selectionStart === selectionEnd
-        ? currentText
-        : `${currentText.slice(0, selectionStart)}${currentText.slice(selectionEnd)}`;
-
-    speechInsertionRangeRef.current = {
-      start: selectionStart,
-      end: selectionStart,
-    };
-    if (nextText !== currentText) {
-      pendingTextareaSelectionRef.current = {
-        value: nextText,
-        restore: (currentTextarea) => {
-          currentTextarea.focus();
-          currentTextarea.setSelectionRange(selectionStart, selectionStart);
-        },
-      };
-      noteComposerEdit(nextText);
-      controls.setDraft(nextText);
-    } else if (textarea) {
+    speechInsertionRangeRef.current = createSpeechInsertionRange(
+      selectionStart,
+      selectionEnd,
+    );
+    pendingTextareaSelectionRef.current = null;
+    if (textarea) {
       textarea.focus();
-      textarea.setSelectionRange(selectionStart, selectionStart);
+      textarea.setSelectionRange(selectionStart, selectionEnd);
     }
     setInterimTranscript("");
-  }, [controls, noteComposerEdit]);
+  }, [controls]);
 
   const handleVoiceTranscript = useCallback(
     (transcript: string, metadata?: SpeechTranscriptionResultMetadata) => {
@@ -915,47 +914,61 @@ export function MessageInput({
       if (metadata?.smartTurnCommand === "cancel") {
         const currentText = controls.getDraft();
         const range = speechInsertionRangeRef.current;
-        if (range) {
-          const next = removeTextRange(currentText, range.start, range.end);
-          if (next.text !== currentText) {
+        const removal = range
+          ? removeLatestSpeechChunkFromRange(currentText, range)
+          : null;
+        if (removal) {
+          if (removal.text !== currentText) {
             const selection = captureTextareaAppendSelection(
               textareaRef.current,
               currentText,
             );
             pendingTextareaSelectionRef.current = {
-              value: next.text,
+              value: removal.text,
               restore: (textarea) => {
                 restoreTextareaReplacementSelection(
                   textarea,
                   selection,
-                  next.text,
-                  range.start,
-                  range.end,
+                  removal.text,
+                  removal.replacementStart,
+                  removal.replacementEnd,
                   0,
                 );
               },
             };
-            noteComposerEdit(next.text);
-            controls.setDraft(next.text);
+            noteComposerEdit(removal.text);
+            controls.setDraft(removal.text);
+            speechInsertionRangeRef.current = removal.range;
           } else {
             pendingTextareaSelectionRef.current = null;
           }
+        } else {
+          pendingTextareaSelectionRef.current = null;
         }
-        speechInsertionRangeRef.current = null;
         setInterimTranscript("");
         return;
       }
 
       const currentText = controls.getDraft();
       const speechRange = speechInsertionRangeRef.current;
-      const replacement = replaceSpeechTranscriptBefore(
-        currentText,
-        trimmedTranscript,
-        speechRange?.end ?? currentText.length,
-        speechRange
-          ? (metadata?.replacePreviousTranscriptChars ?? 0)
-          : 0,
-      );
+      let nextSpeechRange: SpeechInsertionRange | null = null;
+      const replacement = speechRange
+        ? (() => {
+            const rangeReplacement = replaceSpeechTranscriptInRange(
+              currentText,
+              trimmedTranscript,
+              speechRange,
+              metadata?.replacePreviousTranscriptChars ?? 0,
+            );
+            nextSpeechRange = rangeReplacement.range;
+            return rangeReplacement;
+          })()
+        : replaceSpeechTranscriptBefore(
+            currentText,
+            trimmedTranscript,
+            currentText.length,
+            0,
+          );
       const nextText =
         trimmedTranscript || metadata?.replacePreviousTranscriptChars
           ? replacement.text
@@ -982,11 +995,8 @@ export function MessageInput({
           : null;
         noteComposerEdit(nextText);
         controls.setDraft(nextText);
-        if (speechRange) {
-          speechInsertionRangeRef.current = {
-            start: speechRange.start,
-            end: replacement.cursor,
-          };
+        if (nextSpeechRange) {
+          speechInsertionRangeRef.current = nextSpeechRange;
         }
       }
       setInterimTranscript("");
@@ -1076,18 +1086,12 @@ export function MessageInput({
               onChange={(e) => {
                 const nextText = e.target.value;
                 if (speechInsertionRangeRef.current) {
-                  speechInsertionRangeRef.current = {
-                    start: mapTextIndexThroughEdit(
+                  speechInsertionRangeRef.current =
+                    mapSpeechInsertionRangeThroughEdit(
                       text,
                       nextText,
-                      speechInsertionRangeRef.current.start,
-                    ),
-                    end: mapTextIndexThroughEdit(
-                      text,
-                      nextText,
-                      speechInsertionRangeRef.current.end,
-                    ),
-                  };
+                      speechInsertionRangeRef.current,
+                    );
                 }
                 noteComposerEdit(nextText);
                 setText(nextText);
