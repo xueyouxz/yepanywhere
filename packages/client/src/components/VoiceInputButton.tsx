@@ -122,10 +122,11 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
     storedGrokSpeechAudioSettings ??
     DEFAULT_GROK_SPEECH_AUDIO_SETTINGS;
   const relayTransport = basePath !== "";
-  const openRelayedSpeechSocket =
-    relayTransport && connection.openSpeechSocket
-      ? connection.openSpeechSocket.bind(connection)
-      : undefined;
+  const openRelayedSpeechSocket = useMemo(() => {
+    const openSpeechSocket = connection.openSpeechSocket;
+    if (!relayTransport || !openSpeechSocket) return undefined;
+    return () => openSpeechSocket.call(connection);
+  }, [connection, relayTransport]);
   const speechMethodServerRouted = isServerRoutedSpeechMethod(speechMethod);
   const serverStreaming = canSpeechMethodStream({
     methodId: speechMethod,

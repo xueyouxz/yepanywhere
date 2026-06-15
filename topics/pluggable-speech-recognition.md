@@ -265,6 +265,14 @@ Deploy it in stages:
    `whisper.cpp` or another runtime as a swappable backend implementation only
    if deployment friction, CPU performance, or packaging makes
    `faster-whisper` the wrong choice.
+   Parakeet is a plausible alternate local recognizer, especially if current
+   Hugging Face / Transformers support keeps installation lighter than a full
+   NeMo stack. Do not wire it directly into the YA Node runtime first: the
+   Rocky 8 host has old glibc and an old/easy Docker path may not match modern
+   NVIDIA container assumptions. Spike it in an isolated Python environment or
+   pinned container, verify CUDA/PyTorch compatibility on the L40S, and expose
+   it behind the same warm-worker `SpeechBackend` boundary only if install plus
+   cold/warm latency beats `faster-whisper` for this server.
 3. **Ship explicit operator configuration.** The opt-in is
    `YA_VOICE_BACKENDS=ya-whisper`. Model/runtime knobs stay server-local:
    `WHISPER_MODEL`, `WHISPER_DEVICE`, and `WHISPER_COMPUTE_TYPE`. The default
