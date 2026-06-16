@@ -1027,6 +1027,7 @@
   "speechSettingsParakeetCustomModel": "Custom model id",
   "speechSettingsParakeetModelPlaceholder": "nvidia/parakeet-tdt-0.6b-v3",
   "speechSettingsParakeetModelHint": "Use a model supported by the selected Parakeet backend. The unified streaming Parakeet model needs a separate modern-NeMo runtime.",
+  "speechSettingsParakeetModelRequiresBackend": "requires {backend}",
   "speechSettingsSmartTurnTitle": "Smart Turn",
   "speechSettingsSmartTurnDescription": "{backend} can send, cancel, or wait after a dictated pause when the selected STT backend supports it.",
   "speechSettingsSmartTurnUnavailable": "{backend} does not advertise Smart Turn controls.",

@@ -219,8 +219,12 @@ streaming/confidence surface exists.
   fallbacks for clients that send no model. The implemented presets are
   limited to model ids tested in the current runtimes:
   `nvidia/parakeet-tdt-0.6b-v3`, `nvidia/parakeet-ctc-1.1b`, and
-  `nvidia/parakeet-rnnt-1.1b`. Both local Parakeet backends are batch-only
-  until a local streaming/chunking surface is proven.
+  `nvidia/parakeet-rnnt-1.1b`. Presets carry backend compatibility metadata:
+  model selection keeps the current compatible backend, switches to another
+  enabled compatible backend when needed, and hides or disables presets that no
+  enabled backend can run. Custom model ids stay backend-neutral and are sent to
+  the currently selected Parakeet backend. Both local Parakeet backends are
+  batch-only until a local streaming/chunking surface is proven.
 - The normal `index.ts` runtime mounts `/api/speech` after
   `createNodeWebSocket()` creates the shared `upgradeWebSocket` helper.
 - `createSpeechRoutes` implements `POST /api/speech/transcribe` for batch
@@ -393,12 +397,13 @@ Deploy it in stages:
    `NEMO_MODEL` is the server fallback and `NEMO_DEVICE` is the server device
    policy. Authenticated browser UI may send a per-request Parakeet model id to
    either backend. Selecting a Parakeet model in either global STT settings or
-   the mic-attached speech options asks YA to prewarm that backend/model in the
+   the mic-attached speech options picks a compatible enabled backend when the
+   preset requires one, then asks YA to prewarm that backend/model in the
    background; the UI request returns immediately and model-load success or
-   failure is logged server-side. Whisper's default should remain CPU-safe (`device=cpu`,
-   `compute_type=int8`). Parakeet defaults to `nvidia/parakeet-tdt-0.6b-v3`
-   with `device=auto`, which lets the worker choose CUDA when available without
-   making CUDA a startup requirement.
+   failure is logged server-side. Whisper's default should remain CPU-safe
+   (`device=cpu`, `compute_type=int8`). Parakeet defaults to
+   `nvidia/parakeet-tdt-0.6b-v3` with `device=auto`, which lets the worker
+   choose CUDA when available without making CUDA a startup requirement.
 4. **Add a readiness surface before advertising.** Startup validation should
    confirm pixi exists, the `stt` environment is already bootstrapped,
    `faster_whisper` imports, the configured model can load, and a tiny known
@@ -611,5 +616,9 @@ to a local model remains a later optimization after local batch is solid.
   from the UI. The same Parakeet model selector sends model ids to `ya-nemo`;
   compressed batch recordings are decoded through `ffmpeg` only when needed
   before NeMo transcribes them.
+- With both local Parakeet backends enabled, selecting an RNNT-only preset while
+  the Transformers backend is active switches the STT backend to `ya-nemo` and
+  prewarms that model. With `ya-nemo` unavailable, compact mic options hide that
+  preset and global settings disable it with a required-backend hint.
 - Removing a previously selected backend causes an explicit method-selection
   prompt or notice, not a silent fallback and not a dead mic button.

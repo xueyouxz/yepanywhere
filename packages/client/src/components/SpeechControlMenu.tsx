@@ -18,9 +18,12 @@ import { useI18n } from "../i18n";
 import type { SpeechMethodId } from "../lib/speechProviders/methods";
 import {
   cleanParakeetSpeechModel,
+  getCompatibleParakeetModelForBackend,
   getParakeetSpeechPresetValue,
   isParakeetModelBackend,
   PARAKEET_SPEECH_MODEL_PRESETS,
+  type ParakeetModelBackendId,
+  resolveParakeetModelBackend,
 } from "../lib/speechProviders/parakeetModels";
 import type { SpeechSmartTurnSettings } from "../lib/speechProviders/SpeechProvider";
 import { prewarmYaServerSpeechBackend } from "../lib/speechProviders/YaServerProvider";
@@ -87,8 +90,37 @@ export function SpeechControlMenu({
     !!smartTurnSettings && !!onSmartTurnSettingsChange;
   const showMicDeviceControls = selectedMethod !== "browser-native";
   const showParakeetModelControls = isParakeetModelBackend(selectedMethod);
-  const selectedParakeetPreset =
+  const enabledParakeetBackends = useMemo(() => {
+    const backends: ParakeetModelBackendId[] = [];
+    const addBackend = (backendId: string) => {
+      if (isParakeetModelBackend(backendId) && !backends.includes(backendId)) {
+        backends.push(backendId);
+      }
+    };
+    addBackend(selectedMethod);
+    for (const option of methodOptions) {
+      addBackend(option.value);
+    }
+    return backends;
+  }, [methodOptions, selectedMethod]);
+  const parakeetPresetOptions = useMemo(
+    () =>
+      PARAKEET_SPEECH_MODEL_PRESETS.filter((preset) =>
+        resolveParakeetModelBackend(
+          preset.value,
+          selectedMethod,
+          enabledParakeetBackends,
+        ),
+      ),
+    [enabledParakeetBackends, selectedMethod],
+  );
+  const storedParakeetPreset =
     getParakeetSpeechPresetValue(parakeetSpeechModel);
+  const selectedParakeetPreset = parakeetPresetOptions.some(
+    (preset) => preset.value === storedParakeetPreset,
+  )
+    ? storedParakeetPreset
+    : "";
   const hasOptions =
     showMethodSelector ||
     showMicDeviceControls ||
@@ -121,6 +153,43 @@ export function SpeechControlMenu({
       prewarmParakeetModel(event.currentTarget.value);
     },
     [prewarmParakeetModel],
+  );
+  const selectParakeetPreset = useCallback(
+    (modelValue: string) => {
+      const model = cleanParakeetSpeechModel(modelValue);
+      const backendId = resolveParakeetModelBackend(
+        model,
+        selectedMethod,
+        enabledParakeetBackends,
+      );
+      if (!backendId) return;
+      setParakeetSpeechModel(model);
+      if (backendId !== selectedMethod) {
+        onMethodChange([backendId]);
+      }
+      prewarmParakeetModel(model, backendId);
+    },
+    [
+      enabledParakeetBackends,
+      onMethodChange,
+      prewarmParakeetModel,
+      selectedMethod,
+      setParakeetSpeechModel,
+    ],
+  );
+  const prepareParakeetBackend = useCallback(
+    (backendId: SpeechMethodId) => {
+      if (!isParakeetModelBackend(backendId)) return;
+      const model = getCompatibleParakeetModelForBackend(
+        parakeetSpeechModel,
+        backendId,
+      );
+      if (model !== cleanParakeetSpeechModel(parakeetSpeechModel)) {
+        setParakeetSpeechModel(model);
+      }
+      prewarmParakeetModel(model, backendId);
+    },
+    [parakeetSpeechModel, prewarmParakeetModel, setParakeetSpeechModel],
   );
 
   const clearLongPress = useCallback(() => {
@@ -336,15 +405,14 @@ export function SpeechControlMenu({
                   const preset = event.currentTarget.value;
                   if (!preset) return;
                   onBeforeCaptureChange?.();
-                  setParakeetSpeechModel(preset);
-                  prewarmParakeetModel(preset);
+                  selectParakeetPreset(preset);
                 }}
                 aria-label={t("speechSettingsParakeetModelPresetLabel")}
               >
                 <option value="">
                   {t("speechSettingsParakeetCustomModel")}
                 </option>
-                {PARAKEET_SPEECH_MODEL_PRESETS.map((preset) => (
+                {parakeetPresetOptions.map((preset) => (
                   <option key={preset.value} value={preset.value}>
                     {preset.label}
                   </option>
@@ -392,7 +460,7 @@ export function SpeechControlMenu({
                         if (option.value !== selectedMethod) {
                           onBeforeCaptureChange?.();
                         }
-                        prewarmParakeetModel(parakeetSpeechModel, option.value);
+                        prepareParakeetBackend(option.value);
                         onMethodChange([option.value]);
                       }}
                     >

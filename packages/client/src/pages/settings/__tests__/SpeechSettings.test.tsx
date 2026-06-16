@@ -37,6 +37,9 @@ const browserXaiKey = vi.hoisted(() => ({
   hasBrowserXaiSttApiKey: false,
   setBrowserXaiSttApiKey: vi.fn(),
 }));
+const versionState = vi.hoisted(() => ({
+  voiceBackends: ["ya-grok", "ya-parakeet", "ya-nemo"],
+}));
 const prewarmYaServerSpeechBackend = vi.hoisted(() => vi.fn(async () => {}));
 
 vi.mock("../../../hooks/useModelSettings", () => ({
@@ -59,7 +62,7 @@ vi.mock("../../../hooks/useVersion", () => ({
   useVersion: () => ({
     version: {
       capabilities: ["voiceInput"],
-      voiceBackends: ["ya-grok", "ya-parakeet", "ya-nemo"],
+      voiceBackends: versionState.voiceBackends,
       voiceBackendCapabilities: {
         "ya-grok": { streaming: true, smartTurn: true },
       },
@@ -88,6 +91,7 @@ describe("SpeechSettings", () => {
     cleanup();
     modelSettings.speechMethod = "ya-parakeet";
     modelSettings.parakeetSpeechModel = "nvidia/parakeet-tdt-0.6b-v3";
+    versionState.voiceBackends = ["ya-grok", "ya-parakeet", "ya-nemo"];
     modelSettings.setSpeechMethod.mockClear();
     modelSettings.setParakeetSpeechModel.mockClear();
     speechCaptureSettings.setKeepMicWarm.mockClear();
@@ -114,6 +118,39 @@ describe("SpeechSettings", () => {
     );
   });
 
+  it("switches to a compatible enabled backend for a selected Parakeet preset", () => {
+    render(<SpeechSettings />);
+
+    fireEvent.change(
+      screen.getByLabelText("speechSettingsParakeetModelPresetLabel"),
+      {
+        target: { value: "nvidia/parakeet-rnnt-1.1b" },
+      },
+    );
+
+    expect(modelSettings.setParakeetSpeechModel).toHaveBeenCalledWith(
+      "nvidia/parakeet-rnnt-1.1b",
+    );
+    expect(modelSettings.setSpeechMethod).toHaveBeenCalledWith("ya-nemo");
+    expect(prewarmYaServerSpeechBackend).toHaveBeenCalledWith(
+      "ya-nemo",
+      "nvidia/parakeet-rnnt-1.1b",
+    );
+  });
+
+  it("disables Parakeet presets unsupported by enabled local backends", () => {
+    versionState.voiceBackends = ["ya-grok", "ya-parakeet"];
+
+    render(<SpeechSettings />);
+
+    const option = screen.getByRole("option", {
+      name: /RNNT 1\.1B English lowercase/,
+    }) as HTMLOptionElement;
+
+    expect(option.disabled).toBe(true);
+    expect(option.textContent).toContain("NeMo Parakeet");
+  });
+
   it("prewarms the current Parakeet model when selecting a local STT backend globally", () => {
     modelSettings.speechMethod = "ya-grok";
     render(<SpeechSettings />);
@@ -128,6 +165,28 @@ describe("SpeechSettings", () => {
     expect(modelSettings.setSpeechMethod).toHaveBeenCalledWith("ya-nemo");
     expect(prewarmYaServerSpeechBackend).toHaveBeenCalledWith(
       "ya-nemo",
+      "nvidia/parakeet-tdt-0.6b-v3",
+    );
+  });
+
+  it("normalizes an incompatible preset when selecting a local STT backend globally", () => {
+    modelSettings.speechMethod = "ya-grok";
+    modelSettings.parakeetSpeechModel = "nvidia/parakeet-rnnt-1.1b";
+    render(<SpeechSettings />);
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "filterByLabel speechSettingsBackendTitle",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Parakeet STT/ }));
+
+    expect(modelSettings.setSpeechMethod).toHaveBeenCalledWith("ya-parakeet");
+    expect(modelSettings.setParakeetSpeechModel).toHaveBeenCalledWith(
+      "nvidia/parakeet-tdt-0.6b-v3",
+    );
+    expect(prewarmYaServerSpeechBackend).toHaveBeenCalledWith(
+      "ya-parakeet",
       "nvidia/parakeet-tdt-0.6b-v3",
     );
   });

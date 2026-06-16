@@ -25,9 +25,13 @@ import {
 } from "../../lib/speechProviders/methods";
 import {
   cleanParakeetSpeechModel,
+  getCompatibleParakeetModelForBackend,
+  getParakeetModelBackendLabel,
   getParakeetSpeechPresetValue,
   isParakeetModelBackend,
   PARAKEET_SPEECH_MODEL_PRESETS,
+  type ParakeetModelBackendId,
+  resolveParakeetModelBackend,
 } from "../../lib/speechProviders/parakeetModels";
 import { prewarmYaServerSpeechBackend } from "../../lib/speechProviders/YaServerProvider";
 import { useSettingsUndoBaseline } from "./SettingsUndoContext";
@@ -118,6 +122,19 @@ export function SpeechSettings() {
   const showParakeetModelControls = isParakeetModelBackend(selectedBackend);
   const selectedParakeetPreset =
     getParakeetSpeechPresetValue(parakeetSpeechModel);
+  const enabledParakeetBackends = useMemo(() => {
+    const backends: ParakeetModelBackendId[] = [];
+    const addBackend = (backendId: string) => {
+      if (isParakeetModelBackend(backendId) && !backends.includes(backendId)) {
+        backends.push(backendId);
+      }
+    };
+    addBackend(selectedBackend);
+    for (const backendId of serverBackends) {
+      addBackend(backendId);
+    }
+    return backends;
+  }, [selectedBackend, serverBackends]);
   const selectedBackendCanStream = canSpeechMethodStream({
     methodId: selectedBackend,
     serverCapabilities: versionInfo?.voiceBackendCapabilities,
@@ -154,6 +171,43 @@ export function SpeechSettings() {
       prewarmParakeetModel(event.currentTarget.value);
     },
     [prewarmParakeetModel],
+  );
+  const selectParakeetPreset = useCallback(
+    (modelValue: string) => {
+      const model = cleanParakeetSpeechModel(modelValue);
+      const backendId = resolveParakeetModelBackend(
+        model,
+        selectedBackend,
+        enabledParakeetBackends,
+      );
+      if (!backendId) return;
+      setParakeetSpeechModel(model);
+      if (backendId !== selectedBackend) {
+        setSpeechMethod(backendId);
+      }
+      prewarmParakeetModel(model, backendId);
+    },
+    [
+      enabledParakeetBackends,
+      prewarmParakeetModel,
+      selectedBackend,
+      setParakeetSpeechModel,
+      setSpeechMethod,
+    ],
+  );
+  const prepareParakeetBackend = useCallback(
+    (backendId: SpeechMethodId) => {
+      if (!isParakeetModelBackend(backendId)) return;
+      const model = getCompatibleParakeetModelForBackend(
+        parakeetSpeechModel,
+        backendId,
+      );
+      if (model !== cleanParakeetSpeechModel(parakeetSpeechModel)) {
+        setParakeetSpeechModel(model);
+      }
+      prewarmParakeetModel(model, backendId);
+    },
+    [parakeetSpeechModel, prewarmParakeetModel, setParakeetSpeechModel],
   );
 
   return (
@@ -200,19 +254,37 @@ export function SpeechSettings() {
                 onChange={(event) => {
                   const preset = event.currentTarget.value;
                   if (!preset) return;
-                  setParakeetSpeechModel(preset);
-                  prewarmParakeetModel(preset);
+                  selectParakeetPreset(preset);
                 }}
                 aria-label={t("speechSettingsParakeetModelPresetLabel")}
               >
                 <option value="">
                   {t("speechSettingsParakeetCustomModel")}
                 </option>
-                {PARAKEET_SPEECH_MODEL_PRESETS.map((preset) => (
-                  <option key={preset.value} value={preset.value}>
-                    {preset.label}
-                  </option>
-                ))}
+                {PARAKEET_SPEECH_MODEL_PRESETS.map((preset) => {
+                  const backendId = resolveParakeetModelBackend(
+                    preset.value,
+                    selectedBackend,
+                    enabledParakeetBackends,
+                  );
+                  const requiredBackends = preset.supportedBackends
+                    .map(getParakeetModelBackendLabel)
+                    .join(" or ");
+                  return (
+                    <option
+                      key={preset.value}
+                      value={preset.value}
+                      disabled={!backendId}
+                    >
+                      {backendId
+                        ? preset.label
+                        : `${preset.label} (${t(
+                            "speechSettingsParakeetModelRequiresBackend",
+                            { backend: requiredBackends },
+                          )})`}
+                    </option>
+                  );
+                })}
               </select>
               <input
                 id={parakeetModelInputId}
@@ -251,7 +323,7 @@ export function SpeechSettings() {
                 const nextBackend = selected[0];
                 if (!nextBackend) return;
                 if (isParakeetModelBackend(nextBackend)) {
-                  prewarmParakeetModel(parakeetSpeechModel, nextBackend);
+                  prepareParakeetBackend(nextBackend);
                 }
                 setSpeechMethod(nextBackend);
               }}

@@ -234,6 +234,53 @@ describe("SpeechControlMenu", () => {
     );
   });
 
+  it("hides Parakeet presets that no enabled backend can run", () => {
+    installMediaDevices([]);
+
+    renderSpeechControlMenu({
+      trigger: <button type="button">voice</button>,
+      showMethodSelector: false,
+      methodOptions: [],
+      selectedMethod: "ya-parakeet",
+      onMethodChange: vi.fn(),
+    });
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "voice" }));
+
+    expect(screen.getByText("CTC 1.1B English lowercase")).toBeDefined();
+    expect(screen.queryByText("RNNT 1.1B English lowercase")).toBeNull();
+  });
+
+  it("switches to an enabled compatible backend when selecting a Parakeet preset", () => {
+    installMediaDevices([]);
+    const onMethodChange = vi.fn();
+
+    renderSpeechControlMenu({
+      trigger: <button type="button">voice</button>,
+      showMethodSelector: false,
+      methodOptions: [
+        { value: "ya-parakeet", label: "Parakeet" },
+        { value: "ya-nemo", label: "NeMo Parakeet" },
+      ],
+      selectedMethod: "ya-parakeet",
+      onMethodChange,
+    });
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "voice" }));
+    fireEvent.change(screen.getByLabelText("Parakeet model preset"), {
+      target: { value: "nvidia/parakeet-rnnt-1.1b" },
+    });
+
+    expect(modelSettings.setParakeetSpeechModel).toHaveBeenCalledWith(
+      "nvidia/parakeet-rnnt-1.1b",
+    );
+    expect(onMethodChange).toHaveBeenCalledWith(["ya-nemo"]);
+    expect(prewarmYaServerSpeechBackend).toHaveBeenCalledWith(
+      "ya-nemo",
+      "nvidia/parakeet-rnnt-1.1b",
+    );
+  });
+
   it("prewarms a custom Parakeet model on free-text commit", () => {
     installMediaDevices([]);
     modelSettings.parakeetSpeechModel = "nvidia/custom-parakeet";
@@ -276,6 +323,35 @@ describe("SpeechControlMenu", () => {
     expect(onMethodChange).toHaveBeenCalledWith(["ya-nemo"]);
     expect(prewarmYaServerSpeechBackend).toHaveBeenCalledWith(
       "ya-nemo",
+      "nvidia/parakeet-tdt-0.6b-v3",
+    );
+  });
+
+  it("normalizes an incompatible preset when switching to a Parakeet backend", () => {
+    installMediaDevices([]);
+    modelSettings.parakeetSpeechModel = "nvidia/parakeet-rnnt-1.1b";
+    const onMethodChange = vi.fn();
+
+    renderSpeechControlMenu({
+      trigger: <button type="button">voice</button>,
+      showMethodSelector: true,
+      methodOptions: [
+        { value: "ya-grok", label: "Grok" },
+        { value: "ya-parakeet", label: "Parakeet" },
+      ],
+      selectedMethod: "ya-grok",
+      onMethodChange,
+    });
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "voice" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Parakeet" }));
+
+    expect(onMethodChange).toHaveBeenCalledWith(["ya-parakeet"]);
+    expect(modelSettings.setParakeetSpeechModel).toHaveBeenCalledWith(
+      "nvidia/parakeet-tdt-0.6b-v3",
+    );
+    expect(prewarmYaServerSpeechBackend).toHaveBeenCalledWith(
+      "ya-parakeet",
       "nvidia/parakeet-tdt-0.6b-v3",
     );
   });
