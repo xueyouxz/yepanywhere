@@ -1,5 +1,6 @@
 - new session project selection
 - Rich rendering for agent output via yepanywhere
+- Task-list rendering from incremental Claude `Task*` events (problem framing)
 - Codex GPT-5.5 model and protocol compatibility
 - Pluggable speech recognition providers
 - Browser-load session UI reliability
