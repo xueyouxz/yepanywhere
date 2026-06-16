@@ -257,6 +257,17 @@ export interface AgentProvider {
   contextWindowFor?(model: string | undefined): number | undefined;
 
   /**
+   * Map a provider-reported model id (e.g. "claude-opus-4-8") back to a YA model
+   * id / launch alias (e.g. "opus"), or `undefined` when no mapping is known.
+   * This is the imperfect inverse of how YA aliases resolve at launch — properly
+   * one-to-(zero or more), so the table returns a single canonical alias. Used
+   * only to recover a keying id for sessions YA didn't start (the requested YA id
+   * is unavailable); owned sessions key by their stored requested id instead.
+   * See topics/provider-abstraction.md § Per-model settings keying.
+   */
+  yaModelIdForReported?(reported: string | undefined): string | undefined;
+
+  /**
    * Synthesize a short recap of recent agent activity from already-emitted
    * assistant text. The provider runs an ephemeral, non-persisted query —
    * the output must not appear in the underlying session transcript.

@@ -937,6 +937,8 @@ export const api = {
         thinking?: { type: string };
         effort?: string;
         model?: string;
+        /** YA model id (launch alias) for keying per-model settings. */
+        requestedModel?: string;
         liveness?: SessionLivenessSnapshot;
         recapMode?: RecapMode;
         promptSuggestionMode?: PromptSuggestionMode;

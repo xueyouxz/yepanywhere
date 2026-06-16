@@ -817,6 +817,26 @@ export class ClaudeProvider implements AgentProvider {
   }
 
   /**
+   * Reported Claude model id → canonical YA alias, matched by family component.
+   * Anthropic has shipped both "{family}-{version}" (claude-opus-4-8) and
+   * "{version}-{family}" (claude-3-5-sonnet), so we look for the family anywhere
+   * in the name. One-to-(zero or more): we return the plain alias ("sonnet",
+   * not "sonnet[1m]"/"best") because the reported id can't say which the user
+   * actually launched. Used only to recover a keying id for non-YA-started
+   * sessions. See topics/provider-abstraction.md § Per-model settings keying.
+   */
+  yaModelIdForReported(reported: string | undefined): string | undefined {
+    if (!reported) return undefined;
+    const name = reported.toLowerCase();
+    for (const family of ["opus", "sonnet", "haiku", "fable"] as const) {
+      if (new RegExp(`(?:^|[-/])${family}(?:[-/]|$)`).test(name)) {
+        return family;
+      }
+    }
+    return undefined;
+  }
+
+  /**
    * Get available Claude models.
    * Fetches dynamically from SDK via a probe session, with caching.
    * Falls back to static list if probe fails or user is not authenticated.

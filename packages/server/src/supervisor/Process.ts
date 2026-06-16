@@ -495,6 +495,12 @@ export class Process {
 
   /** Resolved model name from the first assistant message (e.g., "claude-sonnet-4-5-20250929") */
   private _resolvedModel: string | undefined;
+  /**
+   * Current requested YA model id (launch alias, e.g. "opus"). Starts at the
+   * launch `model` and follows mid-session model switches (which leave the
+   * readonly `model` at its original value). Keys per-model settings.
+   */
+  private _requestedModel: string | undefined;
   /** Context window size reported by SDK in result messages' modelUsage */
   private _contextWindow: number | undefined;
 
@@ -526,6 +532,7 @@ export class Process {
     this._permissions = options.permissions;
     this.provider = options.provider;
     this.model = options.model;
+    this._requestedModel = options.model;
     this.serviceTier = options.serviceTier;
     this.executor = options.executor;
     this._thinking = options.thinking;
@@ -597,6 +604,14 @@ export class Process {
    */
   get resolvedModel(): string | undefined {
     return this._resolvedModel ?? this.model;
+  }
+
+  /**
+   * Current requested YA model id (launch alias, following model switches),
+   * the key for per-model settings. Distinct from `resolvedModel` (reported).
+   */
+  get requestedModel(): string | undefined {
+    return this._requestedModel ?? this.model;
   }
 
   /** Context window size reported by SDK (from result message modelUsage) */
@@ -1240,6 +1255,9 @@ export class Process {
     // Update resolved model so subsequent API responses reflect the switch
     if (model) {
       this._resolvedModel = model;
+      // Follow the switch for per-model-settings keying (readonly `model` stays
+      // at the original launch alias). See topics/provider-abstraction.md.
+      this._requestedModel = model;
     }
     return true;
   }
@@ -1375,6 +1393,10 @@ export class Process {
       queueDepth: this.queueDepth,
       provider: this.provider,
       model: this._resolvedModel ?? this.model,
+      // The requested YA launch alias (e.g. "opus"), distinct from the reported
+      // model above. Keys per-model settings; the route enrichment fills the
+      // persisted/helper fallback when this is absent (non-YA-started sessions).
+      requestedModel: this.requestedModel,
       serviceTier: this.serviceTier,
       thinking: this._thinking,
       effort: this._effort,

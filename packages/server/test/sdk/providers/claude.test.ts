@@ -30,6 +30,41 @@ describe("ClaudeProvider.contextWindowFor", () => {
   });
 });
 
+describe("ClaudeProvider.yaModelIdForReported", () => {
+  it("maps reported ids to the canonical family alias", () => {
+    expect(claudeProvider.yaModelIdForReported("claude-opus-4-8")).toBe("opus");
+    expect(claudeProvider.yaModelIdForReported("claude-sonnet-4-6")).toBe(
+      "sonnet",
+    );
+    expect(claudeProvider.yaModelIdForReported("claude-haiku-4-5")).toBe(
+      "haiku",
+    );
+    expect(claudeProvider.yaModelIdForReported("claude-fable-5")).toBe("fable");
+  });
+
+  it("matches the family regardless of component order (version-first ids)", () => {
+    expect(claudeProvider.yaModelIdForReported("claude-3-5-sonnet")).toBe(
+      "sonnet",
+    );
+  });
+
+  it("is idempotent on bare aliases", () => {
+    expect(claudeProvider.yaModelIdForReported("opus")).toBe("opus");
+    expect(claudeProvider.yaModelIdForReported("sonnet")).toBe("sonnet");
+  });
+
+  it("returns undefined for unknown ids and empty input", () => {
+    expect(
+      claudeProvider.yaModelIdForReported("claude-mythos-5"),
+    ).toBeUndefined();
+    expect(
+      claudeProvider.yaModelIdForReported("gpt-5.3-codex"),
+    ).toBeUndefined();
+    expect(claudeProvider.yaModelIdForReported(undefined)).toBeUndefined();
+    expect(claudeProvider.yaModelIdForReported("")).toBeUndefined();
+  });
+});
+
 function control(
   mcpServerStatus: () => Promise<unknown>,
 ): Pick<Query, "mcpServerStatus"> {

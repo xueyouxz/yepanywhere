@@ -18,8 +18,13 @@ export interface SessionMetadata {
   isStarred?: boolean;
   /** Parent session when this session is a YA-owned fork/aside. */
   parentSessionId?: string;
-  /** Model used for this session (resolved, not "default") */
-  model?: string;
+  /**
+   * YA model id (launch alias, e.g. "opus"/"default") chosen when YA started
+   * this session. Persisted so per-model settings still key by the requested
+   * YA id after a server restart, instead of falling back to the reported model.
+   * Absent for sessions YA didn't start. See topics/provider-abstraction.md.
+   */
+  requestedModel?: string;
   /** Provider used for this session (for backward compatibility with sessions that don't have provider in JSONL) */
   provider?: ProviderName;
   /** SSH host alias for remote execution (undefined = local) */
@@ -190,11 +195,35 @@ export class SessionMetadataService {
   }
 
   /**
+   * Set the YA model id (launch alias) chosen when YA started this session.
+   * Persisted so per-model settings still key by the requested YA id after a
+   * server restart. See topics/provider-abstraction.md § Per-model settings keying.
+   */
+  async setRequestedModel(
+    sessionId: string,
+    requestedModel: string | undefined,
+  ): Promise<void> {
+    this.updateSessionMetadata(sessionId, (metadata) => ({
+      ...metadata,
+      requestedModel: requestedModel || undefined,
+    }));
+    await this.save();
+  }
+
+  /**
    * Get the provider for a session.
    * Returns undefined if the provider was never explicitly saved.
    */
   getProvider(sessionId: string): string | undefined {
     return this.state.sessions[sessionId]?.provider;
+  }
+
+  /**
+   * Get the requested YA model id for a session.
+   * Returns undefined for sessions YA didn't start (no requested id was stored).
+   */
+  getRequestedModel(sessionId: string): string | undefined {
+    return this.state.sessions[sessionId]?.requestedModel;
   }
 
   /**
@@ -258,12 +287,12 @@ export class SessionMetadataService {
       }
 
       if (updates.parentSessionId !== undefined) {
-        result.parentSessionId =
-          updates.parentSessionId?.trim() || undefined;
+        result.parentSessionId = updates.parentSessionId?.trim() || undefined;
       }
 
       if (updates.heartbeatTurnsEnabled !== undefined) {
-        result.heartbeatTurnsEnabled = updates.heartbeatTurnsEnabled || undefined;
+        result.heartbeatTurnsEnabled =
+          updates.heartbeatTurnsEnabled || undefined;
       }
 
       if (updates.heartbeatTurnsAfterMinutes !== undefined) {
@@ -272,7 +301,8 @@ export class SessionMetadataService {
       }
 
       if (updates.heartbeatTurnText !== undefined) {
-        result.heartbeatTurnText = updates.heartbeatTurnText?.trim() || undefined;
+        result.heartbeatTurnText =
+          updates.heartbeatTurnText?.trim() || undefined;
       }
 
       if (updates.heartbeatForceAfterMinutes !== undefined) {
@@ -299,8 +329,9 @@ export class SessionMetadataService {
     if (updated.customTitle) cleaned.customTitle = updated.customTitle;
     if (updated.isArchived) cleaned.isArchived = updated.isArchived;
     if (updated.isStarred) cleaned.isStarred = updated.isStarred;
-    if (updated.parentSessionId) cleaned.parentSessionId = updated.parentSessionId;
-    if (updated.model) cleaned.model = updated.model;
+    if (updated.parentSessionId)
+      cleaned.parentSessionId = updated.parentSessionId;
+    if (updated.requestedModel) cleaned.requestedModel = updated.requestedModel;
     if (updated.provider) cleaned.provider = updated.provider;
     if (updated.executor) cleaned.executor = updated.executor;
     if (updated.initialPrompt) cleaned.initialPrompt = updated.initialPrompt;

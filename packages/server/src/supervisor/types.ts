@@ -209,8 +209,15 @@ export interface ProcessInfo {
   effort?: EffortLevel;
   /** Provider-visible service tier. undefined means provider/default behavior. */
   serviceTier?: string;
-  /** Model used for this session (e.g., "claude-opus-4-5-20251101") */
+  /** Reported model for this session (e.g., "claude-opus-4-5-20251101"), for display */
   model?: string;
+  /**
+   * YA model id for keying per-model settings: the requested launch alias when
+   * YA owns the session (survives restart via persisted metadata), else the
+   * reported model mapped back through the provider's yaModelIdForReported.
+   * See topics/provider-abstraction.md § Per-model settings keying.
+   */
+  requestedModel?: string;
   /** Context window usage from the last assistant message */
   contextUsage?: ContextUsage;
   /** SSH host for remote execution (undefined = local) */

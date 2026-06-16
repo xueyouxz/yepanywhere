@@ -7,7 +7,11 @@ import { ContextUsageIndicator } from "./ContextUsageIndicator";
 
 interface ContextThresholdQuickEditProps {
   usage?: ContextUsage;
-  /** Session model id — the slider/migration key (e.g. "opus"). */
+  /**
+   * YA model id (launch alias, e.g. "opus") — the key the Settings slider and
+   * migration use. The toolbar resolves this from the session's requested model,
+   * not the reported one. See topics/provider-abstraction.md.
+   */
   model?: string;
   /** Model context window, for the token preview. */
   contextWindow?: number;

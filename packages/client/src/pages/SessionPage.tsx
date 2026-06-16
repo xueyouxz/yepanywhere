@@ -147,6 +147,9 @@ interface PreparedComposerSubmission {
 
 interface LiveModelConfig {
   model?: string;
+  /** YA model id (launch alias) for keying per-model settings, distinct from
+   * the reported `model` above. See topics/provider-abstraction.md. */
+  requestedModel?: string;
   thinking?: { type: string };
   effort?: string;
   promptSuggestionMode?: PromptSuggestionMode;
@@ -578,6 +581,7 @@ function isSameLiveModelConfig(
   return (
     current !== null &&
     current.model === next.model &&
+    current.requestedModel === next.requestedModel &&
     current.thinking?.type === next.thinking?.type &&
     current.effort === next.effort &&
     current.promptSuggestionMode === next.promptSuggestionMode
@@ -1004,6 +1008,7 @@ function SessionPageContent({
           process
             ? {
                 model: process.model,
+                requestedModel: process.requestedModel,
                 thinking: process.thinking,
                 effort: process.effort,
                 promptSuggestionMode: process.promptSuggestionMode,
@@ -2189,13 +2194,16 @@ function SessionPageContent({
       if (next.thinking !== undefined || next.effort !== undefined) {
         setLiveModelConfig((prev) => ({
           model: next.model ?? prev?.model,
+          requestedModel: next.model ?? prev?.requestedModel,
           thinking: next.thinking,
           effort: next.effort,
           promptSuggestionMode: prev?.promptSuggestionMode,
         }));
       } else if (next.model) {
         setLiveModelConfig((prev) =>
-          prev ? { ...prev, model: next.model } : { model: next.model },
+          prev
+            ? { ...prev, model: next.model, requestedModel: next.model }
+            : { model: next.model, requestedModel: next.model },
         );
       }
       if (status.owner === "self") {
@@ -4109,6 +4117,7 @@ function SessionPageContent({
                     onSelectSlashCommand={handleToolbarSlashCommand}
                     thinkingProvider={effectiveProvider}
                     thinkingModel={liveBadgeModel}
+                    contextRequestedModel={liveModelConfig?.requestedModel}
                     heartbeatEnabled={heartbeatTurnsEnabled}
                     onToggleHeartbeat={handleToggleHeartbeat}
                     onConfigureHeartbeat={() => setShowHeartbeatModal(true)}
@@ -4219,6 +4228,7 @@ function SessionPageContent({
                 btwToolbarMode={btwToolbarMode}
                 thinkingProvider={effectiveProvider}
                 thinkingModel={liveBadgeModel}
+                contextRequestedModel={liveModelConfig?.requestedModel}
                 heartbeatEnabled={heartbeatTurnsEnabled}
                 onToggleHeartbeat={handleToggleHeartbeat}
                 onConfigureHeartbeat={() => setShowHeartbeatModal(true)}

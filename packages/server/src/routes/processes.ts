@@ -99,6 +99,15 @@ async function enrichProcessInfo(
     enriched.provider =
       summary?.provider ?? metadata?.provider ?? process.provider;
 
+    // Resolve the YA model id used to key per-model settings. Prefer the live
+    // requested alias, then the alias persisted when YA started the session
+    // (survives restart), then map the reported model back through the provider
+    // (sessions YA didn't start). See topics/provider-abstraction.md.
+    enriched.requestedModel =
+      process.requestedModel ??
+      metadata?.requestedModel ??
+      getProvider(enriched.provider)?.yaModelIdForReported?.(enriched.model);
+
     // Add context usage if available
     if (summary?.contextUsage) {
       enriched.contextUsage = summary.contextUsage;

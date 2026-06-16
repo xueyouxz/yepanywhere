@@ -188,6 +188,8 @@ interface Props {
   /** Provider/model context used by the thinking effort chooser. */
   thinkingProvider?: string;
   thinkingModel?: string;
+  /** YA model id for the context quick-edit's per-model threshold keying. */
+  contextRequestedModel?: string;
   /** Whether heartbeat turns are currently enabled for this session */
   heartbeatEnabled?: boolean;
   /** Current quiet-period timeout used by patient queue mode. */
@@ -246,6 +248,7 @@ export function MessageInput({
   btwToolbarMode,
   thinkingProvider,
   thinkingModel,
+  contextRequestedModel,
   heartbeatEnabled = false,
   patientQueuePatienceSeconds,
   onToggleHeartbeat,
@@ -655,7 +658,9 @@ export function MessageInput({
   const handleSlashCommand = useCallback(
     (command: string) => {
       if (!command) return;
-      const normalizedCommand = command.startsWith("/") ? command : `/${command}`;
+      const normalizedCommand = command.startsWith("/")
+        ? command
+        : `/${command}`;
       const bare = normalizedCommand.slice(1);
       if (onCustomCommand?.(bare)) {
         return;
@@ -1039,8 +1044,7 @@ export function MessageInput({
         committedRange: SpeechInsertionRange | null,
       ) => {
         if (speechInsertionRangesRef.current.size === 0) return;
-        const committedTargetId =
-          targetId ?? activeSpeechTargetIdRef.current;
+        const committedTargetId = targetId ?? activeSpeechTargetIdRef.current;
         const nextRanges = new Map<string, SpeechInsertionRange>();
         for (const [rangeTargetId, range] of speechInsertionRangesRef.current) {
           if (rangeTargetId === committedTargetId) {
@@ -1187,7 +1191,8 @@ export function MessageInput({
   const handleVoiceTranscript = useCallback(
     (transcript: string, metadata?: SpeechTranscriptionResultMetadata) => {
       const speechRange = metadata?.speechTargetId
-        ? (speechInsertionRangesRef.current.get(metadata.speechTargetId) ?? null)
+        ? (speechInsertionRangesRef.current.get(metadata.speechTargetId) ??
+          null)
         : speechInsertionRangeRef.current;
       const delayMs = metadata?.smartTurnCommand
         ? 0
@@ -1314,8 +1319,10 @@ export function MessageInput({
                 clearPendingSpeechFinal();
                 if (speechInsertionRangesRef.current.size > 0) {
                   const nextRanges = new Map<string, SpeechInsertionRange>();
-                  for (const [targetId, range] of speechInsertionRangesRef
-                    .current) {
+                  for (const [
+                    targetId,
+                    range,
+                  ] of speechInsertionRangesRef.current) {
                     nextRanges.set(
                       targetId,
                       clearSpeechInsertionRangeReplacement(
@@ -1354,9 +1361,7 @@ export function MessageInput({
               }}
               enterKeyHint="send"
               placeholder={
-                externalCollapsed
-                  ? t("messageInputContinueAbove")
-                  : placeholder
+                externalCollapsed ? t("messageInputContinueAbove") : placeholder
               }
               disabled={disabled}
               rows={collapsed ? 1 : 3}
@@ -1539,6 +1544,7 @@ export function MessageInput({
             btwToolbarMode={btwToolbarMode}
             thinkingProvider={thinkingProvider}
             thinkingModel={thinkingModel}
+            contextRequestedModel={contextRequestedModel}
             heartbeatEnabled={heartbeatEnabled}
             patientQueuePatienceSeconds={effectivePatientQueuePatienceSeconds}
             onToggleHeartbeat={onToggleHeartbeat}

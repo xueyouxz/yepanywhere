@@ -60,6 +60,7 @@ import {
 } from "../sessions/persisted-augments.js";
 import { findSessionSummaryAcrossProviders } from "../sessions/provider-resolution.js";
 import type { ISessionReader } from "../sessions/types.js";
+import { getProvider } from "../sdk/providers/index.js";
 import { getStaticSlashCommandsForProvider } from "../sdk/providers/staticSlashCommands.js";
 import type { ExternalSessionTracker } from "../supervisor/ExternalSessionTracker.js";
 import type {
@@ -778,28 +779,21 @@ function isAutoCompactModel(model: string | undefined): boolean {
 }
 
 /**
- * Resolve a per-model compact-early percent (task 029) from the client-defaults
- * map. The slider and migration store the threshold under the provider alias
- * the user picked (e.g. "opus"), but a live process resolves to a full id
- * (e.g. "claude-opus-4-8") via the SDK. Try every known identifier first, then
- * fall back to the model family so a threshold stored under "opus" still applies
- * to "claude-opus-4-8". Out-of-range values are ignored by the consumer.
+ * Per-model compact-early percent (task 029): a direct lookup of the resolved YA
+ * model id in the client-defaults map. The id is resolved upstream (the requested
+ * launch alias, else the alias persisted at launch, else the provider's
+ * reported→YA-id helper for sessions YA didn't start), so per-model settings key
+ * by the same YA id the slider stored — no family fallback. "default" is the
+ * runtime holdout and never carries a stored threshold. Out-of-range values are
+ * ignored by the consumer. See topics/provider-abstraction.md.
  */
 export function resolveCompactPercent(
   map: Record<string, number> | undefined,
-  candidates: (string | undefined)[],
+  yaModelId: string | undefined,
 ): number | undefined {
-  if (!map) return undefined;
-  for (const m of candidates) {
-    if (m && m !== "default" && typeof map[m] === "number") return map[m];
-  }
-  for (const m of candidates) {
-    const family = m?.match(
-      /(?:^|[-/])(opus|sonnet|haiku|fable)(?:[-/[]|$)/,
-    )?.[1];
-    if (family && typeof map[family] === "number") return map[family];
-  }
-  return undefined;
+  if (!map || !yaModelId || yaModelId === "default") return undefined;
+  const value = map[yaModelId];
+  return typeof value === "number" ? value : undefined;
 }
 
 /**
@@ -1741,6 +1735,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     provider: ProviderName | undefined,
     executor: string | undefined,
     initialPrompt?: string,
+    requestedModel?: string,
   ): Promise<void> => {
     if (!deps.sessionMetadataService) {
       return;
@@ -1755,6 +1750,15 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       await deps.sessionMetadataService.setInitialPrompt(
         sessionId,
         initialPrompt,
+      );
+    }
+    // Persist the requested YA model id (the launch alias, incl. "default") so
+    // per-model settings still key by it after a server restart, instead of
+    // falling back to the reported model. See topics/provider-abstraction.md.
+    if (requestedModel) {
+      await deps.sessionMetadataService.setRequestedModel(
+        sessionId,
+        requestedModel,
       );
     }
   };
@@ -2610,6 +2614,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       body.provider,
       executor,
       body.message,
+      body.model,
     );
 
     return c.json({
@@ -2697,7 +2702,13 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       return c.json({ ...result, serverTimestamp: Date.now() }, 202); // 202 Accepted - queued for processing
     }
 
-    await persistLaunchMetadata(result.sessionId, body.provider, executor);
+    await persistLaunchMetadata(
+      result.sessionId,
+      body.provider,
+      executor,
+      undefined,
+      body.model,
+    );
 
     return c.json({
       sessionId: result.sessionId,
@@ -2786,6 +2797,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       body.provider,
       executor,
       body.message,
+      body.model,
     );
 
     return c.json({
@@ -2851,7 +2863,13 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       return c.json({ ...result, serverTimestamp: Date.now() }, 202);
     }
 
-    await persistLaunchMetadata(result.sessionId, body.provider, executor);
+    await persistLaunchMetadata(
+      result.sessionId,
+      body.provider,
+      executor,
+      undefined,
+      body.model,
+    );
 
     return c.json({
       sessionId: result.sessionId,
@@ -2919,9 +2937,16 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       ? thinkingOptionToConfig(body.thinking, body.showThinking)
       : { thinking: undefined, effort: undefined };
 
-    // Convert model option (undefined or "default" means use CLI default)
+    // Convert model option (undefined or "default" means use CLI default). When
+    // the client sends no model (e.g. resume after a server restart), recover the
+    // YA model id persisted at launch so the process keeps its requested alias
+    // and per-model settings stay keyed by it. See topics/provider-abstraction.md.
+    const requestedModel =
+      body.model ?? deps.sessionMetadataService?.getRequestedModel(sessionId);
     const model =
-      body.model && body.model !== "default" ? body.model : undefined;
+      requestedModel && requestedModel !== "default"
+        ? requestedModel
+        : undefined;
     const serviceTier = normalizeOptionalServiceTier(body.serviceTier);
 
     // Use client-provided executor, falling back to saved executor from metadata.
@@ -3330,7 +3355,13 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         );
       }
 
-      await persistLaunchMetadata(result.sessionId, sourceProvider, executor);
+      await persistLaunchMetadata(
+        result.sessionId,
+        sourceProvider,
+        executor,
+        undefined,
+        body.model ?? deps.sessionMetadataService?.getRequestedModel(sessionId),
+      );
       if (deps.sessionMetadataService) {
         await deps.sessionMetadataService.updateMetadata(result.sessionId, {
           title: forkTitle,
@@ -3427,7 +3458,13 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       );
     }
 
-    await persistLaunchMetadata(result.sessionId, providerName, executor);
+    await persistLaunchMetadata(
+      result.sessionId,
+      providerName,
+      executor,
+      undefined,
+      body.model ?? deps.sessionMetadataService?.getRequestedModel(sessionId),
+    );
     if (deps.sessionMetadataService) {
       await deps.sessionMetadataService.updateMetadata(result.sessionId, {
         title: handoffTitle,
@@ -3557,7 +3594,13 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     const savedExecutor = parseOptionalExecutor(
       deps.sessionMetadataService?.getExecutor(sessionId),
     ).executor;
-    await persistLaunchMetadata(fork.sessionId, providerName, savedExecutor);
+    await persistLaunchMetadata(
+      fork.sessionId,
+      providerName,
+      savedExecutor,
+      undefined,
+      deps.sessionMetadataService?.getRequestedModel(sessionId),
+    );
     if (forkTitle && deps.sessionMetadataService) {
       await deps.sessionMetadataService.updateMetadata(fork.sessionId, {
         title: forkTitle,
@@ -3704,21 +3747,23 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         : (process.resolvedModel ?? process.model);
     const serviceTier = normalizeOptionalServiceTier(body.serviceTier);
 
-    // Per-model preemptive-compaction threshold (task 029). The route holds
-    // the settings; the Supervisor stays settings-agnostic. The slider/migration
-    // key by the provider alias the user picked ("opus"), but a live process
-    // resolves to a full id ("claude-opus-4-8"), so resolveCompactPercent tries
-    // every identifier and falls back to model family.
-    const compactModelCandidates = [
-      body.model,
-      model,
-      process.model,
-      process.resolvedModel,
-    ];
+    // Per-model preemptive-compaction threshold (task 029). The route holds the
+    // settings; the Supervisor stays settings-agnostic. Key strictly by the YA
+    // model id: the alias the user picked this turn, else the live requested
+    // alias, else the alias persisted at launch (survives restart), else the
+    // provider's reported→YA-id helper for sessions YA didn't start. No family
+    // fallback. See topics/provider-abstraction.md § Per-model settings keying.
+    const yaModelId =
+      body.model ??
+      process.requestedModel ??
+      deps.sessionMetadataService?.getRequestedModel(sessionId) ??
+      getProvider(process.provider)?.yaModelIdForReported?.(
+        process.resolvedModel,
+      );
     const compactAtContextPercent = resolveCompactPercent(
       deps.serverSettingsService?.getSetting("clientDefaults")
         ?.compactAtContextPercent,
-      compactModelCandidates,
+      yaModelId,
     );
     // Resolve the effective window here too — process.contextWindow is
     // unreliable (often undefined) and the base resolver ignores always-1M.
@@ -3727,7 +3772,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         ? undefined
         : resolveCompactWindow(
             process.provider,
-            compactModelCandidates,
+            [yaModelId, process.resolvedModel, process.model],
             resolveContextWindow,
           );
 

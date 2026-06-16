@@ -81,3 +81,125 @@ context window this provider runs `model` at, or `undefined` to defer to
 provider owns "opus is always-1M, sonnet is not" instead of leaking that into
 `resolveCompactWindow`, the settings route, and the client. Sonnet's 1M needs
 paid usage credits, so only opus is overridden; everything else defers.
+
+## Per-model settings keying
+
+Decided and **implemented** for the core path (task 029, 2026-06-16). Configs
+key by the **YA model id**; the over-split prefix tree, `off`=0 tombstone, and
+provider split override remain parked (see *Still parked* below). This is the
+home of the requested↔reported model-name candidate surface named above.
+
+**Decision:** configs are split by **YA model id** (the requested name), and
+where YA **owns** the session the config is looked up by that same YA model id.
+The reported→requested mapping is still worth keeping with some fidelity (for
+external sessions and display), but it is **not** the storage key.
+
+### Implemented (task 029)
+
+- **Owned sessions key by the requested id.** `Process` tracks `_requestedModel`
+  (the launch alias, following mid-session switches; the readonly `model` stays
+  at the original) and exposes it as `Process.requestedModel` /
+  `ProcessInfo.requestedModel`. The `/messages` threshold lookup keys by
+  `body.model ?? process.requestedModel ?? <persisted> ?? <helper>`.
+- **Survives restart.** `SessionMetadata.requestedModel` persists the launch
+  alias (`persistLaunchMetadata`); the `/resume` route recovers it into
+  `options.model` when the client sends none, and `enrichProcessInfo` falls back
+  to it. The old vestigial `SessionMetadata.model` (reported, never read) was
+  removed.
+- **Helper for non-YA-started sessions.** `provider.yaModelIdForReported`
+  (Claude: a fixed family-substring table, `claude-opus-4-8`→`opus`, etc.) is the
+  last fallback when no requested id exists. Imperfect and one-to-(0+) by design.
+- **No family fallback in the lookup.** `resolveCompactPercent` is now a direct
+  single-id lookup; the canonicalization that used to need family matching now
+  happens once, upstream, via the helper.
+
+### Still parked
+
+The over-split prefix tree (`-`/`.`/alpha↔digit) with longest-match inheritance,
+`off`=0 tombstone semantics, and a provider-overridable split. The fixed helper
+table is the interim stand-in for the prefix tree; it covers current Claude
+families but won't inherit across unseen minor versions the way the tree would.
+
+### The core type mismatch
+
+"The model" is one `string` doing double duty for two different things:
+
+- **requested model** — what YA config / the user chose (the YA alias, e.g.
+  `opus`); and
+- **reported model** — what the harness says it's running (the SDK-resolved id,
+  e.g. `claude-opus-4-8`).
+
+They differ, and because both are `string` the compiler can't catch
+substituting one for the other. That is the actual bug class: `Process.getInfo()`
+returns `model: resolvedModel ?? model`, i.e. it hands back the **reported**
+model at the read boundary and discards the **requested** one, and that reported
+string then gets used as a per-model config key it was never meant to be. The
+status-quo *intent* was to key per-model settings (`compactAtContextPercent`) by
+the **YA name** (the Settings slider does); the context quick-edit storing the
+**reported** id was the deviation that fragmented the same model across two keys.
+
+Fix the distinction nominally — a `RequestedModel` / `ReportedModel` brand (or at
+minimum two separately-named fields surfaced at that boundary) so they can't be
+swapped silently, with exactly one resolver where they cross. The two-field
+minimum is now in place (`requestedModel` alongside the reported `model` on
+`Process`/`ProcessInfo`/`LiveModelConfig`); the nominal brand is not yet.
+
+### Rejected: probe-and-store-under-the-resolved-name
+
+Initial idea: probe what each alias currently resolves to (`opus →
+claude-opus-4-8`) and store config under the resolved name, so a non-owned
+session (which reports the resolved name) is a direct lookup — no mapping,
+search, or win-order. **Rejected because the resolution is not stable**: it
+drifts with model versions and is subscription-dependent (`default` resolves to
+different models per plan). Baking an unstable mapping into storage is brittle —
+the stored key would silently stop matching when the resolution moves.
+
+### Chosen shape
+
+- **Owned sessions (YA-launched): key by the requested model** (the YA
+  alias), which YA already tracks (`process.model`, persisted
+  `SessionMetadata.model`). Don't key by `getInfo()`'s reported model.
+  Distinct-by-choice: `opus` ≠ `best`, no forced sharing — max flexibility.
+- **External sessions (attached/viewed, not YA-launched): no requested model**,
+  so fall back to the **reported** name, canonicalized:
+  - **provider-prefixed** (prepend the YA provider name if the reported name
+    doesn't already start with it), so the namespace is provider-rooted;
+  - **over-split into a prefix tree** — split on `-`, `.`, and alpha↔digit
+    boundaries. Deterministic and applied identically at write and read;
+    internal only, never user-facing. Over-splitting only makes prefixes *more*
+    specific, so it can't cause wrong inheritance — it just adds harmless nodes
+    and gives nicer minor-version grouping.
+  - **longest-stored-prefix read.** Writing a setting writes the value at every
+    prefix; an explicit node beats any inherited shorter prefix.
+- **Inheritance survives resolution drift** — the robustness the rejected
+  approach lacked: a bumped version (`claude-opus-4-9`), never configured, still
+  reads `claude-opus-4`. Setting one model also populates broad prefixes, so an
+  unconfigured sibling inherits the last-changed family value (accepted: an
+  explicit per-model node always wins).
+- **`off` is a stored 0, not a deleted key** — `{1–99 = percent, 0 = explicit
+  off / don't inherit, absent = inherit}`. (Today the slider deletes at 0 and the
+  validator drops 0; both flip.)
+- **`default` is the holdout** — subscription-dependent, no reported name until a
+  session runs; only learnable at runtime.
+
+### Caveats / where the provider must override
+
+The prefix family-default assumes a **stable component order** (family before
+version). Provider naming doesn't always cooperate — Anthropic flipped it
+(`claude-opus-4-8` is `{family}-{version}`, the older `claude-3-5-sonnet` was
+`{version}-{family}`), so `claude-sonnet-4-6` yields a `claude-sonnet` prefix and
+`claude-3-5-sonnet` yields none. For current models it's a non-issue, but it's
+the reason the **provider may override the split / canonicalization** — default
+is the universal over-split (no-op), a provider overrides only when its naming
+needs re-ordering or to resolve an alias it has learned. This is the
+requested↔reported / split surface, same default-does-nothing contract as
+`contextWindowFor`.
+
+### Recorded tension
+
+Owned-by-requested gives distinct-by-choice (no sharing) and contradicts the
+earlier "set opus, see it on best". You can't get both "distinct by choice" and
+"shared by underlying model" from one key; owned-by-requested picks distinct. If
+an owned setting should also apply when later *viewing an external* session of
+the same model, owned would additionally write the resolved-name prefixes — but
+that reintroduces the collapse. Owned-by-requested is the chosen default.

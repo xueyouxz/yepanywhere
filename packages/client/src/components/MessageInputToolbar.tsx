@@ -218,6 +218,12 @@ export interface MessageInputToolbarProps {
   /** Provider/model context used by the thinking effort chooser. */
   thinkingProvider?: string;
   thinkingModel?: string;
+  /**
+   * YA model id (launch alias) used to key the context quick-edit's per-model
+   * compaction threshold. Distinct from `thinkingModel` (the reported model);
+   * falls back to it when absent. See topics/provider-abstraction.md.
+   */
+  contextRequestedModel?: string;
 
   // Session heartbeat
   heartbeatEnabled?: boolean;
@@ -2002,6 +2008,7 @@ export function MessageInputToolbar({
   btwToolbarMode,
   thinkingProvider,
   thinkingModel,
+  contextRequestedModel,
   heartbeatEnabled = false,
   onToggleHeartbeat,
   onConfigureHeartbeat,
@@ -2586,7 +2593,7 @@ export function MessageInputToolbar({
         disabled,
         voiceDisabled,
         contextUsage,
-        contextModel: thinkingModel,
+        contextModel: contextRequestedModel ?? thinkingModel,
         contextWindow: thinkingModelInfo?.contextWindow,
         btw: onBtwClick
           ? {
