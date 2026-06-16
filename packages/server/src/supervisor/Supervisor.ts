@@ -357,6 +357,12 @@ export interface ModelSettings {
    * Supervisor stays settings-agnostic. 1–99 active; absent/out-of-range = off.
    */
   compactAtContextPercent?: number;
+  /**
+   * Effective context window (tokens) for the compaction threshold, resolved
+   * by the route. Preferred over `process.contextWindow`, which is often
+   * undefined and ignores always-1M for opus/sonnet.
+   */
+  compactAtContextWindow?: number;
 }
 
 /** Error response when queue is full */
@@ -1032,7 +1038,10 @@ export class Supervisor {
     if (process.provider !== "claude" && process.provider !== "claude-ollama") {
       return;
     }
-    const contextWindow = process.contextWindow;
+    // Prefer the route-resolved window; process.contextWindow is often
+    // undefined and ignores always-1M for opus/sonnet.
+    const contextWindow =
+      modelSettings?.compactAtContextWindow ?? process.contextWindow;
     if (!contextWindow || contextWindow <= 0) return;
 
     let inputTokens: number | undefined;

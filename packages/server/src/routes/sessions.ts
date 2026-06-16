@@ -802,6 +802,33 @@ export function resolveCompactPercent(
   return undefined;
 }
 
+/**
+ * Effective context window for the compaction threshold (task 029). Honors
+ * always-1M: claude opus/sonnet run at the 1M window, but their resolved ids
+ * ("claude-opus-4-8") fall through `getModelContextWindow` to the base 200K
+ * family window, and `process.contextWindow` is often undefined — so neither is
+ * reliable. Use the `[1m]` window for those families, else the resolver.
+ */
+export function resolveCompactWindow(
+  provider: ProviderName | undefined,
+  candidates: (string | undefined)[],
+  fallback: (model: string | undefined, provider?: ProviderName) => number,
+): number | undefined {
+  if (provider === "claude" || provider === "claude-ollama") {
+    for (const m of candidates) {
+      const family = m?.match(/(?:^|[-/])(opus|sonnet)(?:[-/[]|$)/)?.[1];
+      if (family) return getModelContextWindow(`${family}[1m]`, "claude");
+    }
+  }
+  for (const m of candidates) {
+    if (m && m !== "default") {
+      const w = fallback(m, provider);
+      if (w > 0) return w;
+    }
+  }
+  return undefined;
+}
+
 function isAutoCompactEligibleMessage(message: string): boolean {
   const trimmed = message.trim();
   if (!trimmed) {
@@ -3687,11 +3714,27 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     // key by the provider alias the user picked ("opus"), but a live process
     // resolves to a full id ("claude-opus-4-8"), so resolveCompactPercent tries
     // every identifier and falls back to model family.
+    const compactModelCandidates = [
+      body.model,
+      model,
+      process.model,
+      process.resolvedModel,
+    ];
     const compactAtContextPercent = resolveCompactPercent(
       deps.serverSettingsService?.getSetting("clientDefaults")
         ?.compactAtContextPercent,
-      [body.model, model, process.model, process.resolvedModel],
+      compactModelCandidates,
     );
+    // Resolve the effective window here too — process.contextWindow is
+    // unreliable (often undefined) and the base resolver ignores always-1M.
+    const compactAtContextWindow =
+      compactAtContextPercent === undefined
+        ? undefined
+        : resolveCompactWindow(
+            process.provider,
+            compactModelCandidates,
+            resolveContextWindow,
+          );
 
     // Use queueMessageToSession which handles thinking mode changes
     // If thinking mode changed, it will restart the process automatically
@@ -3715,6 +3758,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         globalInstructions: queueGlobalInstructions,
         permissions: body.permissions,
         compactAtContextPercent,
+        compactAtContextWindow,
       },
     );
 
