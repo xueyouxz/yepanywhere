@@ -9635,6 +9635,46 @@ a.sidebar-nav-item {
   font-variant-numeric: tabular-nums;
 }
 
+/* Long-press / right-click quick-edit for the per-model compact threshold. */
+.context-threshold-quickedit {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.context-threshold-popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 200px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-elevated, #252526);
+  border: 1px solid var(--border-color, #3c3c3c);
+  border-radius: var(--radius-md, 6px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.context-threshold-popover input[type="range"] {
+  width: 100%;
+}
+
+.context-threshold-popover-title {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--text-primary, #e0e0e0);
+}
+
+.context-threshold-popover-hint {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 @media (max-width: 600px) {
   .page {
     padding-right: 2px;

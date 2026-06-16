@@ -67,7 +67,7 @@ import type {
   SpeechTranscriptionResultMetadata,
 } from "../lib/speechProviders/SpeechProvider";
 import type { ContextUsage, PermissionMode } from "../types";
-import { ContextUsageIndicator } from "./ContextUsageIndicator";
+import { ContextThresholdQuickEdit } from "./ContextThresholdQuickEdit";
 import type { FilterOption } from "./FilterDropdown";
 import { MessageAge } from "./MessageAge";
 import { ModeSelector } from "./ModeSelector";
@@ -578,6 +578,10 @@ interface ToolbarActionsControl {
   disabled?: boolean;
   voiceDisabled?: boolean;
   contextUsage?: ContextUsage;
+  /** Session model id, for the long-press compact-threshold quick-edit. */
+  contextModel?: string;
+  /** Model context window, for the quick-edit token preview. */
+  contextWindow?: number;
   btw?: ToolbarBtwControl | null;
   stop?: ToolbarStopControl | null;
   send?: ToolbarSendControl | null;
@@ -1771,8 +1775,10 @@ export function MessageInputToolbarView({
           </div>
         )}
         {visibility.contextUsage && (
-          <ContextUsageIndicator
+          <ContextThresholdQuickEdit
             usage={actionsControl.contextUsage}
+            model={actionsControl.contextModel}
+            contextWindow={actionsControl.contextWindow}
             size={16}
           />
         )}
@@ -2580,6 +2586,8 @@ export function MessageInputToolbar({
         disabled,
         voiceDisabled,
         contextUsage,
+        contextModel: thinkingModel,
+        contextWindow: thinkingModelInfo?.contextWindow,
         btw: onBtwClick
           ? {
               onClick: onBtwClick,
