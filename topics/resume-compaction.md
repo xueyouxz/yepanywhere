@@ -13,7 +13,8 @@ Related topics: [claude](claude.md),
 [provider-refresh](provider-refresh.md),
 [provider-state-machine](provider-state-machine.md),
 [session-liveness](session-liveness.md),
-[cost-efficiency](cost-efficiency.md)
+[cost-efficiency](cost-efficiency.md),
+[injected-message-visibility](injected-message-visibility.md)
 
 ## Motivation
 
@@ -168,6 +169,46 @@ cheaper model on the user's behalf.
 - Client tests for the old-session choice and busy/progress state.
 - Codex regression tests proving existing compaction item normalization
   remains intact before any Codex initiation work is added.
+
+## Live threshold trigger (task 029)
+
+Distinct from resume-time compact-first above: a **live, in-session**
+preemptive compaction, configured per model as "compact at X% of that model's
+context window" (`clientDefaults.compactAtContextPercent[model]`). It reuses the
+same `Supervisor.tryResumeCompaction` primitive, so it drives the **native
+`compact_boundary`** (same result + render contract) and the injected `/compact`
+carries no user echo (`metadata.hidden`; see
+[injected-message-visibility](injected-message-visibility.md)). The route
+resolves the live model's percent (it holds the settings) and threads it via
+`ModelSettings.compactAtContextPercent`; the Supervisor stays settings-agnostic.
+The pure decision is `crossesCompactThreshold(percent, contextWindow,
+inputTokens)`; the orchestration is `Supervisor.maybeCompactBeforeDelivery`,
+called from `queueMessageToSession` just before delivering a turn.
+
+Design intent and invariants (user-confirmed 2026-06-16):
+
+- **Voluntary, momentum-preserving.** It is a "do it when the user won't be
+  bothered" compaction, not a needed one. Idle-gated: it returns immediately
+  unless the process is idle, so it never interrupts an active turn.
+- **Harness-enforced compaction is untouched and remains the backstop.** This
+  trigger is purely *earlier and additive*; nothing about the harness's own
+  auto-compaction changed. When the trigger does not fire (off, usage unknown,
+  non-idle, non-claude) the enforced path behaves exactly as before. The
+  voluntary threshold (e.g. opus 28% ≈ 280K of a 1M window) sits well below the
+  harness's enforced point (~800K on 1M), so in steady state the two never fire
+  together — the voluntary one keeps usage from ever reaching the enforced one.
+- **No double compaction.** Live usage is re-read and re-tested *immediately
+  before* executing — there is no deferral gap between deciding and running — so
+  a prior compaction (the harness's enforced one or a previous voluntary one)
+  that dropped usage below the threshold makes the next evaluation a no-op.
+- **Conservative (task 002).** Claude only, idle only, only when usage is known;
+  best-effort — the turn is delivered regardless of the compaction outcome, with
+  no retry loop; failure is logged, never blocks the turn.
+
+Scope boundary (v1): only fresh REST turns through `queueMessageToSession`
+evaluate the trigger. Deferred-queue promotions go through `Process.queueMessage`
+directly and bypass it; the next fresh turn re-evaluates. Acceptable because the
+trigger is voluntary and the enforced backstop still covers the deferred path.
 
 ## Open Questions
 

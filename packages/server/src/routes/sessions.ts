@@ -2227,7 +2227,10 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     // native built-ins, such as Codex, can expose those while stopped.
     const slashCommands = await getSessionSlashCommands(
       process,
-      process?.provider ?? session?.provider ?? metadataProvider ?? project.provider,
+      process?.provider ??
+        session?.provider ??
+        metadataProvider ??
+        project.provider,
     );
 
     if (!session) {
@@ -3654,6 +3657,16 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         : (process.resolvedModel ?? process.model);
     const serviceTier = normalizeOptionalServiceTier(body.serviceTier);
 
+    // Per-model preemptive-compaction threshold (task 029). Resolve the live
+    // model's percent here (the route holds the settings); the Supervisor
+    // stays settings-agnostic. `model` is always a concrete id, never the
+    // "default" sentinel, so it matches the slider/migration map key.
+    const compactAtContextPercent =
+      model == null
+        ? undefined
+        : deps.serverSettingsService?.getSetting("clientDefaults")
+            ?.compactAtContextPercent?.[model];
+
     // Use queueMessageToSession which handles thinking mode changes
     // If thinking mode changed, it will restart the process automatically
     const queueGlobalInstructions = getGlobalInstructions();
@@ -3675,6 +3688,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
           undefined,
         globalInstructions: queueGlobalInstructions,
         permissions: body.permissions,
+        compactAtContextPercent,
       },
     );
 

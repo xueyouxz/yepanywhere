@@ -70,6 +70,7 @@ const CLIENT_DEFAULT_KEYS = [
   "speech",
   "sessionToolbarVisibility",
   "steerNowDefault",
+  "compactAtContextPercent",
 ] as const;
 const SPEECH_CLIENT_DEFAULT_KEYS = [
   "voiceInputEnabled",
@@ -443,6 +444,27 @@ function parseSessionToolbarVisibilityClientDefaults(
   return Object.keys(parsed).length > 0 ? parsed : null;
 }
 
+// Per-model compaction thresholds: each value is "compact at X% of that
+// model's context window". Reject non-numbers (the slider only ever sends
+// numbers), but treat out-of-range like the load path does — keep 1–99 and
+// drop anything else (including >= 100 = "off"). An empty result clears the
+// setting. The returned map is authoritative: the client always sends the
+// full map, so mergeClientDefaults replaces rather than per-model merges,
+// which is what makes turning a model "off" (dropping its key) take effect.
+function parseCompactAtContextPercent(
+  raw: unknown,
+): Record<string, number> | undefined | null {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  if (!isRecord(raw)) return null;
+  const cleaned: Record<string, number> = {};
+  for (const [modelId, value] of Object.entries(raw)) {
+    if (typeof value !== "number" || !Number.isFinite(value)) return null;
+    const pct = Math.round(value);
+    if (pct > 0 && pct < 100) cleaned[modelId] = pct;
+  }
+  return Object.keys(cleaned).length > 0 ? cleaned : undefined;
+}
+
 function parseClientDefaults(raw: unknown): ClientDefaults | undefined | null {
   if (raw === undefined) return null;
   if (raw === null || raw === "") return undefined;
@@ -514,6 +536,13 @@ function parseClientDefaults(raw: unknown): ClientDefaults | undefined | null {
     if (parsedVisibility === null) return null;
     parsed.sessionToolbarVisibility = parsedVisibility;
   }
+  if ("compactAtContextPercent" in raw) {
+    const parsedCompact = parseCompactAtContextPercent(
+      raw.compactAtContextPercent,
+    );
+    if (parsedCompact === null) return null;
+    parsed.compactAtContextPercent = parsedCompact;
+  }
 
   return Object.keys(parsed).length > 0 ? parsed : undefined;
 }
@@ -549,6 +578,15 @@ function mergeClientDefaults(
         ...current?.sessionToolbarVisibility,
         ...update.sessionToolbarVisibility,
       };
+    }
+  }
+  if ("compactAtContextPercent" in update) {
+    // Replace the whole map (not a per-model merge): the client always sends
+    // the complete map, so a model dropped from it means "off" for that model.
+    if (update.compactAtContextPercent === undefined) {
+      delete merged.compactAtContextPercent;
+    } else {
+      merged.compactAtContextPercent = update.compactAtContextPercent;
     }
   }
   return Object.keys(merged).length > 0 ? merged : undefined;

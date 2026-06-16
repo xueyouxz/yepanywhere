@@ -401,6 +401,97 @@ describe("Settings Routes", () => {
       expect(mockServerSettingsService.updateSettings).not.toHaveBeenCalled();
     });
 
+    it("persists per-model compact thresholds and drops out-of-range entries", async () => {
+      settings = { ...settings, clientDefaults: undefined };
+      const routes = createSettingsRoutes({
+        serverSettingsService: mockServerSettingsService,
+      });
+
+      const response = await routes.request("/", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientDefaults: {
+            // 150 means "off" for sonnet (>= 100) and is dropped.
+            compactAtContextPercent: { opus: 20, sonnet: 150 },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(mockServerSettingsService.updateSettings).toHaveBeenCalledWith({
+        clientDefaults: { compactAtContextPercent: { opus: 20 } },
+      });
+    });
+
+    it("preserves compact thresholds when another client default changes", async () => {
+      settings = {
+        ...settings,
+        clientDefaults: { compactAtContextPercent: { opus: 20 } },
+      };
+      const routes = createSettingsRoutes({
+        serverSettingsService: mockServerSettingsService,
+      });
+
+      const response = await routes.request("/", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientDefaults: { steerNowDefault: true },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(mockServerSettingsService.updateSettings).toHaveBeenCalledWith({
+        clientDefaults: {
+          compactAtContextPercent: { opus: 20 },
+          steerNowDefault: true,
+        },
+      });
+    });
+
+    it("clears compact thresholds when the map empties", async () => {
+      settings = {
+        ...settings,
+        clientDefaults: { compactAtContextPercent: { opus: 20 } },
+      };
+      const routes = createSettingsRoutes({
+        serverSettingsService: mockServerSettingsService,
+      });
+
+      const response = await routes.request("/", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientDefaults: { compactAtContextPercent: {} },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(mockServerSettingsService.updateSettings).toHaveBeenCalledWith({
+        clientDefaults: undefined,
+      });
+    });
+
+    it("rejects non-numeric compact threshold values", async () => {
+      const routes = createSettingsRoutes({
+        serverSettingsService: mockServerSettingsService,
+      });
+
+      const response = await routes.request("/", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientDefaults: { compactAtContextPercent: { opus: "20" } },
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      const json = await response.json();
+      expect(json.error).toBe("Invalid clientDefaults setting");
+      expect(mockServerSettingsService.updateSettings).not.toHaveBeenCalled();
+    });
+
     it("accepts provider-scoped prompt-cache keepalive settings", async () => {
       const routes = createSettingsRoutes({
         serverSettingsService: mockServerSettingsService,

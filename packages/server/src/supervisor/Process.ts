@@ -179,6 +179,21 @@ export function shouldEmitMessage(_message: SDKMessage): boolean {
   return true;
 }
 
+/**
+ * Single decision point for whether a queued user message is hidden from the
+ * transcript UI. Currently true only for YA-injected control commands — the
+ * `/compact` YA queues for compaction, which native auto-compaction shows no
+ * user turn for. This is deliberately NOT folded into `shouldEmitMessage`
+ * (which must stay an unconditional `return true` for provider-stream
+ * messages); it gates only the optimistic user echo at queue time. Routing
+ * every hide through this one predicate lets a future "show hidden" UI render
+ * these consistently (e.g. hyper-collapsed) instead of each call site
+ * suppressing ad hoc. See topics/injected-message-visibility.md.
+ */
+export function isHiddenInjectedMessage(message: UserMessage): boolean {
+  return message.metadata?.hidden === true;
+}
+
 function isClaudeSdkProvider(provider: ProviderName): boolean {
   return provider === "claude" || provider === "claude-ollama";
 }
@@ -1814,12 +1829,16 @@ export class Process {
       message: { role: "user", content },
     } as SDKMessage);
 
+    // YA-injected control messages (e.g. the `/compact` we queue for
+    // compaction) carry no user echo — native auto-compaction shows none.
+    const hidden = isHiddenInjectedMessage(providerMessage);
+
     // Add to history for SSE replay to late-joining clients.
     // The client-side deduplication (mergeSSEMessage, mergeJSONLMessages) handles
     // any duplicates when JSONL is later fetched. This is especially important
     // for the two-phase flow (createSession + queueMessage) where the client
     // may connect before the JSONL is written.
-    if (shouldEmitMessage(sdkMessage)) {
+    if (!hidden && shouldEmitMessage(sdkMessage)) {
       // Check for duplicates in both buckets before adding
       // This prevents duplicates if the provider echoes the message back with the same UUID
       const isDuplicate =
@@ -1834,7 +1853,7 @@ export class Process {
     // Include the session ID so client can associate it correctly
     // The provider will echo this message back, but if we ensure UUIDs match,
     // the client will merge them.
-    if (shouldEmitMessage(sdkMessage)) {
+    if (!hidden && shouldEmitMessage(sdkMessage)) {
       this.emit({
         type: "message",
         message: { ...sdkMessage, session_id: this._sessionId },

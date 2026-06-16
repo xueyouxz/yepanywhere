@@ -188,6 +188,29 @@ function isCompactSuccessStatus(message: SDKMessage): boolean {
   );
 }
 
+/**
+ * Pure gate for the per-model compact-early threshold (task 029): true when a
+ * valid percent (1–99) and a known context window put live usage at or over
+ * the token threshold (percent% × window). Anything unknown or out of range
+ * yields false — the trigger never fires on missing usage. Semantics are
+ * "current usage already crosses the threshold", not a prediction of the next
+ * turn's size.
+ */
+export function crossesCompactThreshold(
+  percent: number | undefined,
+  contextWindow: number | undefined,
+  inputTokens: number | undefined,
+): boolean {
+  if (typeof percent !== "number" || percent <= 0 || percent >= 100) {
+    return false;
+  }
+  if (typeof contextWindow !== "number" || contextWindow <= 0) return false;
+  if (typeof inputTokens !== "number" || !Number.isFinite(inputTokens)) {
+    return false;
+  }
+  return inputTokens >= (percent / 100) * contextWindow;
+}
+
 function getStaleInTurnThresholdMs(provider: ProviderName): number {
   return provider === "codex" || provider === "codex-oss"
     ? CODEX_STALE_IN_TURN_THRESHOLD_MS
@@ -327,6 +350,13 @@ export interface ModelSettings {
    * providers that support prefix resume; ignored elsewhere.
    */
   resumeSessionAt?: string;
+  /**
+   * Per-model preemptive compaction threshold (task 029): "compact at X% of
+   * this model's context window". Resolved by the route from
+   * `clientDefaults.compactAtContextPercent[model]` and threaded through so the
+   * Supervisor stays settings-agnostic. 1–99 active; absent/out-of-range = off.
+   */
+  compactAtContextPercent?: number;
 }
 
 /** Error response when queue is full */
@@ -954,7 +984,9 @@ export class Supervisor {
 
     const watcher = this.watchResumeCompaction(process, command.command);
     const queued = process.queueMessage(
-      { text: `/${command.command}` },
+      // Hidden: native compaction shows no `/compact` user turn, so neither
+      // should YA-initiated compaction (resume-time or threshold-triggered).
+      { text: `/${command.command}`, metadata: { hidden: true } },
       { allowSteer: false },
     );
     if (!queued.success) {
@@ -967,6 +999,82 @@ export class Supervisor {
     }
 
     return watcher.promise;
+  }
+
+  /**
+   * Threshold-triggered preemptive compaction (task 029). When the per-model
+   * compact-at-% is set and live context already sits at/over that fraction of
+   * the model's window, run a `/compact` before delivering the next turn — the
+   * same native compaction the harness would eventually auto-fire, just
+   * earlier. Conservative per task 002: claude only, idle process only, only
+   * when usage is known. Best-effort — the turn is delivered regardless of the
+   * compaction outcome, and there is no retry loop. Reuses
+   * `tryResumeCompaction`, so the boundary the client renders is the native
+   * `compact_boundary` and the `/compact` carries no visible user echo.
+   *
+   * No double compaction: live usage is re-read and re-tested immediately
+   * before executing (there is no deferral gap between decide and run), so a
+   * prior compaction — the harness's enforced one or a previous voluntary one —
+   * that dropped usage below the threshold makes the next evaluation a no-op.
+   * The voluntary threshold also sits well below the harness's enforced point,
+   * so in steady state the two never fire together.
+   */
+  private async maybeCompactBeforeDelivery(
+    process: Process,
+    sessionId: string,
+    modelSettings: ModelSettings | undefined,
+  ): Promise<void> {
+    const percent = modelSettings?.compactAtContextPercent;
+    if (typeof percent !== "number" || percent <= 0 || percent >= 100) return;
+    // Only an idle claude process can be safely compacted before delivery;
+    // tryResumeCompaction also self-guards, but skip the usage read otherwise.
+    if (process.state.type !== "idle") return;
+    if (process.provider !== "claude" && process.provider !== "claude-ollama") {
+      return;
+    }
+    const contextWindow = process.contextWindow;
+    if (!contextWindow || contextWindow <= 0) return;
+
+    let inputTokens: number | undefined;
+    try {
+      const summary = await this.onSessionSummary?.(
+        sessionId,
+        process.projectId,
+      );
+      inputTokens = summary?.contextUsage?.inputTokens;
+    } catch {
+      // Usage unavailable → never block the turn.
+      return;
+    }
+    if (!crossesCompactThreshold(percent, contextWindow, inputTokens)) return;
+
+    try {
+      const attempt = await this.tryResumeCompaction(process);
+      if (attempt.status !== "completed") {
+        getLogger().info(
+          {
+            event: "threshold_compaction_skipped",
+            sessionId,
+            processId: process.id,
+            status: attempt.status,
+            percent,
+            inputTokens,
+            thresholdTokens: Math.round((percent / 100) * contextWindow),
+          },
+          "Threshold compaction did not complete; delivering turn as-is",
+        );
+      }
+    } catch (error) {
+      getLogger().warn(
+        {
+          event: "threshold_compaction_failed",
+          sessionId,
+          processId: process.id,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        "Threshold compaction errored; delivering turn as-is",
+      );
+    }
   }
 
   private async queueAfterResumeCompaction(params: {
@@ -1990,6 +2098,11 @@ export class Supervisor {
     if (permissionMode) {
       process.setPermissionMode(permissionMode);
     }
+
+    // Preemptively compact when this turn would push an already-near-threshold
+    // session over its per-model compact-early limit (task 029). No-op unless
+    // the threshold is set and the idle process is over it.
+    await this.maybeCompactBeforeDelivery(process, sessionId, modelSettings);
 
     const result = await this.queueProcessMessage(process, message);
     if (result.success) {

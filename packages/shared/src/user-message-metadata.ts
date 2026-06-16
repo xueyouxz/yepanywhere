@@ -110,4 +110,14 @@ export interface UserMessageMetadata {
   clientTimestamp?: number;
   /** Server receive time for the REST request that accepted this user turn. */
   serverReceivedAt?: string;
+  /**
+   * Hidden from the transcript UI as a YA-injected control message — currently
+   * the `/compact` command YA queues for a threshold-triggered or resume-time
+   * compaction, which native auto-compaction shows no user turn for. This is
+   * the single signal the echo/render path checks (see Process
+   * `isHiddenInjectedMessage`), so a future "show hidden" UI can reveal these
+   * consistently rather than each call site deciding ad hoc.
+   * See topics/injected-message-visibility.md.
+   */
+  hidden?: boolean;
 }

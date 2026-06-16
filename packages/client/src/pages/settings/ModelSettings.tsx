@@ -32,7 +32,7 @@ import {
   getDefaultProvider,
   useProviders,
 } from "../../hooks/useProviders";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useServerSettings } from "../../hooks/useServerSettings";
 import { useI18n } from "../../i18n";
 import { useSettingsUndoBaseline } from "./SettingsUndoContext";
@@ -290,6 +290,55 @@ export function ModelSettings() {
   );
   const selectedModelInfo =
     selectedModels.find((modelInfo) => modelInfo.id === selectedModel) ?? null;
+  // Per-model "compact context early" threshold (task 029): a percent of the
+  // selected model's context window. 0 = off, stored as the model's key being
+  // absent from clientDefaults.compactAtContextPercent. A local draft tracks
+  // the slider during a drag; commit-on-release writes the whole map, so
+  // dragging a model down to 0 drops its key and turns it off.
+  const storedCompactPercent =
+    (selectedModel
+      ? settings?.clientDefaults?.compactAtContextPercent?.[selectedModel]
+      : undefined) ?? 0;
+  const [compactPercentDraft, setCompactPercentDraft] =
+    useState(storedCompactPercent);
+  useEffect(() => {
+    setCompactPercentDraft(storedCompactPercent);
+  }, [storedCompactPercent]);
+  const showCompactThreshold =
+    selectedProvider?.name === "claude" &&
+    selectedModelInfo != null &&
+    // The live trigger keys by the running process model, which is always a
+    // concrete id (e.g. "opus") — never the "default" sentinel. Offering a
+    // threshold for "default" would only persist a key that can never fire.
+    selectedModel !== "default";
+  const compactWindow = selectedModelInfo?.contextWindow ?? null;
+  const compactTokenPreview =
+    compactWindow && compactPercentDraft > 0
+      ? `${Math.round((compactWindow * compactPercentDraft) / 100 / 1024)}K`
+      : null;
+  const commitCompactPercent = useCallback(
+    (pct: number) => {
+      if (!selectedModel) return;
+      const nextMap: Record<string, number> = {
+        ...settings?.clientDefaults?.compactAtContextPercent,
+      };
+      if (pct > 0 && pct < 100) {
+        nextMap[selectedModel] = Math.round(pct);
+      } else {
+        delete nextMap[selectedModel];
+      }
+      void updateSetting("clientDefaults", {
+        compactAtContextPercent: nextMap,
+      }).catch(() => {
+        // surfaced via the hook's error state
+      });
+    },
+    [
+      selectedModel,
+      settings?.clientDefaults?.compactAtContextPercent,
+      updateSetting,
+    ],
+  );
   const effortOptions = getEffortLevelOptions({
     provider: selectedProvider,
     model: selectedModelInfo,
@@ -561,6 +610,56 @@ export function ModelSettings() {
               )}
             </div>
           </div>
+
+          {showCompactThreshold && (
+            <div className="new-session-helper-section session-default-compact-section">
+              <h3>{t("modelSettingsCompactThresholdTitle")}</h3>
+              <p className="session-default-section-description">
+                {t("modelSettingsCompactThresholdDescription")}
+              </p>
+              <span className="output-appearance-slider-row">
+                <input
+                  type="range"
+                  min={0}
+                  max={99}
+                  step={1}
+                  value={compactPercentDraft}
+                  disabled={settingsLoading}
+                  aria-label={t("modelSettingsCompactThresholdTitle")}
+                  onChange={(e) =>
+                    setCompactPercentDraft(Number(e.target.value))
+                  }
+                  onPointerUp={() => commitCompactPercent(compactPercentDraft)}
+                  onKeyUp={() => commitCompactPercent(compactPercentDraft)}
+                />
+                <span className="output-appearance-number-wrap">
+                  <input
+                    type="number"
+                    className="settings-input-small output-appearance-number"
+                    min={0}
+                    max={99}
+                    step={1}
+                    value={compactPercentDraft}
+                    disabled={settingsLoading}
+                    aria-label={t("modelSettingsCompactThresholdTitle")}
+                    onChange={(e) =>
+                      setCompactPercentDraft(Number(e.target.value))
+                    }
+                    onBlur={() => commitCompactPercent(compactPercentDraft)}
+                  />
+                  <span className="output-appearance-unit">%</span>
+                </span>
+              </span>
+              <span className="settings-hint">
+                {compactPercentDraft > 0
+                  ? t("modelSettingsCompactThresholdOnHint", {
+                      percent: String(compactPercentDraft),
+                      tokens: compactTokenPreview ?? "—",
+                    })
+                  : t("modelSettingsCompactThresholdOffHint")}
+              </span>
+            </div>
+          )}
 
           {showThinkingControls && (
             <div className="new-session-helper-section session-default-thinking-section">

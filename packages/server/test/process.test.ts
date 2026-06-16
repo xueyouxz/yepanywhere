@@ -162,6 +162,39 @@ describe("Process", () => {
       expect(received[2]?.type).toBe("result");
     });
 
+    it("suppresses the user echo for hidden injected messages", async () => {
+      const iterator = createMockIterator([
+        { type: "system", subtype: "init", session_id: "sess-1" },
+      ]);
+      const process = new Process(iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        idleTimeoutMs: 100,
+      });
+
+      const userEchoes: SDKMessage[] = [];
+      process.subscribe((event) => {
+        if (event.type === "message" && event.message.type === "user") {
+          userEchoes.push(event.message);
+        }
+      });
+
+      const visible = process.queueMessage({ text: "hello" });
+      const compact = process.queueMessage({
+        text: "/compact",
+        metadata: { hidden: true },
+      });
+
+      expect(visible.success).toBe(true);
+      expect(compact.success).toBe(true);
+
+      // Let any emit flush, then confirm only the visible turn echoed — the
+      // hidden /compact (queued, so compaction still runs) shows no user turn.
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(userEchoes).toHaveLength(1);
+    });
+
     it("transitions to idle after result", async () => {
       const messages: SDKMessage[] = [
         { type: "system", subtype: "init", session_id: "sess-1" },

@@ -4,6 +4,11 @@
 > attached to the data or render boundary that produces it, rather than patching
 > generated DOM after the fact.
 
+See also: [`injected-message-visibility.md`](injected-message-visibility.md) —
+how YA-injected, non-user text (compaction commands, summaries, skill/resume
+init text) is hidden or given the system/boundary contract instead of rendering
+as a normal turn.
+
 Topic: ui-architecture
 
 ## Render Boundary Principle
