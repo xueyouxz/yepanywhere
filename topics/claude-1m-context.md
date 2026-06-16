@@ -360,18 +360,80 @@ This override is a useful, non-destructive way to *test* window math: set a
 small percent and confirm a session compacts at the expected absolute token
 count for its model's window.
 
+## Fix (implemented): durable per-model window observations
+
+The non-determinism above is path 2 being **in-memory only**: a server
+restart drops every observed window, so idle opus-4-8 sessions fall back to
+the static 200K heuristic (path 3) and read "120%" until some opus process
+runs again. The fix makes observed windows survive restarts without changing
+the resolution model — the window still tracks the *current model*, not the
+session (see "A session's window is not fixed for the session id"), because
+it stays keyed by model.
+
+**Shape.** `ModelInfoService` keeps two layers, not one:
+
+- **observed (durable).** Only `recordContextWindow(...)` writes it — i.e.
+  only real windows captured from an SDK `result` message's `modelUsage`,
+  the sole place the true account-resolved window exists. Keyed by
+  `"<provider>:<model>"` with the concrete model id, **one record per model**:
+  `{ contextWindow, observedAt }`. Persisted to
+  `{dataDir}/model-context-windows.json` (versioned, debounced writes), loaded
+  on startup.
+- **ingested (ephemeral).** `ingestModels`/`warmProvider` keep writing here as
+  before — provider-list/heuristic values keyed by alias (`opus`, `opus[1m]`).
+  Intentionally **not** persisted; persisting them would fill the durable file
+  with static guesses under alias keys.
+
+`getContextWindow` precedence is observed → ingested → static heuristic, and
+the live-process value (path 1) still overrides everything at request time.
+Full stack: **live process → durable observation → static default**.
+
+**Why a file and not the transcript.** Verified empirically: a Claude `.jsonl`
+holds the *numerator* but never the *denominator*. Assistant `message.usage`
+carries only token counts (`input_tokens`, `cache_read_input_tokens`, …) with
+no `contextWindow`, and `result` messages (which alone carry
+`modelUsage[model].contextWindow`) are a streaming/SDK artifact Claude Code
+does not write to the session file. The window is SDK-derived config that only
+surfaces in the end-of-turn `result`, so there is nothing to recover it from
+after the fact — hence our own small durable memo.
+
+**Timing.** The window is observed only when a YA-owned process completes a
+full turn (the `result` handler that also calls `transitionToIdle`), and is
+recorded the next time a route reads that process. Until a model has completed
+one turn under YA there is no observation and resolution falls to the static
+default; after the first completion it is recorded, persisted, and refreshes
+`observedAt` on every later completion. Self-correcting: a wrong or stale value
+is overwritten by the next real observation, so no expiry logic is needed.
+
+**Deliberately out of scope here** — each a clean follow-up the durable file
+unlocks rather than blocks: a bolder static default for known auto-1M ids
+(safe to add precisely *because* observations now correct it), unifying the
+metadata/detail endpoints, the display-clamp question, the per-session
+200K-Opus toggle (feasible per-spawn via `CLAUDE_CODE_DISABLE_1M_CONTEXT` in
+the filtered child env — see below), and storing more per-model fields. The
+record is intentionally just `{ contextWindow, observedAt }` (no cost/usage).
+
 ## Open questions (unresolved on purpose)
 
-- Whether the canonical fix is to persist the SDK-reported per-session
-  window (e.g. to session metadata) rather than relying on an in-memory,
-  model-keyed cache, and/or to update the static heuristic for known
-  auto-1M models. Any such fix must track mid-session model changes (see
-  "A session's window is not fixed for the session id"), not write the
-  window once. Not decided here.
+- **(Addressed by the fix above for the restart case.)** The remaining piece
+  is whether to also ship a bolder static default for known auto-1M ids
+  (opus-4-8/4-7, fable-5, mythos-5) so the *first* view of a never-run model
+  on a fresh install doesn't briefly read 200K. Now low-risk because the
+  durable observation overrides it on the first completed turn, but still
+  account-specific (would understate on a non-qualifying account until then).
+  Not done yet.
 - Whether yepanywhere should expose a way to request a 200K Opus session.
-  The only lever found is the CLI env var `CLAUDE_CODE_DISABLE_1M_CONTEXT`,
-  which is process-wide (would force all sessions to standard context), not
-  per-session.
+  The only lever found is the CLI env var `CLAUDE_CODE_DISABLE_1M_CONTEXT`.
+  Correction to an earlier assumption that this is unavoidably process-wide:
+  YA spawns a fresh child per Claude session and already injects per-launch
+  env defaults into the filtered child environment (`filterEnvForChildProcess`
+  sets `ENABLE_PROMPT_CACHING_1H ??= "1"`,
+  `packages/server/src/sdk/providers/env-filter.ts`). So a **per-session**
+  toggle is feasible: persist a flag in `SessionMetadata` and set
+  `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` in that one session's child env at
+  launch/resume/fork. Constraint: env is fixed at spawn, so it cannot flip
+  mid-session (only at launch/resume) — the same shape as model selection
+  being a launch/owned-process capability. Deferred as a separate feature.
 - Whether the metadata endpoint should apply the same live-process override
   the detail endpoint does, and whether raw percentages should be clamped at
   the surfaces noted above.
