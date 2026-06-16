@@ -2261,14 +2261,8 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
               ? (m, p) => mis.getContextWindow(m, p)
               : undefined,
         );
-        // Cache SDK-reported context window for future JSONL reads
-        if (mis && sdkContextWindow && process.resolvedModel) {
-          mis.recordContextWindow(
-            process.resolvedModel,
-            sdkContextWindow,
-            process.provider,
-          );
-        }
+        // (Durable recording happens at the observation point in Process via
+        // onContextWindowObserved, not as a side effect of this GET.)
         // Get metadata even for new sessions (in case it was set before file was written)
         const metadata = deps.sessionMetadataService?.getMetadata(sessionId);
         // Get notification data for new sessions too
@@ -2399,12 +2393,8 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         percentage: Math.round((contextUsage.inputTokens / cw) * 100),
         contextWindow: cw,
       };
-      // Cache for future reads without a live process
-      deps.modelInfoService?.recordContextWindow(
-        process.resolvedModel ?? session.model ?? "",
-        cw,
-        process.provider,
-      );
+      // Durable recording happens at the observation point in Process via
+      // onContextWindowObserved; this block only overrides the displayed value.
     }
 
     const { messages: _messages, ...sessionMetadata } = session;

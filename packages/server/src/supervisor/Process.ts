@@ -2846,20 +2846,31 @@ export class Process {
           // Legacy mock SDK behavior - handle input_request message
           this.handleInputRequest(message);
         } else if (message.type === "result") {
-          // Capture context window from modelUsage in result messages.
+          // Capture context window from modelUsage in result messages. This is
+          // the authoritative observation point (the only place the real,
+          // account-resolved window exists); we emit a per-model observation
+          // for each entry so it can be durably recorded regardless of whether
+          // any client fetches this session's detail, and keep the max across
+          // entries as this process's live-override window.
           // Keys may include suffixes like "[1m]" (e.g. "claude-opus-4-6[1m]"),
-          // so we take the max contextWindow across all model entries.
+          // so we strip them to the canonical id the transcript/reader uses.
           if (message.modelUsage) {
             const mu = message.modelUsage as Record<
               string,
               { contextWindow?: number }
             >;
-            for (const entry of Object.values(mu)) {
+            for (const [rawModel, entry] of Object.entries(mu)) {
               if (entry.contextWindow && entry.contextWindow > 0) {
                 this._contextWindow = Math.max(
                   this._contextWindow ?? 0,
                   entry.contextWindow,
                 );
+                this.emit({
+                  type: "context-window-observed",
+                  model: rawModel.replace(/\[1m\]$/i, ""),
+                  contextWindow: entry.contextWindow,
+                  provider: this.provider,
+                });
               }
             }
           }

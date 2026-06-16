@@ -393,6 +393,12 @@ export interface SupervisorOptions {
   maxQueueSize?: number;
   /** Callback to persist executor when session ID is received (for remote execution resume) */
   onSessionExecutor?: OnSessionExecutorCallback;
+  /** Callback invoked when a process observes a model's real context window. */
+  onContextWindowObserved?: (
+    model: string,
+    contextWindow: number,
+    provider: ProviderName,
+  ) => void;
   /** Callback to fetch session summary for initial metadata reconciliation */
   onSessionSummary?: OnSessionSummaryCallback;
   /** Callback to read the current heartbeat-turn settings for a session */
@@ -427,6 +433,11 @@ export class Supervisor {
   private idlePreemptThresholdMs: number;
   private workerQueue: WorkerQueue;
   private onSessionExecutor?: OnSessionExecutorCallback;
+  private onContextWindowObserved?: (
+    model: string,
+    contextWindow: number,
+    provider: ProviderName,
+  ) => void;
   private onSessionSummary?: OnSessionSummaryCallback;
   private staleCheckTimer: ReturnType<typeof setInterval>;
   private getHeartbeatTurnSettings?: (
@@ -463,6 +474,7 @@ export class Supervisor {
       maxQueueSize: options.maxQueueSize,
     });
     this.onSessionExecutor = options.onSessionExecutor;
+    this.onContextWindowObserved = options.onContextWindowObserved;
     this.onSessionSummary = options.onSessionSummary;
     this.getHeartbeatTurnSettings = options.getHeartbeatTurnSettings;
     this.getHeartbeatTurnCandidates = options.getHeartbeatTurnCandidates;
@@ -2768,6 +2780,12 @@ export class Supervisor {
         this.emitSessionAborted(process.sessionId, process.projectId);
       } else if (event.type === "complete") {
         this.unregisterProcess(process);
+      } else if (event.type === "context-window-observed") {
+        this.onContextWindowObserved?.(
+          event.model,
+          event.contextWindow,
+          event.provider,
+        );
       } else if (event.type === "session-id-changed") {
         // Update session→process mapping when temp ID is replaced by real ID from SDK
         // This is critical for ExternalSessionTracker to correctly identify owned sessions

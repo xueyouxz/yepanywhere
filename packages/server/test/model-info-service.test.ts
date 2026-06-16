@@ -60,6 +60,29 @@ describe("ModelInfoService durable observations", () => {
     expect(Object.keys(opus).sort()).toEqual(["contextWindow", "observedAt"]);
   });
 
+  it("re-flushes and refreshes observedAt on a repeat identical observation", async () => {
+    const svc = new ModelInfoService({ dataDir });
+    const file = path.join(dataDir, "model-context-windows.json");
+
+    svc.recordContextWindow("claude-opus-4-8", 1_000_000, "claude");
+    await svc.flush();
+    const first = JSON.parse(await readFile(file, "utf-8")).models[
+      "claude:claude-opus-4-8"
+    ].observedAt;
+
+    // Same value again: must still rewrite so observedAt = "last confirmed".
+    await new Promise((r) => setTimeout(r, 5));
+    svc.recordContextWindow("claude-opus-4-8", 1_000_000, "claude");
+    await svc.flush();
+    const second = JSON.parse(await readFile(file, "utf-8")).models[
+      "claude:claude-opus-4-8"
+    ].observedAt;
+
+    expect(new Date(second).getTime()).toBeGreaterThan(
+      new Date(first).getTime(),
+    );
+  });
+
   it("does not persist ephemeral ingested (provider-list/heuristic) values", async () => {
     const svc = new ModelInfoService({ dataDir });
     svc.ingestModels("claude", [

@@ -162,6 +162,55 @@ describe("Process", () => {
       expect(received[2]?.type).toBe("result");
     });
 
+    it("emits a context-window-observed event per modelUsage entry (and strips [1m])", async () => {
+      const messages = [
+        { type: "system", subtype: "init", session_id: "sess-1" },
+        {
+          type: "result",
+          session_id: "sess-1",
+          modelUsage: {
+            "claude-opus-4-8": { contextWindow: 1_000_000 },
+            "claude-haiku-4-5-20251001": { contextWindow: 200_000 },
+            "claude-sonnet-4-6[1m]": { contextWindow: 1_000_000 },
+            "zero-window-model": { contextWindow: 0 },
+          },
+        },
+      ] as unknown as SDKMessage[];
+
+      const iterator = createMockIterator(messages);
+      const process = new Process(iterator, {
+        projectPath: "/test",
+        projectId: "proj-1" as UrlProjectId,
+        sessionId: "sess-1",
+        provider: "claude",
+        idleTimeoutMs: 100,
+      });
+
+      const observed: Array<{ model: string; contextWindow: number }> = [];
+      let observedProvider: string | undefined;
+      process.subscribe((event) => {
+        if (event.type === "context-window-observed") {
+          observed.push({
+            model: event.model,
+            contextWindow: event.contextWindow,
+          });
+          observedProvider = event.provider;
+        }
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // One event per non-zero entry; the zero-window entry is skipped.
+      expect(observed).toEqual([
+        { model: "claude-opus-4-8", contextWindow: 1_000_000 },
+        { model: "claude-haiku-4-5-20251001", contextWindow: 200_000 },
+        { model: "claude-sonnet-4-6", contextWindow: 1_000_000 }, // [1m] stripped
+      ]);
+      expect(observedProvider).toBe("claude");
+      // Live-override window is still the max across entries.
+      expect(process.contextWindow).toBe(1_000_000);
+    });
+
     it("transitions to idle after result", async () => {
       const messages: SDKMessage[] = [
         { type: "system", subtype: "init", session_id: "sess-1" },

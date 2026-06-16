@@ -157,19 +157,14 @@ export class ModelInfoService {
     provider?: ProviderName,
   ): void {
     const key = provider ? `${provider}:${model}` : model;
-    const prev = this.observed.get(key);
     this.observed.set(key, {
       contextWindow,
       observedAt: new Date().toISOString(),
     });
-    // Only touch disk when something durable changed or we have nothing yet.
-    // observedAt always refreshes in memory; persisting it on every identical
-    // observation would thrash disk during a live turn, so we flush on first
-    // sight or on a value change and otherwise leave the timestamp to the next
-    // change. The debounced writer coalesces bursts regardless.
-    if (!prev || prev.contextWindow !== contextWindow) {
-      void this.save();
-    }
+    // Flush on every observation so observedAt means "last confirmed". Callers
+    // record at turn-completion cadence (not per request), and the debounced
+    // writer coalesces any bursts, so this is cheap.
+    void this.save();
   }
 
   /**

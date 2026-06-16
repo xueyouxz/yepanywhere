@@ -372,13 +372,20 @@ it stays keyed by model.
 
 **Shape.** `ModelInfoService` keeps two layers, not one:
 
-- **observed (durable).** Only `recordContextWindow(...)` writes it — i.e.
-  only real windows captured from an SDK `result` message's `modelUsage`,
-  the sole place the true account-resolved window exists. Keyed by
-  `"<provider>:<model>"` with the concrete model id, **one record per model**:
-  `{ contextWindow, observedAt }`. Persisted to
-  `{dataDir}/model-context-windows.json` (versioned, debounced writes), loaded
-  on startup.
+- **observed (durable).** Only `recordContextWindow(...)` writes it — fed from
+  the **observation point itself**: `Process` emits a `context-window-observed`
+  event for each `modelUsage` entry the moment a `result` message arrives
+  (`Process.ts`), the `Supervisor` forwards it via the `onContextWindowObserved`
+  callback (`Supervisor.observeProcessEvents`), and `app.ts` wires that to
+  `ModelInfoService.recordContextWindow`. Keyed by `"<provider>:<model>"` with
+  the concrete model id (a trailing `[1m]` is stripped to match the reader's
+  bare-id lookup), **one record per model**: `{ contextWindow, observedAt }`.
+  Persisted to `{dataDir}/model-context-windows.json` (versioned, debounced
+  writes) and loaded on startup. Recording is **not** a side effect of any HTTP
+  GET — an earlier version recorded only when the session-detail route happened
+  to read a live process, so a model whose turns streamed over WS/relay without
+  a detail fetch (verified: a standalone sonnet session) captured its window in
+  the `Process` but never persisted it.
 - **ingested (ephemeral).** `ingestModels`/`warmProvider` keep writing here as
   before — provider-list/heuristic values keyed by alias (`opus`, `opus[1m]`).
   Intentionally **not** persisted; persisting them would fill the durable file
@@ -397,13 +404,16 @@ does not write to the session file. The window is SDK-derived config that only
 surfaces in the end-of-turn `result`, so there is nothing to recover it from
 after the fact — hence our own small durable memo.
 
-**Timing.** The window is observed only when a YA-owned process completes a
-full turn (the `result` handler that also calls `transitionToIdle`), and is
-recorded the next time a route reads that process. Until a model has completed
-one turn under YA there is no observation and resolution falls to the static
-default; after the first completion it is recorded, persisted, and refreshes
-`observedAt` on every later completion. Self-correcting: a wrong or stale value
-is overwritten by the next real observation, so no expiry logic is needed.
+**Timing.** The window is observed and recorded at the same instant a YA-owned
+process completes a full turn (the `result` handler that also calls
+`transitionToIdle`) — no second trigger, no dependence on a client fetch. Until
+a model has completed one turn under YA there is no observation and resolution
+falls to the static default; after the first completion it is recorded,
+persisted, and **flushes on every later completion** (so `observedAt` means
+"last confirmed", not "first seen"). Recording cadence is turn-completion, not
+per-request, and the debounced writer coalesces the per-model burst within one
+turn. Self-correcting: a wrong or stale value is overwritten by the next real
+observation, so no expiry logic is needed.
 
 **Deliberately out of scope here** — each a clean follow-up the durable file
 unlocks rather than blocks: a bolder static default for known auto-1M ids

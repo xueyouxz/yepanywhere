@@ -234,6 +234,12 @@ export type ProcessEvent =
   | { type: "liveness-update" }
   | { type: "mode-change"; mode: PermissionMode; version: number }
   | { type: "session-id-changed"; oldSessionId: string; newSessionId: string }
+  | {
+      type: "context-window-observed";
+      model: string;
+      contextWindow: number;
+      provider: ProviderName;
+    }
   | { type: "error"; error: Error }
   | { type: "idle-reap" }
   | { type: "complete" }
