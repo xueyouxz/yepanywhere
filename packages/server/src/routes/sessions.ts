@@ -1694,6 +1694,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     provider: ProviderName | undefined,
     executor: string | undefined,
     initialPrompt?: string,
+    promptSuggestionMode?: PromptSuggestionMode,
   ): Promise<void> => {
     if (!deps.sessionMetadataService) {
       return;
@@ -1709,6 +1710,14 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         sessionId,
         initialPrompt,
       );
+    }
+    // Persist the resolved prompt-suggestion mode so a later resume (which may
+    // omit it from the request body) recovers the per-session preference
+    // instead of falling back to the provider's native default.
+    if (promptSuggestionMode !== undefined) {
+      await deps.sessionMetadataService.updateMetadata(sessionId, {
+        promptSuggestionMode,
+      });
     }
   };
 
@@ -2030,6 +2039,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         heartbeatTurnText: metadata?.heartbeatTurnText,
         heartbeatForceAfterMinutes:
           metadata?.heartbeatForceAfterMinutes ?? undefined,
+        promptSuggestionMode: metadata?.promptSuggestionMode,
         lastSeenAt,
         hasUnread,
       },
@@ -2285,6 +2295,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
             heartbeatTurnsAfterMinutes: metadata?.heartbeatTurnsAfterMinutes,
             heartbeatTurnText: metadata?.heartbeatTurnText,
             heartbeatForceAfterMinutes: metadata?.heartbeatForceAfterMinutes,
+            promptSuggestionMode: metadata?.promptSuggestionMode,
             lastSeenAt: lastSeenEntry?.timestamp,
             hasUnread,
             provider: process.provider,
@@ -2445,6 +2456,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         heartbeatTurnsAfterMinutes: metadata?.heartbeatTurnsAfterMinutes,
         heartbeatTurnText: metadata?.heartbeatTurnText,
         heartbeatForceAfterMinutes: metadata?.heartbeatForceAfterMinutes,
+        promptSuggestionMode: metadata?.promptSuggestionMode,
         // Model comes from the session reader (extracted from JSONL)
         model: session.model,
         lastSeenAt,
@@ -2560,6 +2572,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       body.provider,
       executor,
       body.message,
+      result.promptSuggestionMode,
     );
 
     return c.json({
@@ -2647,7 +2660,13 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       return c.json({ ...result, serverTimestamp: Date.now() }, 202); // 202 Accepted - queued for processing
     }
 
-    await persistLaunchMetadata(result.sessionId, body.provider, executor);
+    await persistLaunchMetadata(
+      result.sessionId,
+      body.provider,
+      executor,
+      undefined,
+      result.promptSuggestionMode,
+    );
 
     return c.json({
       sessionId: result.sessionId,
@@ -2736,6 +2755,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       body.provider,
       executor,
       body.message,
+      result.promptSuggestionMode,
     );
 
     return c.json({
@@ -2801,7 +2821,13 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       return c.json({ ...result, serverTimestamp: Date.now() }, 202);
     }
 
-    await persistLaunchMetadata(result.sessionId, body.provider, executor);
+    await persistLaunchMetadata(
+      result.sessionId,
+      body.provider,
+      executor,
+      undefined,
+      result.promptSuggestionMode,
+    );
 
     return c.json({
       sessionId: result.sessionId,
@@ -3037,7 +3063,11 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
           globalInstructions,
           permissions: body.permissions,
           recapMode: helperSettings.recapMode,
-          promptSuggestionMode: helperSettings.promptSuggestionMode,
+          // Body value wins; otherwise recover the per-session preference from
+          // metadata so a body-less resume does not default back to native.
+          promptSuggestionMode:
+            helperSettings.promptSuggestionMode ??
+            deps.sessionMetadataService?.getPromptSuggestionMode?.(sessionId),
           helperSideModel: helperSettings.helperSideModel,
           resumeMode,
           resumeSessionAt,
@@ -3258,7 +3288,10 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
           globalInstructions: getGlobalInstructions(),
           permissions: body.permissions,
           recapMode: helperSettings.recapMode,
-          promptSuggestionMode: helperSettings.promptSuggestionMode,
+          // Inherit the source session's preference unless the body overrides.
+          promptSuggestionMode:
+            helperSettings.promptSuggestionMode ??
+            originalMetadata?.promptSuggestionMode,
           helperSideModel: helperSettings.helperSideModel,
         },
       );
@@ -3280,7 +3313,13 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         );
       }
 
-      await persistLaunchMetadata(result.sessionId, sourceProvider, executor);
+      await persistLaunchMetadata(
+        result.sessionId,
+        sourceProvider,
+        executor,
+        undefined,
+        result.promptSuggestionMode,
+      );
       if (deps.sessionMetadataService) {
         await deps.sessionMetadataService.updateMetadata(result.sessionId, {
           title: forkTitle,
@@ -3354,7 +3393,10 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         globalInstructions: getGlobalInstructions(),
         permissions: body.permissions,
         recapMode: helperSettings.recapMode,
-        promptSuggestionMode: helperSettings.promptSuggestionMode,
+        // Inherit the source session's preference unless the body overrides.
+        promptSuggestionMode:
+          helperSettings.promptSuggestionMode ??
+          originalMetadata?.promptSuggestionMode,
         helperSideModel: helperSettings.helperSideModel,
       },
     );
@@ -3377,7 +3419,13 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       );
     }
 
-    await persistLaunchMetadata(result.sessionId, providerName, executor);
+    await persistLaunchMetadata(
+      result.sessionId,
+      providerName,
+      executor,
+      undefined,
+      result.promptSuggestionMode,
+    );
     if (deps.sessionMetadataService) {
       await deps.sessionMetadataService.updateMetadata(result.sessionId, {
         title: handoffTitle,
@@ -3507,7 +3555,13 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     const savedExecutor = parseOptionalExecutor(
       deps.sessionMetadataService?.getExecutor(sessionId),
     ).executor;
-    await persistLaunchMetadata(fork.sessionId, providerName, savedExecutor);
+    await persistLaunchMetadata(
+      fork.sessionId,
+      providerName,
+      savedExecutor,
+      undefined,
+      deps.sessionMetadataService?.getMetadata(sessionId)?.promptSuggestionMode,
+    );
     if (forkTitle && deps.sessionMetadataService) {
       await deps.sessionMetadataService.updateMetadata(fork.sessionId, {
         title: forkTitle,
@@ -4081,6 +4135,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       heartbeatTurnsAfterMinutes?: number | null;
       heartbeatTurnText?: string | null;
       heartbeatForceAfterMinutes?: number | null;
+      promptSuggestionMode?: unknown;
     } = {};
     try {
       body = await c.req.json();
@@ -4097,7 +4152,8 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       body.heartbeatTurnsEnabled === undefined &&
       body.heartbeatTurnsAfterMinutes === undefined &&
       body.heartbeatTurnText === undefined &&
-      body.heartbeatForceAfterMinutes === undefined
+      body.heartbeatForceAfterMinutes === undefined &&
+      body.promptSuggestionMode === undefined
     ) {
       return c.json(
         {
@@ -4193,6 +4249,27 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
           ? body.parentSessionId.trim() || null
           : null;
 
+    // promptSuggestionMode: null/"" clears the preference (revert to default);
+    // a valid enum value is stored; any other value is rejected.
+    let promptSuggestionMode: PromptSuggestionMode | null | undefined;
+    if (body.promptSuggestionMode !== undefined) {
+      if (body.promptSuggestionMode === null || body.promptSuggestionMode === "") {
+        promptSuggestionMode = null;
+      } else if (
+        typeof body.promptSuggestionMode === "string" &&
+        PROMPT_SUGGESTION_MODES.includes(
+          body.promptSuggestionMode as PromptSuggestionMode,
+        )
+      ) {
+        promptSuggestionMode = body.promptSuggestionMode as PromptSuggestionMode;
+      } else {
+        return c.json(
+          { error: "promptSuggestionMode must be one of: off, native" },
+          400,
+        );
+      }
+    }
+
     await deps.sessionMetadataService.updateMetadata(sessionId, {
       title: body.title,
       archived: body.archived,
@@ -4202,6 +4279,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       heartbeatTurnsAfterMinutes,
       heartbeatTurnText,
       heartbeatForceAfterMinutes,
+      promptSuggestionMode,
     });
 
     // Emit SSE event so sidebar and other clients can update
@@ -4217,6 +4295,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         heartbeatTurnsAfterMinutes,
         heartbeatTurnText,
         heartbeatForceAfterMinutes,
+        promptSuggestionMode: promptSuggestionMode ?? undefined,
         timestamp: new Date().toISOString(),
       });
     }

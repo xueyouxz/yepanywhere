@@ -1103,6 +1103,9 @@ function SessionPageContent({
   >(undefined);
   const [localHeartbeatForceAfterMinutes, setLocalHeartbeatForceAfterMinutes] =
     useState<number | undefined>(undefined);
+  const [localPromptSuggestionMode, setLocalPromptSuggestionMode] = useState<
+    PromptSuggestionMode | undefined
+  >(undefined);
   const [localHasUnread, setLocalHasUnread] = useState<boolean | undefined>(
     undefined,
   );
@@ -1116,6 +1119,7 @@ function SessionPageContent({
     setLocalHeartbeatTurnsAfterMinutes(undefined);
     setLocalHeartbeatTurnText(undefined);
     setLocalHeartbeatForceAfterMinutes(undefined);
+    setLocalPromptSuggestionMode(undefined);
     setLocalHasUnread(undefined);
   }, [sessionId]);
 
@@ -3194,6 +3198,13 @@ function SessionPageContent({
     localHeartbeatTurnText ?? session?.heartbeatTurnText;
   const heartbeatForceAfterMinutes =
     localHeartbeatForceAfterMinutes ?? session?.heartbeatForceAfterMinutes;
+  // Effective per-session suggestion mode: optimistic local toggle wins, then
+  // the live process config, then the persisted session metadata, else off.
+  const promptSuggestionMode =
+    localPromptSuggestionMode ??
+    liveModelConfig?.promptSuggestionMode ??
+    session?.promptSuggestionMode ??
+    "off";
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -3306,6 +3317,28 @@ function SessionPageContent({
     } catch (err) {
       console.error("Failed to update star status:", err);
       showToast(t("sessionStarFailed"), "error");
+    }
+  };
+
+  const handleTogglePromptSuggestions = async () => {
+    const next: PromptSuggestionMode =
+      promptSuggestionMode === "native" ? "off" : "native";
+    const previous = localPromptSuggestionMode;
+    setLocalPromptSuggestionMode(next);
+    try {
+      await api.updateSessionMetadata(sessionId, {
+        promptSuggestionMode: next,
+      });
+      showToast(
+        next === "native"
+          ? t("sessionPromptSuggestionsEnabled")
+          : t("sessionPromptSuggestionsDisabled"),
+        "success",
+      );
+    } catch (err) {
+      console.error("Failed to update prompt suggestion mode:", err);
+      setLocalPromptSuggestionMode(previous);
+      showToast(t("sessionPromptSuggestionsFailed"), "error");
     }
   };
 
@@ -3641,6 +3674,12 @@ function SessionPageContent({
                   onConfigureRecaps={
                     status.owner === "self"
                       ? () => setShowRecapModal(true)
+                      : undefined
+                  }
+                  promptSuggestionMode={promptSuggestionMode}
+                  onTogglePromptSuggestions={
+                    currentProviderInfo?.supportsNativePromptSuggestions
+                      ? handleTogglePromptSuggestions
                       : undefined
                   }
                   warningRestoreAvailable={

@@ -1434,6 +1434,9 @@ export function useSession(
             heartbeatForceAfterMinutes:
               event.heartbeatForceAfterMinutes ?? undefined,
           }),
+          ...(event.promptSuggestionMode !== undefined && {
+            promptSuggestionMode: event.promptSuggestionMode,
+          }),
         };
       });
     },

@@ -129,6 +129,7 @@ export interface Message {
 // Type aliases for session types
 import type {
   AppSessionSummary,
+  PromptSuggestionMode,
   SessionLivenessSnapshot,
   SessionOwnership as SessionOwnershipType,
 } from "@yep-anywhere/shared";
@@ -142,6 +143,7 @@ export interface SessionMetadata extends SessionSummary {
   heartbeatTurnsAfterMinutes?: number;
   heartbeatTurnText?: string;
   heartbeatForceAfterMinutes?: number;
+  promptSuggestionMode?: PromptSuggestionMode;
 }
 
 /**

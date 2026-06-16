@@ -975,6 +975,7 @@ export const api = {
       heartbeatTurnsAfterMinutes?: number | null;
       heartbeatTurnText?: string | null;
       heartbeatForceAfterMinutes?: number | null;
+      promptSuggestionMode?: PromptSuggestionMode | null;
     },
   ) =>
     fetchJSON<{ updated: boolean }>(`/sessions/${sessionId}/metadata`, {
