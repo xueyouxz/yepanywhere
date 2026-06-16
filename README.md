@@ -119,6 +119,20 @@ child agent environments. The STT-specific xAI key is preferred over a general
 `XAI_API_KEY`, which lets speech transcription use different billing from any
 Grok model or CLI usage.
 
+Local STT backends are opt-in and use the committed pixi `stt` environment:
+
+```bash
+# Enable one or both local backends before starting the server:
+export YA_VOICE_BACKENDS=ya-whisper
+export YA_VOICE_BACKENDS=ya-whisper,ya-parakeet
+```
+
+When `ya-whisper` or `ya-parakeet` is enabled, startup creates/updates the pixi
+environment if needed, installs the local STT Python requirements, and downloads
+the selected model on first load. If setup and model validation succeed, the STT
+backend menu includes Whisper STT and/or Parakeet STT; otherwise the server logs
+repair hints and hides the unavailable backend.
+
 If you already exported xAI's standard `XAI_API_KEY`, Yep Anywhere will also use
 it for Grok STT and scrub it from child agent environments. Grok Build does not
 receive `XAI_API_KEY` by default, avoiding accidental pay-as-you-go provider
