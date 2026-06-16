@@ -16,7 +16,7 @@ import {
   useState,
 } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { api, type DeferredMessagePlacement } from "../api/client";
+import { api } from "../api/client";
 import {
   BtwAsidePane,
   BtwAsideTranscript,
@@ -76,7 +76,6 @@ import { recordSessionVisit } from "../hooks/useRecentSessions";
 import { useRemoteBasePath } from "../hooks/useRemoteBasePath";
 import { useServerSettings } from "../hooks/useServerSettings";
 import {
-  type DeferredMessage,
   type StreamingMarkdownCallbacks,
   useSession,
 } from "../hooks/useSession";
@@ -133,11 +132,6 @@ const BTW_ASIDE_FORK_PROVIDERS = new Set<ProviderName>([
   "codex",
   "codex-oss",
 ]);
-
-interface QueuedEditDraft {
-  originalTempId: string;
-  placement?: DeferredMessagePlacement;
-}
 
 interface PreparedComposerSubmission {
   outgoingText: string;
@@ -209,25 +203,6 @@ function appendSlashCommandDraft(
     return `${normalizedCommand} `;
   }
   return current ? `${current} ${normalizedCommand} ` : `${normalizedCommand} `;
-}
-
-function getDeferredEditPlacement(
-  messages: DeferredMessage[],
-  tempId: string,
-): DeferredMessagePlacement | undefined {
-  const index = messages.findIndex((message) => message.tempId === tempId);
-  if (index === -1) {
-    return undefined;
-  }
-  const afterTempId = messages[index - 1]?.tempId;
-  const beforeTempId = messages[index + 1]?.tempId;
-  if (!afterTempId && !beforeTempId) {
-    return undefined;
-  }
-  return {
-    ...(afterTempId ? { afterTempId } : {}),
-    ...(beforeTempId ? { beforeTempId } : {}),
-  };
 }
 
 function isMissingDeferredQueueEntryError(error: unknown): boolean {
@@ -723,9 +698,7 @@ function SessionPageContent({
     removePendingMessage,
     updatePendingMessage,
     deferredMessages,
-    addDeferredMessage,
-    syncDeferredMessages,
-    removeDeferredMessage,
+    setDeferredMessages,
     slashCommands,
     setSessionModel,
     pagination,
@@ -803,37 +776,7 @@ function SessionPageContent({
     messageId: string;
     originalText: string;
   } | null>(null);
-  const [queuedEditDraft, setQueuedEditDraft] =
-    useState<QueuedEditDraft | null>(null);
   const { showToast } = useToastContext();
-
-  const releaseQueuedEditBarrier = useCallback(
-    (editDraft: QueuedEditDraft | null, reason: string) => {
-      if (!editDraft) {
-        return;
-      }
-      logSessionUiTrace("queued-edit-release", {
-        sessionId,
-        originalTempId: editDraft.originalTempId,
-        reason,
-      });
-      api
-        .releaseDeferredEditBarrier(sessionId, editDraft.originalTempId)
-        .then((result) => {
-          if (result.deferredMessages) {
-            syncDeferredMessages(result.deferredMessages, {
-              reason: "edited",
-              tempId: editDraft.originalTempId,
-              source: "rest",
-            });
-          }
-        })
-        .catch((err) => {
-          console.warn("Failed to release deferred edit barrier:", err);
-        });
-    },
-    [sessionId, syncDeferredMessages],
-  );
 
   const rememberSentSubmission = useCallback((text: string, id: string) => {
     const trimmed = text.trim();
@@ -1186,7 +1129,6 @@ function SessionPageContent({
 
   useEffect(() => {
     setCorrectionDraft(null);
-    setQueuedEditDraft(null);
     setBtwAsides([]);
     btwAsidesRef.current = [];
     setFocusedBtwAsideId(null);
@@ -1196,13 +1138,10 @@ function SessionPageContent({
   }, [sessionId]);
 
   const handleCancelCorrection = useCallback(() => {
-    const editDraft = queuedEditDraft;
     setCorrectionDraft(null);
-    setQueuedEditDraft(null);
     draftControlsRef.current?.clearDraft();
     setAttachments([]);
-    releaseQueuedEditBarrier(editDraft, "cancel-correction");
-  }, [queuedEditDraft, releaseQueuedEditBarrier]);
+  }, []);
 
   const handleCorrectLatestUserMessage = useCallback(
     (messageId: string, content: string) => {
@@ -1219,11 +1158,9 @@ function SessionPageContent({
 
       draftControls.setDraft(content);
       setAttachments([]);
-      releaseQueuedEditBarrier(queuedEditDraft, "start-sent-correction");
       setCorrectionDraft({ messageId, originalText: content });
-      setQueuedEditDraft(null);
     },
-    [queuedEditDraft, releaseQueuedEditBarrier, showToast, t],
+    [showToast, t],
   );
 
   const getOutgoingMessageText = useCallback(
@@ -1355,7 +1292,6 @@ function SessionPageContent({
     // Display preference for thinking rows; sent for compatibility while the
     // server requests provider summaries independently.
     const showThinking = getShowThinkingSetting();
-    const queuedEditDraftAtSubmit = queuedEditDraft;
     const actionAtMs = Date.now();
     const clientTimestamp = getServerClockTimestamp(actionAtMs);
     const clientTimestampIso = new Date(clientTimestamp).toISOString();
@@ -1380,7 +1316,6 @@ function SessionPageContent({
       textLength: outgoingText.length,
       attachmentCount: attachments.length,
       hasCorrectionDraft: !!correctionDraft,
-      hasQueuedEditDraft: !!queuedEditDraft,
       clientTimestamp,
       serverOffsetMs: getEstimatedServerOffsetMs(),
     });
@@ -1473,11 +1408,10 @@ function SessionPageContent({
           currentAttachments.length > 0 ? currentAttachments : undefined,
           tempId,
           thinking,
-          undefined,
-          undefined,
+          undefined, // deferred
           clientTimestamp,
           metadata,
-          undefined,
+          undefined, // serviceTier
           showThinking,
         );
         const responseReceivedAtMs = Date.now();
@@ -1514,8 +1448,6 @@ function SessionPageContent({
       rememberSentSubmission(text, tempId);
       draftControlsRef.current?.clearDraft();
       setCorrectionDraft(null);
-      setQueuedEditDraft(null);
-      releaseQueuedEditBarrier(queuedEditDraftAtSubmit, "send-edited-queue");
     } catch (err) {
       console.error("Failed to send:", err);
       let finalError: unknown = err;
@@ -1579,11 +1511,6 @@ function SessionPageContent({
           rememberSentSubmission(text, tempId);
           draftControlsRef.current?.clearDraft();
           setCorrectionDraft(null);
-          setQueuedEditDraft(null);
-          releaseQueuedEditBarrier(
-            queuedEditDraftAtSubmit,
-            "retry-send-edited-queue",
-          );
           return;
         } catch (retryErr) {
           console.error("Failed to resume session:", retryErr);
@@ -1636,13 +1563,12 @@ function SessionPageContent({
     const showThinking = getShowThinkingSetting();
     const actionAtMs = Date.now();
     const clientTimestamp = getServerClockTimestamp(actionAtMs);
-    const clientTimestampIso = new Date(clientTimestamp).toISOString();
 
-    const { tempId, clientOrder } = addPendingMessage(
-      outgoingText,
-      undefined,
-      clientTimestampIso,
-    );
+    // The queue path is not optimistic: no "Sending..." pending chip. The
+    // composer disables for the round-trip and the queued chip renders from the
+    // server's deferred-queue state (SSE event + this POST response). We still
+    // mint a tempId so the server can echo this message back by identity.
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setScrollTrigger((prev) => prev + 1);
     logSessionUiTrace("composer-deferred-start", {
       sessionId,
@@ -1654,7 +1580,6 @@ function SessionPageContent({
       slashCommand: slashCommand ?? null,
       textLength: outgoingText.length,
       attachmentCount: attachments.length,
-      queuedEditOriginalTempId: queuedEditDraft?.originalTempId ?? null,
       clientTimestamp,
       serverOffsetMs: getEstimatedServerOffsetMs(),
     });
@@ -1665,7 +1590,6 @@ function SessionPageContent({
     // Wait for any in-flight uploads to complete before queuing
     const pendingAtSendTime = [...pendingUploadsRef.current.values()];
     if (pendingAtSendTime.length > 0) {
-      updatePendingMessage(tempId, { status: t("sessionUploading") });
       setAttachments([]);
       const results = await Promise.all(pendingAtSendTime);
       for (const result of results) {
@@ -1673,24 +1597,12 @@ function SessionPageContent({
       }
       const sentIds = new Set(currentAttachments.map((a) => a.id));
       setAttachments((prev) => prev.filter((a) => !sentIds.has(a.id)));
-      updatePendingMessage(tempId, { status: undefined });
     } else {
       setAttachments([]);
     }
 
-    if (currentAttachments.length > 0) {
-      updatePendingMessage(tempId, { attachments: currentAttachments });
-    }
-
     try {
       const requestSentAtMs = Date.now();
-      const queuedEditDraftAtSubmit = queuedEditDraft;
-      const queuedEditPlacement = queuedEditDraftAtSubmit
-        ? {
-            ...queuedEditDraftAtSubmit.placement,
-            replaceTempId: queuedEditDraftAtSubmit.originalTempId,
-          }
-        : undefined;
       const result = await api.queueMessage(
         sessionId,
         outgoingText,
@@ -1699,10 +1611,9 @@ function SessionPageContent({
         tempId,
         thinking,
         true, // deferred
-        queuedEditPlacement,
         clientTimestamp,
         metadata,
-        undefined,
+        undefined, // serviceTier
         showThinking,
       );
       const responseReceivedAtMs = Date.now();
@@ -1728,69 +1639,15 @@ function SessionPageContent({
           result.serverTimestamp,
         ),
       });
-      removePendingMessage(tempId);
-      const localDeferredMessage = {
-        tempId,
-        content: outgoingText,
-        timestamp: clientTimestampIso,
-        clientOrder,
-        ...(currentAttachments.length > 0
-          ? {
-              attachmentCount: currentAttachments.length,
-              attachments: currentAttachments,
-            }
-          : {}),
-        mode: permissionMode,
-        metadata,
-        deliveryState: "queued" as const,
-      };
+      // Mirror the server's authoritative queue from the response. The
+      // deferred-queue SSE event reports the same thing; whichever lands last
+      // wins, and both are server truth, so there is nothing to reconcile.
+      setDeferredMessages(result.deferredMessages ?? []);
       if (result.deferred === false || result.promoted) {
-        addDeferredMessage({
-          ...localDeferredMessage,
-          deliveryState: "sending" as const,
-        });
-        if (result.deferredMessages) {
-          syncDeferredMessages(result.deferredMessages, {
-            reason: "promoted",
-            tempId,
-            source: "rest",
-          });
-        }
+        // Promoted straight into the active turn — treat it like a sent message
+        // for composer recall.
         rememberSentSubmission(text, tempId);
-        draftControlsRef.current?.clearDraft();
-        setCorrectionDraft(null);
-        setQueuedEditDraft(null);
-        return;
-      }
-      const serverDeferredMessages = result.deferredMessages?.map((message) =>
-        message.tempId === tempId
-          ? {
-              ...message,
-              attachments: currentAttachments,
-              mode: permissionMode,
-              deliveryState: "queued" as const,
-            }
-          : message,
-      );
-      if (
-        serverDeferredMessages?.some((message) => message.tempId === tempId)
-      ) {
-        syncDeferredMessages(serverDeferredMessages, {
-          reason: "queued",
-          tempId,
-          source: "rest",
-        });
-      } else {
-        addDeferredMessage(localDeferredMessage);
-        if (serverDeferredMessages) {
-          syncDeferredMessages(serverDeferredMessages, {
-            reason: "queued",
-            tempId,
-            source: "rest",
-          });
-        }
-      }
-      if (text.trim()) {
+      } else if (text.trim()) {
         lastComposerSubmissionRef.current = {
           kind: "queued",
           text: text.trim(),
@@ -1799,7 +1656,6 @@ function SessionPageContent({
       }
       draftControlsRef.current?.clearDraft();
       setCorrectionDraft(null);
-      setQueuedEditDraft(null);
     } catch (err) {
       console.error("Failed to queue deferred message:", err);
       let finalError: unknown = err;
@@ -1845,11 +1701,9 @@ function SessionPageContent({
             permissionMode: result.permissionMode,
             modeVersion: result.modeVersion,
           });
-          removePendingMessage(tempId);
           rememberSentSubmission(text, tempId);
           draftControlsRef.current?.clearDraft();
           setCorrectionDraft(null);
-          setQueuedEditDraft(null);
           return;
         } catch (retryErr) {
           console.error("Failed to resume session:", retryErr);
@@ -1863,7 +1717,6 @@ function SessionPageContent({
         }
       }
 
-      removePendingMessage(tempId);
       draftControlsRef.current?.restoreFromStorage();
       setAttachments(currentAttachments);
       const errorMsg =
@@ -1886,9 +1739,8 @@ function SessionPageContent({
 
   const handleCancelDeferred = useCallback(
     async (tempId: string) => {
-      const localMessage = deferredMessages.find(
-        (message) => message.tempId === tempId,
-      );
+      // No optimistic removal: the chip disappears when the server's next
+      // deferred-queue state (which omits this tempId) is mirrored.
       const previousLastSubmission = lastComposerSubmissionRef.current;
       lastComposerSubmissionRef.current = getRecallSubmissionAfterQueuedCancel(
         lastComposerSubmissionRef.current,
@@ -1896,19 +1748,11 @@ function SessionPageContent({
         deferredMessages,
         tempId,
       );
-      removeDeferredMessage(tempId);
-      if (localMessage?.deliveryState === "recovered") {
-        return;
-      }
-
       try {
         await api.cancelDeferredMessage(sessionId, tempId);
       } catch (err) {
         if (isMissingDeferredQueueEntryError(err)) {
           return;
-        }
-        if (localMessage) {
-          addDeferredMessage(localMessage);
         }
         lastComposerSubmissionRef.current = previousLastSubmission;
         console.error("Failed to cancel deferred message:", err);
@@ -1919,20 +1763,13 @@ function SessionPageContent({
         );
       }
     },
-    [
-      addDeferredMessage,
-      deferredMessages,
-      removeDeferredMessage,
-      sessionId,
-      showToast,
-      t,
-    ],
+    [deferredMessages, sessionId, showToast, t],
   );
 
   const handleCancelLatestDeferred = useCallback(() => {
     const latest = [...deferredMessages]
       .reverse()
-      .find((message) => message.tempId && message.deliveryState !== "sending");
+      .find((message) => message.tempId);
     if (!latest?.tempId) {
       return false;
     }
@@ -1940,230 +1777,30 @@ function SessionPageContent({
     return true;
   }, [deferredMessages, handleCancelDeferred]);
 
-  const handleUpdateDeferred = useCallback(
-    async (tempId: string, content: string) => {
-      const localMessage = deferredMessages.find(
-        (message) => message.tempId === tempId,
-      );
-      if (!localMessage) {
-        throw new Error("Deferred message not found");
-      }
-
-      addDeferredMessage({ ...localMessage, content });
-      if (localMessage.deliveryState === "recovered") {
-        return;
-      }
-
-      try {
-        const result = await api.updateDeferredMessage(
-          sessionId,
-          tempId,
-          content,
-        );
-        if (result.deferredMessages) {
-          syncDeferredMessages(result.deferredMessages, {
-            reason: "edited",
-            tempId,
-            source: "rest",
-          });
-        }
-      } catch (err) {
-        if (isMissingDeferredQueueEntryError(err)) {
-          addDeferredMessage({
-            ...localMessage,
-            content,
-            deliveryState: "recovered",
-          });
-          showToast(t("sessionDeferredEditLocalOnly"), "info");
-          return;
-        }
-
-        addDeferredMessage(localMessage);
-        console.error("Failed to update deferred message:", err);
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        showToast(
-          t("sessionDeferredEditFailed", { message: errorMsg }),
-          "error",
-        );
-        throw err;
-      }
-    },
-    [
-      addDeferredMessage,
-      deferredMessages,
-      sessionId,
-      showToast,
-      syncDeferredMessages,
-      t,
-    ],
-  );
-
-  const handleEditDeferred = useCallback(
-    async (tempId: string) => {
-      const draftControls = draftControlsRef.current;
-      if (!draftControls) {
-        showToast(
-          t("sessionDeferredEditFailed", {
-            message: "Composer is not available",
-          }),
-          "error",
-        );
-        return;
-      }
-
-      const localMessage = deferredMessages.find(
-        (message) => message.tempId === tempId,
-      );
-      const localPlacement = getDeferredEditPlacement(deferredMessages, tempId);
-      if (localMessage?.deliveryState === "recovered") {
-        const restoredAttachments = localMessage.attachments ?? [];
-        draftControls.setDraft(localMessage.content);
-        setAttachments(restoredAttachments);
-        if (localMessage.mode) {
-          setPermissionMode(localMessage.mode);
-        }
-        removeDeferredMessage(tempId);
-        setQueuedEditDraft({
-          originalTempId: tempId,
-          placement: localPlacement,
-        });
-        if (
-          (localMessage.attachmentCount ?? 0) > 0 &&
-          restoredAttachments.length === 0
-        ) {
-          showToast(t("sessionDeferredEditMissingAttachments"), "error");
-        }
-        return;
-      }
-
-      try {
-        const result = await api.editDeferredMessage(sessionId, tempId);
-        const restoredAttachments =
-          result.attachments ?? localMessage?.attachments ?? [];
-        draftControls.setDraft(result.message);
-        setAttachments(restoredAttachments);
-        setQueuedEditDraft({
-          originalTempId: result.tempId ?? tempId,
-          placement: result.placement ?? localPlacement,
-        });
-        const restoredMode = result.mode ?? localMessage?.mode;
-        if (restoredMode) {
-          setPermissionMode(restoredMode);
-        }
-        removeDeferredMessage(tempId);
-        if (
-          (localMessage?.attachmentCount ?? 0) > 0 &&
-          restoredAttachments.length === 0
-        ) {
-          showToast(t("sessionDeferredEditMissingAttachments"), "error");
-        }
-      } catch (err) {
-        if (localMessage && isMissingDeferredQueueEntryError(err)) {
-          const restoredAttachments = localMessage.attachments ?? [];
-          draftControls.setDraft(localMessage.content);
-          setAttachments(restoredAttachments);
-          setQueuedEditDraft({
-            originalTempId: tempId,
-            placement: localPlacement,
-          });
-          if (localMessage.mode) {
-            setPermissionMode(localMessage.mode);
-          }
-          removeDeferredMessage(tempId);
-          showToast(t("sessionDeferredEditLocalOnly"), "info");
-          if (
-            (localMessage.attachmentCount ?? 0) > 0 &&
-            restoredAttachments.length === 0
-          ) {
-            showToast(t("sessionDeferredEditMissingAttachments"), "error");
-          }
-          return;
-        }
-
-        console.error("Failed to edit deferred message:", err);
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        showToast(
-          t("sessionDeferredEditFailed", { message: errorMsg }),
-          "error",
-        );
-      }
-    },
-    [
-      deferredMessages,
-      removeDeferredMessage,
-      sessionId,
-      setPermissionMode,
-      showToast,
-      t,
-    ],
-  );
-
-  const handleSteerDeferred = useCallback(
-    async (tempId: string) => {
-      const localMessage = deferredMessages.find(
-        (message) => message.tempId === tempId,
-      );
-      if (!localMessage || localMessage.deliveryState === "recovered") {
-        return;
-      }
-
-      removeDeferredMessage(tempId);
-      try {
-        const result = await api.steerDeferredMessage(sessionId, tempId);
-        if (result.deferredMessages) {
-          syncDeferredMessages(result.deferredMessages, {
-            reason: "promoted",
-            tempId,
-            source: "rest",
-          });
-        }
-        if (result.message.trim()) {
-          rememberSentSubmission(result.message, result.tempId ?? tempId);
-        }
-      } catch (err) {
-        if (isMissingDeferredQueueEntryError(err)) {
-          return;
-        }
-        addDeferredMessage(localMessage);
-        console.error("Failed to steer deferred message:", err);
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        showToast(
-          t("sessionDeferredSteerFailed", { message: errorMsg }),
-          "error",
-        );
-      }
-    },
-    [
-      addDeferredMessage,
-      deferredMessages,
-      rememberSentSubmission,
-      removeDeferredMessage,
-      sessionId,
-      showToast,
-      syncDeferredMessages,
-      t,
-    ],
-  );
-
   const handleRecallLastSubmission = useCallback((): boolean => {
     const lastSubmission = lastComposerSubmissionRef.current;
     if (!lastSubmission?.text.trim()) {
       return false;
     }
 
+    const draftControls = draftControlsRef.current;
+    if (!draftControls) {
+      return false;
+    }
+
+    // Recalling a still-queued message cancels it server-side and restores its
+    // text to the composer — the "edit" affordance is intentionally just
+    // cancel + re-queue (see topics/queued-messages.md).
     if (
       lastSubmission.kind === "queued" &&
       deferredMessages.some(
         (message) => message.tempId === lastSubmission.tempId,
       )
     ) {
-      void handleEditDeferred(lastSubmission.tempId);
+      void handleCancelDeferred(lastSubmission.tempId);
+      draftControls.setDraft(lastSubmission.text);
+      setAttachments([]);
       return true;
-    }
-
-    const draftControls = draftControlsRef.current;
-    if (!draftControls) {
-      return false;
     }
 
     draftControls.setDraft(lastSubmission.text);
@@ -2176,7 +1813,7 @@ function SessionPageContent({
       originalText: lastSubmission.text,
     });
     return true;
-  }, [deferredMessages, handleEditDeferred]);
+  }, [deferredMessages, handleCancelDeferred]);
 
   const handleModelChanged = useCallback(
     (next: {
@@ -3958,10 +3595,6 @@ function SessionPageContent({
                   onToggleBtwAsideExpanded={toggleBtwAsideExpanded}
                   onTransferBtwAsideTurn={transferBtwTurnToMotherComposer}
                   onCancelDeferred={handleCancelDeferred}
-                  onUpdateDeferred={handleUpdateDeferred}
-                  onEditDeferred={handleEditDeferred}
-                  onSteerDeferred={handleSteerDeferred}
-                  canSteerDeferred={primaryComposerAction === "steer"}
                   onCorrectLatestUserMessage={handleCorrectLatestUserMessage}
                   onTrimBeforeUserMessage={trimClientFromUserMessage}
                   onForkBeforeUserMessage={

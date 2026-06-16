@@ -62,10 +62,7 @@ import { findSessionSummaryAcrossProviders } from "../sessions/provider-resoluti
 import type { ISessionReader } from "../sessions/types.js";
 import { getStaticSlashCommandsForProvider } from "../sdk/providers/staticSlashCommands.js";
 import type { ExternalSessionTracker } from "../supervisor/ExternalSessionTracker.js";
-import type {
-  DeferredMessagePlacement,
-  Process,
-} from "../supervisor/Process.js";
+import type { Process } from "../supervisor/Process.js";
 import type {
   QueueFullResponse,
   ResumeMode,
@@ -372,35 +369,6 @@ function isCodexProviderName(
   return provider === "codex" || provider === "codex-oss";
 }
 
-function parseDeferredPlacement(body: {
-  insertBeforeTempId?: unknown;
-  insertAfterTempId?: unknown;
-  replaceDeferredTempId?: unknown;
-}): DeferredMessagePlacement | undefined {
-  const beforeTempId =
-    typeof body.insertBeforeTempId === "string" &&
-    body.insertBeforeTempId.trim()
-      ? body.insertBeforeTempId.trim()
-      : undefined;
-  const afterTempId =
-    typeof body.insertAfterTempId === "string" && body.insertAfterTempId.trim()
-      ? body.insertAfterTempId.trim()
-      : undefined;
-  const replaceTempId =
-    typeof body.replaceDeferredTempId === "string" &&
-    body.replaceDeferredTempId.trim()
-      ? body.replaceDeferredTempId.trim()
-      : undefined;
-  if (!beforeTempId && !afterTempId && !replaceTempId) {
-    return undefined;
-  }
-  return {
-    ...(afterTempId ? { afterTempId } : {}),
-    ...(beforeTempId ? { beforeTempId } : {}),
-    ...(replaceTempId ? { replaceTempId } : {}),
-  };
-}
-
 const USER_MESSAGE_DELIVERY_INTENTS: ReadonlySet<UserMessageDeliveryIntent> =
   new Set(["direct", "steer", "deferred", "patient"]);
 
@@ -563,12 +531,6 @@ interface StartSessionBody {
   messageMetadata?: UserMessageMetadata;
   /** Client-generated temp ID for optimistic UI tracking */
   tempId?: string;
-  /** Deferred queue reinsertion anchor for edited queued messages */
-  insertBeforeTempId?: string;
-  /** Deferred queue reinsertion anchor for edited queued messages */
-  insertAfterTempId?: string;
-  /** Queued temp ID currently held behind an edit barrier */
-  replaceDeferredTempId?: string;
   /** SSH host alias for remote execution (undefined = local) */
   executor?: string;
   /** Permission rules for tool filtering (deny/allow patterns) */
@@ -3650,7 +3612,6 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       await process.primeSupportedCommandsForMessage(userMessage);
       const deferredResult = process.deferMessage(userMessage, {
         promoteIfReady: true,
-        placement: parseDeferredPlacement(body),
       });
       if (!deferredResult.success) {
         return c.json(
@@ -3757,105 +3718,6 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     }
 
     return c.json({ cancelled: true });
-  });
-
-  // PUT /api/sessions/:sessionId/deferred/:tempId - Update queued text in place
-  routes.put("/sessions/:sessionId/deferred/:tempId", async (c) => {
-    const sessionId = c.req.param("sessionId");
-    const tempId = c.req.param("tempId");
-
-    let body: { message?: unknown };
-    try {
-      body = await c.req.json<{ message?: unknown }>();
-    } catch {
-      return c.json({ error: "Invalid JSON body" }, 400);
-    }
-
-    if (typeof body.message !== "string") {
-      return c.json({ error: "Message must be a string" }, 400);
-    }
-
-    const process = deps.supervisor.getProcessForSession(sessionId);
-    if (!process) {
-      return c.json({ error: "No active process for session" }, 404);
-    }
-
-    const updated = process.updateDeferredMessage(tempId, body.message);
-    if (!updated) {
-      return c.json({ error: "Deferred message not found" }, 404);
-    }
-
-    return c.json({
-      updated: true,
-      tempId: updated.tempId,
-      message: updated.text,
-      deferredMessages: process.getDeferredQueueSummary(),
-    });
-  });
-
-  // POST /api/sessions/:sessionId/deferred/:tempId/edit - Take a deferred message for editing
-  routes.post("/sessions/:sessionId/deferred/:tempId/edit", (c) => {
-    const sessionId = c.req.param("sessionId");
-    const tempId = c.req.param("tempId");
-
-    const process = deps.supervisor.getProcessForSession(sessionId);
-    if (!process) {
-      return c.json({ error: "No active process for session" }, 404);
-    }
-
-    const taken = process.takeDeferredMessage(tempId);
-    if (!taken) {
-      return c.json({ error: "Deferred message not found" }, 404);
-    }
-
-    return c.json({
-      message: taken.message.text,
-      tempId: taken.message.tempId,
-      mode: taken.message.mode,
-      attachments: taken.message.attachments,
-      placement: taken.placement,
-    });
-  });
-
-  // POST /api/sessions/:sessionId/deferred/:tempId/steer - Send a queued message as active-turn steering
-  routes.post("/sessions/:sessionId/deferred/:tempId/steer", (c) => {
-    const sessionId = c.req.param("sessionId");
-    const tempId = c.req.param("tempId");
-
-    const process = deps.supervisor.getProcessForSession(sessionId);
-    if (!process) {
-      return c.json({ error: "No active process for session" }, 404);
-    }
-
-    const steered = process.steerDeferredMessage(tempId);
-    if (!steered) {
-      return c.json({ error: "Deferred message not found" }, 404);
-    }
-
-    return c.json({
-      steered: true,
-      tempId: steered.message.tempId,
-      message: steered.message.text,
-      position: steered.position,
-      deferredMessages: process.getDeferredQueueSummary(),
-    });
-  });
-
-  // POST /api/sessions/:sessionId/deferred/:tempId/edit/release - Release a queued edit barrier
-  routes.post("/sessions/:sessionId/deferred/:tempId/edit/release", (c) => {
-    const sessionId = c.req.param("sessionId");
-    const tempId = c.req.param("tempId");
-
-    const process = deps.supervisor.getProcessForSession(sessionId);
-    if (!process) {
-      return c.json({ error: "No active process for session" }, 404);
-    }
-
-    const released = process.releaseDeferredEditBarrier(tempId);
-    return c.json({
-      released,
-      deferredMessages: process.getDeferredQueueSummary(),
-    });
   });
 
   // PUT /api/sessions/:sessionId/mode - Update permission mode without sending a message

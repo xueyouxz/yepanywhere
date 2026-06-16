@@ -266,21 +266,6 @@ function findRenderRow(
   return null;
 }
 
-function findQueuedTailRow(
-  messageList: HTMLDivElement | null,
-  key: string,
-): HTMLElement | null {
-  if (!messageList) return null;
-  for (const row of messageList.querySelectorAll<HTMLElement>(
-    "[data-queued-tail-key]",
-  )) {
-    if (row.dataset.queuedTailKey === key) {
-      return row;
-    }
-  }
-  return null;
-}
-
 interface VisibleRenderAnchor {
   id: string;
   topOffset: number;
@@ -758,22 +743,14 @@ interface DeferredMessage {
   tempId?: string;
   content: string;
   timestamp: string;
-  clientOrder?: number;
   metadata?: UserMessageMetadata;
   attachmentCount?: number;
   attachments?: UploadedFile[];
-  blockedByEdit?: boolean;
-  deliveryState?: "queued" | "sending" | "recovered" | "verifying";
 }
 
 interface ComposerTailLanePosition {
   regularIndex?: number;
   patientIndex?: number;
-}
-
-interface QueuedContextReturnAnchor {
-  tailKey: string;
-  scrollTop: number;
 }
 
 function isPatientDeferredMessage(message: DeferredMessage): boolean {
@@ -786,35 +763,16 @@ function formatQueuedAge(timestampMs: number, nowMs: number): string {
 }
 
 function getDeferredMessageStatus({
-  deferred,
   isPatient,
   lanePosition,
   timestampMs,
   nowMs,
 }: {
-  deferred: DeferredMessage;
   isPatient: boolean;
   lanePosition: ComposerTailLanePosition | undefined;
   timestampMs: number | null;
   nowMs: number;
 }): string {
-  if (deferred.deliveryState === "sending") {
-    return isPatient
-      ? "Sending patient message..."
-      : "Sending queued message...";
-  }
-  if (deferred.deliveryState === "recovered") {
-    return isPatient
-      ? "Recovered patient draft"
-      : "Recovered draft (not queued)";
-  }
-  if (deferred.deliveryState === "verifying") {
-    return isPatient ? "Patient (verifying)" : "Queued (verifying)";
-  }
-  if (deferred.blockedByEdit) {
-    return isPatient ? "Patient (after edit)" : "Queued (after edit)";
-  }
-
   if (isPatient) {
     const age =
       timestampMs !== null ? formatQueuedAge(timestampMs, nowMs) : null;
@@ -853,8 +811,20 @@ function compareComposerTailItems(
   left: ComposerTailItem,
   right: ComposerTailItem,
 ): number {
-  const leftOrder = left.message.clientOrder;
-  const rightOrder = right.message.clientOrder;
+  // Two lanes, each kept in its own order: optimistic pending sends (in flight)
+  // render before server-queued deferred messages, and deferred messages
+  // preserve the server's authoritative queue order rather than being re-sorted.
+  if (left.kind !== right.kind) {
+    return left.kind === "pending" ? -1 : 1;
+  }
+
+  if (left.kind === "deferred" && right.kind === "deferred") {
+    return left.deferredIndex - right.deferredIndex;
+  }
+
+  const leftOrder = left.kind === "pending" ? left.message.clientOrder : undefined;
+  const rightOrder =
+    right.kind === "pending" ? right.message.clientOrder : undefined;
   if (
     typeof leftOrder === "number" &&
     Number.isFinite(leftOrder) &&
@@ -922,14 +892,6 @@ interface Props {
   onTransferBtwAsideTurn?: (text: string) => void;
   /** Callback to cancel a deferred message */
   onCancelDeferred?: (tempId: string) => void;
-  /** Callback to update queued text without moving it into the composer */
-  onUpdateDeferred?: (tempId: string, content: string) => void | Promise<void>;
-  /** Fallback callback to take a deferred message back into the composer */
-  onEditDeferred?: (tempId: string) => void;
-  /** Callback to promote a deferred message into current-turn steering */
-  onSteerDeferred?: (tempId: string) => void;
-  /** Whether the current session can accept active-turn steering now */
-  canSteerDeferred?: boolean;
   /** Callback to correct the latest actually-sent user message */
   onCorrectLatestUserMessage?: (messageId: string, content: string) => void;
   /** Callback to aggressively reload the client transcript from a user turn */
@@ -950,25 +912,6 @@ interface Props {
   clientTailActive?: boolean;
 }
 
-function PencilIcon({ size = 14 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-    </svg>
-  );
-}
-
 function XIcon({ size = 14 }: { size?: number }) {
   return (
     <svg
@@ -986,38 +929,6 @@ function XIcon({ size = 14 }: { size?: number }) {
       <path d="m6 6 12 12" />
     </svg>
   );
-}
-
-function rangeIntersectsNode(range: Range, node: Node): boolean {
-  try {
-    return range.intersectsNode(node);
-  } catch {
-    return false;
-  }
-}
-
-function hasSelectedTextInside(element: HTMLElement): boolean {
-  const selection = element.ownerDocument.getSelection();
-  if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-    return false;
-  }
-
-  if (selection.toString().length === 0) {
-    return false;
-  }
-
-  for (let index = 0; index < selection.rangeCount; index += 1) {
-    if (rangeIntersectsNode(selection.getRangeAt(index), element)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function resizeQueuedInlineEditor(textarea: HTMLTextAreaElement): void {
-  textarea.style.height = "auto";
-  textarea.style.height = `${textarea.scrollHeight}px`;
 }
 
 function BtwAsideTimelineCard({
@@ -1140,10 +1051,6 @@ export const MessageList = memo(function MessageList({
   onToggleBtwAsideExpanded,
   onTransferBtwAsideTurn,
   onCancelDeferred,
-  onUpdateDeferred,
-  onEditDeferred,
-  onSteerDeferred,
-  canSteerDeferred = false,
   onCorrectLatestUserMessage,
   onTrimBeforeUserMessage,
   onForkBeforeUserMessage,
@@ -1154,7 +1061,6 @@ export const MessageList = memo(function MessageList({
   onLoadOlderMessages,
   clientTailActive = false,
 }: Props) {
-  const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
   const isInitialLoadRef = useRef(true);
@@ -1165,13 +1071,6 @@ export const MessageList = memo(function MessageList({
   const forcedCurrentScrollTimersRef = useRef<ReturnType<typeof setTimeout>[]>(
     [],
   );
-  const queuedInlineEditorRef = useRef<HTMLTextAreaElement | null>(null);
-  const [queuedInlineEdit, setQueuedInlineEdit] = useState<{
-    tempId: string;
-    originalContent: string;
-    draft: string;
-    saving?: boolean;
-  } | null>(null);
   const programmaticScrollReleaseRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
@@ -1227,93 +1126,7 @@ export const MessageList = memo(function MessageList({
     selectedId: null,
     originalScrollTop: null,
   });
-  const [queuedContextReturn, setQueuedContextReturn] =
-    useState<QueuedContextReturnAnchor | null>(null);
   const nowMs = useRelativeNow();
-
-  const startQueuedInlineEdit = useCallback(
-    (deferred: DeferredMessage) => {
-      if (!deferred.tempId) {
-        return;
-      }
-      if (!onUpdateDeferred) {
-        onEditDeferred?.(deferred.tempId);
-        return;
-      }
-      shouldAutoScrollRef.current = false;
-      setQueuedInlineEdit({
-        tempId: deferred.tempId,
-        originalContent: deferred.content,
-        draft: deferred.content,
-      });
-    },
-    [onEditDeferred, onUpdateDeferred],
-  );
-
-  const cancelQueuedInlineEdit = useCallback(() => {
-    setQueuedInlineEdit(null);
-  }, []);
-
-  const saveQueuedInlineEdit = useCallback(async () => {
-    const edit = queuedInlineEdit;
-    if (!edit || edit.saving) {
-      return;
-    }
-    if (!onUpdateDeferred || edit.draft === edit.originalContent) {
-      setQueuedInlineEdit(null);
-      return;
-    }
-
-    setQueuedInlineEdit((current) =>
-      current?.tempId === edit.tempId ? { ...current, saving: true } : current,
-    );
-    try {
-      await onUpdateDeferred(edit.tempId, edit.draft);
-      setQueuedInlineEdit((current) =>
-        current?.tempId === edit.tempId ? null : current,
-      );
-    } catch {
-      setQueuedInlineEdit((current) =>
-        current?.tempId === edit.tempId
-          ? { ...current, saving: false }
-          : current,
-      );
-      if (typeof requestAnimationFrame === "function") {
-        requestAnimationFrame(() => queuedInlineEditorRef.current?.focus());
-      } else {
-        setTimeout(() => queuedInlineEditorRef.current?.focus(), 0);
-      }
-    }
-  }, [onUpdateDeferred, queuedInlineEdit]);
-
-  useEffect(() => {
-    const textarea = queuedInlineEditorRef.current;
-    if (!textarea || !queuedInlineEdit) {
-      return;
-    }
-    textarea.focus();
-    const end = textarea.value.length;
-    textarea.setSelectionRange(end, end);
-  }, [queuedInlineEdit?.tempId]);
-
-  useEffect(() => {
-    const textarea = queuedInlineEditorRef.current;
-    if (!textarea || !queuedInlineEdit) {
-      return;
-    }
-    resizeQueuedInlineEditor(textarea);
-  }, [queuedInlineEdit?.draft, queuedInlineEdit]);
-
-  useEffect(() => {
-    if (
-      queuedInlineEdit &&
-      !deferredMessages.some(
-        (message) => message.tempId === queuedInlineEdit.tempId,
-      )
-    ) {
-      setQueuedInlineEdit(null);
-    }
-  }, [deferredMessages, queuedInlineEdit]);
 
   // Scroll to bottom, marking it as programmatic so scroll handler ignores it
   const scrollToBottom = useCallback(
@@ -1892,16 +1705,6 @@ export const MessageList = memo(function MessageList({
 
     return positions;
   }, [composerTailItems]);
-  useEffect(() => {
-    if (
-      queuedContextReturn &&
-      !composerTailItems.some(
-        (item) => item.key === queuedContextReturn.tailKey,
-      )
-    ) {
-      setQueuedContextReturn(null);
-    }
-  }, [composerTailItems, queuedContextReturn]);
   const latestCorrectablePrompt = useMemo(() => {
     if (!onCorrectLatestUserMessage) return null;
 
@@ -2253,72 +2056,6 @@ export const MessageList = memo(function MessageList({
       allowThinkingDeltas: true,
     });
   }, [forceScrollToCurrent]);
-
-  const findQueuedContextRenderId = useCallback(
-    (queuedTimestampMs: number): string | null => {
-      let candidate: { id: string; timestampMs: number } | null = null;
-      for (const item of displayRenderItems) {
-        const timestampMs = getLatestMessageTimestampMs(item.sourceMessages);
-        if (timestampMs === null || timestampMs > queuedTimestampMs) {
-          continue;
-        }
-        if (!candidate || timestampMs >= candidate.timestampMs) {
-          candidate = { id: item.id, timestampMs };
-        }
-      }
-      return candidate?.id ?? displayRenderItems[0]?.id ?? null;
-    },
-    [displayRenderItems],
-  );
-
-  const jumpToQueuedContext = useCallback(
-    (tailKey: string, contextRenderId: string) => {
-      const scrollContainer = containerRef.current?.parentElement;
-      if (!scrollContainer) {
-        return;
-      }
-      setQueuedContextReturn({
-        tailKey,
-        scrollTop: scrollContainer.scrollTop,
-      });
-      scrollToRenderId(contextRenderId, "auto", "center", true);
-    },
-    [scrollToRenderId],
-  );
-
-  const returnToQueuedContext = useCallback(() => {
-    const anchor = queuedContextReturn;
-    const messageList = containerRef.current;
-    const scrollContainer = messageList?.parentElement;
-    setQueuedContextReturn(null);
-    if (!anchor || !scrollContainer) {
-      return;
-    }
-
-    const row = findQueuedTailRow(messageList, anchor.tailKey);
-    isProgrammaticScrollRef.current = true;
-    shouldAutoScrollRef.current = false;
-    setIsScrolledToBottom(false);
-
-    if (row) {
-      const scrollRect = scrollContainer.getBoundingClientRect();
-      const rowRect = row.getBoundingClientRect();
-      const offset = Math.max(
-        0,
-        (scrollContainer.clientHeight - rowRect.height) / 2,
-      );
-      scrollContainer.scrollTop = Math.max(
-        0,
-        scrollContainer.scrollTop + rowRect.top - scrollRect.top - offset,
-      );
-    } else {
-      scrollContainer.scrollTop = anchor.scrollTop;
-    }
-    lastHeightRef.current = scrollContainer.scrollHeight;
-    requestAnimationFrame(() => {
-      isProgrammaticScrollRef.current = false;
-    });
-  }, [queuedContextReturn]);
 
   const closeUserTurnSearch = useCallback((restoreScroll: boolean) => {
     const scrollTopToRestore = restoreScroll
@@ -2924,18 +2661,6 @@ export const MessageList = memo(function MessageList({
       <span>Follow</span>
     </button>
   ) : null;
-  const queuedContextReturnButton = queuedContextReturn ? (
-    <button
-      type="button"
-      className="queued-context-return"
-      onClick={returnToQueuedContext}
-      aria-label="Return to queued message"
-      title="Return to queued message"
-    >
-      ↩
-    </button>
-  ) : null;
-
   return (
     <>
       <UserTurnNavigator
@@ -2957,7 +2682,6 @@ export const MessageList = memo(function MessageList({
         ? createPortal(followButton, followButtonTarget)
         : followButton}
       <div className="message-list" ref={containerRef}>
-        {queuedContextReturnButton}
         {(hasOlderMessages || clientTailActive) && (
           <div className="load-older-messages">
             {clientTailActive && (
@@ -3161,35 +2885,15 @@ export const MessageList = memo(function MessageList({
           const deferred = tailItem.message;
           const isPatientDeferred = isPatientDeferredMessage(deferred);
           const lanePosition = composerTailLanePositions.get(tailItem.key);
-          const contextRenderId =
-            timestampMs !== null
-              ? findQueuedContextRenderId(timestampMs)
-              : null;
           const deferredStatus = getDeferredMessageStatus({
-            deferred,
             isPatient: isPatientDeferred,
             lanePosition,
             timestampMs,
             nowMs,
           });
-          const isEditingDeferred =
-            queuedInlineEdit?.tempId === deferred.tempId;
-          const canEditDeferred = !!(
-            deferred.tempId &&
-            (onUpdateDeferred || onEditDeferred) &&
-            deferred.deliveryState !== "sending"
-          );
-          const canSteerQueued =
-            canSteerDeferred &&
-            !!deferred.tempId &&
-            !!onSteerDeferred &&
-            !deferred.blockedByEdit &&
-            deferred.deliveryState !== "sending" &&
-            deferred.deliveryState !== "recovered";
           return (
             <div
               key={tailItem.key}
-              data-queued-tail-key={tailItem.key}
               className={`deferred-message message-render-row ${
                 isPatientDeferred ? "patient-deferred-message" : ""
               } ${
@@ -3197,68 +2901,9 @@ export const MessageList = memo(function MessageList({
               } ${showAgeByDefault ? "is-message-age-visible" : ""}`}
             >
               <div className="message-render-content">
-                {isEditingDeferred ? (
-                  <textarea
-                    ref={queuedInlineEditorRef}
-                    className="message-user-prompt deferred-message-bubble deferred-message-inline-editor"
-                    value={queuedInlineEdit?.draft ?? deferred.content}
-                    disabled={queuedInlineEdit?.saving}
-                    rows={1}
-                    aria-label={t("sessionQueuedInlineEditLabel")}
-                    onChange={(event) => {
-                      resizeQueuedInlineEditor(event.currentTarget);
-                      const draft = event.currentTarget.value;
-                      setQueuedInlineEdit((current) => {
-                        if (!current || current.tempId !== deferred.tempId) {
-                          return current;
-                        }
-                        return { ...current, draft };
-                      });
-                    }}
-                    onBlur={() => {
-                      void saveQueuedInlineEdit();
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") {
-                        event.preventDefault();
-                        cancelQueuedInlineEdit();
-                      } else if (
-                        event.key === "Enter" &&
-                        (event.metaKey || event.ctrlKey)
-                      ) {
-                        event.preventDefault();
-                        void saveQueuedInlineEdit();
-                      }
-                    }}
-                  />
-                ) : canEditDeferred ? (
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    className="message-user-prompt deferred-message-bubble deferred-message-edit"
-                    onClick={(event) => {
-                      if (hasSelectedTextInside(event.currentTarget)) {
-                        return;
-                      }
-                      startQueuedInlineEdit(deferred);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter" && event.key !== " ") {
-                        return;
-                      }
-                      event.preventDefault();
-                      startQueuedInlineEdit(deferred);
-                    }}
-                    title="Select text or press Enter to edit queued message"
-                    aria-label="Queued message text; press Enter to edit"
-                  >
-                    {deferred.content}
-                  </div>
-                ) : (
-                  <div className="message-user-prompt deferred-message-bubble">
-                    {deferred.content}
-                  </div>
-                )}
+                <div className="message-user-prompt deferred-message-bubble">
+                  {deferred.content}
+                </div>
                 {deferred.attachments?.length ? (
                   <div className="attachment-list deferred-message-attachments-list">
                     {deferred.attachments.map((file) => (
@@ -3314,111 +2959,26 @@ export const MessageList = memo(function MessageList({
                     </span>
                   ) : null}
                   <div className="deferred-message-actions">
-                    {isEditingDeferred ? (
-                      <>
-                        <button
-                          type="button"
-                          className="deferred-message-action deferred-message-action-save"
-                          disabled={queuedInlineEdit?.saving}
-                          onMouseDown={(event) => {
-                            event.preventDefault();
-                            void saveQueuedInlineEdit();
-                          }}
-                          aria-label={t("sessionQueuedInlineSave")}
-                          title={t("sessionQueuedInlineSave")}
-                        >
-                          <span>{t("sessionQueuedInlineSave")}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="deferred-message-action deferred-message-action-cancel-edit"
-                          onMouseDown={(event) => {
-                            event.preventDefault();
-                            cancelQueuedInlineEdit();
-                          }}
-                          aria-label={t("sessionQueuedInlineCancel")}
-                          title={t("sessionQueuedInlineCancel")}
-                        >
-                          <XIcon />
-                          <span>{t("sessionQueuedInlineCancel")}</span>
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          className="deferred-message-action deferred-message-action-context"
-                          onClick={() => {
-                            if (contextRenderId) {
-                              jumpToQueuedContext(
-                                tailItem.key,
-                                contextRenderId,
-                              );
-                            }
-                          }}
-                          disabled={!contextRenderId}
-                          aria-label="Jump to queued message context"
-                          title={
-                            contextRenderId
-                              ? "Jump to queued message context"
-                              : "No loaded context before this queued message"
-                          }
-                        >
-                          <span className="deferred-message-context-icon">
-                            ↩
-                          </span>
-                          <span>Context</span>
-                        </button>
-                        <CopyTextButton
-                          text={deferred.content}
-                          label="Copy queued message"
-                          className="deferred-message-action deferred-message-action-copy"
-                          showTextLabel
-                          onClick={(event) => event.stopPropagation()}
-                        />
-                        {canEditDeferred && (
-                          <button
-                            type="button"
-                            className="deferred-message-action deferred-message-action-edit"
-                            onClick={() => startQueuedInlineEdit(deferred)}
-                            aria-label="Edit queued message"
-                            title="Edit queued message"
-                          >
-                            <PencilIcon />
-                            <span>Edit</span>
-                          </button>
-                        )}
-                        {canSteerQueued && (
-                          <button
-                            type="button"
-                            className="deferred-message-action deferred-message-action-steer"
-                            onClick={() =>
-                              onSteerDeferred?.(deferred.tempId as string)
-                            }
-                            aria-label={t("sessionSteerQueuedMessageNow")}
-                            title={t("sessionSteerQueuedMessageNow")}
-                          >
-                            <span className="deferred-message-steer-icon">
-                              ↗
-                            </span>
-                            <span>{t("sessionSteerNow")}</span>
-                          </button>
-                        )}
-                        {deferred.tempId && onCancelDeferred && (
-                          <button
-                            type="button"
-                            className="deferred-message-action deferred-message-action-cancel"
-                            onClick={() =>
-                              onCancelDeferred(deferred.tempId as string)
-                            }
-                            aria-label="Cancel queued message"
-                            title="Cancel queued message"
-                          >
-                            <XIcon />
-                            <span>Cancel</span>
-                          </button>
-                        )}
-                      </>
+                    <CopyTextButton
+                      text={deferred.content}
+                      label="Copy queued message"
+                      className="deferred-message-action deferred-message-action-copy"
+                      showTextLabel
+                      onClick={(event) => event.stopPropagation()}
+                    />
+                    {deferred.tempId && onCancelDeferred && (
+                      <button
+                        type="button"
+                        className="deferred-message-action deferred-message-action-cancel"
+                        onClick={() =>
+                          onCancelDeferred(deferred.tempId as string)
+                        }
+                        aria-label="Cancel queued message"
+                        title="Cancel queued message"
+                      >
+                        <XIcon />
+                        <span>Cancel</span>
+                      </button>
                     )}
                   </div>
                 </div>

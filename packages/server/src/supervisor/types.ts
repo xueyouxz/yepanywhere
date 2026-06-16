@@ -251,9 +251,8 @@ export type ProcessEvent =
         content: string;
         timestamp: string;
         attachmentCount?: number;
-        blockedByEdit?: boolean;
       }[];
-      reason?: "queued" | "cancelled" | "edited" | "promoted";
+      reason?: "queued" | "cancelled" | "promoted";
       tempId?: string;
     };
 

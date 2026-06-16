@@ -126,13 +126,6 @@ export interface DeferredQueueMessage {
   timestamp: string;
   metadata?: UserMessageMetadata;
   attachmentCount?: number;
-  blockedByEdit?: boolean;
-}
-
-export interface DeferredMessagePlacement {
-  beforeTempId?: string;
-  afterTempId?: string;
-  replaceTempId?: string;
 }
 
 /** Minimal project info for filter dropdowns */
@@ -746,7 +739,6 @@ export const api = {
     tempId?: string,
     thinking?: ThinkingOption,
     deferred?: boolean,
-    placement?: DeferredMessagePlacement,
     clientTimestamp?: number,
     messageMetadata?: UserMessageMetadata,
     serviceTier?: string,
@@ -773,9 +765,6 @@ export const api = {
         showThinking,
         serviceTier,
         deferred,
-        insertBeforeTempId: placement?.beforeTempId,
-        insertAfterTempId: placement?.afterTempId,
-        replaceDeferredTempId: placement?.replaceTempId,
         clientTimestamp,
         messageMetadata,
       }),
@@ -785,45 +774,6 @@ export const api = {
     fetchJSON<{ cancelled: boolean }>(
       `/sessions/${sessionId}/deferred/${encodeURIComponent(tempId)}`,
       { method: "DELETE" },
-    ),
-
-  updateDeferredMessage: (sessionId: string, tempId: string, message: string) =>
-    fetchJSON<{
-      updated: boolean;
-      tempId?: string;
-      message: string;
-      deferredMessages?: DeferredQueueMessage[];
-    }>(`/sessions/${sessionId}/deferred/${encodeURIComponent(tempId)}`, {
-      method: "PUT",
-      body: JSON.stringify({ message }),
-    }),
-
-  editDeferredMessage: (sessionId: string, tempId: string) =>
-    fetchJSON<{
-      message: string;
-      tempId?: string;
-      mode?: PermissionMode;
-      attachments?: UploadedFile[];
-      placement?: DeferredMessagePlacement;
-    }>(`/sessions/${sessionId}/deferred/${encodeURIComponent(tempId)}/edit`, {
-      method: "POST",
-    }),
-
-  steerDeferredMessage: (sessionId: string, tempId: string) =>
-    fetchJSON<{
-      steered: boolean;
-      tempId?: string;
-      message: string;
-      position?: number;
-      deferredMessages?: DeferredQueueMessage[];
-    }>(`/sessions/${sessionId}/deferred/${encodeURIComponent(tempId)}/steer`, {
-      method: "POST",
-    }),
-
-  releaseDeferredEditBarrier: (sessionId: string, tempId: string) =>
-    fetchJSON<{ released: boolean; deferredMessages?: DeferredQueueMessage[] }>(
-      `/sessions/${sessionId}/deferred/${encodeURIComponent(tempId)}/edit/release`,
-      { method: "POST" },
     ),
 
   abortProcess: (processId: string) =>

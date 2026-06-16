@@ -264,7 +264,7 @@ describe("useSession completion reconciliation", () => {
     expect(fetchNewMessages).toHaveBeenCalledTimes(1);
   });
 
-  it("clears deferred queue chips when the queued turn is echoed as a user message", () => {
+  it("mirrors the server deferred-queue event", () => {
     const { result } = renderHook(() =>
       useSession(PROJECT_ID, "sess-1", {
         owner: "self",
@@ -277,34 +277,26 @@ describe("useSession completion reconciliation", () => {
         eventType: "deferred-queue",
         messages: [
           {
-            tempId: "temp-queued",
-            content: "i see it already.",
+            tempId: "temp-a",
+            content: "alpha message",
             timestamp: "2026-04-24T00:00:00.000Z",
+          },
+          {
+            tempId: "temp-b",
+            content: "beta message",
+            timestamp: "2026-04-24T00:00:01.000Z",
           },
         ],
       });
     });
 
-    expect(result.current.deferredMessages).toHaveLength(1);
-
-    act(() => {
-      sessionStreamHandler?.({
-        eventType: "message",
-        type: "user",
-        uuid: "uuid-queued",
-        tempId: "temp-queued",
-        message: {
-          role: "user",
-          content: "i see it already.",
-        },
-      });
-    });
-
-    expect(result.current.deferredMessages).toEqual([]);
+    expect(result.current.deferredMessages).toMatchObject([
+      { tempId: "temp-a", content: "alpha message" },
+      { tempId: "temp-b", content: "beta message" },
+    ]);
   });
 
-  it("clears every bundled chip by tempIds on the merged-turn echo", () => {
-    sessionMessagesMock.messages = [];
+  it("replaces the deferred mirror wholesale on each server event", () => {
     const { result } = renderHook(() =>
       useSession(PROJECT_ID, "sess-1", {
         owner: "self",
@@ -313,40 +305,47 @@ describe("useSession completion reconciliation", () => {
     );
 
     act(() => {
-      result.current.addDeferredMessage({
-        tempId: "temp-a",
-        content: "alpha message",
-        timestamp: "2026-04-24T00:00:00.000Z",
-      });
-      result.current.addDeferredMessage({
-        tempId: "temp-b",
-        content: "beta message",
-        timestamp: "2026-04-24T00:00:01.000Z",
+      sessionStreamHandler?.({
+        eventType: "deferred-queue",
+        messages: [
+          {
+            tempId: "temp-a",
+            content: "alpha",
+            timestamp: "2026-04-24T00:00:00.000Z",
+          },
+          {
+            tempId: "temp-b",
+            content: "beta",
+            timestamp: "2026-04-24T00:00:01.000Z",
+          },
+        ],
       });
     });
     expect(result.current.deferredMessages).toHaveLength(2);
 
-    // The delivered turn echoes back every bundled id. Its text is the
-    // time-marked merge and intentionally does NOT contain the original chip
-    // text, so only the tempIds list can clear both chips.
+    // The server promotes temp-a and reports the remaining queue. The client
+    // mirrors it wholesale — no merge, no fuzzy matching against the echo.
     act(() => {
       sessionStreamHandler?.({
-        eventType: "message",
-        type: "user",
-        uuid: "uuid-bundle",
+        eventType: "deferred-queue",
+        reason: "promoted",
         tempId: "temp-a",
-        tempIds: ["temp-a", "temp-b"],
-        message: {
-          role: "user",
-          content: "(60s ago)\n\nrewritten\n\n--------\n\n(1s later)\n\nrewritten",
-        },
+        messages: [
+          {
+            tempId: "temp-b",
+            content: "beta",
+            timestamp: "2026-04-24T00:00:01.000Z",
+          },
+        ],
       });
     });
 
-    expect(result.current.deferredMessages).toEqual([]);
+    expect(result.current.deferredMessages).toMatchObject([
+      { tempId: "temp-b", content: "beta" },
+    ]);
   });
 
-  it("clears all deferred chips contained in a merged provider user turn", () => {
+  it("does not clear deferred chips from a user-message echo", () => {
     const { result } = renderHook(() =>
       useSession(PROJECT_ID, "sess-1", {
         owner: "self",
@@ -359,72 +358,29 @@ describe("useSession completion reconciliation", () => {
         eventType: "deferred-queue",
         messages: [
           {
-            tempId: "temp-first",
-            content: "first queued",
+            tempId: "temp-a",
+            content: "still queued",
             timestamp: "2026-04-24T00:00:00.000Z",
-          },
-          {
-            tempId: "temp-second",
-            content: "second queued",
-            timestamp: "2026-04-24T00:00:01.000Z",
-          },
-          {
-            tempId: "temp-third",
-            content: "third queued",
-            timestamp: "2026-04-24T00:00:02.000Z",
           },
         ],
       });
     });
 
+    // A user echo with matching text must NOT remove the chip — only a server
+    // deferred-queue event can change the mirror.
     act(() => {
       sessionStreamHandler?.({
         eventType: "message",
         type: "user",
-        uuid: "uuid-merged",
-        tempId: "temp-first",
-        message: {
-          role: "user",
-          content:
-            "first queued\n\n--------\n\nsecond queued\n\n--------\n\nthird queued",
-        },
+        uuid: "uuid-echo",
+        tempId: "temp-a",
+        message: { role: "user", content: "still queued" },
       });
     });
 
-    expect(result.current.deferredMessages).toEqual([]);
-  });
-
-  it("does not re-add a promoted queued chip after the user echo already arrived", () => {
-    const { result } = renderHook(() =>
-      useSession(PROJECT_ID, "sess-1", {
-        owner: "self",
-        processId: "proc-1",
-      }),
-    );
-
-    act(() => {
-      sessionStreamHandler?.({
-        eventType: "message",
-        type: "user",
-        uuid: "uuid-promoted",
-        tempId: "temp-promoted",
-        message: {
-          role: "user",
-          content: "already promoted",
-        },
-      });
-    });
-
-    act(() => {
-      result.current.addDeferredMessage({
-        tempId: "temp-promoted",
-        content: "already promoted",
-        timestamp: "2026-04-24T00:00:00.000Z",
-        deliveryState: "sending",
-      });
-    });
-
-    expect(result.current.deferredMessages).toEqual([]);
+    expect(result.current.deferredMessages).toMatchObject([
+      { tempId: "temp-a", content: "still queued" },
+    ]);
   });
 
   it("clears pending direct sends when persisted history contains the user turn", () => {
@@ -504,75 +460,6 @@ describe("useSession completion reconciliation", () => {
     expect(result.current.pendingMessages).toMatchObject([
       {
         content: "repeatable question",
-      },
-    ]);
-  });
-
-  it("keeps deferred queue chips on an idle status boundary", () => {
-    const { result } = renderHook(() =>
-      useSession(PROJECT_ID, "sess-1", {
-        owner: "self",
-        processId: "proc-1",
-      }),
-    );
-
-    act(() => {
-      sessionStreamHandler?.({
-        eventType: "deferred-queue",
-        messages: [
-          {
-            tempId: "temp-stale",
-            content: "stale queued text",
-            timestamp: "2026-04-24T00:00:00.000Z",
-          },
-        ],
-      });
-    });
-
-    expect(result.current.deferredMessages).toHaveLength(1);
-
-    act(() => {
-      sessionStreamHandler?.({ eventType: "status", state: "idle" });
-    });
-
-    expect(result.current.deferredMessages).toMatchObject([
-      {
-        tempId: "temp-stale",
-        content: "stale queued text",
-        deliveryState: "queued",
-      },
-    ]);
-  });
-
-  it("marks queue entries as verifying when connected snapshot omits them", () => {
-    const { result } = renderHook(() =>
-      useSession(PROJECT_ID, "sess-1", {
-        owner: "self",
-        processId: "proc-1",
-      }),
-    );
-
-    act(() => {
-      result.current.addDeferredMessage({
-        tempId: "temp-verifying",
-        content: "needs verification",
-        timestamp: "2026-04-24T00:00:00.000Z",
-      });
-    });
-
-    act(() => {
-      sessionStreamHandler?.({
-        eventType: "connected",
-        state: "idle",
-        deferredMessages: [],
-      });
-    });
-
-    expect(result.current.deferredMessages).toMatchObject([
-      {
-        tempId: "temp-verifying",
-        content: "needs verification",
-        deliveryState: "verifying",
       },
     ]);
   });
@@ -760,361 +647,6 @@ describe("useSession completion reconciliation", () => {
     expect(result.current.markdownAugments).toEqual({
       "assistant-1": { html: "<p>complete</p>" },
     });
-  });
-
-  it("marks a promoted deferred queue chip as sending without Codex catch-up", () => {
-    const { result } = renderHook(() =>
-      useSession(PROJECT_ID, "sess-1", {
-        owner: "self",
-        processId: "proc-1",
-      }),
-    );
-
-    act(() => {
-      result.current.addDeferredMessage({
-        tempId: "temp-promoted",
-        content: "promote this",
-        timestamp: "2026-04-24T00:00:00.000Z",
-      });
-    });
-
-    act(() => {
-      sessionStreamHandler?.({
-        eventType: "deferred-queue",
-        reason: "promoted",
-        tempId: "temp-promoted",
-        messages: [],
-      });
-    });
-
-    expect(result.current.deferredMessages).toMatchObject([
-      {
-        tempId: "temp-promoted",
-        content: "promote this",
-        deliveryState: "sending",
-      },
-    ]);
-    expect(fetchNewMessages).not.toHaveBeenCalled();
-
-    act(() => {
-      vi.advanceTimersByTime(500);
-    });
-
-    expect(fetchNewMessages).not.toHaveBeenCalled();
-  });
-
-  it("fetches catch-up for a Claude promoted deferred queue chip", () => {
-    sessionMessagesMock.provider = "claude";
-    const { result } = renderHook(() =>
-      useSession(PROJECT_ID, "sess-1", {
-        owner: "self",
-        processId: "proc-1",
-      }),
-    );
-
-    act(() => {
-      result.current.addDeferredMessage({
-        tempId: "temp-promoted",
-        content: "promote this",
-        timestamp: "2026-04-24T00:00:00.000Z",
-      });
-    });
-
-    act(() => {
-      sessionStreamHandler?.({
-        eventType: "deferred-queue",
-        reason: "promoted",
-        tempId: "temp-promoted",
-        messages: [],
-      });
-    });
-
-    expect(result.current.deferredMessages).toMatchObject([
-      {
-        tempId: "temp-promoted",
-        content: "promote this",
-        deliveryState: "sending",
-      },
-    ]);
-    expect(fetchNewMessages).toHaveBeenCalledTimes(1);
-
-    act(() => {
-      vi.advanceTimersByTime(500);
-    });
-
-    expect(fetchNewMessages).toHaveBeenCalledTimes(2);
-  });
-
-  it("clears a promoted deferred batch from a concatenated user echo", () => {
-    const { result } = renderHook(() =>
-      useSession(PROJECT_ID, "sess-1", {
-        owner: "self",
-        processId: "proc-1",
-      }),
-    );
-
-    act(() => {
-      result.current.addDeferredMessage({
-        tempId: "temp-1",
-        content: "first queued",
-        timestamp: "2026-04-24T00:00:00.000Z",
-      });
-      result.current.addDeferredMessage({
-        tempId: "temp-2",
-        content: "second queued",
-        timestamp: "2026-04-24T00:00:01.000Z",
-      });
-    });
-
-    act(() => {
-      sessionStreamHandler?.({
-        eventType: "deferred-queue",
-        reason: "promoted",
-        messages: [],
-      });
-    });
-
-    expect(result.current.deferredMessages).toMatchObject([
-      { tempId: "temp-1", deliveryState: "sending" },
-      { tempId: "temp-2", deliveryState: "sending" },
-    ]);
-
-    act(() => {
-      sessionStreamHandler?.({
-        eventType: "message",
-        type: "user",
-        uuid: "uuid-combined",
-        tempId: "temp-1",
-        message: {
-          role: "user",
-          content: "first queued\n\n--------\n\nsecond queued",
-        },
-      });
-    });
-
-    expect(result.current.deferredMessages).toEqual([]);
-  });
-
-  it("prunes persisted deferred chips after loading a concatenated provider turn", () => {
-    window.localStorage.setItem(
-      "queued-message-sess-1",
-      JSON.stringify([
-        {
-          tempId: "temp-1",
-          content: "first queued",
-          timestamp: "2026-04-24T00:00:00.000Z",
-        },
-        {
-          tempId: "temp-2",
-          content: "second queued",
-          timestamp: "2026-04-24T00:00:01.000Z",
-        },
-      ]),
-    );
-    sessionMessagesMock.messages = [
-      {
-        type: "user",
-        uuid: "uuid-combined",
-        message: {
-          role: "user",
-          content: "first queued\n\n--------\n\nsecond queued",
-        },
-      },
-    ];
-
-    const { result } = renderHook(() =>
-      useSession(PROJECT_ID, "sess-1", {
-        owner: "self",
-        processId: "proc-1",
-      }),
-    );
-
-    expect(result.current.deferredMessages).toEqual([]);
-    expect(window.localStorage.getItem("queued-message-sess-1")).toBeNull();
-  });
-
-  it("prunes persisted deferred chips from a legacy time-marked turn", () => {
-    window.localStorage.setItem(
-      "queued-message-sess-1",
-      JSON.stringify([
-        {
-          tempId: "temp-1",
-          content: "could you rename the label",
-          timestamp: "2026-04-24T00:00:00.000Z",
-        },
-        {
-          tempId: "temp-2",
-          content: "e.g. Asking then Asked?",
-          timestamp: "2026-04-24T00:00:01.000Z",
-        },
-      ]),
-    );
-    // Older builds delivered one turn with per-chunk "(Ns ago/later)" markers
-    // plus the "--------" separator. Keep reconciling those persisted chips.
-    sessionMessagesMock.messages = [
-      {
-        type: "user",
-        uuid: "uuid-combined",
-        timestamp: "2026-04-24T00:01:00.000Z",
-        message: {
-          role: "user",
-          content:
-            "(60s ago)\n\ncould you rename the label\n\n--------\n\n(1s later)\n\ne.g. Asking then Asked?",
-        },
-      },
-    ];
-
-    const { result } = renderHook(() =>
-      useSession(PROJECT_ID, "sess-1", {
-        owner: "self",
-        processId: "proc-1",
-      }),
-    );
-
-    expect(result.current.deferredMessages).toEqual([]);
-    expect(window.localStorage.getItem("queued-message-sess-1")).toBeNull();
-  });
-
-  it("prunes a deferred chip whose delivered turn scrolled past the recent window", () => {
-    window.localStorage.setItem(
-      "queued-message-sess-1",
-      JSON.stringify([
-        {
-          tempId: "temp-1",
-          content: "old queued message",
-          timestamp: "2026-04-24T00:00:00.000Z",
-        },
-      ]),
-    );
-    const deliveredTurn = {
-      type: "user",
-      uuid: "uuid-delivered",
-      timestamp: "2026-04-24T00:00:05.000Z",
-      message: { role: "user", content: "old queued message" },
-    };
-    // 40 later turns push the delivered turn out of any fixed -30 tail window.
-    const filler = Array.from({ length: 40 }, (_, i) => ({
-      type: "assistant",
-      uuid: `uuid-filler-${i}`,
-      timestamp: "2026-04-24T00:10:00.000Z",
-      message: { role: "assistant", content: `filler ${i}` },
-    }));
-    sessionMessagesMock.messages = [deliveredTurn, ...filler];
-
-    const { result } = renderHook(() =>
-      useSession(PROJECT_ID, "sess-1", {
-        owner: "self",
-        processId: "proc-1",
-      }),
-    );
-
-    expect(result.current.deferredMessages).toEqual([]);
-  });
-
-  it("uses server queue order when a REST sync inserts an edited message", () => {
-    const { result } = renderHook(() =>
-      useSession(PROJECT_ID, "sess-1", {
-        owner: "self",
-        processId: "proc-1",
-      }),
-    );
-
-    act(() => {
-      result.current.addDeferredMessage({
-        tempId: "temp-1",
-        content: "first",
-        timestamp: "2026-04-24T00:00:00.000Z",
-      });
-      result.current.addDeferredMessage({
-        tempId: "temp-3",
-        content: "third",
-        timestamp: "2026-04-24T00:00:02.000Z",
-      });
-    });
-
-    act(() => {
-      result.current.syncDeferredMessages(
-        [
-          {
-            tempId: "temp-1",
-            content: "first",
-            timestamp: "2026-04-24T00:00:00.000Z",
-          },
-          {
-            tempId: "temp-2-edited",
-            content: "second edited",
-            timestamp: "2026-04-24T00:00:01.000Z",
-          },
-          {
-            tempId: "temp-3",
-            content: "third",
-            timestamp: "2026-04-24T00:00:02.000Z",
-          },
-        ],
-        {
-          reason: "queued",
-          tempId: "temp-2-edited",
-          source: "rest",
-        },
-      );
-    });
-
-    expect(result.current.deferredMessages.map((message) => message.tempId)).toEqual(
-      ["temp-1", "temp-2-edited", "temp-3"],
-    );
-  });
-
-  it("preserves queued attachment metadata across server summaries", () => {
-    const attachment = {
-      id: "file-1",
-      originalName: "notes.txt",
-      name: "file-1-notes.txt",
-      size: 12,
-      mimeType: "text/plain",
-      path: "/uploads/notes.txt",
-    };
-
-    const { result } = renderHook(() =>
-      useSession(PROJECT_ID, "sess-1", {
-        owner: "self",
-        processId: "proc-1",
-      }),
-    );
-
-    act(() => {
-      result.current.addDeferredMessage({
-        tempId: "temp-with-file",
-        content: "see attached",
-        timestamp: "2026-04-24T00:00:00.000Z",
-        attachmentCount: 1,
-        attachments: [attachment],
-        mode: "acceptEdits",
-      });
-    });
-
-    act(() => {
-      sessionStreamHandler?.({
-        eventType: "deferred-queue",
-        messages: [
-          {
-            tempId: "temp-with-file",
-            content: "see attached",
-            timestamp: "2026-04-24T00:00:01.000Z",
-          },
-        ],
-      });
-    });
-
-    expect(result.current.deferredMessages).toMatchObject([
-      {
-        tempId: "temp-with-file",
-        content: "see attached",
-        attachmentCount: 1,
-        attachments: [attachment],
-        mode: "acceptEdits",
-        deliveryState: "queued",
-      },
-    ]);
   });
 
   it("does not load permission mode from localStorage on session view mount", () => {

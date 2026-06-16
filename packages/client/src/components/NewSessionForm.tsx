@@ -1231,8 +1231,7 @@ export function NewSessionForm({
           uploadedFiles.length > 0 ? uploadedFiles : undefined,
           undefined, // tempId
           thinking, // Pass the captured thinking setting to avoid process restart
-          undefined,
-          undefined,
+          undefined, // deferred
           clientTimestamp,
           undefined, // messageMetadata
           undefined, // serviceTier

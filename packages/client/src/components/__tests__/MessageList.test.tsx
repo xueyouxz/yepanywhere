@@ -8,7 +8,6 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentContentProvider } from "../../contexts/AgentContentContext";
 import { RenderModeProvider } from "../../contexts/RenderModeContext";
@@ -526,44 +525,7 @@ describe("MessageList", () => {
     );
   });
 
-  it("marks queued messages that are blocked behind an edit", () => {
-    render(
-      <MessageList
-        messages={[]}
-        deferredMessages={[
-          {
-            tempId: "temp-3",
-            content: "third",
-            timestamp: "2026-04-25T00:00:00.000Z",
-            blockedByEdit: true,
-          },
-        ]}
-      />,
-    );
-
-    expect(screen.getByText("Queued (after edit)")).toBeTruthy();
-  });
-
-  it("marks queued messages as verifying when provider reconciliation is pending", () => {
-    render(
-      <MessageList
-        messages={[]}
-        deferredMessages={[
-          {
-            tempId: "temp-verifying",
-            content: "verifying text",
-            timestamp: "2026-04-25T00:00:00.000Z",
-            deliveryState: "verifying",
-          },
-        ]}
-      />,
-    );
-
-    expect(screen.getByText("Queued (verifying)")).toBeTruthy();
-  });
-
-  it("exposes explicit edit and cancel controls for queued messages", () => {
-    const onEditDeferred = vi.fn();
+  it("exposes a cancel control for queued messages", () => {
     const onCancelDeferred = vi.fn();
 
     render(
@@ -576,192 +538,15 @@ describe("MessageList", () => {
             timestamp: "2026-04-25T00:00:00.000Z",
           },
         ]}
-        onEditDeferred={onEditDeferred}
         onCancelDeferred={onCancelDeferred}
       />,
     );
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Edit queued message" }),
-    );
-    fireEvent.click(
       screen.getByRole("button", { name: "Cancel queued message" }),
     );
 
-    expect(onEditDeferred).toHaveBeenCalledWith("temp-queued");
     expect(onCancelDeferred).toHaveBeenCalledWith("temp-queued");
-  });
-
-  it("edits queued text inline and saves on blur", async () => {
-    const onUpdateDeferred = vi.fn(
-      async (_tempId: string, _content: string) => undefined,
-    );
-
-    function Harness() {
-      const [deferredMessages, setDeferredMessages] = useState([
-        {
-          tempId: "temp-queued",
-          content: "queued text",
-          timestamp: "2026-04-25T00:00:00.000Z",
-        },
-      ]);
-      return (
-        <MessageList
-          messages={[]}
-          deferredMessages={deferredMessages}
-          onUpdateDeferred={async (tempId, content) => {
-            await onUpdateDeferred(tempId, content);
-            setDeferredMessages((messages) =>
-              messages.map((message) =>
-                message.tempId === tempId ? { ...message, content } : message,
-              ),
-            );
-          }}
-        />
-      );
-    }
-
-    const { container } = render(<Harness />);
-
-    fireEvent.click(screen.getByText("queued text"));
-    const editor = screen.getByLabelText(
-      "Edit queued message text",
-    ) as HTMLTextAreaElement;
-    expect(editor.value).toBe("queued text");
-    expect(container.querySelectorAll(".deferred-message")).toHaveLength(1);
-
-    fireEvent.change(editor, { target: { value: "queued text edited" } });
-    fireEvent.blur(editor);
-
-    await waitFor(() =>
-      expect(onUpdateDeferred).toHaveBeenCalledWith(
-        "temp-queued",
-        "queued text edited",
-      ),
-    );
-    await screen.findByText("queued text edited");
-    expect(screen.queryByLabelText("Edit queued message text")).toBeNull();
-    expect(container.querySelectorAll(".deferred-message")).toHaveLength(1);
-  });
-
-  it("cancels an inline queued edit without saving", () => {
-    const onUpdateDeferred = vi.fn(
-      async (_tempId: string, _content: string) => undefined,
-    );
-
-    render(
-      <MessageList
-        messages={[]}
-        deferredMessages={[
-          {
-            tempId: "temp-queued",
-            content: "queued text",
-            timestamp: "2026-04-25T00:00:00.000Z",
-          },
-        ]}
-        onUpdateDeferred={onUpdateDeferred}
-      />,
-    );
-
-    fireEvent.click(screen.getByText("queued text"));
-    const editor = screen.getByLabelText(
-      "Edit queued message text",
-    ) as HTMLTextAreaElement;
-    fireEvent.change(editor, { target: { value: "queued text edited" } });
-    fireEvent.mouseDown(
-      screen.getByRole("button", { name: "Cancel edit (Esc)" }),
-    );
-
-    expect(onUpdateDeferred).not.toHaveBeenCalled();
-    expect(screen.getByText("queued text")).toBeTruthy();
-    expect(screen.queryByLabelText("Edit queued message text")).toBeNull();
-  });
-
-  it("jumps from a queued message to its transcript context and back", async () => {
-    const { container } = render(
-      <MessageList
-        messages={[
-          userMessage(
-            "user-context",
-            "context request",
-            "2026-04-25T00:00:00.000Z",
-          ),
-          assistantMessage(
-            "assistant-context",
-            "context response",
-            "2026-04-25T00:00:05.000Z",
-          ),
-        ]}
-        deferredMessages={[
-          {
-            tempId: "temp-queued",
-            content: "queued after context",
-            timestamp: "2026-04-25T00:00:10.000Z",
-          },
-        ]}
-      />,
-    );
-    const scrollTo = vi.fn();
-    Object.defineProperty(container, "scrollTop", {
-      configurable: true,
-      value: 120,
-      writable: true,
-    });
-    Object.defineProperty(container, "scrollHeight", {
-      configurable: true,
-      value: 1200,
-    });
-    Object.defineProperty(container, "clientHeight", {
-      configurable: true,
-      value: 300,
-    });
-    container.scrollTo = scrollTo as typeof container.scrollTo;
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Jump to queued message context" }),
-    );
-
-    expect(scrollTo).toHaveBeenCalled();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Return to queued message" }),
-    );
-    expect(
-      screen.queryByRole("button", { name: "Return to queued message" }),
-    ).toBeNull();
-  });
-
-  it("exposes a steer-now control for steerable queued messages", () => {
-    const onSteerDeferred = vi.fn();
-
-    render(
-      <MessageList
-        messages={[]}
-        deferredMessages={[
-          {
-            tempId: "temp-queued",
-            content: "when done, queued text",
-            timestamp: "2026-04-25T00:00:00.000Z",
-          },
-          {
-            tempId: "temp-blocked",
-            content: "blocked text",
-            timestamp: "2026-04-25T00:00:01.000Z",
-            blockedByEdit: true,
-          },
-        ]}
-        onSteerDeferred={onSteerDeferred}
-        canSteerDeferred
-      />,
-    );
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Steer queued message now" }),
-    );
-
-    expect(onSteerDeferred).toHaveBeenCalledWith("temp-queued");
-    expect(
-      screen.getAllByRole("button", { name: "Steer queued message now" }),
-    ).toHaveLength(1);
   });
 
   it("copies sent user message text", async () => {
@@ -797,50 +582,14 @@ describe("MessageList", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("queued text"));
   });
 
-  it("keeps selected queued text from activating edit", () => {
-    const onEditDeferred = vi.fn();
-    const { container } = render(
-      <MessageList
-        messages={[]}
-        deferredMessages={[
-          {
-            tempId: "temp-queued",
-            content: "select me",
-            timestamp: "2026-04-25T00:00:00.000Z",
-          },
-        ]}
-        onEditDeferred={onEditDeferred}
-      />,
-    );
-
-    const queuedBubble = container.querySelector(".deferred-message-edit");
-    expect(queuedBubble).toBeTruthy();
-    const textNode = queuedBubble?.firstChild;
-    expect(textNode).toBeTruthy();
-    const range = document.createRange();
-    range.setStart(textNode as Node, 0);
-    range.setEnd(textNode as Node, "select".length);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-
-    fireEvent.click(queuedBubble as HTMLElement);
-
-    expect(onEditDeferred).not.toHaveBeenCalled();
-    selection?.removeAllRanges();
-
-    fireEvent.click(queuedBubble as HTMLElement);
-    expect(onEditDeferred).toHaveBeenCalledWith("temp-queued");
-  });
-
-  it("renders pending and queued composer-tail items by submit order", () => {
+  it("renders pending sends before server-queued deferred messages", () => {
     const { container } = render(
       <MessageList
         messages={[]}
         pendingMessages={[
           {
             tempId: "temp-pending",
-            content: "second still posting",
+            content: "still posting",
             timestamp: "2026-04-25T00:00:00.000Z",
             clientOrder: 2,
           },
@@ -848,9 +597,8 @@ describe("MessageList", () => {
         deferredMessages={[
           {
             tempId: "temp-queued",
-            content: "first already queued",
+            content: "already queued",
             timestamp: "2026-04-25T00:00:10.000Z",
-            clientOrder: 1,
           },
         ]}
       />,
@@ -859,10 +607,10 @@ describe("MessageList", () => {
     const prompts = Array.from(
       container.querySelectorAll(".message-user-prompt"),
     ).map((node) => node.textContent);
-    expect(prompts).toEqual(["first already queued", "second still posting"]);
+    expect(prompts).toEqual(["still posting", "already queued"]);
   });
 
-  it("marks patient queued rows while preserving typed queue order", () => {
+  it("renders deferred messages in the server's queue order", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-25T00:03:00.000Z"));
 
@@ -874,20 +622,17 @@ describe("MessageList", () => {
             tempId: "temp-regular-first",
             content: "regular first",
             timestamp: "2026-04-25T00:00:01.000Z",
-            clientOrder: 1,
           },
           {
             tempId: "temp-patient",
             content: "patient second",
             timestamp: "2026-04-25T00:00:00.000Z",
-            clientOrder: 2,
             metadata: { deliveryIntent: "patient" },
           },
           {
             tempId: "temp-regular-third",
             content: "regular third",
             timestamp: "2026-04-25T00:00:02.000Z",
-            clientOrder: 3,
           },
         ]}
       />,
