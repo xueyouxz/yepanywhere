@@ -192,8 +192,9 @@ capture, not in the button. Best guesses, roughly in order:
    being cleared) - worth checking.
 2. **Device open itself stalls.** `getUserMedia()` may hang/reject on mobile;
    the streaming path only reaches graph setup after a live `MediaStream`.
-   Batch mode can still be selected by using browser-compressed Grok audio, but
-   it has different browser-default processing and no streaming Smart Turn.
+   The Grok batch implementations remain in code, but normal STT menus no
+   longer advertise them; they have different browser-default processing and no
+   streaming Smart Turn.
 3. **AudioWorklet mode is the likely real fix.** The deprecated
    `ScriptProcessorNode` is exactly the component that is flaky on mobile;
    moving capture to an `AudioWorklet` (the planned opt-in mode) is the

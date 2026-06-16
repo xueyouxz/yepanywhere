@@ -37,9 +37,8 @@ replacement for YA-mediated speech in general:
 - **Browser-local personal key is supported.** A client may configure its own
   xAI key in browser-local storage instead of borrowing server credentials.
   That browser-local key is not sent to the YA server. Once the browser has a
-  non-empty local key, direct Grok streaming and direct Grok batch are
-  selectable even if the YA server has no xAI STT key and therefore does not
-  advertise `ya-grok`.
+  non-empty local key, direct Grok streaming is selectable even if the YA server
+  has no xAI STT key and therefore does not advertise `ya-grok`.
 - **Upstream default is no key exposure.** Sharing a server STT key with
   clients must be an explicit operator setting, not implied by
   `YA_stt__XAI_API_KEY` existing. Minting a short-lived xAI client secret for
@@ -159,19 +158,18 @@ Current implementation, 2026-06-15:
 - When the browser-local key is empty, the client asks
   `POST /api/speech/xai-client-key` for the borrowed server key. The server
   returns it only when `YA_stt__SHARE_XAI_KEY_WITH_CLIENTS=1` is set.
-- Direct streaming and direct batch are selectable in the STT backend menu and
-  can be saved like any other speech method when either `ya-grok` is
-  advertised or this browser has a local xAI STT key; direct batch is
-  explicitly labeled non-streaming.
+- Direct streaming is selectable in the STT backend menu and can be saved like
+  any other speech method when either `ya-grok` is advertised or this browser
+  has a local xAI STT key. The direct batch implementation remains in code for
+  legacy or special use, but normal STT menus do not advertise it.
 - When `ya-grok` is advertised and no explicit local speech method is stored,
   the client defaults to `Grok STT direct` rather than Grok through YA.
 - When no server Grok backend is advertised, entering a browser-local xAI STT
   key immediately makes `Grok STT direct` the default for a browser with no
   explicit speech-method override. Browser paste is one input event, so the UI
   does not add a fixed debounce delay.
-- Grok through YA is also split into `Grok STT through YA` and
-  `Grok STT through YA batch` top-level methods, not a nested PCM/batch
-  setting inside one method.
+- Grok through YA is advertised as `Grok STT through YA`; the retained
+  `Grok STT through YA batch` implementation is hidden from normal STT menus.
 - The xAI key input is always reachable from the main STT settings page and
   from the mic-button speech options. This lets a client unlock direct Grok
   without any server-side speech backend initialization.
@@ -195,9 +193,10 @@ Current implementation, 2026-06-15:
 5. **Ship direct streaming.** Use the existing 16 kHz PCM16 chunker
    discipline: no per-audio-frame allocation, 100 ms frames, `audio.done` on
    stop, and first-audio-frame gated "listening" state.
-6. **Keep server-mediated paths selectable.** Existing `ya-grok` through YA,
-   `ya-grok-batch`, and `ya-whisper` remain available where configured,
-   especially for direct localhost/tunnel usage and local server STT.
+6. **Keep server-mediated streaming paths selectable.** Existing `ya-grok`
+   through YA and local backends such as `ya-whisper` remain available where
+   configured, especially for direct localhost/tunnel usage and local server
+   STT. Grok batch implementations remain code paths, not normal menu choices.
 7. **Record cost and retention semantics.** Direct-to-xAI audio is not retained
    by YA unless separately captured for audit. Server-mediated paths keep the
    existing retention contract.
@@ -211,10 +210,9 @@ Acceptance for the immediate hosted relief path:
 - With server xAI STT configured, an authenticated private hosted client can
   mint a short-lived client secret and stream directly; public/share views
   cannot.
-- With server long-lived key sharing enabled, direct batch can borrow the key
-  and transcribe; public/share views cannot.
-- Batch mode visibly says non-streaming and produces final text or a visible
-  xAI/CORS/auth error.
+- If a hidden/special direct batch path is invoked with server long-lived key
+  sharing enabled, direct batch can borrow the key and transcribe; public/share
+  views cannot.
 - Streaming mode, when available, shows yellow immediately after click, red
   only after first audio frame, tentative drafts while xAI emits mutable
   partials, committed draft text when xAI emits chunk-final partials, and final

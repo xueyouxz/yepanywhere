@@ -59,14 +59,13 @@ describe("speech provider method selection", () => {
     ).toEqual(["ya-custom-stt", DEFAULT_SPEECH_METHOD]);
   });
 
-  it("exposes direct Grok methods when the browser has an xAI key", () => {
+  it("exposes direct Grok streaming when the browser has an xAI key", () => {
     expect(
       getSpeechMethods(["ya-custom-stt"], undefined, {
         directXaiAvailable: true,
       }).map((method) => method.id),
     ).toEqual([
       XAI_DIRECT_STREAMING_SPEECH_METHOD,
-      XAI_DIRECT_BATCH_SPEECH_METHOD,
       "ya-custom-stt",
       DEFAULT_SPEECH_METHOD,
     ]);
@@ -79,21 +78,18 @@ describe("speech provider method selection", () => {
         .map((method) => method.label),
     ).toEqual([
       "Grok STT through YA",
-      "Grok STT through YA batch",
       "Deepgram STT",
       "Parakeet STT",
     ]);
   });
 
-  it("exposes YA-routed Grok streaming and batch as top-level methods", () => {
+  it("exposes Grok streaming methods without batch choices", () => {
     expect(
       getSpeechMethods(["ya-grok"])
         .map((method) => [method.id, method.label]),
     ).toEqual([
       [XAI_DIRECT_STREAMING_SPEECH_METHOD, "Grok STT direct"],
-      [XAI_DIRECT_BATCH_SPEECH_METHOD, "Grok STT direct batch"],
       [YA_GROK_STREAMING_SPEECH_METHOD, "Grok STT through YA"],
-      [YA_GROK_BATCH_SPEECH_METHOD, "Grok STT through YA batch"],
       [DEFAULT_SPEECH_METHOD, expect.stringContaining("Browser")],
     ]);
     expect(
@@ -109,19 +105,26 @@ describe("speech provider method selection", () => {
     ).toBe(false);
   });
 
-  it("keeps the direct xAI batch method as an explicit client choice", () => {
+  it("maps a stored direct xAI batch choice to streaming", () => {
     expect(
       getSpeechMethods(["ya-grok"]).find(
         (method) => method.id === XAI_DIRECT_BATCH_SPEECH_METHOD,
       ),
-    ).toMatchObject({
-      label: "Grok STT direct batch",
-      serverRouted: false,
-      clientSupported: true,
-    });
+    ).toBeUndefined();
     expect(
       resolveSpeechMethod(XAI_DIRECT_BATCH_SPEECH_METHOD, ["ya-grok"], true),
-    ).toBe(XAI_DIRECT_BATCH_SPEECH_METHOD);
+    ).toBe(XAI_DIRECT_STREAMING_SPEECH_METHOD);
+  });
+
+  it("maps a stored YA-routed Grok batch choice to streaming", () => {
+    expect(
+      getSpeechMethods(["ya-grok"]).find(
+        (method) => method.id === YA_GROK_BATCH_SPEECH_METHOD,
+      ),
+    ).toBeUndefined();
+    expect(
+      resolveSpeechMethod(YA_GROK_BATCH_SPEECH_METHOD, ["ya-grok"], true),
+    ).toBe(XAI_DIRECT_STREAMING_SPEECH_METHOD);
   });
 
   it("keeps the direct xAI streaming method as the primary direct choice", () => {
@@ -189,7 +192,7 @@ describe("speech provider method selection", () => {
     ).toBe("ya-deepgram");
     expect(
       resolveSpeechMethod(YA_GROK_BATCH_SPEECH_METHOD, ["ya-grok"], true),
-    ).toBe(YA_GROK_BATCH_SPEECH_METHOD);
+    ).toBe(XAI_DIRECT_STREAMING_SPEECH_METHOD);
     expect(resolveSpeechMethod(DEFAULT_SPEECH_METHOD, ["ya-grok"], true)).toBe(
       DEFAULT_SPEECH_METHOD,
     );

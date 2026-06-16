@@ -153,23 +153,26 @@ streaming/confidence surface exists.
   ML end-of-turn detection. Grok STT exposes this through the xAI
   `smart_turn` threshold and `smart_turn_timeout` parameters. The client shows
   Smart Turn controls only when the selected backend advertises that capability.
-- Grok STT through YA has separate top-level methods for streaming and batch
-  behavior. `ya-grok` captures Web Audio in the browser and sends raw 16 kHz
-  PCM16 frames to YA for streaming recognition. `ya-grok-batch` uses the
-  browser's MediaRecorder output and the batch transcription route. Smart Turn
-  depends on streaming `speech_final` events and is therefore only active for
-  methods whose capabilities advertise both `streaming` and `smartTurn`.
+- Grok STT through YA is advertised as a streaming method. `ya-grok` captures
+  Web Audio in the browser and sends raw 16 kHz PCM16 frames to YA for
+  streaming recognition. The retained `ya-grok-batch` implementation uses the
+  browser's MediaRecorder output and the batch transcription route, but normal
+  STT menus do not offer it. Smart Turn depends on streaming `speech_final`
+  events and is therefore only active for methods whose capabilities advertise
+  both `streaming` and `smartTurn`.
 - `useSpeechRecognition` selects browser-native when the method is
   `browser-native`; `xai-grok-direct-streaming` constructs a direct xAI
-  streaming provider; `xai-grok-direct-batch` constructs a direct xAI batch
-  provider; advertised server backend ids construct `YaServerProvider`
-  unchanged.
+  streaming provider; the retained `xai-grok-direct-batch` id constructs a
+  direct xAI batch provider but is not advertised in normal STT menus;
+  advertised server backend ids construct `YaServerProvider` unchanged.
 - The client speech-method selector is data-driven from
   `/api/version.voiceBackends`, the special browser-native fallback, and direct
   xAI client methods only when direct xAI can run: either `ya-grok` is
   advertised or this browser has a local xAI STT key. It does not keep a
   client-side whitelist of server backend ids; unknown advertised ids remain
-  selectable and route through YA unchanged.
+  selectable and route through YA unchanged. Grok batch ids are hidden from the
+  normal selector; stored batch selections resolve to streaming Grok when Grok
+  STT is available.
 - `NewSessionForm` and the active session composer toolbar build
   speech-method dropdowns from the same advertised active backend list. The
   dropdown is shown only when more than one method is available.
@@ -494,9 +497,8 @@ to a local model remains a later optimization after local batch is solid.
   `send`.
 - With `Grok STT through YA` selected, the WebSocket start frame advertises
   `mimeType: "audio/pcm;rate=16000;encoding=s16le"`, `sampleRate: 16000`, and
-  `encoding: "pcm"`. `Grok STT through YA batch` uses the MediaRecorder batch
-  path and hides Smart Turn because that path has no streaming `speech_final`
-  events.
+  `encoding: "pcm"`. The hidden `Grok STT through YA batch` path uses
+  MediaRecorder batch transcription and has no streaming `speech_final` events.
 - With both `ya-grok` and `ya-deepgram` advertised and no explicit stored
   speech method, the client selects `Grok STT direct` as the effective mic
   backend. The through-YA Grok methods remain explicit fallback/debug choices.

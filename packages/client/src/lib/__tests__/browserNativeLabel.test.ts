@@ -60,7 +60,7 @@ describe("detectBrowserNativeLabel", () => {
 });
 
 describe("formatBrowserNativeLabel", () => {
-  it("formats supported browser with recognizer guess and trailing ?", () => {
+  it("renders supported browser-native recognition as Browser", () => {
     expect(
       formatBrowserNativeLabel({
         prefix: "Browser",
@@ -68,10 +68,10 @@ describe("formatBrowserNativeLabel", () => {
         recognizerGuess: "Google STT",
         likelySupported: true,
       }),
-    ).toBe("Browser (Chrome → Google STT?)");
+    ).toBe("Browser");
   });
 
-  it("formats Firefox as unsupported", () => {
+  it("renders unsupported browser-native recognition as Browser", () => {
     expect(
       formatBrowserNativeLabel({
         prefix: "Browser",
@@ -79,7 +79,7 @@ describe("formatBrowserNativeLabel", () => {
         recognizerGuess: "",
         likelySupported: false,
       }),
-    ).toBe("Browser (Firefox → unsupported)");
+    ).toBe("Browser");
   });
 
   it("falls back to bare prefix when browser is unknown", () => {

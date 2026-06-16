@@ -21,6 +21,7 @@ import {
   YA_GROK_BATCH_SPEECH_METHOD,
   XAI_DIRECT_STREAMING_SPEECH_METHOD,
 } from "../../lib/speechProviders/methods";
+import { setBrowserXaiSttApiKey } from "../../lib/speechProviders/xaiCredentials";
 import { MessageInput } from "../MessageInput";
 import {
   MessageInputToolbarView,
@@ -599,32 +600,21 @@ describe("MessageInput", () => {
       }),
     ).toBeDefined();
     expect(
-      screen.getByRole("radio", {
+      screen.queryByRole("radio", {
         name: /^Grok STT through YA batch Browser sends a complete compressed recording through YA to xAI\.$/,
       }),
-    ).toBeDefined();
+    ).toBeNull();
     fireEvent.click(screen.getByRole("radio", { name: /Deepgram STT/ }));
 
     expect(mockSetSpeechMethod).toHaveBeenCalledWith("ya-deepgram");
   });
 
-  it("selects direct Grok streaming after entering a browser xAI key", async () => {
+  it("selects direct Grok streaming when a browser xAI key is configured", async () => {
+    setBrowserXaiSttApiKey("browser-xai-key");
+
     renderMessageInput();
 
-    expect(
-      screen.getByRole("button", { name: "voice" }).dataset.speechMethod,
-    ).toBe("browser-native");
-
     fireEvent.contextMenu(screen.getByRole("button", { name: "voice" }));
-    expect(
-      screen.queryByRole("radio", {
-        name: /^Grok STT direct Browser streams PCM audio directly to xAI\.$/,
-      }),
-    ).toBeNull();
-
-    fireEvent.change(screen.getByLabelText("Browser xAI STT Key"), {
-      target: { value: "browser-xai-key" },
-    });
 
     await waitFor(() =>
       expect(
@@ -636,6 +626,11 @@ describe("MessageInput", () => {
         name: /^Grok STT direct Browser streams PCM audio directly to xAI\.$/,
       }),
     ).toBeDefined();
+    expect(
+      screen.queryByRole("radio", {
+        name: /Grok STT direct batch/,
+      }),
+    ).toBeNull();
   });
 
   it("stops active voice capture before opening speech settings", () => {
@@ -1040,7 +1035,7 @@ describe("MessageInput", () => {
     });
   });
 
-  it("shows YA-routed Grok batch as a top-level method without Smart Turn", () => {
+  it("hides a stored YA-routed Grok batch method from the method list", () => {
     versionState.version = {
       ...versionState.version,
       voiceBackends: ["ya-grok"],
@@ -1060,12 +1055,16 @@ describe("MessageInput", () => {
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "voice" }));
     expect(
-      screen.getByRole("radio", {
+      screen.queryByRole("radio", {
         name: /^Grok STT through YA batch Browser sends a complete compressed recording through YA to xAI\.$/,
+      }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("radio", {
+        name: /^Grok STT direct Browser streams PCM audio directly to xAI\.$/,
       }).getAttribute("aria-checked"),
     ).toBe("true");
-    expect(screen.queryByText("Grok STT audio")).toBeNull();
-    expect(screen.queryByText("Smart Turn")).toBeNull();
+    expect(screen.getByText("Smart Turn")).toBeDefined();
 
     fireEvent.click(
       screen.getByRole("radio", {
@@ -1098,7 +1097,7 @@ describe("MessageInput", () => {
     expect(screen.queryByText("Grok STT audio")).toBeNull();
   });
 
-  it("keeps YA-routed Grok batch selectable in relay mode", () => {
+  it("hides a stored YA-routed Grok batch method in relay mode", () => {
     remoteBasePathState.basePath = "/ygraehl";
     versionState.version = {
       ...versionState.version,
@@ -1114,12 +1113,11 @@ describe("MessageInput", () => {
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "voice" }));
 
-    expect(screen.queryByText("Grok STT audio")).toBeNull();
     expect(
-      screen.getByRole("radio", {
+      screen.queryByRole("radio", {
         name: /^Grok STT through YA batch Browser sends a complete compressed recording through YA to xAI\.$/,
-      }).getAttribute("aria-checked"),
-    ).toBe("true");
+      }),
+    ).toBeNull();
   });
 
   it("keeps Up as native navigation when the composer has text", () => {

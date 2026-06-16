@@ -889,7 +889,7 @@ describe("NewSessionForm", () => {
     expect(mockVoiceToggle).toHaveBeenCalledTimes(1);
   });
 
-  it("offers YA-routed Grok batch as a top-level method", () => {
+  it("hides a stored YA-routed Grok batch method from the method list", () => {
     versionState.version = {
       voiceBackends: ["ya-grok"],
       voiceBackendCapabilities: {
@@ -916,12 +916,16 @@ describe("NewSessionForm", () => {
 
     fireEvent.contextMenu(screen.getByText("voice"));
     expect(
-      screen.getByRole("radio", {
+      screen.queryByRole("radio", {
         name: /^Grok STT through YA batch Browser sends a complete compressed recording through YA to xAI\.$/,
+      }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("radio", {
+        name: /^Grok STT direct Browser streams PCM audio directly to xAI\.$/,
       }).getAttribute("aria-checked"),
     ).toBe("true");
-    expect(screen.queryByText("Grok STT audio")).toBeNull();
-    expect(screen.queryByText("Smart Turn")).toBeNull();
+    expect(screen.getByText("Smart Turn")).toBeDefined();
 
     fireEvent.click(
       screen.getByRole("radio", {
@@ -959,7 +963,7 @@ describe("NewSessionForm", () => {
     expect(screen.queryByText("Grok STT audio")).toBeNull();
   });
 
-  it("keeps YA-routed Grok batch selectable in relay mode", () => {
+  it("hides a stored YA-routed Grok batch method in relay mode", () => {
     remoteBasePathState.basePath = "/ygraehl";
     versionState.version = {
       voiceBackends: ["ya-grok"],
@@ -981,11 +985,10 @@ describe("NewSessionForm", () => {
     fireEvent.contextMenu(screen.getByText("voice"));
 
     expect(
-      screen.getByRole("radio", {
+      screen.queryByRole("radio", {
         name: /^Grok STT through YA batch Browser sends a complete compressed recording through YA to xAI\.$/,
-      }).getAttribute("aria-checked"),
-    ).toBe("true");
-    expect(screen.queryByText("Grok STT audio")).toBeNull();
+      }),
+    ).toBeNull();
   });
 
   it("defaults prompt suggestions off when the provider lacks native support", async () => {

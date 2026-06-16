@@ -291,6 +291,50 @@ export function SpeechControlMenu({
               />
             </section>
           )}
+          {showParakeetModelControls && (
+            <section className="speech-options-section">
+              <label
+                className="speech-options-section-title"
+                htmlFor={parakeetModelPresetId}
+              >
+                {t("speechSettingsParakeetModelTitle")}
+              </label>
+              <select
+                id={parakeetModelPresetId}
+                className="speech-parakeet-model-select"
+                value={selectedParakeetPreset}
+                onChange={(event) => {
+                  const preset = event.currentTarget.value;
+                  if (!preset) return;
+                  onBeforeCaptureChange?.();
+                  setParakeetSpeechModel(preset);
+                }}
+                aria-label={t("speechSettingsParakeetModelPresetLabel")}
+              >
+                <option value="">
+                  {t("speechSettingsParakeetCustomModel")}
+                </option>
+                {PARAKEET_SPEECH_MODEL_PRESETS.map((preset) => (
+                  <option key={preset.value} value={preset.value}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                id={parakeetModelInputId}
+                className="speech-parakeet-model-input"
+                value={parakeetSpeechModel}
+                placeholder={t("speechSettingsParakeetModelPlaceholder")}
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(event) => {
+                  onBeforeCaptureChange?.();
+                  setParakeetSpeechModel(event.currentTarget.value);
+                }}
+                aria-label={t("speechSettingsParakeetModelInputLabel")}
+              />
+            </section>
+          )}
           {showMethodSelector && (
             <section className="speech-options-section">
               <div className="speech-options-section-title">STT backend</div>
@@ -339,50 +383,6 @@ export function SpeechControlMenu({
                   );
                 })}
               </div>
-            </section>
-          )}
-          {showParakeetModelControls && (
-            <section className="speech-options-section">
-              <label
-                className="speech-options-section-title"
-                htmlFor={parakeetModelPresetId}
-              >
-                {t("speechSettingsParakeetModelTitle")}
-              </label>
-              <select
-                id={parakeetModelPresetId}
-                className="speech-parakeet-model-select"
-                value={selectedParakeetPreset}
-                onChange={(event) => {
-                  const preset = event.currentTarget.value;
-                  if (!preset) return;
-                  onBeforeCaptureChange?.();
-                  setParakeetSpeechModel(preset);
-                }}
-                aria-label={t("speechSettingsParakeetModelPresetLabel")}
-              >
-                <option value="">
-                  {t("speechSettingsParakeetCustomModel")}
-                </option>
-                {PARAKEET_SPEECH_MODEL_PRESETS.map((preset) => (
-                  <option key={preset.value} value={preset.value}>
-                    {preset.label}
-                  </option>
-                ))}
-              </select>
-              <input
-                id={parakeetModelInputId}
-                className="speech-parakeet-model-input"
-                value={parakeetSpeechModel}
-                placeholder={t("speechSettingsParakeetModelPlaceholder")}
-                autoComplete="off"
-                spellCheck={false}
-                onChange={(event) => {
-                  onBeforeCaptureChange?.();
-                  setParakeetSpeechModel(event.currentTarget.value);
-                }}
-                aria-label={t("speechSettingsParakeetModelInputLabel")}
-              />
             </section>
           )}
           {showMicDeviceControls && (

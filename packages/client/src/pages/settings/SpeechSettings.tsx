@@ -156,37 +156,6 @@ export function SpeechSettings() {
           </label>
         </div>
 
-        <div className="settings-item model-settings-item">
-          <div className="settings-item-info">
-            <strong>{t("speechSettingsBackendTitle")}</strong>
-            <p>{t("speechSettingsBackendDescription")}</p>
-          </div>
-          <div className="speech-backend-settings-field">
-            <FilterDropdown
-              label={t("speechSettingsBackendTitle")}
-              options={backendOptions}
-              selected={[selectedBackend]}
-              onChange={(selected) => {
-                const nextBackend = selected[0];
-                if (nextBackend) setSpeechMethod(nextBackend);
-              }}
-              multiSelect={false}
-              placeholder={t("speechSettingsBackendPlaceholder")}
-            />
-            {serverBackends.length === 0 && (
-              <p className="settings-hint">
-                {t("speechSettingsNoServerBackends")}
-              </p>
-            )}
-          </div>
-        </div>
-
-        {relayTransport && selectedBackend === "ya-grok" && (
-          <p className="settings-hint">
-            {t("speechSettingsStreamingRelayUnavailable")}
-          </p>
-        )}
-
         {showParakeetModelControls && (
           <div className="settings-item model-settings-item">
             <div className="settings-item-info">
@@ -230,6 +199,37 @@ export function SpeechSettings() {
               </p>
             </div>
           </div>
+        )}
+
+        <div className="settings-item model-settings-item">
+          <div className="settings-item-info">
+            <strong>{t("speechSettingsBackendTitle")}</strong>
+            <p>{t("speechSettingsBackendDescription")}</p>
+          </div>
+          <div className="speech-backend-settings-field">
+            <FilterDropdown
+              label={t("speechSettingsBackendTitle")}
+              options={backendOptions}
+              selected={[selectedBackend]}
+              onChange={(selected) => {
+                const nextBackend = selected[0];
+                if (nextBackend) setSpeechMethod(nextBackend);
+              }}
+              multiSelect={false}
+              placeholder={t("speechSettingsBackendPlaceholder")}
+            />
+            {serverBackends.length === 0 && (
+              <p className="settings-hint">
+                {t("speechSettingsNoServerBackends")}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {relayTransport && selectedBackend === "ya-grok" && (
+          <p className="settings-hint">
+            {t("speechSettingsStreamingRelayUnavailable")}
+          </p>
         )}
 
         <div className="settings-item model-settings-item">

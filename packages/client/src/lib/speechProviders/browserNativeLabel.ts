@@ -1,12 +1,9 @@
 /**
- * UA-based best-guess label for the browser-native speech recognizer.
+ * UA-based support metadata for the browser-native speech recognizer.
  *
- * The Web Speech API doesn't tell us which backend the browser uses —
- * Chrome talks to Google STT, Safari to Apple's stack, etc. The guess
- * helps users orient ("which cloud is hearing this?") but is not
- * authoritative; mobile variants and Chromium forks can route
- * differently. Callers should style the guessed-backend portion as
- * faint and/or trail it with "?" to signal uncertainty.
+ * The Web Speech API doesn't tell us which backend the browser uses, so the UI
+ * renders the recognizer simply as "Browser" and keeps backend guesses out of
+ * the STT method label.
  */
 
 export interface BrowserNativeLabel {
@@ -95,21 +92,6 @@ export function detectBrowserNativeLabel(
   };
 }
 
-/**
- * Render the label as a single string, e.g.
- *   "Browser (Chrome → Google STT?)"
- *   "Browser (Firefox → unsupported)"
- *
- * For UI rendering with separate styling for the guess, callers can
- * use the structured fields from `detectBrowserNativeLabel` directly.
- */
 export function formatBrowserNativeLabel(label: BrowserNativeLabel): string {
-  if (!label.browser) return label.prefix;
-  if (!label.likelySupported) {
-    return `${label.prefix} (${label.browser} → unsupported)`;
-  }
-  if (!label.recognizerGuess) {
-    return `${label.prefix} (${label.browser})`;
-  }
-  return `${label.prefix} (${label.browser} → ${label.recognizerGuess}?)`;
+  return label.prefix;
 }
