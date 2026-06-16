@@ -33,7 +33,10 @@ import {
 import { MessageInputToolbar } from "../components/MessageInputToolbar";
 import { MessageList } from "../components/MessageList";
 import { ModelSwitchModal } from "../components/ModelSwitchModal";
-import { ProcessInfoModal } from "../components/ProcessInfoModal";
+import {
+  ProcessInfoBody,
+  ProcessInfoModal,
+} from "../components/ProcessInfoModal";
 import { ProviderBadge } from "../components/ProviderBadge";
 import { QuestionAnswerPanel } from "../components/QuestionAnswerPanel";
 import { RecentSessionsDropdown } from "../components/RecentSessionsDropdown";
@@ -1306,6 +1309,9 @@ function SessionPageContent({
 
   // Model switch modal state
   const [showModelSwitchModal, setShowModelSwitchModal] = useState(false);
+  const [modelPanelInitialTab, setModelPanelInitialTab] = useState<
+    "model" | "info"
+  >("model");
   const [showHandoffModal, setShowHandoffModal] = useState(false);
 
   // Track user engagement to mark session as "seen"
@@ -3714,6 +3720,16 @@ function SessionPageContent({
                 className="provider-badge-button"
                 onClick={() => {
                   if (status.owner === "self" && status.processId) {
+                    setModelPanelInitialTab("model");
+                    setShowModelSwitchModal(true);
+                    return;
+                  }
+                  setShowProcessInfoModal(true);
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  if (status.owner === "self" && status.processId) {
+                    setModelPanelInitialTab("info");
                     setShowModelSwitchModal(true);
                     return;
                   }
@@ -3814,10 +3830,28 @@ function SessionPageContent({
           sessionId={actualSessionId}
           currentModel={session?.model}
           onModelChanged={handleModelChanged}
-          onOpenSessionInfo={() => {
-            setShowModelSwitchModal(false);
-            setShowProcessInfoModal(true);
-          }}
+          initialTab={modelPanelInitialTab}
+          infoPane={
+            session ? (
+              <ProcessInfoBody
+                sessionId={actualSessionId}
+                provider={session.provider}
+                model={session.model}
+                status={status}
+                processState={processState}
+                sessionLiveness={sessionLiveness}
+                contextUsage={session.contextUsage}
+                originator={session.originator}
+                cliVersion={session.cliVersion}
+                sessionSource={session.source}
+                approvalPolicy={session.approvalPolicy}
+                sandboxPolicy={session.sandboxPolicy}
+                createdAt={session.createdAt}
+                sessionStreamConnected={sessionUpdatesConnected}
+                lastSessionEventAt={lastStreamActivityAt}
+              />
+            ) : null
+          }
           onClose={() => setShowModelSwitchModal(false)}
         />
       )}

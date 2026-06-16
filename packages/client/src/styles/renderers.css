@@ -2254,6 +2254,38 @@ details[open] .collapsible__icon {
   margin: 0 auto;
 }
 
+.model-switch-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.model-switch-tab {
+  padding: 0.35rem 0.7rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.model-switch-tab:hover {
+  color: var(--text-primary);
+}
+
+.model-switch-tab.active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent-color);
+}
+
+.model-switch-info-pane {
+  max-height: min(60vh, 32rem);
+  overflow-y: auto;
+}
+
 .model-switch-loading,
 .model-switch-error {
   font-size: var(--font-size-sm);

@@ -3,7 +3,7 @@ import type {
   ModelInfo,
   ProviderName,
 } from "@yep-anywhere/shared";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import {
   getShowThinkingSetting,
@@ -35,7 +35,10 @@ interface ModelSwitchModalProps {
     thinking?: { type: string };
     effort?: string;
   }) => void;
-  onOpenSessionInfo?: () => void;
+  /** When provided, renders an "Info" tab whose pane is this node. */
+  infoPane?: ReactNode;
+  /** Which tab is focused on open (default "model"). */
+  initialTab?: "model" | "info";
   onClose: () => void;
 }
 
@@ -73,7 +76,8 @@ export function ModelSwitchModal({
   sessionId,
   currentModel,
   onModelChanged,
-  onOpenSessionInfo,
+  infoPane,
+  initialTab,
   onClose,
 }: ModelSwitchModalProps) {
   const { t } = useI18n();
@@ -97,6 +101,9 @@ export function ModelSwitchModal({
   );
   const [lastTouchedSection, setLastTouchedSection] =
     useState<DirtySection>(null);
+  const [activeTab, setActiveTab] = useState<"model" | "info">(
+    initialTab ?? "model",
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -226,15 +233,6 @@ export function ModelSwitchModal({
     onClose();
   };
 
-  const handleOpenSessionInfo = () => {
-    if (!onOpenSessionInfo || switching) return;
-    if (dirty) {
-      void applyConfig(onOpenSessionInfo);
-      return;
-    }
-    onOpenSessionInfo();
-  };
-
   const currentIndicatorTone = getIndicatorToneFromProcess(
     { type: currentThinkingMode === "off" ? "disabled" : "adaptive" },
     currentThinkingMode === "on" ? currentEffortLevel : undefined,
@@ -284,11 +282,36 @@ export function ModelSwitchModal({
   return (
     <Modal title={t("modelSwitchTitle")} onClose={handleDismiss}>
       <div className="model-switch-content">
-        {loading && (
+        {infoPane && (
+          <div className="model-switch-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "model"}
+              className={`model-switch-tab ${activeTab === "model" ? "active" : ""}`}
+              onClick={() => setActiveTab("model")}
+            >
+              {t("newSessionModelTitle")}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "info"}
+              className={`model-switch-tab ${activeTab === "info" ? "active" : ""}`}
+              onClick={() => setActiveTab("info")}
+            >
+              {t("processInfoTitle")}
+            </button>
+          </div>
+        )}
+        {infoPane && activeTab === "info" && (
+          <div className="model-switch-info-pane">{infoPane}</div>
+        )}
+        {(!infoPane || activeTab === "model") && loading && (
           <div className="model-switch-loading">{t("modelSwitchLoading")}</div>
         )}
 
-        {!loading && (
+        {(!infoPane || activeTab === "model") && !loading && (
           <>
             <div className="model-switch-status">
               <div className="model-switch-status-row">
@@ -300,7 +323,9 @@ export function ModelSwitchModal({
                   aria-hidden="true"
                 />
                 <span className="model-switch-status-main">
-                  {currentModelId ?? currentModel ?? t("processInfoDefaultModel")}
+                  {currentModelId ??
+                    currentModel ??
+                    t("processInfoDefaultModel")}
                 </span>
                 <span className="model-switch-status-detail">
                   {renderThinkingLabel(currentThinkingMode, currentEffortLevel)}
@@ -332,19 +357,6 @@ export function ModelSwitchModal({
                 </div>
               )}
             </div>
-            {onOpenSessionInfo && (
-              <div className="model-switch-info-action">
-                <button
-                  type="button"
-                  className="settings-button settings-button-secondary model-switch-inline-save"
-                  onClick={handleOpenSessionInfo}
-                  disabled={switching}
-                >
-                  {t("sessionViewInfo")}
-                </button>
-              </div>
-            )}
-
             {error && <div className="model-switch-error">{error}</div>}
 
             <section className="model-switch-section">
