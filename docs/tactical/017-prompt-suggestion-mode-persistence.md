@@ -1,14 +1,14 @@
 # Prompt Suggestion Mode Persistence
 
-Status: Planned
+Status: Implemented.
 
 Progress:
 
-- [ ] Add `promptSuggestionMode` to `SessionMetadata` + service write/prune.
-- [ ] Accept/validate/emit it in `PUT /sessions/:sessionId/metadata`.
-- [ ] Persist the chosen mode to metadata when a session is created.
-- [ ] Resolve the resume mode from metadata.
-- [ ] Add a current-session toggle in the client (writes metadata).
+- [x] Add `promptSuggestionMode` to `SessionMetadata` + service write/prune.
+- [x] Accept/validate/emit it in `PUT /sessions/:sessionId/metadata`.
+- [x] Persist the chosen mode to metadata when a session is created.
+- [x] Resolve the resume mode from metadata.
+- [x] Add a current-session toggle in the client (writes metadata).
 
 ## Context
 
