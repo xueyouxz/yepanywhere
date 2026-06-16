@@ -377,23 +377,24 @@ async function* withCleanup<T>(
 }
 
 /**
- * Opus and Sonnet always run with the 1M-token context window. The picker no
- * longer offers a separate "1M" choice; bare `opus`/`sonnet` are normalized to
- * the extended-context alias at every launch/setModel chokepoint, and surfaced
- * with the 1M window in the exposed model list. Opus 4.8's 1M is standard-priced
- * (no per-token premium). See tasks/029.
+ * Opus always runs with the 1M-token context window: Opus 4.8's 1M is
+ * standard-priced (no per-token premium), so bare `opus` is normalized to the
+ * extended-context alias at every launch/setModel chokepoint and surfaced with
+ * the 1M window in the exposed model list.
+ *
+ * Sonnet is deliberately NOT extended. Its 1M window requires paid usage
+ * credits — launching it as `sonnet[1m]` errors with "Usage credits required
+ * for 1M context" — so Sonnet keeps its standard 200K window. See tasks/029.
  */
 const ALWAYS_EXTENDED_CONTEXT_ALIASES: Record<string, string> = {
   opus: "opus[1m]",
-  sonnet: "sonnet[1m]",
 };
 
 const ALWAYS_EXTENDED_DESCRIPTIONS: Record<string, string> = {
   opus: "Opus 4.8 with the full 1M-token context window",
-  sonnet: "Sonnet 4.6 with the full 1M-token context window",
 };
 
-/** Normalize an opus/sonnet alias to its always-on 1M variant at launch. */
+/** Normalize the opus alias to its always-on 1M variant at launch. */
 export function withExtendedClaudeContext(
   model: string | undefined,
 ): string | undefined {
@@ -430,7 +431,13 @@ const CLAUDE_MODELS_FALLBACK: ModelInfo[] = [
   {
     id: "sonnet",
     name: "Sonnet",
-    description: ALWAYS_EXTENDED_DESCRIPTIONS.sonnet,
+    description: "Standard-context Sonnet for everyday coding tasks",
+    contextWindow: getModelContextWindow("sonnet", "claude"),
+  },
+  {
+    id: "sonnet[1m]",
+    name: "Sonnet 1M",
+    description: "Sonnet with 1M context for long sessions and large codebases",
     contextWindow: getModelContextWindow("sonnet[1m]", "claude"),
   },
   {
@@ -537,17 +544,18 @@ export function mergeClaudeModels(models: ModelInfo[]): ModelInfo[] {
     .map((id) => byId.get(id))
     .filter((model): model is ModelInfo => model !== undefined);
 
-  // Opus/Sonnet always use the 1M window (withExtendedClaudeContext), so drop
-  // the separate "[1m]" picker entries and surface the extended window + label
-  // on the base aliases — including when the SDK probe supplies a 200K window.
+  // Opus always uses the 1M window (withExtendedClaudeContext), so drop the
+  // redundant "opus[1m]" entry and surface the 1M window + label on the base
+  // alias — including when the SDK probe supplies a 200K window. Sonnet keeps
+  // both a standard "sonnet" and an explicit credit-gated "sonnet[1m]" entry.
   return merged
-    .filter((model) => model.id !== "opus[1m]" && model.id !== "sonnet[1m]")
+    .filter((model) => model.id !== "opus[1m]")
     .map((model) =>
-      model.id === "opus" || model.id === "sonnet"
+      model.id === "opus"
         ? {
             ...model,
-            contextWindow: getModelContextWindow(`${model.id}[1m]`, "claude"),
-            description: ALWAYS_EXTENDED_DESCRIPTIONS[model.id],
+            contextWindow: getModelContextWindow("opus[1m]", "claude"),
+            description: ALWAYS_EXTENDED_DESCRIPTIONS.opus,
           }
         : model,
     );

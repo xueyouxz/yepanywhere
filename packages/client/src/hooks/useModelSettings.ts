@@ -47,6 +47,7 @@ export const MODEL_OPTIONS: { value: ModelOption; label: string }[] = [
   { value: "best", label: "Best" },
   { value: "fable", label: "Fable" },
   { value: "sonnet", label: "Sonnet" },
+  { value: "sonnet[1m]", label: "Sonnet 1M" },
   { value: "opus", label: "Opus" },
   { value: "haiku", label: "Haiku" },
   { value: "opusplan", label: "Opus Plan" },
@@ -57,13 +58,14 @@ export { EFFORT_LEVEL_OPTIONS };
 const MAX_SPEECH_SMART_TURN_TIMEOUT_MS = 10000;
 
 /**
- * Opus/Sonnet are always 1M now (the picker no longer offers a separate "1M"
- * choice), so remap any previously stored "opus[1m]"/"sonnet[1m]" preference to
- * the single base alias rather than dropping it back to "default".
+ * Opus is always 1M now (the picker no longer offers a separate "Opus 1M"
+ * choice), so remap any previously stored "opus[1m]" preference to the base
+ * alias rather than dropping it back to "default". Sonnet is NOT always-1M
+ * (its 1M needs usage credits), so "sonnet[1m]" remains a distinct valid
+ * choice and is not remapped.
  */
 function remapLegacyModelChoice(stored: string | null): string | null {
   if (stored === "opus[1m]") return "opus";
-  if (stored === "sonnet[1m]") return "sonnet";
   return stored;
 }
 

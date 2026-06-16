@@ -803,11 +803,11 @@ export function resolveCompactPercent(
 }
 
 /**
- * Effective context window for the compaction threshold (task 029). Honors
- * always-1M: claude opus/sonnet run at the 1M window, but their resolved ids
- * ("claude-opus-4-8") fall through `getModelContextWindow` to the base 200K
- * family window, and `process.contextWindow` is often undefined — so neither is
- * reliable. Use the `[1m]` window for those families, else the resolver.
+ * Effective context window for the compaction threshold (task 029). Opus is
+ * always-1M, but its resolved id ("claude-opus-4-8") falls through
+ * `getModelContextWindow` to the base 200K window, and `process.contextWindow`
+ * is often undefined — so opus is special-cased to the 1M window. Everything
+ * else (bare sonnet = 200K, explicit sonnet[1m] = 1M, etc.) uses the resolver.
  */
 export function resolveCompactWindow(
   provider: ProviderName | undefined,
@@ -816,8 +816,12 @@ export function resolveCompactWindow(
 ): number | undefined {
   if (provider === "claude" || provider === "claude-ollama") {
     for (const m of candidates) {
-      const family = m?.match(/(?:^|[-/])(opus|sonnet)(?:[-/[]|$)/)?.[1];
-      if (family) return getModelContextWindow(`${family}[1m]`, "claude");
+      // Opus is always-1M, but its resolved id ("claude-opus-4-8") otherwise
+      // reads as the base 200K window. Sonnet is NOT always-1M (bare sonnet is
+      // 200K; an explicit "sonnet[1m]" is resolved by the fallback below), so
+      // only opus is special-cased here.
+      const family = m?.match(/(?:^|[-/])(opus)(?:[-/[]|$)/)?.[1];
+      if (family) return getModelContextWindow("opus[1m]", "claude");
     }
   }
   for (const m of candidates) {
