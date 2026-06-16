@@ -5040,7 +5040,7 @@ a.sidebar-nav-item {
 }
 
 .speech-mic-device-select,
-.speech-xai-key-input,
+.speech-parakeet-model-select,
 .speech-parakeet-model-input {
   width: 100%;
   min-width: 0;
@@ -5051,6 +5051,10 @@ a.sidebar-nav-item {
   color: var(--text-primary);
   background: var(--bg-primary);
   font-size: var(--font-size-sm);
+}
+
+.speech-parakeet-model-select + .speech-parakeet-model-input {
+  margin-top: var(--space-2);
 }
 
 .speech-mic-device-error {

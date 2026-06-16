@@ -16,6 +16,12 @@ export const PARAKEET_SPEECH_MODEL_PRESETS: ParakeetSpeechModelPreset[] = [
   },
 ];
 
+export function getParakeetSpeechPresetValue(model: string): string {
+  return PARAKEET_SPEECH_MODEL_PRESETS.some((preset) => preset.value === model)
+    ? model
+    : "";
+}
+
 export function cleanParakeetSpeechModel(
   value: string | null | undefined,
 ): string {

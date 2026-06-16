@@ -18,7 +18,10 @@ import {
   resolveSpeechMethod,
   type SpeechMethodId,
 } from "../../lib/speechProviders/methods";
-import { PARAKEET_SPEECH_MODEL_PRESETS } from "../../lib/speechProviders/parakeetModels";
+import {
+  getParakeetSpeechPresetValue,
+  PARAKEET_SPEECH_MODEL_PRESETS,
+} from "../../lib/speechProviders/parakeetModels";
 import { useSettingsUndoBaseline } from "./SettingsUndoContext";
 
 export function SpeechSettings() {
@@ -34,8 +37,8 @@ export function SpeechSettings() {
     parakeetSpeechModel,
     setParakeetSpeechModel,
   } = useModelSettings();
+  const parakeetModelPresetId = useId();
   const parakeetModelInputId = useId();
-  const parakeetModelListId = useId();
   const { keepMicWarm, setKeepMicWarm } = useSpeechCaptureSettings();
   const {
     browserXaiSttApiKey,
@@ -105,6 +108,8 @@ export function SpeechSettings() {
   const selectedBackendServerRouted =
     isServerRoutedSpeechMethod(selectedBackend);
   const showParakeetModelControls = selectedBackend === "ya-parakeet";
+  const selectedParakeetPreset =
+    getParakeetSpeechPresetValue(parakeetSpeechModel);
   const selectedBackendCanStream = canSpeechMethodStream({
     methodId: selectedBackend,
     serverCapabilities: versionInfo?.voiceBackendCapabilities,
@@ -189,9 +194,27 @@ export function SpeechSettings() {
               <p>{t("speechSettingsParakeetModelDescription")}</p>
             </div>
             <div className="speech-backend-settings-field">
+              <select
+                id={parakeetModelPresetId}
+                className="settings-select speech-parakeet-model-select"
+                value={selectedParakeetPreset}
+                onChange={(event) => {
+                  const preset = event.currentTarget.value;
+                  if (preset) setParakeetSpeechModel(preset);
+                }}
+                aria-label={t("speechSettingsParakeetModelPresetLabel")}
+              >
+                <option value="">
+                  {t("speechSettingsParakeetCustomModel")}
+                </option>
+                {PARAKEET_SPEECH_MODEL_PRESETS.map((preset) => (
+                  <option key={preset.value} value={preset.value}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
               <input
                 id={parakeetModelInputId}
-                list={parakeetModelListId}
                 className="settings-input"
                 value={parakeetSpeechModel}
                 placeholder={t("speechSettingsParakeetModelPlaceholder")}
@@ -200,17 +223,8 @@ export function SpeechSettings() {
                 onChange={(event) =>
                   setParakeetSpeechModel(event.currentTarget.value)
                 }
-                aria-label={t("speechSettingsParakeetModelTitle")}
+                aria-label={t("speechSettingsParakeetModelInputLabel")}
               />
-              <datalist id={parakeetModelListId}>
-                {PARAKEET_SPEECH_MODEL_PRESETS.map((preset) => (
-                  <option
-                    key={preset.value}
-                    value={preset.value}
-                    label={preset.label}
-                  />
-                ))}
-              </datalist>
               <p className="settings-hint">
                 {t("speechSettingsParakeetModelHint")}
               </p>

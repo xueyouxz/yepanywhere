@@ -35,6 +35,25 @@ describe("initSpeechBackendRegistry", () => {
     ]);
   });
 
+  it("logs enabled cloud backends consistently", async () => {
+    const infoSpy = vi.spyOn(getLogger(), "info").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("{}", { status: 200 }),
+    );
+
+    const registry = await initSpeechBackendRegistry({
+      voiceInputEnabled: true,
+      deepgramApiKey: "dg-key",
+      xaiSttApiKey: "xai-key",
+    });
+
+    expect(registry.enabledIds()).toEqual(["ya-deepgram", "ya-grok"]);
+    expect(infoSpy).toHaveBeenCalledWith(
+      '[Voice] Backend "ya-deepgram" enabled',
+    );
+    expect(infoSpy).toHaveBeenCalledWith('[Voice] Backend "ya-grok" enabled');
+  });
+
   it("does not register backends when voice input is disabled", async () => {
     const registry = await initSpeechBackendRegistry({
       voiceInputEnabled: false,

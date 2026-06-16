@@ -371,7 +371,10 @@ Deploy it in stages:
    `stt-bootstrap-parakeet` for `ya-parakeet`) and then probes again. Runtime
    validation and the warm worker use `pixi run --frozen -e stt python`, not
    ambient `python3`, so old system Python cannot accidentally become the ASR
-   runtime. Model/runtime knobs stay server-local for Whisper:
+   runtime. Parakeet validation also loads the configured fallback model at
+   startup; if Hugging Face auth, model access, cache space, or model loading is
+   broken, YA logs repair hints and does not advertise `ya-parakeet` to the UI.
+   Model/runtime knobs stay server-local for Whisper:
    `WHISPER_MODEL`, `WHISPER_DEVICE`, and `WHISPER_COMPUTE_TYPE`. For
    Parakeet, `PARAKEET_MODEL` is the server fallback, `PARAKEET_DEVICE` is the
    server device policy, and authenticated browser UI may send a per-request
@@ -511,10 +514,11 @@ to a local model remains a later optimization after local batch is solid.
 - With `YA_VOICE_BACKENDS=ya-whisper` and `faster_whisper` importable, startup
   validation advertises `ya-whisper`; the first utterance warms the model once
   and later utterances reuse the worker.
-- With `YA_VOICE_BACKENDS=ya-parakeet` and the Parakeet Transformers runtime
-  importable, startup validation advertises `ya-parakeet`; the first utterance
-  warms the selected model once and later utterances reuse the worker. Choosing
-  a different Parakeet model in STT settings or mic options sends that model id
-  to `/api/speech/transcribe` and restarts the warm worker for the new model.
+- With `YA_VOICE_BACKENDS=ya-parakeet`, the Parakeet Transformers runtime
+  importable, and the configured fallback model loadable, startup validation
+  advertises `ya-parakeet`; otherwise it logs the cache/auth/model-load repair
+  hint and hides the backend from the UI. Choosing a different Parakeet model
+  in STT settings or mic options sends that model id to `/api/speech/transcribe`
+  and restarts the warm worker for the new model.
 - Removing a previously selected backend causes an explicit method-selection
   prompt or notice, not a silent fallback and not a dead mic button.

@@ -1,4 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import { statfsSync } from "node:fs";
+import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +11,7 @@ import {
   PIXI_COMMAND,
   PIXI_PYTHON_ARGS,
   PIXI_STT_ENV,
+  summarizeChildError,
 } from "./localSttRuntime.js";
 
 const logger = getLogger();
@@ -22,6 +25,38 @@ export const DEFAULT_PARAKEET_MODEL = "nvidia/parakeet-tdt-0.6b-v3";
 
 /** Milliseconds to wait for model load before giving up. */
 const MODEL_LOAD_TIMEOUT_MS = 180_000;
+
+const PARAKEET_REPAIR_HINT =
+  "If Hugging Face auth or a gated model is the problem, run `pixi run --frozen -e stt hf auth login` and accept the model terms on Hugging Face. If the error is ENOSPC, free the cache/tmp filesystem or set HF_HUB_CACHE, HF_XET_CACHE, and TMPDIR before starting YA.";
+
+function formatBytes(bytes: number): string {
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function defaultHuggingFaceHubCache(): string {
+  if (process.env.HF_HUB_CACHE) return process.env.HF_HUB_CACHE;
+  if (process.env.HF_HOME) return join(process.env.HF_HOME, "hub");
+  if (process.env.XDG_CACHE_HOME) {
+    return join(process.env.XDG_CACHE_HOME, "huggingface", "hub");
+  }
+  return join(homedir(), ".cache", "huggingface", "hub");
+}
+
+function cacheFreeSpaceSummary(cacheDir: string): string {
+  try {
+    const stat = statfsSync(cacheDir);
+    return `free=${formatBytes(stat.bavail * stat.bsize)}`;
+  } catch {
+    return "free=unknown";
+  }
+}
 
 export class LocalParakeetBackend implements SpeechBackend {
   readonly id = "ya-parakeet";
@@ -44,11 +79,29 @@ export class LocalParakeetBackend implements SpeechBackend {
   }
 
   async validate(): Promise<{ ok: true } | { ok: false; reason: string }> {
-    return ensureLocalSttRuntime({
+    const runtime = await ensureLocalSttRuntime({
       backendLabel: "local Parakeet",
       checkPython: "import torch; from transformers import pipeline",
       bootstrapTask: "stt-bootstrap-parakeet",
     });
+    if (!runtime.ok) return runtime;
+
+    const cacheDir = defaultHuggingFaceHubCache();
+    logger.info(
+      `[Voice] ya-parakeet model preflight: loading fallback model "${this.model}" on device=${this.device} (cache=${cacheDir}; ${cacheFreeSpaceSummary(cacheDir)})`,
+    );
+    logger.info(`[Voice] ya-parakeet repair hints: ${PARAKEET_REPAIR_HINT}`);
+
+    try {
+      await this.startWorker(this.model, this.device);
+      return { ok: true };
+    } catch (error) {
+      this.stopWorker();
+      return {
+        ok: false,
+        reason: `${summarizeChildError(error)} ${PARAKEET_REPAIR_HINT}`,
+      };
+    }
   }
 
   private stopWorker(): void {

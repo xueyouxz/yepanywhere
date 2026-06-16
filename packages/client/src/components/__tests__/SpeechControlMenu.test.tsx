@@ -10,7 +10,6 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../i18n";
 import { UI_KEYS } from "../../lib/storageKeys";
-import { getBrowserXaiSttApiKey } from "../../lib/speechProviders/xaiCredentials";
 import { SpeechControlMenu } from "../SpeechControlMenu";
 
 const modelSettings = vi.hoisted(() => {
@@ -172,26 +171,23 @@ describe("SpeechControlMenu", () => {
     expect(onMethodChange).toHaveBeenCalledWith(["xai-grok-direct-streaming"]);
   });
 
-  it("saves the browser xAI STT key from the mic options", () => {
+  it("does not expose browser xAI key editing in the mic options", () => {
     installMediaDevices([]);
 
     renderSpeechControlMenu({
       trigger: <button type="button">voice</button>,
       showMethodSelector: false,
       methodOptions: [],
-      selectedMethod: "browser-native",
+      selectedMethod: "ya-grok",
       onMethodChange: vi.fn(),
     });
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "voice" }));
-    fireEvent.change(screen.getByLabelText("Browser xAI STT Key"), {
-      target: { value: " xai-browser-key " },
-    });
 
-    expect(getBrowserXaiSttApiKey()).toBe("xai-browser-key");
+    expect(screen.queryByLabelText("Browser xAI STT Key")).toBeNull();
   });
 
-  it("shows a free-text Parakeet model selector for the Parakeet backend", () => {
+  it("shows preset and free-text Parakeet model controls", () => {
     installMediaDevices([]);
     const onBeforeCaptureChange = vi.fn();
 
@@ -205,14 +201,23 @@ describe("SpeechControlMenu", () => {
     });
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "voice" }));
-    const input = screen.getByLabelText("Parakeet Model");
-    fireEvent.change(input, {
+    const preset = screen.getByLabelText("Parakeet model preset");
+    expect(screen.getByText("CTC 1.1B English lowercase")).toBeDefined();
+    fireEvent.change(preset, {
       target: { value: "nvidia/parakeet-ctc-1.1b" },
+    });
+
+    const input = screen.getByLabelText("Parakeet model id");
+    fireEvent.change(input, {
+      target: { value: "nvidia/custom-parakeet" },
     });
 
     expect(modelSettings.setParakeetSpeechModel).toHaveBeenCalledWith(
       "nvidia/parakeet-ctc-1.1b",
     );
-    expect(onBeforeCaptureChange).toHaveBeenCalledTimes(1);
+    expect(modelSettings.setParakeetSpeechModel).toHaveBeenCalledWith(
+      "nvidia/custom-parakeet",
+    );
+    expect(onBeforeCaptureChange).toHaveBeenCalledTimes(2);
   });
 });
