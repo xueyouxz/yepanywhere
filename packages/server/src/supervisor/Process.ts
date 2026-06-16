@@ -2851,15 +2851,15 @@ export class Process {
           // account-resolved window exists); we emit a per-model observation
           // for each entry so it can be durably recorded regardless of whether
           // any client fetches this session's detail, and keep the max across
-          // entries as this process's live-override window.
-          // Keys may include suffixes like "[1m]" (e.g. "claude-opus-4-6[1m]"),
-          // so we strip them to the canonical id the transcript/reader uses.
+          // entries as this process's live-override window. The model id is
+          // recorded exactly as the SDK reports it in modelUsage (no munging) —
+          // observations should reflect what was actually observed.
           if (message.modelUsage) {
             const mu = message.modelUsage as Record<
               string,
               { contextWindow?: number }
             >;
-            for (const [rawModel, entry] of Object.entries(mu)) {
+            for (const [model, entry] of Object.entries(mu)) {
               if (entry.contextWindow && entry.contextWindow > 0) {
                 this._contextWindow = Math.max(
                   this._contextWindow ?? 0,
@@ -2867,7 +2867,7 @@ export class Process {
                 );
                 this.emit({
                   type: "context-window-observed",
-                  model: rawModel.replace(/\[1m\]$/i, ""),
+                  model,
                   contextWindow: entry.contextWindow,
                   provider: this.provider,
                 });

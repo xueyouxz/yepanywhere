@@ -162,7 +162,7 @@ describe("Process", () => {
       expect(received[2]?.type).toBe("result");
     });
 
-    it("emits a context-window-observed event per modelUsage entry (and strips [1m])", async () => {
+    it("emits a context-window-observed event per modelUsage entry (recorded exactly as observed)", async () => {
       const messages = [
         { type: "system", subtype: "init", session_id: "sess-1" },
         {
@@ -200,11 +200,12 @@ describe("Process", () => {
 
       await new Promise((resolve) => setTimeout(resolve, 50));
 
-      // One event per non-zero entry; the zero-window entry is skipped.
+      // One event per non-zero entry; the zero-window entry is skipped. Keys
+      // are recorded verbatim (no [1m] munging).
       expect(observed).toEqual([
         { model: "claude-opus-4-8", contextWindow: 1_000_000 },
         { model: "claude-haiku-4-5-20251001", contextWindow: 200_000 },
-        { model: "claude-sonnet-4-6", contextWindow: 1_000_000 }, // [1m] stripped
+        { model: "claude-sonnet-4-6[1m]", contextWindow: 1_000_000 },
       ]);
       expect(observedProvider).toBe("claude");
       // Live-override window is still the max across entries.

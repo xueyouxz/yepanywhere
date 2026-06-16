@@ -378,8 +378,10 @@ it stays keyed by model.
   (`Process.ts`), the `Supervisor` forwards it via the `onContextWindowObserved`
   callback (`Supervisor.observeProcessEvents`), and `app.ts` wires that to
   `ModelInfoService.recordContextWindow`. Keyed by `"<provider>:<model>"` with
-  the concrete model id (a trailing `[1m]` is stripped to match the reader's
-  bare-id lookup), **one record per model**: `{ contextWindow, observedAt }`.
+  the model id **exactly as the SDK reports it** in `modelUsage` — no munging,
+  because an observation should reflect what was observed (in practice the keys
+  are bare concrete ids like `claude-opus-4-8`, matching the reader's lookup).
+  **One record per model**: `{ contextWindow, observedAt }`.
   Persisted to `{dataDir}/model-context-windows.json` (versioned, debounced
   writes) and loaded on startup. Recording is **not** a side effect of any HTTP
   GET — an earlier version recorded only when the session-detail route happened
