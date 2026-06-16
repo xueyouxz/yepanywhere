@@ -10441,12 +10441,6 @@ a.sidebar-nav-item {
   animation: thinking-pulse 1.5s ease-in-out infinite;
 }
 
-.provider-badge-model {
-  margin-left: 2px;
-  opacity: 0.7;
-  font-weight: 400;
-}
-
 .provider-badge-effort {
   display: inline-flex;
   align-items: center;
@@ -10499,23 +10493,10 @@ a.sidebar-nav-item {
   opacity: 0.82;
 }
 
-.provider-badge-model::before {
-  content: "·";
-  margin-right: 2px;
-}
-
-/* On mobile, hide provider name and dot - show only model */
+/* On mobile, hide the dot - the label already shows a compact model glyph */
 @media (max-width: 600px) {
-  .provider-badge-label,
   .provider-badge-dot-inline {
     display: none;
-  }
-  .provider-badge-model::before {
-    display: none;
-  }
-  .provider-badge-model {
-    margin-left: 0;
-    opacity: 1;
   }
 }
 
