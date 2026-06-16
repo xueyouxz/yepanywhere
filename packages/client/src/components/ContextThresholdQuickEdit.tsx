@@ -1,3 +1,4 @@
+import { getModelContextWindow } from "@yep-anywhere/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useServerSettings } from "../hooks/useServerSettings";
 import { useI18n } from "../i18n";
@@ -14,6 +15,28 @@ interface ContextThresholdQuickEditProps {
 }
 
 const LONG_PRESS_MS = 450;
+
+/**
+ * Effective window for the token preview. Mirrors the server's
+ * resolveCompactWindow: claude opus/sonnet run at the 1M window even when the
+ * id resolves to "claude-opus-4-8" (whose base family window is 200K), and the
+ * passed-in ModelInfo window is often missing because the toolbar's
+ * thinkingModelInfo is keyed by the alias, not the resolved id.
+ */
+function effectiveContextWindow(
+  model: string | undefined,
+  passed: number | undefined,
+  usageWindow: number | undefined,
+): number | undefined {
+  const family = model?.match(/(?:^|[-/])(opus|sonnet)(?:[-/[]|$)/)?.[1];
+  if (family) return getModelContextWindow(`${family}[1m]`, "claude");
+  if (passed && passed > 0) return passed;
+  if (model) {
+    const resolved = getModelContextWindow(model);
+    if (resolved > 0) return resolved;
+  }
+  return usageWindow && usageWindow > 0 ? usageWindow : undefined;
+}
 
 /**
  * Wraps the context-usage indicator with a long-press (touch) / right-click
@@ -90,9 +113,14 @@ export function ContextThresholdQuickEdit({
 
   if (!usage) return null;
 
+  const effWindow = effectiveContextWindow(
+    model,
+    contextWindow,
+    usage.contextWindow,
+  );
   const tokenPreview =
-    contextWindow && draft > 0
-      ? `${Math.round((contextWindow * draft) / 100 / 1024)}K`
+    effWindow && draft > 0
+      ? `${Math.round((effWindow * draft) / 100 / 1024)}K`
       : null;
 
   // No editable model → just the plain indicator, no interaction wrapper.
