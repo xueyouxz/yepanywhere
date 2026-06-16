@@ -14,12 +14,36 @@ const WORKER_SCRIPT = join(
   "whisper_worker.py",
 );
 
+const PIXI_COMMAND = "pixi";
+const PIXI_STT_ENV = "stt";
+const PIXI_PYTHON_ARGS = ["run", "--frozen", "-e", PIXI_STT_ENV, "python"];
+const PIXI_STT_READY_HINT =
+  "Run `pixi run -e stt stt-bootstrap` from the YA checkout, then restart YA.";
+
 /** Milliseconds to wait for model load before giving up. */
 const MODEL_LOAD_TIMEOUT_MS = 120_000;
 
+function summarizeChildError(error: unknown): string {
+  if (typeof error === "object" && error !== null) {
+    const record = error as {
+      code?: unknown;
+      message?: unknown;
+      stderr?: unknown;
+    };
+    const stderr =
+      typeof record.stderr === "string" ? record.stderr.trim() : "";
+    if (stderr) return stderr.split("\n").slice(-4).join(" ");
+    if (typeof record.code === "string" && typeof record.message === "string") {
+      return `${record.code}: ${record.message}`;
+    }
+    if (typeof record.message === "string") return record.message;
+  }
+  return String(error);
+}
+
 export class LocalWhisperBackend implements SpeechBackend {
   readonly id = "ya-whisper";
-  readonly label = "Local Whisper (CPU)";
+  readonly label = "Local Whisper (pixi stt)";
 
   private readonly model: string;
   private readonly device: string;
@@ -39,16 +63,15 @@ export class LocalWhisperBackend implements SpeechBackend {
   async validate(): Promise<{ ok: true } | { ok: false; reason: string }> {
     try {
       await execFileAsync(
-        "python3",
-        ["-c", "from faster_whisper import WhisperModel"],
-        { timeout: 8_000 },
+        PIXI_COMMAND,
+        [...PIXI_PYTHON_ARGS, "-c", "from faster_whisper import WhisperModel"],
+        { cwd: process.cwd(), timeout: 30_000 },
       );
       return { ok: true };
-    } catch {
+    } catch (error) {
       return {
         ok: false,
-        reason:
-          "faster-whisper not importable. Install with: pip install faster-whisper",
+        reason: `local STT pixi environment is not ready. ${PIXI_STT_READY_HINT} Detail: ${summarizeChildError(error)}`,
       };
     }
   }
@@ -58,18 +81,34 @@ export class LocalWhisperBackend implements SpeechBackend {
 
     this.warmPromise = new Promise<void>((resolve, reject) => {
       logger.info(
-        `Starting whisper worker (model=${this.model} device=${this.device} compute_type=${this.computeType})`,
+        `Starting whisper worker via pixi env "${PIXI_STT_ENV}" (model=${this.model} device=${this.device} compute_type=${this.computeType})`,
       );
 
       const proc = spawn(
-        "python3",
-        [WORKER_SCRIPT, this.model, this.device, this.computeType],
-        { stdio: ["pipe", "pipe", "pipe"] },
+        PIXI_COMMAND,
+        [
+          ...PIXI_PYTHON_ARGS,
+          WORKER_SCRIPT,
+          this.model,
+          this.device,
+          this.computeType,
+        ],
+        { cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"] },
       );
       this.proc = proc;
 
+      let ready = false;
+      let loadTimeout: NodeJS.Timeout | null = null;
+
       proc.stderr?.on("data", (chunk: Buffer) => {
         logger.debug(`[whisper] ${chunk.toString().trim()}`);
+      });
+
+      proc.on("error", (error) => {
+        if (!ready) {
+          if (loadTimeout) clearTimeout(loadTimeout);
+          reject(error);
+        }
       });
 
       proc.on("exit", (code) => {
@@ -84,9 +123,8 @@ export class LocalWhisperBackend implements SpeechBackend {
       });
 
       const rl = createInterface({ input: proc.stdout! });
-      let ready = false;
 
-      const loadTimeout = setTimeout(() => {
+      loadTimeout = setTimeout(() => {
         if (!ready) {
           reject(new Error("Whisper model load timed out"));
           proc.kill();

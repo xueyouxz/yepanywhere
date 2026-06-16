@@ -87,6 +87,14 @@ Backends should implement a common `SpeechBackend` contract:
   interim/final transcript events;
 - keep expensive local models warm rather than loading per utterance.
 
+Local STT backends should use the same event contract when the model/runtime can
+produce meaningful stream updates. A local model that exposes partial/final
+segments, timestamps, endpoint confidence, or a confidence signal that an audio
+chunk is transcribable should feed those events through the generalized
+streaming path instead of inventing a separate UI flow. Offline-only models
+such as a basic faster-whisper worker remain batch backends until a verified
+streaming/confidence surface exists.
+
 ## Implemented
 
 - Client speech capture was refactored behind a `SpeechProvider` interface.
@@ -340,17 +348,28 @@ Deploy it in stages:
    it behind the same warm-worker `SpeechBackend` boundary only if install plus
    cold/warm latency beats `faster-whisper` for this server.
 3. **Ship explicit operator configuration.** The opt-in is
-   `YA_VOICE_BACKENDS=ya-whisper`. Model/runtime knobs stay server-local:
-   `WHISPER_MODEL`, `WHISPER_DEVICE`, and `WHISPER_COMPUTE_TYPE`. The default
-   should remain CPU-safe (`device=cpu`, `compute_type=int8`) and the model
-   should be chosen for the host class rather than silently downloading a
-   multi-GB model on first use without a clear operator decision.
+   `YA_VOICE_BACKENDS=ya-whisper`. The backend is pixi-only in the first
+   implementation: the YA checkout commits a `stt` pixi environment, and the
+   operator must run `pixi run -e stt stt-bootstrap` before starting YA with
+   `ya-whisper` enabled. Runtime validation and the warm worker use
+   `pixi run --frozen -e stt python`, not ambient `python3`, so old system
+   Python cannot accidentally become the ASR runtime. Model/runtime knobs stay
+   server-local: `WHISPER_MODEL`, `WHISPER_DEVICE`, and
+   `WHISPER_COMPUTE_TYPE`. The default should remain CPU-safe (`device=cpu`,
+   `compute_type=int8`) and the model should be chosen for the host class
+   rather than silently downloading a multi-GB model on first use without a
+   clear operator decision.
 4. **Add a readiness surface before advertising.** Startup validation should
-   confirm Python exists, `faster_whisper` imports, the configured model can
-   load, and a tiny known audio sample transcribes within an acceptable
-   timeout. Only then should `/api/version.voiceBackends` advertise
-   `ya-whisper`. Failures should be actionable in logs: missing package,
-   missing model/cache, unsupported device/compute type, or model-load timeout.
+   confirm pixi exists, the `stt` environment is already bootstrapped,
+   `faster_whisper` imports, the configured model can load, and a tiny known
+   audio sample transcribes within an acceptable timeout. Only then should
+   `/api/version.voiceBackends` advertise `ya-whisper`. Failures should be
+   actionable in logs: missing pixi, stale/missing pixi lock or environment,
+   missing package, missing model/cache, unsupported device/compute type, or
+   model-load timeout. The YA server should still start with `ya-whisper`
+   disabled if local STT is not ready; deploy wrappers may choose to run
+   `stt-bootstrap`/`stt-check` as a strict preflight and abort before launching
+   YA.
 5. **Make model warm-up observable.** The first utterance may legitimately pay
    model-load cost, but the UI and logs should distinguish "loading local STT
    model" from ordinary recognition. Record model name, device, compute type,
@@ -371,6 +390,27 @@ Deploy it in stages:
    ready, first request may be cold but succeeds or reports a clear error,
    subsequent requests reuse the worker, and transcription metadata records the
    runtime settings.
+
+### Local STT pixi bootstrap
+
+The committed pixi environment is intentionally not part of the normal
+Node/PNPM install. To enable local Whisper on a server:
+
+1. Install pixi on the host.
+2. From the YA checkout, run `pixi run -e stt stt-bootstrap`. This creates the
+   `stt` environment from `pixi.lock` and installs `requirements/stt.txt`.
+3. Start YA with `YA_VOICE_BACKENDS` containing `ya-whisper`.
+
+For the private `reyep` helper, the local-STT switch should be set-union logic,
+not assignment. A `YA_LOCAL_STT=1 reyep`-style wrapper should append
+`ya-whisper` only when the current comma-separated `YA_VOICE_BACKENDS` does not
+already contain it. Cloud STT backends still auto-enable from their
+`YA_stt__*` keys; the wrapper must not read or print those keys.
+
+Future local recognizers such as Parakeet should reuse this deployment shape:
+extend the pixi `stt` environment or add a sibling requirements file and task,
+then expose the model behind the same warm-worker `SpeechBackend` boundary only
+after an isolated install/latency spike.
 
 Hosted relay support for server-local STT is a product choice, not a technical
 requirement. If the operator wants phone-to-local-Whisper dictation through

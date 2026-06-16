@@ -1,0 +1,17 @@
+[workspace]
+name = "yepanywhere"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[environments]
+stt = { features = ["stt"] }
+
+[feature.stt.dependencies]
+python = ">=3.11,<3.13"
+pip = ">=25"
+ffmpeg = ">=7"
+
+[feature.stt.tasks]
+stt-install = "python -m pip install --requirement requirements/stt.txt"
+stt-check = "python -c \"from faster_whisper import WhisperModel; print('faster-whisper import OK')\""
+stt-bootstrap = { depends-on = ["stt-install", "stt-check"] }

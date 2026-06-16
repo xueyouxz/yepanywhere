@@ -1,0 +1,13 @@
+# Optional YA server-local STT Python dependencies.
+#
+# Install inside the committed pixi environment with:
+#   pixi run -e stt stt-bootstrap
+#
+# YA validates and launches ya-whisper through:
+#   pixi run --frozen -e stt python ...
+#
+# Keep the default install focused on the implemented local backend. Future
+# local recognizers such as NVIDIA Parakeet should either extend this file
+# after a deployment spike or move to a sibling requirements file with its own
+# pixi task.
+faster-whisper>=1.1,<2
