@@ -213,18 +213,53 @@ function getSdkMessageSubtype(message: SDKMessage): string | undefined {
   return typeof message.subtype === "string" ? message.subtype : undefined;
 }
 
+// Top-level SDK message types that represent real turn content. Each one is part
+// of a model/tool turn that is guaranteed to eventually reach a `result`, so
+// waking on them can never pin the process `in-turn` forever.
+const WAKE_WORK_MESSAGE_TYPES = new Set<string>([
+  "assistant",
+  "user",
+  "stream_event",
+]);
+
+// `system` message subtypes that represent live Claude-owned background work
+// which can wake the session later. Mirrors the task lifecycle tracked for
+// reap-retention in ClaudeProviderRetentionTracker.observeMessage.
+const WAKE_WORK_SYSTEM_SUBTYPES = new Set<string>([
+  "task_started",
+  "task_progress",
+  "task_updated",
+  "task_notification",
+]);
+
+/**
+ * Decide whether a post-idle provider message should promote a coarse-idle owned
+ * process back to `in-turn` (see promoteIdleForProviderWork and doc
+ * tactical/015-claude-background-task-idle-reap.md).
+ *
+ * This is an allowlist (default-deny) on purpose. The original blacklist ("wake
+ * on everything except result / session_state_changed / init") woke the process
+ * on any message the SDK introduced that we did not model. That included
+ * `prompt_suggestion` — a post-turn, predicted-next-prompt message that is never
+ * followed by a `result` — so finished sessions got pinned as "thinking" forever
+ * and were never idle-reaped. To add a wake trigger, name it here.
+ *
+ * Reap-safety is owned separately by ClaudeProviderRetentionTracker; this
+ * predicate only governs the cosmetic `in-turn` activity flip. So an unmodeled
+ * future message type degrades safely to "no wake" rather than "stuck", and a
+ * genuine background task still shows as live via the retention overlay
+ * (verified-waiting-provider) regardless of this flip.
+ */
 function isProviderWorkWakeMessage(message: SDKMessage): boolean {
-  const claudeState = getClaudeSessionStateChange(message);
-  if (claudeState !== null) {
+  // session_state_changed drives the state machine directly; it is not a wake.
+  if (getClaudeSessionStateChange(message) !== null) {
     return false;
   }
-  if (message.type === "result") {
-    return false;
+  if (message.type === "system") {
+    const subtype = getSdkMessageSubtype(message);
+    return subtype !== undefined && WAKE_WORK_SYSTEM_SUBTYPES.has(subtype);
   }
-  if (message.type === "system" && message.subtype === "init") {
-    return false;
-  }
-  return true;
+  return WAKE_WORK_MESSAGE_TYPES.has(message.type);
 }
 
 function extractMessageText(message: SDKMessage): string | undefined {

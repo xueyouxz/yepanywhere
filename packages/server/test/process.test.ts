@@ -420,6 +420,115 @@ describe("Process", () => {
       }
     });
 
+    it("does not wake a finished idle process on a prompt_suggestion message", async () => {
+      const controller = createControllableIterator();
+      const process = new Process(controller.iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        provider: "claude",
+        idleTimeoutMs: 10_000,
+      });
+
+      controller.push({
+        type: "system",
+        subtype: "init",
+        session_id: "sess-1",
+      });
+      controller.push({ type: "result", session_id: "sess-1" });
+      await waitFor(() => expect(process.state.type).toBe("idle"));
+
+      // prompt_suggestion is a top-level type emitted after the turn's result.
+      // It is bookkeeping (a predicted next prompt), never followed by another
+      // result, so it must not pin the process in-turn. See doc 015.
+      controller.push({
+        type: "prompt_suggestion",
+        suggestion: "Try the next thing",
+        session_id: "sess-1",
+      } as unknown as SDKMessage);
+
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(process.state.type).toBe("idle");
+      expect(process.getLivenessSnapshot().lastWakeReason ?? null).toBeNull();
+    });
+
+    it("does not wake a finished idle process on unmodeled bookkeeping messages", async () => {
+      const controller = createControllableIterator();
+      const process = new Process(controller.iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        provider: "claude",
+        idleTimeoutMs: 10_000,
+      });
+
+      controller.push({
+        type: "system",
+        subtype: "init",
+        session_id: "sess-1",
+      });
+      controller.push({ type: "result", session_id: "sess-1" });
+      await waitFor(() => expect(process.state.type).toBe("idle"));
+
+      // Default-deny: known non-work subtypes and an invented future subtype all
+      // stay idle rather than pinning the process in-turn.
+      for (const subtype of [
+        "status",
+        "compact_boundary",
+        "stop_hook_summary",
+        "some_future_subtype_we_do_not_model",
+      ]) {
+        controller.push({
+          type: "system",
+          subtype,
+          session_id: "sess-1",
+        } as unknown as SDKMessage);
+      }
+
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(process.state.type).toBe("idle");
+      expect(process.getLivenessSnapshot().lastWakeReason ?? null).toBeNull();
+    });
+
+    it("wakes a finished idle process on assistant turn content", async () => {
+      const controller = createControllableIterator();
+      const process = new Process(controller.iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        provider: "claude",
+        idleTimeoutMs: 10_000,
+      });
+
+      controller.push({
+        type: "system",
+        subtype: "init",
+        session_id: "sess-1",
+      });
+      controller.push({ type: "result", session_id: "sess-1" });
+      await waitFor(() => expect(process.state.type).toBe("idle"));
+
+      controller.push({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          model: "claude-opus-4-8",
+          content: [{ type: "text", text: "resuming after background work" }],
+        },
+        session_id: "sess-1",
+        uuid: "33333333-3333-4333-8333-333333333333",
+      } as unknown as SDKMessage);
+
+      await waitFor(() => expect(process.state.type).toBe("in-turn"));
+      expect(process.getLivenessSnapshot().lastWakeReason).toMatchObject({
+        fromState: "idle",
+        reason: "provider-message-after-idle",
+        messageType: "assistant",
+      });
+    });
+
     it("keeps Claude idle with session crons out of verified-idle liveness", async () => {
       const providerRetention: ProviderRetentionSnapshot = {
         retained: true,

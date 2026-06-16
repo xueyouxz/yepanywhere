@@ -23,6 +23,10 @@ Progress:
 - [x] 2026-06-13: Promote a coarse-idle owned process back to `in-turn` when
   provider work messages arrive after a provider-retained idle pause, even if
   Claude does not emit `session_state_changed` with `state: "running"`.
+- [x] 2026-06-16: Fixed a false wake: `prompt_suggestion` messages were pinning
+  finished sessions as "thinking" forever. Flipped the wake predicate from a
+  blacklist to an allowlist (default-deny). See "Follow-up: prompt_suggestion
+  false wake" below.
 
 ## Problem
 
@@ -266,10 +270,14 @@ Low-churn follow-up model:
 - Show those diagnostics in Session Info/debug surfaces, and let UI activity
   derivation treat `verified-waiting-provider` as background work without
   replacing the canonical coarse state.
-- Promote from coarse `idle` to `in-turn` on post-idle provider work messages
-  such as assistant output, stream events, task lifecycle messages, and tool
-  result messages. Do not promote on terminal boundary/bookkeeping messages
-  such as `result`, `session_state_changed idle`, or `init`.
+- Promote from coarse `idle` to `in-turn` only on an explicit allowlist of
+  post-idle provider work messages: assistant output, stream events, tool
+  result (`user`) messages, and the task lifecycle `system` subtypes
+  (`task_started`, `task_progress`, `task_updated`, `task_notification`). Treat
+  everything else — `result`, `session_state_changed`, `init`, and any other
+  bookkeeping or unmodeled message — as not a wake. See "Follow-up:
+  prompt_suggestion false wake" for why this must be default-deny rather than a
+  blacklist.
 
 This keeps the public state machine small while answering future debugging
 questions:
@@ -279,6 +287,50 @@ questions:
 - What caused it to wake back into active work?
 - Did Claude explicitly report `running`, or did YA infer the wake from a
   post-idle provider message?
+
+## Follow-up: prompt_suggestion false wake
+
+Bug noticed (2026-06-16): a finished Claude session stayed stuck showing the
+"thinking" / pulsing indicator indefinitely and was never idle-reaped.
+
+Root cause: the wake promotion described above was implemented as a blacklist in
+`Process.ts` `isProviderWorkWakeMessage` — it promoted a coarse-idle process back
+to `in-turn` on *every* post-idle message except `result`,
+`session_state_changed`, and `system/init`. With native prompt suggestions
+enabled (`promptSuggestions: true`), the Claude SDK emits a `prompt_suggestion`
+message *after* the turn's `result`, while the process is already idle. That
+message passed the blacklist, so the process was promoted back to `in-turn`. But
+a `prompt_suggestion` is not a turn and is never followed by another `result`, so
+nothing ever transitioned the process back to `idle` — only `result` and
+`session_state_changed idle` call `transitionToIdle()`. The process was pinned
+`in-turn`, which renders as `verified-waiting-provider` / agent-turn (pulsing)
+and, because the idle reaper never sees an idle edge, it was never reaped.
+
+Evidence (session `0485f170-8fda-45fe-86d3-64ecf2000b12`, project
+`/Users/kgraehl/code/mclone`): Session Info showed Activity "Waiting on
+provider", Liveness "Verified Waiting Provider", Last wake "Provider Message
+After Idle", Wake message `prompt_suggestion`. The retention path was *not*
+involved — server logs showed zero `idle_cleanup_deferred` events for the
+process, i.e. it never reached the idle timer at all.
+
+Message shape:
+
+- `prompt_suggestion` is a **top-level** SDK message `type`, not a `system`
+  subtype: `{ type: "prompt_suggestion", suggestion: "<predicted next prompt>" }`
+  (see `useSession.ts`, which stores `suggestion` and drops the message from the
+  transcript). Neither `prompt_suggestion` nor the `task_*` lifecycle subtypes
+  are modeled in `packages/shared/src/claude-sdk-schema`; the SDK keeps adding
+  message types the codebase does not yet model, which is exactly why a blacklist
+  is fragile — every future unmodeled type is a latent repeat of this bug.
+
+Fix: flip `isProviderWorkWakeMessage` to an allowlist (default-deny). Wake only
+on `assistant` / `user` / `stream_event` top-level types (real turn content that
+always reaches a `result`) and the task lifecycle `system` subtypes that mirror
+`ClaudeProviderRetentionTracker.observeMessage`. This is purely the cosmetic
+`in-turn` flip; reap-safety remains owned by the retention tracker, so a genuine
+background task still shows as live via the retention overlay
+(`verified-waiting-provider`) and is still not reaped, while bookkeeping and
+unmodeled messages degrade safely to "no wake".
 
 ## Guardrails
 
