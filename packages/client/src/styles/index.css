@@ -7795,6 +7795,8 @@ a.sidebar-nav-item {
 .output-appearance-controls {
   display: grid;
   gap: var(--space-3);
+  container-type: inline-size;
+  container-name: output-controls;
 }
 
 .output-appearance-control {
@@ -7813,6 +7815,7 @@ a.sidebar-nav-item {
 .output-font-selector {
   width: fit-content;
   max-width: 100%;
+  flex-wrap: wrap;
 }
 
 .output-font-option-source-serif-4 {
@@ -7862,8 +7865,8 @@ a.sidebar-nav-item {
 .output-appearance-specimen {
   display: grid;
   justify-self: start;
-  width: min(100%, 19rem);
-  max-width: 19rem;
+  width: min(100%, 16rem);
+  max-width: 16rem;
   gap: var(--space-1);
 }
 
@@ -8075,12 +8078,29 @@ a.sidebar-nav-item {
 
 @container output-appearance (min-width: 736px) {
   .output-appearance-panel {
-    grid-template-columns: minmax(0, 1fr) minmax(17rem, 19rem);
+    grid-template-columns: minmax(0, 1fr) minmax(13rem, 16rem);
     gap: var(--space-4);
   }
 
   .output-appearance-specimen {
     justify-self: end;
+  }
+}
+
+/*
+ * Stack each control (label over input) based on the controls column's own
+ * width, not the viewport. This keeps the rows from overflowing into the
+ * preview when the panel is in its two-column layout and the controls column
+ * is narrow.
+ */
+@container output-controls (max-width: 26rem) {
+  .output-appearance-control {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+
+  .output-appearance-slider-row {
+    grid-template-columns: minmax(0, 1fr) max-content;
   }
 }
 
@@ -8092,15 +8112,6 @@ a.sidebar-nav-item {
 
   .output-appearance-header .settings-button {
     align-self: flex-start;
-  }
-
-  .output-appearance-control {
-    grid-template-columns: 1fr;
-    gap: var(--space-1);
-  }
-
-  .output-appearance-slider-row {
-    grid-template-columns: minmax(0, 1fr) max-content;
   }
 
   .output-appearance-number {
