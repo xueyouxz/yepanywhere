@@ -146,6 +146,9 @@ export function SessionToolbarPreview() {
               primaryActionLabel: t("toolbarSteerTooltip"),
               tooltip: t("toolbarSteerTooltip"),
               icon: "↗",
+              showSteerNowMode: true,
+              steerNowEnabled: false,
+              onToggleSteerNow: noop,
               queue: {
                 onQueue: noop,
                 hasDualActions: true,
