@@ -1,6 +1,15 @@
 # Codex Manual Compaction
 
-Status: Planned.
+Status: Implemented (2026-06-17).
+
+Codex `/compact` now dispatches the native app-server `thread/compact/start`
+RPC out-of-band via `Process.runProviderCommand` / the Codex provider's
+`runProviderCommand` handler, instead of being delivered as `turn/start` text.
+Claude's `/compact` continues to flow as an ordinary turn (the provider reports
+`handled: false`), and now forwards trailing focus instructions verbatim. Codex
+compaction takes no instructions, so any `/compact <text>` argument is dropped
+server-side. See the protocol subset in
+`packages/server/src/sdk/providers/codex-protocol/` (`ThreadCompactStart*`).
 
 ## Context
 

@@ -37,6 +37,7 @@ import type { GeminiSessionScanner } from "../projects/gemini-scanner.js";
 import { DETACHED_PROJECT_PATH, encodeProjectId } from "../projects/paths.js";
 import type { ProjectScanner } from "../projects/scanner.js";
 import { ensureRemoteDirectory } from "../sdk/remote-spawn.js";
+import { parseSlashCommandSubmission } from "../sdk/slashCommandEmulation.js";
 import { getProjectDirFromCwd, syncSessions } from "../sdk/session-sync.js";
 import type { PermissionMode, SDKMessage, UserMessage } from "../sdk/types.js";
 import { appendApprovalAuditLog } from "../security/approvalAuditLog.js";
@@ -3752,6 +3753,31 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         },
         410,
       ); // 410 Gone
+    }
+
+    // Provider-native slash commands (e.g. Codex `/compact`) are dispatched
+    // through the provider's own protocol rather than delivered as turn text the
+    // model would never interpret. Claude's `/compact` reports handled:false and
+    // falls through to normal delivery so the SDK handles it as a regular turn
+    // (and any trailing focus instructions reach the SDK verbatim). A deferred
+    // submission keeps normal queue semantics.
+    if (!body.deferred) {
+      const parsed = parseSlashCommandSubmission(body.message);
+      if (parsed) {
+        const providerResult = await process.runProviderCommand(
+          parsed.name,
+          parsed.argument,
+        );
+        if (providerResult.handled) {
+          if (providerResult.error) {
+            return c.json(
+              { error: "Failed to run command", reason: providerResult.error },
+              409,
+            );
+          }
+          return c.json({ queued: true, serverTimestamp });
+        }
+      }
     }
 
     const resolvedModel =

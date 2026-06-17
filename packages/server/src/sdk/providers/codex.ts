@@ -33,6 +33,7 @@ import { logSDKMessage } from "../messageLogger.js";
 import { MessageQueue } from "../messageQueue.js";
 import type {
   ProviderActivitySnapshot,
+  ProviderCommandResult,
   ProviderLivenessProbeResult,
   SDKMessage,
   TimestampedSDKMessage,
@@ -55,6 +56,8 @@ import type {
   SandboxMode as CodexSandboxMode,
   ThreadReadParams,
   ThreadItem as CodexThreadItem,
+  ThreadCompactStartParams,
+  ThreadCompactStartResponse,
   CommandExecutionApprovalDecision,
   CommandExecutionRequestApprovalParams,
   FileChangeApprovalDecision,
@@ -1577,6 +1580,47 @@ export class CodexProvider implements AgentProvider {
           turnId: runtimeState.activeTurnId,
         } satisfies TurnInterruptParams);
         return true;
+      },
+      runProviderCommand: async (command): Promise<ProviderCommandResult> => {
+        // Only `/compact` is dispatched natively; every other slash command
+        // falls through to ordinary turn delivery.
+        const name = command.trim().replace(/^\/+/, "").toLowerCase();
+        if (name !== "compact") {
+          return { handled: false };
+        }
+        // Codex compaction takes no instructions, so any trailing argument is
+        // intentionally dropped here — there is no app-server surface for it.
+        if (!activeClient || !runtimeState.threadId) {
+          return {
+            handled: true,
+            error: "Codex session is not ready for compaction yet",
+          };
+        }
+        // A compact runs as its own (non-steerable) turn; refuse mid-turn so we
+        // do not collide with active work or send `/compact` as plain text.
+        if (runtimeState.activeTurnId) {
+          return {
+            handled: true,
+            error: "Cannot compact while a turn is in progress",
+          };
+        }
+        try {
+          await activeClient.request<ThreadCompactStartResponse>(
+            "thread/compact/start",
+            {
+              threadId: runtimeState.threadId,
+            } satisfies ThreadCompactStartParams,
+          );
+          return { handled: true };
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          log.warn(
+            { threadId: runtimeState.threadId, error: message },
+            "Codex thread/compact/start failed",
+          );
+          return { handled: true, error: message };
+        }
       },
     };
   }

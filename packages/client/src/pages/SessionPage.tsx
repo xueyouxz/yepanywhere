@@ -1857,24 +1857,32 @@ function SessionPageContent({
     [reconnectStream, setSessionModel, showToast, status.owner, t],
   );
 
-  const handleCompactSession = useCallback(async () => {
-    if (status.owner !== "self" || !supportsManualCompact) return;
-    try {
-      await api.queueMessage(actualSessionId, "/compact", permissionMode);
-      showToast(t("sessionCompactRequested"), "success");
-    } catch (err) {
-      console.error("Failed to request compaction:", err);
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      showToast(t("sessionCompactFailed", { message: errorMsg }), "error");
-    }
-  }, [
-    actualSessionId,
-    permissionMode,
-    showToast,
-    status.owner,
-    supportsManualCompact,
-    t,
-  ]);
+  const handleCompactSession = useCallback(
+    async (argument = "") => {
+      if (status.owner !== "self" || !supportsManualCompact) return;
+      // Trailing focus instructions ("/compact preserve X") ride along
+      // verbatim; Claude honors them natively. Providers without an instruction
+      // surface (e.g. Codex) ignore the argument server-side.
+      const trimmed = argument.trim();
+      const message = trimmed ? `/compact ${trimmed}` : "/compact";
+      try {
+        await api.queueMessage(actualSessionId, message, permissionMode);
+        showToast(t("sessionCompactRequested"), "success");
+      } catch (err) {
+        console.error("Failed to request compaction:", err);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        showToast(t("sessionCompactFailed", { message: errorMsg }), "error");
+      }
+    },
+    [
+      actualSessionId,
+      permissionMode,
+      showToast,
+      status.owner,
+      supportsManualCompact,
+      t,
+    ],
+  );
 
   const focusedBtwAside = focusedBtwAsideId
     ? (btwAsides.find((aside) => aside.id === focusedBtwAsideId) ?? null)
@@ -2423,7 +2431,7 @@ function SessionPageContent({
         return true;
       }
       if (command === "compact" && supportsManualCompact) {
-        void handleCompactSession();
+        void handleCompactSession(argument);
         return true;
       }
       if (command === "btw") {

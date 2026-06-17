@@ -850,6 +850,57 @@ describe("Process", () => {
       await process.abort();
     });
 
+    it("reports handled:false for providers without native command dispatch", async () => {
+      let resolveIterator!: () => void;
+      const iterator: AsyncIterator<SDKMessage> = {
+        next: () =>
+          new Promise((resolve) => {
+            resolveIterator = () => resolve({ done: true, value: undefined });
+          }),
+      };
+      const process = new Process(iterator, {
+        projectPath: "/test",
+        projectId: "proj-1" as UrlProjectId,
+        sessionId: "sess-1",
+        provider: "claude",
+        idleTimeoutMs: 100,
+        queue: new MessageQueue(),
+      });
+
+      const result = await process.runProviderCommand("compact", "preserve X");
+      expect(result).toEqual({ handled: false });
+
+      resolveIterator?.();
+      await process.abort();
+    });
+
+    it("delegates native commands to runProviderCommandFn", async () => {
+      let resolveIterator!: () => void;
+      const iterator: AsyncIterator<SDKMessage> = {
+        next: () =>
+          new Promise((resolve) => {
+            resolveIterator = () => resolve({ done: true, value: undefined });
+          }),
+      };
+      const runProviderCommandFn = vi.fn(async () => ({ handled: true }));
+      const process = new Process(iterator, {
+        projectPath: "/test",
+        projectId: "proj-1" as UrlProjectId,
+        sessionId: "sess-1",
+        provider: "codex",
+        idleTimeoutMs: 100,
+        queue: new MessageQueue(),
+        runProviderCommandFn,
+      });
+
+      const result = await process.runProviderCommand("compact", "preserve X");
+      expect(result).toEqual({ handled: true });
+      expect(runProviderCommandFn).toHaveBeenCalledWith("compact", "preserve X");
+
+      resolveIterator?.();
+      await process.abort();
+    });
+
     it("expands cached slash-command emulation before queueing", async () => {
       let resolveIterator!: () => void;
       const iterator: AsyncIterator<SDKMessage> = {

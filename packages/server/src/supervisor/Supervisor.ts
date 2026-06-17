@@ -1443,6 +1443,7 @@ export class Supervisor {
       supportedModels,
       supportedCommands,
       setModel,
+      runProviderCommand,
       publishAgentctlSessionId,
     } = result;
 
@@ -1471,6 +1472,7 @@ export class Supervisor {
       supportedModelsFn: supportedModels,
       supportedCommandsFn: supportedCommands,
       setModelFn: setModel,
+      runProviderCommandFn: runProviderCommand,
       publishAgentctlSessionIdFn: publishAgentctlSessionId,
       permissionMode: effectiveMode,
       provider: activeProvider.name,
@@ -1568,6 +1570,7 @@ export class Supervisor {
       supportedModels,
       supportedCommands,
       setModel,
+      runProviderCommand,
       publishAgentctlSessionId,
     } = result;
 
@@ -1596,6 +1599,7 @@ export class Supervisor {
       supportedModelsFn: supportedModels,
       supportedCommandsFn: supportedCommands,
       setModelFn: setModel,
+      runProviderCommandFn: runProviderCommand,
       publishAgentctlSessionIdFn: publishAgentctlSessionId,
       permissionMode: effectiveMode,
       provider: activeProvider.name,

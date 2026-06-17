@@ -54,6 +54,11 @@ const SUBSET_EXPORTS = [
   { name: "TurnStartResponse", file: "v2/TurnStartResponse.ts" },
   { name: "TurnSteerResponse", file: "v2/TurnSteerResponse.ts" },
   { name: "TurnInterruptResponse", file: "v2/TurnInterruptResponse.ts" },
+  { name: "ThreadCompactStartParams", file: "v2/ThreadCompactStartParams.ts" },
+  {
+    name: "ThreadCompactStartResponse",
+    file: "v2/ThreadCompactStartResponse.ts",
+  },
   {
     name: "CommandExecutionRequestApprovalParams",
     file: "v2/CommandExecutionRequestApprovalParams.ts",

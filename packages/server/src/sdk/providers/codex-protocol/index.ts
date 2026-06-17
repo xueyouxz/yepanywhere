@@ -13,6 +13,8 @@ export type { ThreadResumeResponse } from "./generated/v2/ThreadResumeResponse.j
 export type { TurnStartResponse } from "./generated/v2/TurnStartResponse.js";
 export type { TurnSteerResponse } from "./generated/v2/TurnSteerResponse.js";
 export type { TurnInterruptResponse } from "./generated/v2/TurnInterruptResponse.js";
+export type { ThreadCompactStartParams } from "./generated/v2/ThreadCompactStartParams.js";
+export type { ThreadCompactStartResponse } from "./generated/v2/ThreadCompactStartResponse.js";
 export type { CommandExecutionRequestApprovalParams } from "./generated/v2/CommandExecutionRequestApprovalParams.js";
 export type { FileChangeRequestApprovalParams } from "./generated/v2/FileChangeRequestApprovalParams.js";
 export type { CommandExecutionApprovalDecision } from "./generated/v2/CommandExecutionApprovalDecision.js";

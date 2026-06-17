@@ -40,6 +40,7 @@ import {
 import type {
   PermissionMode,
   ProviderActivitySnapshot,
+  ProviderCommandResult,
   ProviderLivenessProbeResult,
   ProviderRetentionSnapshot,
   SDKMessage,
@@ -363,6 +364,15 @@ export interface ProcessConstructorOptions extends ProcessOptions {
   /** Function to change model mid-session (SDK 0.2.7+) */
   setModelFn?: (model?: string) => Promise<void>;
   /**
+   * Dispatch a provider-native slash command out-of-band (e.g. Codex
+   * `/compact` → `thread/compact/start`). Returns `{ handled: false }` when the
+   * command should fall back to normal turn delivery.
+   */
+  runProviderCommandFn?: (
+    command: string,
+    argument?: string,
+  ) => Promise<ProviderCommandResult>;
+  /**
    * Publish the provider's real session id to environment bridges that affect
    * future tool shells spawned by the provider child process.
    */
@@ -480,6 +490,10 @@ export class Process {
 
   /** Function to change model mid-session (SDK 0.2.7+) */
   private setModelFn: ((model?: string) => Promise<void>) | null;
+  /** Function to dispatch a provider-native slash command out-of-band. */
+  private runProviderCommandFn:
+    | ((command: string, argument?: string) => Promise<ProviderCommandResult>)
+    | null;
   private publishAgentctlSessionIdFn:
     | ((sessionId: string) => void | Promise<void>)
     | null;
@@ -573,6 +587,7 @@ export class Process {
     this.supportedCommandsFn = options.supportedCommandsFn ?? null;
     this._pidResolver = options.pid;
     this.setModelFn = options.setModelFn ?? null;
+    this.runProviderCommandFn = options.runProviderCommandFn ?? null;
     this.publishAgentctlSessionIdFn =
       options.publishAgentctlSessionIdFn ?? null;
     this._isProcessAlive = options.isProcessAlive ?? null;
@@ -1192,6 +1207,23 @@ export class Process {
    */
   get supportsDynamicCommands(): boolean {
     return this.supportedCommandsFn !== null;
+  }
+
+  /**
+   * Dispatch a provider-native slash command out-of-band (e.g. Codex `/compact`
+   * → `thread/compact/start`) instead of delivering it as a user turn. Returns
+   * `{ handled: false }` when the provider does not own the command — including
+   * every provider that does not implement native dispatch (Claude, etc.) — so
+   * the caller can fall back to normal message delivery.
+   */
+  async runProviderCommand(
+    command: string,
+    argument?: string,
+  ): Promise<ProviderCommandResult> {
+    if (!this.runProviderCommandFn) {
+      return { handled: false };
+    }
+    return this.runProviderCommandFn(command, argument);
   }
 
   /**

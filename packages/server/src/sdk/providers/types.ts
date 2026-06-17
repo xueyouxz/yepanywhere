@@ -9,6 +9,7 @@ import type { MessageQueue } from "../messageQueue.js";
 import type {
   CanUseTool,
   ProviderActivitySnapshot,
+  ProviderCommandResult,
   ProviderLivenessProbeResult,
   ProviderRetentionSnapshot,
   SDKMessage,
@@ -169,6 +170,17 @@ export interface AgentSession {
    * Only supported by Claude SDK 0.2.7+.
    */
   setModel?: (model?: string) => Promise<void>;
+  /**
+   * Run a provider-native slash command out-of-band — dispatched through the
+   * provider's own protocol rather than delivered as a user turn. Codex uses
+   * this for `/compact` (`thread/compact/start`); a `{ handled: false }` result
+   * means the command is not native here and should fall back to normal turn
+   * delivery (as Claude's `/compact` does).
+   */
+  runProviderCommand?: (
+    command: string,
+    argument?: string,
+  ) => Promise<ProviderCommandResult>;
 }
 
 /**

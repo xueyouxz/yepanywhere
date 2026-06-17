@@ -242,6 +242,17 @@ export interface StartSessionResult {
   publishAgentctlSessionId?: (sessionId: string) => void | Promise<void>;
 }
 
+export interface ProviderCommandResult {
+  /**
+   * True when the provider owns this command and attempted to dispatch it
+   * (whether or not it succeeded). False means "not a native command here" and
+   * the caller should fall back to normal message delivery.
+   */
+  handled: boolean;
+  /** Set when `handled` is true but the native dispatch failed. */
+  error?: string;
+}
+
 export interface RealClaudeSDKInterface {
   startSession(options: StartSessionOptions): Promise<StartSessionResult>;
 }

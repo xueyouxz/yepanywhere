@@ -16,6 +16,24 @@ export function isSlashCommandSubmission(text: string): boolean {
   return SLASH_COMMAND_SUBMISSION_RE.test(text);
 }
 
+/**
+ * Split a `/command arg...` submission into its normalized command name and the
+ * trailing argument text (empty string when none). Returns null when the text
+ * is not a slash-command submission.
+ */
+export function parseSlashCommandSubmission(
+  text: string,
+): { name: string; argument: string } | null {
+  const match = text.match(SLASH_COMMAND_SUBMISSION_RE);
+  if (!match?.[1]) {
+    return null;
+  }
+  return {
+    name: normalizeSlashCommandName(match[1]),
+    argument: match[2] ?? "",
+  };
+}
+
 export function expandSlashCommandEmulation(
   message: UserMessage,
   commands: SlashCommand[] | null | undefined,
