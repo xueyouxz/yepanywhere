@@ -318,7 +318,6 @@ export interface SessionToolbarVisibilityClientDefaults {
   contextUsage?: boolean;
   btw?: boolean;
   nudge?: boolean;
-  queueControls?: boolean;
   sessionStatus?: boolean;
 }
 
@@ -330,6 +329,13 @@ export interface ClientDefaults {
    * "now" lane (currently Claude). The toggle itself stays per-turn.
    */
   steerNowDefault?: boolean;
+  /**
+   * Default for the "wait until the agent is fully done before delivering
+   * queued messages" preference (patient queue intent). Global; set in the
+   * Message Delivery settings pane. Off = deliver at the next end of turn
+   * (`deferred`).
+   */
+  patientQueueDefault?: boolean;
   /** Session toolbar visibility defaults for controls with no local override. */
   sessionToolbarVisibility?: SessionToolbarVisibilityClientDefaults;
   /**

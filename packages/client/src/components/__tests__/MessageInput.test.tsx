@@ -53,6 +53,9 @@ const {
         string,
         { streaming?: boolean; smartTurn?: boolean }
       >,
+      clientDefaults: undefined as
+        | { steerNowDefault?: boolean; patientQueueDefault?: boolean }
+        | undefined,
     },
   },
   modelSettingsState: {
@@ -177,7 +180,6 @@ vi.mock("../../hooks/useSessionToolbarVisibility", () => ({
       contextUsage: true,
       btw: true,
       nudge: true,
-      queueControls: true,
       sessionStatus: true,
     },
     setControlVisible: vi.fn(),
@@ -206,15 +208,6 @@ vi.mock("../../i18n", () => ({
         ({
           commonOr: "or",
           toolbarKeyboardShortcutsAria: "Session keyboard shortcuts",
-          toolbarPatientQueueEnable: "Use patient queue",
-          toolbarPatientQueueDisable: "Use regular queue",
-          toolbarPatientQueueEnabledAck: `Patient queue on: new queued messages wait for ${params?.timeout ?? ""} of verified quiet. Click again for regular queue.`,
-          toolbarPatientQueueDisabledAck: `Regular queue on. Click again for patient queue (${params?.timeout ?? ""}).`,
-          toolbarPatientQueueActionLabel: "Queue patiently",
-          toolbarPatientQueueConfiguredTimeout: `the configured ${params?.timeout ?? ""} timeout`,
-          toolbarPatientQueueToggleShortcut:
-            "Right-click or long-press a queue button to switch regular/patient queue.",
-          toolbarPatientQueueTooltip: `Patient queue waits for ${params?.timeout ?? ""} of verified quiet before delivery. Regular queued messages may pass patient messages.`,
           toolbarSteerNowLabel: "Steer now",
           toolbarSteerNowShortLabel: "Now",
           toolbarSteerNowTooltip:
@@ -394,7 +387,6 @@ const toolbarVisibility: MessageInputToolbarViewProps["visibility"] = {
   contextUsage: false,
   btw: false,
   nudge: false,
-  queueControls: false,
   sessionStatus: false,
 };
 
@@ -414,10 +406,6 @@ const toolbarT = ((key: string, params?: Record<string, string>) => {
     toolbarQueueTooltip: "Queue for the next regular delivery\nCtrl+Enter",
     toolbarSteerTooltip: "Steer current turn\nEnter",
     toolbarSend: "Send",
-    toolbarPatientQueueEnable: "Use patient queue",
-    toolbarPatientQueueDisable: "Use regular queue",
-    toolbarPatientQueueToggleShortcut:
-      "Right-click or long-press a queue button to switch regular/patient queue.",
     toolbarOverflowMenu: "More toolbar controls",
   };
   return translations[key] ?? key;
@@ -468,6 +456,7 @@ describe("MessageInput", () => {
       capabilities: ["voiceInput"],
       voiceBackends: [],
       voiceBackendCapabilities: {},
+      clientDefaults: undefined,
     };
     modelSettingsState.speechMethod = "browser-native";
     modelSettingsState.hasStoredSpeechMethod = false;
@@ -1618,10 +1607,6 @@ describe("MessageInput", () => {
       },
     );
 
-    expect(
-      screen.getByRole("button", { name: "Use patient queue" }),
-    ).toBeTruthy();
-
     fireEvent.change(textarea, { target: { value: "follow up later" } });
     fireEvent.click(screen.getByLabelText("toolbarQueueLabel"));
 
@@ -1678,38 +1663,6 @@ describe("MessageInput", () => {
     expectSubmission(onQueue, "follow up later", "deferred");
   });
 
-  it("uses patient intent without rewriting text when the stopwatch is enabled", () => {
-    const onQueue = vi.fn();
-    const textarea = renderMessageInput(
-      vi.fn(() => true),
-      {
-        supportsSteering: true,
-        onQueue,
-      },
-    );
-
-    const toggle = screen.getByRole("button", { name: "Use patient queue" });
-    expect(toggle.getAttribute("aria-pressed")).toBe("false");
-    expect(toggle.getAttribute("title")).toContain("30s");
-
-    fireEvent.click(toggle);
-    expect(
-      screen
-        .getByRole("button", { name: "Use regular queue" })
-        .getAttribute("aria-pressed"),
-    ).toBe("true");
-    expect(screen.getByRole("status").textContent).toContain(
-      "Patient queue on",
-    );
-    expect(screen.getByRole("status").textContent).toContain("30s");
-    fireEvent.change(textarea, { target: { value: "follow up later" } });
-    const patientQueueAction = screen.getByLabelText("Queue patiently");
-    expect(patientQueueAction.getAttribute("title")).toContain("30s");
-    fireEvent.click(patientQueueAction);
-
-    expectSubmission(onQueue, "follow up later", "patient");
-  });
-
   it("stamps steer-now metadata when the Claude now checkbox is enabled", () => {
     const restoreMatchMedia = installDesktopMatchMedia();
     const onSend = vi.fn();
@@ -1735,42 +1688,6 @@ describe("MessageInput", () => {
     } finally {
       restoreMatchMedia();
     }
-  });
-
-  it("keeps the patient switch visible for idle steering sessions", () => {
-    renderMessageInput(
-      vi.fn(() => true),
-      {
-        supportsSteering: true,
-      },
-    );
-
-    expect(
-      screen
-        .getByRole("button", { name: "Use patient queue" })
-        .getAttribute("aria-pressed"),
-    ).toBe("false");
-    expect(screen.getByLabelText("toolbarSend")).toBeTruthy();
-    expect(screen.queryByLabelText("toolbarQueueLabel")).toBeNull();
-  });
-
-  it("keeps manually typed when-done text unchanged for patient queue", () => {
-    const onQueue = vi.fn();
-    const textarea = renderMessageInput(
-      vi.fn(() => true),
-      {
-        supportsSteering: true,
-        onQueue,
-      },
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Use patient queue" }));
-    fireEvent.change(textarea, {
-      target: { value: "When done please run tests" },
-    });
-    fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
-
-    expectSubmission(onQueue, "When done please run tests", "patient");
   });
 
   it("routes a queue-only primary button through onSend", () => {
@@ -1822,93 +1739,27 @@ describe("MessageInput", () => {
       { onQueue },
     );
 
-    expect(
-      screen.getByRole("button", { name: "Use patient queue" }),
-    ).toBeTruthy();
-
     fireEvent.change(textarea, { target: { value: "plain queue" } });
     fireEvent.click(screen.getByLabelText("toolbarQueueLabel"));
 
     expectSubmission(onQueue, "plain queue", "deferred");
   });
 
-  it("uses patient intent for non-steering queued messages", () => {
+  it("uses patient intent when the patient-queue default is enabled", () => {
+    versionState.version = {
+      ...versionState.version,
+      clientDefaults: { patientQueueDefault: true },
+    };
     const onQueue = vi.fn();
     const textarea = renderMessageInput(
       vi.fn(() => true),
       { onQueue },
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Use patient queue" }));
     fireEvent.change(textarea, { target: { value: "claude patient queue" } });
-    fireEvent.click(screen.getByLabelText("Queue patiently"));
+    fireEvent.click(screen.getByLabelText("toolbarQueueLabel"));
 
     expectSubmission(onQueue, "claude patient queue", "patient");
-  });
-
-  it("changes the single queue primary action when patient mode is on", () => {
-    const onSend = vi.fn();
-    const textarea = renderMessageInput(
-      vi.fn(() => true),
-      {
-        onSend,
-        primaryActionKind: "queue",
-      },
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Use patient queue" }));
-    fireEvent.change(textarea, { target: { value: "single patient action" } });
-
-    const patientAction = screen.getByLabelText("Queue patiently");
-    expect(patientAction.className).toContain("patient-queue-action");
-    fireEvent.click(patientAction);
-
-    expectSubmission(onSend, "single patient action", "patient");
-  });
-
-  it("right-clicking a queue button toggles patient mode without sending", () => {
-    const onQueue = vi.fn();
-    const textarea = renderMessageInput(
-      vi.fn(() => true),
-      {
-        supportsSteering: true,
-        onQueue,
-      },
-    );
-
-    fireEvent.change(textarea, { target: { value: "patient mode switch" } });
-    fireEvent.contextMenu(screen.getByLabelText("toolbarQueueLabel"));
-
-    expect(onQueue).not.toHaveBeenCalled();
-    expect(
-      screen
-        .getByRole("button", { name: "Use regular queue" })
-        .getAttribute("aria-pressed"),
-    ).toBe("true");
-    expect(screen.getByLabelText("Queue patiently")).toBeTruthy();
-    expect(screen.getByRole("status").textContent).toContain(
-      "Patient queue on",
-    );
-  });
-
-  it("keeps patient queue visible for a stoppable non-steering turn before text", () => {
-    renderMessageInput(
-      vi.fn(() => true),
-      {
-        isRunning: true,
-        isThinking: true,
-        onQueue: vi.fn(),
-        onStop: vi.fn(),
-      },
-    );
-
-    expect(screen.getByLabelText("toolbarStop")).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "Use patient queue" }),
-    ).toBeTruthy();
-    expect(
-      screen.getByLabelText("toolbarQueueLabel").hasAttribute("disabled"),
-    ).toBe(true);
   });
 
   it("keeps queue available when the primary steer action downgrades", () => {
@@ -1947,55 +1798,6 @@ describe("MessageInput", () => {
 
     expect(onSend).not.toHaveBeenCalled();
     expectSubmission(onQueue, "queue from primary", "deferred");
-  });
-
-  it("keeps the alternate queue action visible when patient controls are hidden", () => {
-    render(
-      <MessageInputToolbarView
-        t={toolbarT}
-        visibility={{ ...toolbarVisibility, queueControls: false }}
-        attachmentControl={{ attachmentCount: 0 }}
-        shortcutsControl={{
-          open: false,
-          isearchScope: null,
-          setOpen:
-            vi.fn() as unknown as MessageInputToolbarViewProps["shortcutsControl"]["setOpen"],
-          settingsOpen: false,
-          setSettingsOpen:
-            vi.fn() as unknown as MessageInputToolbarViewProps["shortcutsControl"]["setSettingsOpen"],
-          hasDualActions: true,
-          enterActionKind: "steer",
-          canSwapEnterAction: false,
-          queueShortcutLabel: "Queue message",
-        }}
-        actionsControl={{
-          send: {
-            onSend: vi.fn(),
-            canSend: true,
-            primaryActionKind: "steer",
-            primaryActionLabel: "Steer current turn",
-            tooltip: "Steer current turn",
-            icon: "↗",
-            queue: {
-              onQueue: vi.fn(),
-              hasDualActions: true,
-              queueTooltip: "Queue for the next regular delivery",
-              showPatientQueueMode: true,
-              patientQueueEnabled: false,
-              patientQueueTimeoutLabel: "30s",
-              patientQueueTooltip:
-                "Patient queue waits for 30s of verified quiet before delivery.",
-              onTogglePatientQueue: vi.fn(),
-            },
-          },
-        }}
-      />,
-    );
-
-    expect(screen.queryByRole("button", { name: "Use patient queue" })).toBe(
-      null,
-    );
-    expect(screen.getByLabelText("Queue message")).toBeTruthy();
   });
 
   it("renders context usage as passive status chrome", () => {

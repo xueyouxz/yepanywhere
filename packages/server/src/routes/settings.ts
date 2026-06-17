@@ -63,13 +63,13 @@ const SESSION_TOOLBAR_VISIBILITY_CLIENT_DEFAULT_KEYS = [
   "contextUsage",
   "btw",
   "nudge",
-  "queueControls",
   "sessionStatus",
 ] as const satisfies readonly (keyof SessionToolbarVisibilityClientDefaults)[];
 const CLIENT_DEFAULT_KEYS = [
   "speech",
   "sessionToolbarVisibility",
   "steerNowDefault",
+  "patientQueueDefault",
   "compactAtContextPercent",
 ] as const;
 const SPEECH_CLIENT_DEFAULT_KEYS = [
@@ -529,6 +529,18 @@ function parseClientDefaults(raw: unknown): ClientDefaults | undefined | null {
       parsed.steerNowDefault = raw.steerNowDefault;
     }
   }
+  if ("patientQueueDefault" in raw) {
+    if (
+      raw.patientQueueDefault === undefined ||
+      raw.patientQueueDefault === null
+    ) {
+      parsed.patientQueueDefault = undefined;
+    } else if (typeof raw.patientQueueDefault !== "boolean") {
+      return null;
+    } else {
+      parsed.patientQueueDefault = raw.patientQueueDefault;
+    }
+  }
   if ("sessionToolbarVisibility" in raw) {
     const parsedVisibility = parseSessionToolbarVisibilityClientDefaults(
       raw.sessionToolbarVisibility,
@@ -568,6 +580,13 @@ function mergeClientDefaults(
       delete merged.steerNowDefault;
     } else {
       merged.steerNowDefault = update.steerNowDefault;
+    }
+  }
+  if ("patientQueueDefault" in update) {
+    if (update.patientQueueDefault === undefined) {
+      delete merged.patientQueueDefault;
+    } else {
+      merged.patientQueueDefault = update.patientQueueDefault;
     }
   }
   if ("sessionToolbarVisibility" in update) {

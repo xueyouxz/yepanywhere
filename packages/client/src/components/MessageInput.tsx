@@ -330,15 +330,7 @@ export function MessageInput({
     (supportsSteering && onQueue ? "steer" : onQueue ? "queue" : "send");
   const hasActiveDualActions =
     supportsSteering && !!onQueue && basePrimaryActionKind === "steer";
-  const patientQueueStorageKey = `${draftKey}:patient-queue-enabled`;
   const enterActionStorageKey = `${draftKey}:enter-action-kind`;
-  const [patientQueueEnabled, setPatientQueueEnabled] = useState(() => {
-    try {
-      return localStorage.getItem(patientQueueStorageKey) === "true";
-    } catch {
-      return false;
-    }
-  });
   const [enterActionKind, setEnterActionKind] = useState<"steer" | "queue">(
     () => {
       try {
@@ -355,6 +347,11 @@ export function MessageInput({
   // and a user click overrides the default for this composer.
   const { version } = useVersion();
   const steerNowDefault = version?.clientDefaults?.steerNowDefault ?? false;
+  // Patient queue intent is a global preference (Message Delivery settings):
+  // when on, a queued message waits for verified-idle before delivery instead
+  // of promoting at the next end of turn.
+  const patientQueueEnabled =
+    version?.clientDefaults?.patientQueueDefault ?? false;
   const [steerNowOverride, setSteerNowOverride] = useState<boolean | null>(
     null,
   );
@@ -365,11 +362,6 @@ export function MessageInput({
   const effectivePatientQueuePatienceSeconds =
     clampPatientPatienceSeconds(patientQueuePatienceSeconds) ??
     DEFAULT_PATIENT_QUEUE_PATIENCE_SECONDS;
-  const showPatientQueueMode = !!(
-    supportsSteering ||
-    onQueue ||
-    basePrimaryActionKind === "queue"
-  );
   const primaryActionLabel =
     effectivePrimaryActionKind === "steer"
       ? t("toolbarSteerTooltip")
@@ -378,16 +370,6 @@ export function MessageInput({
         : t("toolbarSend");
 
   const canAttach = !!(projectId && sessionId && onAttach);
-
-  useEffect(() => {
-    try {
-      setPatientQueueEnabled(
-        localStorage.getItem(patientQueueStorageKey) === "true",
-      );
-    } catch {
-      setPatientQueueEnabled(false);
-    }
-  }, [patientQueueStorageKey]);
 
   useEffect(() => {
     try {
@@ -400,18 +382,6 @@ export function MessageInput({
       setEnterActionKind("steer");
     }
   }, [enterActionStorageKey]);
-
-  const togglePatientQueueEnabled = useCallback(() => {
-    setPatientQueueEnabled((previous) => {
-      const next = !previous;
-      try {
-        localStorage.setItem(patientQueueStorageKey, next ? "true" : "false");
-      } catch {
-        // Patient queue mode is a local convenience; in-memory state still works.
-      }
-      return next;
-    });
-  }, [patientQueueStorageKey]);
 
   const toggleEnterActionKind = useCallback(() => {
     setEnterActionKind((previous) => {
@@ -1546,15 +1516,11 @@ export function MessageInput({
             thinkingModel={thinkingModel}
             contextRequestedModel={contextRequestedModel}
             heartbeatEnabled={heartbeatEnabled}
-            patientQueuePatienceSeconds={effectivePatientQueuePatienceSeconds}
             onToggleHeartbeat={onToggleHeartbeat}
             onConfigureHeartbeat={onConfigureHeartbeat}
             contextUsage={contextUsage}
             lastActivityAt={lastActivityAt}
             sessionLiveness={sessionLiveness}
-            showPatientQueueMode={showPatientQueueMode}
-            patientQueueEnabled={patientQueueEnabled}
-            onTogglePatientQueue={togglePatientQueueEnabled}
             showSteerNowMode={supportsSteerNow && hasActiveDualActions}
             steerNowEnabled={steerNowEnabled}
             onToggleSteerNow={() => setSteerNowOverride(!steerNowEnabled)}

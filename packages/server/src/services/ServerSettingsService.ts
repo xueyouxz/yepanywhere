@@ -25,11 +25,7 @@ const LEGACY_DEFAULT_HEARTBEAT_TURN_TEXTS = new Set([
   "heartbeat",
   "yepanywhere heartbeat",
 ]);
-const DEFAULT_CLIENT_DEFAULTS: ClientDefaults = {
-  sessionToolbarVisibility: {
-    queueControls: false,
-  },
-};
+const DEFAULT_CLIENT_DEFAULTS: ClientDefaults = {};
 
 export interface SpeechAudioRetentionSettings {
   /** Whether YA persists server-routed speech audio and sidecar metadata. */

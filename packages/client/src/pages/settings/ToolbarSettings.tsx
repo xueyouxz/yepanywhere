@@ -88,11 +88,6 @@ export function ToolbarSettings() {
       description: t("appearanceToolbarBtwDescription"),
     },
     {
-      key: "queueControls",
-      title: t("appearanceToolbarQueueTitle"),
-      description: t("appearanceToolbarQueueDescription"),
-    },
-    {
       key: "steerNow",
       title: t("appearanceToolbarSteerNowTitle"),
       description: t("appearanceToolbarSteerNowDescription"),

@@ -17,6 +17,7 @@ interface MessageDeliveryBaseline {
   joinWindowSeconds: number;
   composeAnchorsEnabled: boolean;
   steerNowDefault: boolean;
+  patientQueueDefault: boolean;
 }
 
 /**
@@ -33,12 +34,17 @@ export function MessageDeliverySettings() {
   const [draftJoinWindow, setDraftJoinWindow] = useState<string | null>(null);
   const [draftAnchors, setDraftAnchors] = useState<boolean | null>(null);
   const [draftSteerNow, setDraftSteerNow] = useState<boolean | null>(null);
+  const [draftPatientQueue, setDraftPatientQueue] = useState<boolean | null>(
+    null,
+  );
   const baselineRef = useRef<MessageDeliveryBaseline | null>(null);
 
   const serverJoinWindowSeconds = settings?.deferredJoinWindowSeconds ?? 0;
   const serverComposeAnchorsEnabled = settings?.composeAnchorsEnabled ?? false;
   const serverSteerNowDefault =
     settings?.clientDefaults?.steerNowDefault ?? false;
+  const serverPatientQueueDefault =
+    settings?.clientDefaults?.patientQueueDefault ?? false;
 
   useEffect(() => {
     if (settings && !baselineRef.current) {
@@ -46,6 +52,8 @@ export function MessageDeliverySettings() {
         joinWindowSeconds: settings.deferredJoinWindowSeconds ?? 0,
         composeAnchorsEnabled: settings.composeAnchorsEnabled ?? false,
         steerNowDefault: settings.clientDefaults?.steerNowDefault ?? false,
+        patientQueueDefault:
+          settings.clientDefaults?.patientQueueDefault ?? false,
       };
     }
   }, [settings]);
@@ -55,6 +63,8 @@ export function MessageDeliverySettings() {
   const shownJoinWindowSeconds = parseJoinWindowSeconds(shownJoinWindowText);
   const shownAnchors = draftAnchors ?? serverComposeAnchorsEnabled;
   const shownSteerNowDefault = draftSteerNow ?? serverSteerNowDefault;
+  const shownPatientQueueDefault =
+    draftPatientQueue ?? serverPatientQueueDefault;
 
   // Debounced auto-save for the join window (sliders fire continuously).
   useEffect(() => {
@@ -88,13 +98,22 @@ export function MessageDeliverySettings() {
       setDraftSteerNow(null);
     }
   }, [draftSteerNow, serverSteerNowDefault]);
+  useEffect(() => {
+    if (
+      draftPatientQueue !== null &&
+      draftPatientQueue === serverPatientQueueDefault
+    ) {
+      setDraftPatientQueue(null);
+    }
+  }, [draftPatientQueue, serverPatientQueueDefault]);
 
   const baseline = baselineRef.current;
   const canUndo =
     !!baseline &&
     (shownJoinWindowSeconds !== baseline.joinWindowSeconds ||
       shownAnchors !== baseline.composeAnchorsEnabled ||
-      shownSteerNowDefault !== baseline.steerNowDefault);
+      shownSteerNowDefault !== baseline.steerNowDefault ||
+      shownPatientQueueDefault !== baseline.patientQueueDefault);
 
   const undo = useCallback(async () => {
     const snapshot = baselineRef.current;
@@ -102,10 +121,14 @@ export function MessageDeliverySettings() {
     setDraftJoinWindow(null);
     setDraftAnchors(null);
     setDraftSteerNow(null);
+    setDraftPatientQueue(null);
     await updateSettings({
       deferredJoinWindowSeconds: snapshot.joinWindowSeconds,
       composeAnchorsEnabled: snapshot.composeAnchorsEnabled,
-      clientDefaults: { steerNowDefault: snapshot.steerNowDefault },
+      clientDefaults: {
+        steerNowDefault: snapshot.steerNowDefault,
+        patientQueueDefault: snapshot.patientQueueDefault,
+      },
     }).catch(() => {
       // surfaced via the hook's error state
     });
@@ -209,6 +232,27 @@ export function MessageDeliverySettings() {
               });
             }}
             aria-label={t("messageDeliverySteerNowDefaultTitle")}
+          />
+        </label>
+
+        <label className="settings-item">
+          <div className="settings-item-info">
+            <strong>{t("messageDeliveryPatientQueueDefaultTitle")}</strong>
+            <p>{t("messageDeliveryPatientQueueDefaultDescription")}</p>
+          </div>
+          <input
+            type="checkbox"
+            checked={shownPatientQueueDefault}
+            onChange={(e) => {
+              const next = e.target.checked;
+              setDraftPatientQueue(next);
+              void updateSettings({
+                clientDefaults: { patientQueueDefault: next },
+              }).catch(() => {
+                // surfaced via the hook's error state
+              });
+            }}
+            aria-label={t("messageDeliveryPatientQueueDefaultTitle")}
           />
         </label>
 

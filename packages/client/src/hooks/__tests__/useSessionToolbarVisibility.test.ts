@@ -99,7 +99,6 @@ describe("useSessionToolbarVisibility", () => {
 
     expect(result.current.visibility.slashMenu).toBe(false);
     expect(result.current.visibility.microphone).toBe(true);
-    expect(result.current.visibility.queueControls).toBe(false);
     expect(result.current.visibility.contextUsage).toBe(true);
   });
 
@@ -162,7 +161,6 @@ describe("useSessionToolbarVisibility", () => {
     const { result } = renderHook(() => useSessionToolbarVisibility());
 
     expect(result.current.visibility.microphone).toBe(true);
-    expect(result.current.visibility.queueControls).toBe(false);
   });
 
   it("stores only explicit toolbar choices and reset returns to default", async () => {

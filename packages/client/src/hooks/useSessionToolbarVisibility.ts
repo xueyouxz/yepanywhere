@@ -22,7 +22,6 @@ export interface SessionToolbarVisibility {
   contextUsage: boolean;
   btw: boolean;
   nudge: boolean;
-  queueControls: boolean;
   sessionStatus: boolean;
 }
 
@@ -43,7 +42,6 @@ export const DEFAULT_SESSION_TOOLBAR_VISIBILITY: SessionToolbarVisibility = {
   contextUsage: true,
   btw: false,
   nudge: false,
-  queueControls: false,
   sessionStatus: true,
 };
 

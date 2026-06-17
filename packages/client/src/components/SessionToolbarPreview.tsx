@@ -149,16 +149,7 @@ export function SessionToolbarPreview() {
               queue: {
                 onQueue: noop,
                 hasDualActions: true,
-                queueTooltip: `${t("toolbarPatientQueueTooltip", {
-                  timeout: "30s",
-                })}\n${t("toolbarPatientQueueToggleShortcut")}`,
-                showPatientQueueMode: true,
-                patientQueueEnabled: true,
-                patientQueueTimeoutLabel: "30s",
-                patientQueueTooltip: t("toolbarPatientQueueTooltip", {
-                  timeout: "30s",
-                }),
-                onTogglePatientQueue: noop,
+                queueTooltip: t("toolbarQueueTooltip"),
               },
             },
           }}
