@@ -35,6 +35,19 @@ const DEFAULT_SECTION_EXPANSION = {
   older: true,
 };
 
+/**
+ * A session is "active" while its agent is mid-turn or waiting on input. Active
+ * sessions are pinned above idle rows and are deliberately never sorted or
+ * deduped: their updatedAt churns every few seconds during a turn, so any
+ * recency sort would reshuffle them constantly. They instead ride the stable
+ * order that useGlobalSessions already preserves across refetches.
+ */
+function isActiveSession(session: GlobalSessionItem): boolean {
+  return (
+    session.activity === "in-turn" || session.activity === "waiting-input"
+  );
+}
+
 type SidebarSectionKey = keyof typeof DEFAULT_SECTION_EXPANSION;
 type SidebarSectionExpansion = Record<SidebarSectionKey, boolean>;
 
@@ -512,8 +525,18 @@ export function Sidebar({
     [],
   );
 
+  // Active sessions are pinned above idle rows and never deduped or sorted —
+  // see isActiveSession. filter() preserves the hook's stable order, so a
+  // session that is already active stays put; only a brand-new session (which
+  // the hook prepends) can appear at the top.
+  const recentActive = useMemo(
+    () => recentDaySessions.filter(isActiveSession),
+    [recentDaySessions],
+  );
+
   const { visibleRecent, hiddenRecent } = useMemo(() => {
-    const { visible, hidden } = groupDuplicateSessions(recentDaySessions);
+    const idle = recentDaySessions.filter((s) => !isActiveSession(s));
+    const { visible, hidden } = groupDuplicateSessions(idle);
     return { visibleRecent: visible, hiddenRecent: hidden };
   }, [groupDuplicateSessions, recentDaySessions]);
 
@@ -773,7 +796,7 @@ export function Sidebar({
             </div>
           )}
 
-          {visibleRecent.length > 0 && (
+          {(recentActive.length > 0 || visibleRecent.length > 0) && (
             <div className="sidebar-section">
               <SidebarSectionHeader
                 title={t("sidebarSectionLast24Hours")}
@@ -790,6 +813,35 @@ export function Sidebar({
                   id="sidebar-last-24-hours-list"
                   className="sidebar-session-list"
                 >
+                  {recentActive.map((session) => (
+                    <SessionListItem
+                      key={session.id}
+                      sessionId={session.id}
+                      projectId={session.projectId}
+                      title={getSessionDisplayTitle(session)}
+                      fullTitle={
+                        session.fullTitle ?? getSessionDisplayTitle(session)
+                      }
+                      initialPrompt={session.initialPrompt}
+                      provider={session.provider}
+                      parentSessionId={session.parentSessionId}
+                      status={session.ownership}
+                      pendingInputType={session.pendingInputType}
+                      hasUnread={session.hasUnread}
+                      isStarred={session.isStarred}
+                      isArchived={session.isArchived}
+                      mode="compact"
+                      isCurrent={session.id === currentSessionId}
+                      activity={session.activity}
+                      onNavigate={onNavigate}
+                      showProjectName
+                      projectName={session.projectName}
+                      basePath={basePath}
+                      messageCount={session.messageCount}
+                      hasDraft={drafts.has(session.id)}
+                      publicShareControlsVisible={publicShareControlsVisible}
+                    />
+                  ))}
                   {visibleRecent.map((session) => (
                     <SessionListItem
                       key={session.id}
@@ -971,6 +1023,7 @@ export function Sidebar({
           )}
 
           {filteredStarredSessions.length === 0 &&
+            recentActive.length === 0 &&
             visibleRecent.length === 0 &&
             visibleOlder.length === 0 && (
               <p className="sidebar-empty">

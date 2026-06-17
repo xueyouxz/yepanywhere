@@ -151,6 +151,15 @@ function makeSession(
   };
 }
 
+/** Render order (top → bottom) of the rendered rows in the Last 24 Hours list. */
+function last24HourIds(container: HTMLElement): string[] {
+  const list = container.querySelector("#sidebar-last-24-hours-list");
+  if (!list) return [];
+  return Array.from(list.querySelectorAll("[data-testid^='session-']")).map(
+    (el) => el.getAttribute("data-testid")?.replace("session-", "") ?? "",
+  );
+}
+
 describe("Sidebar collapsed toggle", () => {
   beforeEach(() => {
     const storage = new Map<string, string>();
@@ -441,6 +450,153 @@ describe("Sidebar collapsed toggle", () => {
 
     await waitFor(() => {
       expect(mockGlobalLoadMore).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // Active sessions (activity = in-turn / waiting-input) are pinned above idle
+  // rows in a stable order, and never run through the recency sort or the
+  // duplicate-title grouping. See topics/sidebar-session-ordering.md.
+  describe("active session ordering", () => {
+    const now = Date.now();
+    const ago = (ms: number) => new Date(now - ms).toISOString();
+
+    function renderExpanded() {
+      return render(
+        <MemoryRouter>
+          <Sidebar
+            isOpen={true}
+            onClose={() => {}}
+            onNavigate={() => {}}
+            isDesktop={true}
+            isCollapsed={false}
+          />
+        </MemoryRouter>,
+      );
+    }
+
+    it("pins active sessions above idle sessions", () => {
+      globalSessionsState.sessions = [
+        makeSession("idle-old", ago(3 * 60_000)),
+        makeSession("active-1", ago(60_000), { activity: "in-turn" }),
+        makeSession("idle-new", ago(30_000)),
+      ];
+
+      const { container } = renderExpanded();
+
+      // active first, then idle sorted by recency (newest idle before oldest).
+      expect(last24HourIds(container)).toEqual([
+        "active-1",
+        "idle-new",
+        "idle-old",
+      ]);
+    });
+
+    it("keeps active sessions in input order, not sorted by updatedAt", () => {
+      // Input order [A, B] but B has the newer updatedAt. A recency sort would
+      // flip them to [B, A]; the active group must preserve the stable input
+      // order the data hook hands down.
+      globalSessionsState.sessions = [
+        makeSession("active-A", ago(10_000), { activity: "in-turn" }),
+        makeSession("active-B", ago(5_000), { activity: "in-turn" }),
+      ];
+
+      const { container } = renderExpanded();
+
+      expect(last24HourIds(container)).toEqual(["active-A", "active-B"]);
+    });
+
+    it("treats waiting-input as active and pins it above newer idle rows", () => {
+      globalSessionsState.sessions = [
+        makeSession("idle-new", ago(10_000)),
+        makeSession("waiting", ago(5 * 60_000), { activity: "waiting-input" }),
+      ];
+
+      const { container } = renderExpanded();
+
+      // 'waiting' has an older updatedAt but is active, so it sits on top.
+      expect(last24HourIds(container)).toEqual(["waiting", "idle-new"]);
+    });
+
+    it("never hides active sessions that share a duplicate title", () => {
+      const shared = "Repeated session";
+      globalSessionsState.sessions = [
+        makeSession("active-thin", ago(60_000), {
+          activity: "in-turn",
+          title: shared,
+          fullTitle: shared,
+          messageCount: 1,
+        }),
+        makeSession("active-fat", ago(120_000), {
+          activity: "in-turn",
+          title: shared,
+          fullTitle: shared,
+          messageCount: 20,
+        }),
+      ];
+
+      renderExpanded();
+
+      // Both remain visible — the dedup expander must not swallow live work.
+      expect(screen.getByTestId("session-active-thin")).toBeDefined();
+      expect(screen.getByTestId("session-active-fat")).toBeDefined();
+    });
+
+    it("renders the section for an active-only recent list", () => {
+      globalSessionsState.sessions = [
+        makeSession("active-only", ago(1_000), { activity: "in-turn" }),
+      ];
+
+      renderExpanded();
+
+      expect(
+        screen.getByRole("button", { name: "Collapse: Last 24 Hours" }),
+      ).toBeDefined();
+      expect(screen.getByTestId("session-active-only")).toBeDefined();
+      // The empty-state copy must not appear when only active rows exist.
+      expect(screen.queryByText("sidebarNoSessions")).toBeNull();
+    });
+
+    it("dedups idle duplicates while leaving active duplicates intact", () => {
+      const activeTitle = "Active dup";
+      const idleTitle = "Idle dup";
+      globalSessionsState.sessions = [
+        makeSession("active-dup-1", ago(1_000), {
+          activity: "in-turn",
+          title: activeTitle,
+          fullTitle: activeTitle,
+          messageCount: 1,
+        }),
+        makeSession("active-dup-2", ago(2_000), {
+          activity: "in-turn",
+          title: activeTitle,
+          fullTitle: activeTitle,
+          messageCount: 9,
+        }),
+        makeSession("idle-dup-keep", ago(3_000), {
+          title: idleTitle,
+          fullTitle: idleTitle,
+          messageCount: 9,
+        }),
+        makeSession("idle-dup-hide", ago(4_000), {
+          title: idleTitle,
+          fullTitle: idleTitle,
+          messageCount: 1,
+        }),
+      ];
+
+      const { container } = renderExpanded();
+
+      // Both active duplicates stay; only the lower-message idle duplicate is
+      // hidden. Active rows render above the surviving idle row.
+      expect(screen.getByTestId("session-active-dup-1")).toBeDefined();
+      expect(screen.getByTestId("session-active-dup-2")).toBeDefined();
+      expect(screen.getByTestId("session-idle-dup-keep")).toBeDefined();
+      expect(screen.queryByTestId("session-idle-dup-hide")).toBeNull();
+      expect(last24HourIds(container)).toEqual([
+        "active-dup-1",
+        "active-dup-2",
+        "idle-dup-keep",
+      ]);
     });
   });
 });
