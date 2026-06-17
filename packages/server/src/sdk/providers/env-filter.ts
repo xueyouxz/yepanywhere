@@ -120,6 +120,12 @@ export function filterEnvForChildProcess(
   }
 
   filtered.ENABLE_PROMPT_CACHING_1H ??= "1";
+  // Default the Claude Code Bash ceiling to 59 min so a bounded 55-min
+  // `agentctl wait` (re-polled while a long job runs) fits under it with
+  // headroom. The agent still requests the long timeout per call; the 2-min
+  // default (BASH_DEFAULT_TIMEOUT_MS, left unset) stays for un-opted calls.
+  // A personal env (e.g. ~/keys.sh) BASH_MAX_TIMEOUT_MS overrides via ??=.
+  filtered.BASH_MAX_TIMEOUT_MS ??= "3540000";
 
   return filtered;
 }
