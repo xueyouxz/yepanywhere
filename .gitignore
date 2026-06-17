@@ -73,3 +73,4 @@ packages/server/bundled/
 references/
 start.sh
 scripts/reyep-detached.sh
+scripts/publish-pages.sh
