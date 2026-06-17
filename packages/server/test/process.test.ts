@@ -1648,6 +1648,11 @@ describe("Process", () => {
         sessionId: "sess-1",
         idleTimeoutMs: 100,
         queue,
+        // Pin vanilla delivery so this case is hermetic: without an explicit
+        // override it reads config (YA_DEFERRED_JOIN_WINDOW_S), and a dev shell
+        // that sets a non-zero join window would join both turns into one group
+        // and promote them together. Window 0 = never join = one per boundary.
+        deferredDelivery: { joinWindowSeconds: 0, composeAnchors: false },
       });
       const events: ProcessEvent[] = [];
       process.subscribe((event) => {
