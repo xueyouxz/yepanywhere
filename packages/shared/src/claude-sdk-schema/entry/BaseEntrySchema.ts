@@ -18,4 +18,14 @@ export const BaseEntrySchema = z.object({
   toolUseResult: z.unknown().optional(),
   gitBranch: z.string().optional(),
   isCompactSummary: z.boolean().optional(),
+  // Provenance stamped by Claude Code on injected entries. `origin.kind` is the
+  // authoritative, non-heuristic signal for entries that arrive as `type: "user"`
+  // but were not authored by the user (e.g. `task-notification`). Note that
+  // `promptSource: "sdk"` is NOT such a signal — YA delivers genuine user turns
+  // through the SDK too, so it appears on real prompts as well.
+  origin: z
+    .object({ kind: z.string() })
+    .passthrough()
+    .optional(),
+  promptSource: z.string().optional(),
 });

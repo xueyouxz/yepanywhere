@@ -80,6 +80,9 @@ export function canReuseRenderItem(
         previous.status === next.status &&
         previous.configChanged === next.configChanged
       );
+
+    case "task_notification":
+      return next.type === "task_notification" && previous.raw === next.raw;
   }
 }
 

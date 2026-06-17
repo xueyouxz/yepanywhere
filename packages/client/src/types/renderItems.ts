@@ -13,7 +13,8 @@ export type RenderItem =
   | ToolCallItem
   | UserPromptItem
   | SessionSetupItem
-  | SystemItem;
+  | SystemItem
+  | TaskNotificationItem;
 
 /** Base fields shared by all render items */
 interface RenderItemBase {
@@ -62,6 +63,25 @@ export interface UserPromptItem extends RenderItemBase {
   type: "user_prompt";
   id: string;
   content: string | ContentBlock[];
+}
+
+/**
+ * A Claude Code `<task-notification>` entry: the SDK injects these (as user-role
+ * entries) when a backgrounded task changes state. Rendered as a system/event
+ * chip, not a user bubble. Detected via `origin.kind` (see parseTaskNotification).
+ */
+export interface TaskNotificationItem extends RenderItemBase {
+  type: "task_notification";
+  id: string;
+  /** Raw XML body, retained for copy/debug and as a fallback when unparsed. */
+  raw: string;
+  taskId?: string;
+  toolUseId?: string;
+  outputFile?: string;
+  status?: string;
+  summary?: string;
+  /** Streaming progress body (Monitor `<event>` log dump), when present. */
+  event?: string;
 }
 
 export interface SessionSetupItem extends RenderItemBase {

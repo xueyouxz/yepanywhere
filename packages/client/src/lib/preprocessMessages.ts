@@ -9,6 +9,10 @@ import type {
   UserPromptItem,
 } from "../types/renderItems";
 import { getMessageId } from "./mergeMessages";
+import {
+  isTaskNotificationMessage,
+  parseTaskNotification,
+} from "./parseTaskNotification";
 
 const AWAY_SUMMARY_HINT_SUFFIX_RE = /\s*\(disable recaps in \/config\)\s*$/u;
 
@@ -145,6 +149,11 @@ function isUserPromptMessage(msg: Message): boolean {
     msg.role;
   const isUserMessage = msg.type === "user" || role === "user";
   if (!isUserMessage) {
+    return false;
+  }
+  // Task notifications arrive as user-role entries but are SDK-injected, not
+  // user-authored — they must not anchor the "last user prompt" affordances.
+  if (isTaskNotificationMessage(msg)) {
     return false;
   }
   if (Array.isArray(content)) {
@@ -331,6 +340,21 @@ function processMessage(
   // String content = user prompt (only if type is user)
   if (typeof content === "string") {
     if (isUserMessage) {
+      // SDK-injected task notifications render as a system/event chip, not a
+      // user bubble. Gated on origin.kind (non-heuristic), then the XML body is
+      // parsed for the chip's structured fields.
+      if (isTaskNotificationMessage(msg)) {
+        const parsed = parseTaskNotification(content);
+        items.push({
+          type: "task_notification",
+          id: msgId,
+          raw: content,
+          sourceMessages: [msg],
+          isSubagent: msg.isSubagent,
+          ...parsed,
+        });
+        return;
+      }
       items.push({
         type: "user_prompt",
         id: msgId,

@@ -486,6 +486,16 @@ function getFullSessionSearchAnchorForItem(
             searchText: item.content,
           }
         : null;
+    case "task_notification": {
+      const searchText = item.summary ?? item.raw;
+      return searchText
+        ? {
+            id: item.id,
+            preview: getSearchPreviewFallback(searchText),
+            searchText,
+          }
+        : null;
+    }
     case "tool_call": {
       const searchText = getToolSearchText(item);
       return searchText
