@@ -21,19 +21,16 @@ interface ContextThresholdQuickEditProps {
 const LONG_PRESS_MS = 450;
 
 /**
- * Effective window for the token preview. Mirrors the server's
- * resolveCompactWindow: opus is always-1M even when the id resolves to
- * "claude-opus-4-8" (whose base family window is 200K). Sonnet is not — bare
- * sonnet is 200K, an explicit sonnet[1m] is 1M — so only opus is special-cased,
- * and everything else falls through to the passed ModelInfo / resolver window.
+ * Effective window for the token preview: prefer the model's reported window,
+ * then the static heuristic for the id, then the live usage window. Context
+ * windows are observation-driven (the server learns the real window from the
+ * SDK's modelUsage), so this no longer hardcodes any always-1M model.
  */
 function effectiveContextWindow(
   model: string | undefined,
   passed: number | undefined,
   usageWindow: number | undefined,
 ): number | undefined {
-  const family = model?.match(/(?:^|[-/])(opus)(?:[-/[]|$)/)?.[1];
-  if (family) return getModelContextWindow("opus[1m]", "claude");
   if (passed && passed > 0) return passed;
   if (model) {
     const resolved = getModelContextWindow(model);

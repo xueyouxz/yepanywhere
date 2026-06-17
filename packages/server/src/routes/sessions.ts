@@ -63,10 +63,7 @@ import type { ISessionReader } from "../sessions/types.js";
 import { getProvider } from "../sdk/providers/index.js";
 import { getStaticSlashCommandsForProvider } from "../sdk/providers/staticSlashCommands.js";
 import type { ExternalSessionTracker } from "../supervisor/ExternalSessionTracker.js";
-import type {
-  DeferredMessagePlacement,
-  Process,
-} from "../supervisor/Process.js";
+import type { Process } from "../supervisor/Process.js";
 import type {
   QueueFullResponse,
   ResumeMode,
@@ -373,35 +370,6 @@ function isCodexProviderName(
   return provider === "codex" || provider === "codex-oss";
 }
 
-function parseDeferredPlacement(body: {
-  insertBeforeTempId?: unknown;
-  insertAfterTempId?: unknown;
-  replaceDeferredTempId?: unknown;
-}): DeferredMessagePlacement | undefined {
-  const beforeTempId =
-    typeof body.insertBeforeTempId === "string" &&
-    body.insertBeforeTempId.trim()
-      ? body.insertBeforeTempId.trim()
-      : undefined;
-  const afterTempId =
-    typeof body.insertAfterTempId === "string" && body.insertAfterTempId.trim()
-      ? body.insertAfterTempId.trim()
-      : undefined;
-  const replaceTempId =
-    typeof body.replaceDeferredTempId === "string" &&
-    body.replaceDeferredTempId.trim()
-      ? body.replaceDeferredTempId.trim()
-      : undefined;
-  if (!beforeTempId && !afterTempId && !replaceTempId) {
-    return undefined;
-  }
-  return {
-    ...(afterTempId ? { afterTempId } : {}),
-    ...(beforeTempId ? { beforeTempId } : {}),
-    ...(replaceTempId ? { replaceTempId } : {}),
-  };
-}
-
 const USER_MESSAGE_DELIVERY_INTENTS: ReadonlySet<UserMessageDeliveryIntent> =
   new Set(["direct", "steer", "deferred", "patient"]);
 
@@ -564,12 +532,6 @@ interface StartSessionBody {
   messageMetadata?: UserMessageMetadata;
   /** Client-generated temp ID for optimistic UI tracking */
   tempId?: string;
-  /** Deferred queue reinsertion anchor for edited queued messages */
-  insertBeforeTempId?: string;
-  /** Deferred queue reinsertion anchor for edited queued messages */
-  insertAfterTempId?: string;
-  /** Queued temp ID currently held behind an edit barrier */
-  replaceDeferredTempId?: string;
   /** SSH host alias for remote execution (undefined = local) */
   executor?: string;
   /** Permission rules for tool filtering (deny/allow patterns) */
@@ -1736,6 +1698,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     executor: string | undefined,
     initialPrompt?: string,
     requestedModel?: string,
+    promptSuggestionMode?: PromptSuggestionMode,
   ): Promise<void> => {
     if (!deps.sessionMetadataService) {
       return;
@@ -1760,6 +1723,14 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         sessionId,
         requestedModel,
       );
+    }
+    // Persist the resolved prompt-suggestion mode so a later resume (which may
+    // omit it from the request body) recovers the per-session preference
+    // instead of falling back to the provider's native default.
+    if (promptSuggestionMode !== undefined) {
+      await deps.sessionMetadataService.updateMetadata(sessionId, {
+        promptSuggestionMode,
+      });
     }
   };
 
@@ -2081,6 +2052,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         heartbeatTurnText: metadata?.heartbeatTurnText,
         heartbeatForceAfterMinutes:
           metadata?.heartbeatForceAfterMinutes ?? undefined,
+        promptSuggestionMode: metadata?.promptSuggestionMode,
         lastSeenAt,
         hasUnread,
       },
@@ -2305,14 +2277,8 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
               ? (m, p) => mis.getContextWindow(m, p)
               : undefined,
         );
-        // Cache SDK-reported context window for future JSONL reads
-        if (mis && sdkContextWindow && process.resolvedModel) {
-          mis.recordContextWindow(
-            process.resolvedModel,
-            sdkContextWindow,
-            process.provider,
-          );
-        }
+        // (Durable recording happens at the observation point in Process via
+        // onContextWindowObserved, not as a side effect of this GET.)
         // Get metadata even for new sessions (in case it was set before file was written)
         const metadata = deps.sessionMetadataService?.getMetadata(sessionId);
         // Get notification data for new sessions too
@@ -2339,6 +2305,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
             heartbeatTurnsAfterMinutes: metadata?.heartbeatTurnsAfterMinutes,
             heartbeatTurnText: metadata?.heartbeatTurnText,
             heartbeatForceAfterMinutes: metadata?.heartbeatForceAfterMinutes,
+            promptSuggestionMode: metadata?.promptSuggestionMode,
             lastSeenAt: lastSeenEntry?.timestamp,
             hasUnread,
             provider: process.provider,
@@ -2442,12 +2409,8 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         percentage: Math.round((contextUsage.inputTokens / cw) * 100),
         contextWindow: cw,
       };
-      // Cache for future reads without a live process
-      deps.modelInfoService?.recordContextWindow(
-        process.resolvedModel ?? session.model ?? "",
-        cw,
-        process.provider,
-      );
+      // Durable recording happens at the observation point in Process via
+      // onContextWindowObserved; this block only overrides the displayed value.
     }
 
     const { messages: _messages, ...sessionMetadata } = session;
@@ -2499,6 +2462,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         heartbeatTurnsAfterMinutes: metadata?.heartbeatTurnsAfterMinutes,
         heartbeatTurnText: metadata?.heartbeatTurnText,
         heartbeatForceAfterMinutes: metadata?.heartbeatForceAfterMinutes,
+        promptSuggestionMode: metadata?.promptSuggestionMode,
         // Model comes from the session reader (extracted from JSONL)
         model: session.model,
         lastSeenAt,
@@ -2615,6 +2579,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       executor,
       body.message,
       body.model,
+      result.promptSuggestionMode,
     );
 
     return c.json({
@@ -2708,6 +2673,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       executor,
       undefined,
       body.model,
+      result.promptSuggestionMode,
     );
 
     return c.json({
@@ -2798,6 +2764,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       executor,
       body.message,
       body.model,
+      result.promptSuggestionMode,
     );
 
     return c.json({
@@ -2869,6 +2836,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       executor,
       undefined,
       body.model,
+      result.promptSuggestionMode,
     );
 
     return c.json({
@@ -3112,7 +3080,11 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
           globalInstructions,
           permissions: body.permissions,
           recapMode: helperSettings.recapMode,
-          promptSuggestionMode: helperSettings.promptSuggestionMode,
+          // Body value wins; otherwise recover the per-session preference from
+          // metadata so a body-less resume does not default back to native.
+          promptSuggestionMode:
+            helperSettings.promptSuggestionMode ??
+            deps.sessionMetadataService?.getPromptSuggestionMode?.(sessionId),
           helperSideModel: helperSettings.helperSideModel,
           resumeMode,
           resumeSessionAt,
@@ -3333,7 +3305,10 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
           globalInstructions: getGlobalInstructions(),
           permissions: body.permissions,
           recapMode: helperSettings.recapMode,
-          promptSuggestionMode: helperSettings.promptSuggestionMode,
+          // Inherit the source session's preference unless the body overrides.
+          promptSuggestionMode:
+            helperSettings.promptSuggestionMode ??
+            originalMetadata?.promptSuggestionMode,
           helperSideModel: helperSettings.helperSideModel,
         },
       );
@@ -3361,6 +3336,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         executor,
         undefined,
         body.model ?? deps.sessionMetadataService?.getRequestedModel(sessionId),
+        result.promptSuggestionMode,
       );
       if (deps.sessionMetadataService) {
         await deps.sessionMetadataService.updateMetadata(result.sessionId, {
@@ -3435,7 +3411,10 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         globalInstructions: getGlobalInstructions(),
         permissions: body.permissions,
         recapMode: helperSettings.recapMode,
-        promptSuggestionMode: helperSettings.promptSuggestionMode,
+        // Inherit the source session's preference unless the body overrides.
+        promptSuggestionMode:
+          helperSettings.promptSuggestionMode ??
+          originalMetadata?.promptSuggestionMode,
         helperSideModel: helperSettings.helperSideModel,
       },
     );
@@ -3464,6 +3443,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       executor,
       undefined,
       body.model ?? deps.sessionMetadataService?.getRequestedModel(sessionId),
+      result.promptSuggestionMode,
     );
     if (deps.sessionMetadataService) {
       await deps.sessionMetadataService.updateMetadata(result.sessionId, {
@@ -3600,6 +3580,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       savedExecutor,
       undefined,
       deps.sessionMetadataService?.getRequestedModel(sessionId),
+      deps.sessionMetadataService?.getMetadata(sessionId)?.promptSuggestionMode,
     );
     if (forkTitle && deps.sessionMetadataService) {
       await deps.sessionMetadataService.updateMetadata(fork.sessionId, {
@@ -3699,7 +3680,6 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       await process.primeSupportedCommandsForMessage(userMessage);
       const deferredResult = process.deferMessage(userMessage, {
         promoteIfReady: true,
-        placement: parseDeferredPlacement(body),
       });
       if (!deferredResult.success) {
         return c.json(
@@ -3837,105 +3817,6 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     }
 
     return c.json({ cancelled: true });
-  });
-
-  // PUT /api/sessions/:sessionId/deferred/:tempId - Update queued text in place
-  routes.put("/sessions/:sessionId/deferred/:tempId", async (c) => {
-    const sessionId = c.req.param("sessionId");
-    const tempId = c.req.param("tempId");
-
-    let body: { message?: unknown };
-    try {
-      body = await c.req.json<{ message?: unknown }>();
-    } catch {
-      return c.json({ error: "Invalid JSON body" }, 400);
-    }
-
-    if (typeof body.message !== "string") {
-      return c.json({ error: "Message must be a string" }, 400);
-    }
-
-    const process = deps.supervisor.getProcessForSession(sessionId);
-    if (!process) {
-      return c.json({ error: "No active process for session" }, 404);
-    }
-
-    const updated = process.updateDeferredMessage(tempId, body.message);
-    if (!updated) {
-      return c.json({ error: "Deferred message not found" }, 404);
-    }
-
-    return c.json({
-      updated: true,
-      tempId: updated.tempId,
-      message: updated.text,
-      deferredMessages: process.getDeferredQueueSummary(),
-    });
-  });
-
-  // POST /api/sessions/:sessionId/deferred/:tempId/edit - Take a deferred message for editing
-  routes.post("/sessions/:sessionId/deferred/:tempId/edit", (c) => {
-    const sessionId = c.req.param("sessionId");
-    const tempId = c.req.param("tempId");
-
-    const process = deps.supervisor.getProcessForSession(sessionId);
-    if (!process) {
-      return c.json({ error: "No active process for session" }, 404);
-    }
-
-    const taken = process.takeDeferredMessage(tempId);
-    if (!taken) {
-      return c.json({ error: "Deferred message not found" }, 404);
-    }
-
-    return c.json({
-      message: taken.message.text,
-      tempId: taken.message.tempId,
-      mode: taken.message.mode,
-      attachments: taken.message.attachments,
-      placement: taken.placement,
-    });
-  });
-
-  // POST /api/sessions/:sessionId/deferred/:tempId/steer - Send a queued message as active-turn steering
-  routes.post("/sessions/:sessionId/deferred/:tempId/steer", (c) => {
-    const sessionId = c.req.param("sessionId");
-    const tempId = c.req.param("tempId");
-
-    const process = deps.supervisor.getProcessForSession(sessionId);
-    if (!process) {
-      return c.json({ error: "No active process for session" }, 404);
-    }
-
-    const steered = process.steerDeferredMessage(tempId);
-    if (!steered) {
-      return c.json({ error: "Deferred message not found" }, 404);
-    }
-
-    return c.json({
-      steered: true,
-      tempId: steered.message.tempId,
-      message: steered.message.text,
-      position: steered.position,
-      deferredMessages: process.getDeferredQueueSummary(),
-    });
-  });
-
-  // POST /api/sessions/:sessionId/deferred/:tempId/edit/release - Release a queued edit barrier
-  routes.post("/sessions/:sessionId/deferred/:tempId/edit/release", (c) => {
-    const sessionId = c.req.param("sessionId");
-    const tempId = c.req.param("tempId");
-
-    const process = deps.supervisor.getProcessForSession(sessionId);
-    if (!process) {
-      return c.json({ error: "No active process for session" }, 404);
-    }
-
-    const released = process.releaseDeferredEditBarrier(tempId);
-    return c.json({
-      released,
-      deferredMessages: process.getDeferredQueueSummary(),
-    });
   });
 
   // PUT /api/sessions/:sessionId/mode - Update permission mode without sending a message
@@ -4205,6 +4086,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       heartbeatTurnsAfterMinutes?: number | null;
       heartbeatTurnText?: string | null;
       heartbeatForceAfterMinutes?: number | null;
+      promptSuggestionMode?: unknown;
     } = {};
     try {
       body = await c.req.json();
@@ -4221,7 +4103,8 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       body.heartbeatTurnsEnabled === undefined &&
       body.heartbeatTurnsAfterMinutes === undefined &&
       body.heartbeatTurnText === undefined &&
-      body.heartbeatForceAfterMinutes === undefined
+      body.heartbeatForceAfterMinutes === undefined &&
+      body.promptSuggestionMode === undefined
     ) {
       return c.json(
         {
@@ -4317,6 +4200,31 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
           ? body.parentSessionId.trim() || null
           : null;
 
+    // promptSuggestionMode: null/"" clears the preference (revert to default);
+    // a valid enum value is stored; any other value is rejected.
+    let promptSuggestionMode: PromptSuggestionMode | null | undefined;
+    if (body.promptSuggestionMode !== undefined) {
+      if (
+        body.promptSuggestionMode === null ||
+        body.promptSuggestionMode === ""
+      ) {
+        promptSuggestionMode = null;
+      } else if (
+        typeof body.promptSuggestionMode === "string" &&
+        PROMPT_SUGGESTION_MODES.includes(
+          body.promptSuggestionMode as PromptSuggestionMode,
+        )
+      ) {
+        promptSuggestionMode =
+          body.promptSuggestionMode as PromptSuggestionMode;
+      } else {
+        return c.json(
+          { error: "promptSuggestionMode must be one of: off, native" },
+          400,
+        );
+      }
+    }
+
     await deps.sessionMetadataService.updateMetadata(sessionId, {
       title: body.title,
       archived: body.archived,
@@ -4326,6 +4234,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       heartbeatTurnsAfterMinutes,
       heartbeatTurnText,
       heartbeatForceAfterMinutes,
+      promptSuggestionMode,
     });
 
     // Emit SSE event so sidebar and other clients can update
@@ -4341,6 +4250,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         heartbeatTurnsAfterMinutes,
         heartbeatTurnText,
         heartbeatForceAfterMinutes,
+        promptSuggestionMode: promptSuggestionMode ?? undefined,
         timestamp: new Date().toISOString(),
       });
     }

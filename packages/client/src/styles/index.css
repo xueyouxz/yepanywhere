@@ -1766,6 +1766,19 @@ a.sidebar-nav-item {
   padding: 1rem;
   min-height: 0;
   -webkit-overflow-scrolling: touch;
+  /* Softly fade the bottom few px of scrolling content into the composer,
+     so text doesn't hard-cut right above the connection bar. */
+  --session-messages-fade: 6px;
+  mask-image: linear-gradient(
+    to bottom,
+    black calc(100% - var(--session-messages-fade)),
+    transparent
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    black calc(100% - var(--session-messages-fade)),
+    transparent
+  );
 }
 
 .user-turn-nav {
@@ -7782,6 +7795,8 @@ a.sidebar-nav-item {
 .output-appearance-controls {
   display: grid;
   gap: var(--space-3);
+  container-type: inline-size;
+  container-name: output-controls;
 }
 
 .output-appearance-control {
@@ -7800,6 +7815,7 @@ a.sidebar-nav-item {
 .output-font-selector {
   width: fit-content;
   max-width: 100%;
+  flex-wrap: wrap;
 }
 
 .output-font-option-source-serif-4 {
@@ -7849,8 +7865,8 @@ a.sidebar-nav-item {
 .output-appearance-specimen {
   display: grid;
   justify-self: start;
-  width: min(100%, 19rem);
-  max-width: 19rem;
+  width: min(100%, 16rem);
+  max-width: 16rem;
   gap: var(--space-1);
 }
 
@@ -8062,12 +8078,29 @@ a.sidebar-nav-item {
 
 @container output-appearance (min-width: 736px) {
   .output-appearance-panel {
-    grid-template-columns: minmax(0, 1fr) minmax(17rem, 19rem);
+    grid-template-columns: minmax(0, 1fr) minmax(13rem, 16rem);
     gap: var(--space-4);
   }
 
   .output-appearance-specimen {
     justify-self: end;
+  }
+}
+
+/*
+ * Stack each control (label over input) based on the controls column's own
+ * width, not the viewport. This keeps the rows from overflowing into the
+ * preview when the panel is in its two-column layout and the controls column
+ * is narrow.
+ */
+@container output-controls (max-width: 26rem) {
+  .output-appearance-control {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+
+  .output-appearance-slider-row {
+    grid-template-columns: minmax(0, 1fr) max-content;
   }
 }
 
@@ -8079,15 +8112,6 @@ a.sidebar-nav-item {
 
   .output-appearance-header .settings-button {
     align-self: flex-start;
-  }
-
-  .output-appearance-control {
-    grid-template-columns: 1fr;
-    gap: var(--space-1);
-  }
-
-  .output-appearance-slider-row {
-    grid-template-columns: minmax(0, 1fr) max-content;
   }
 
   .output-appearance-number {
@@ -10481,12 +10505,6 @@ a.sidebar-nav-item {
   animation: thinking-pulse 1.5s ease-in-out infinite;
 }
 
-.provider-badge-model {
-  margin-left: 2px;
-  opacity: 0.7;
-  font-weight: 400;
-}
-
 .provider-badge-effort {
   display: inline-flex;
   align-items: center;
@@ -10539,23 +10557,10 @@ a.sidebar-nav-item {
   opacity: 0.82;
 }
 
-.provider-badge-model::before {
-  content: "·";
-  margin-right: 2px;
-}
-
-/* On mobile, hide provider name and dot - show only model */
+/* On mobile, hide the dot - the label already shows a compact model glyph */
 @media (max-width: 600px) {
-  .provider-badge-label,
   .provider-badge-dot-inline {
     display: none;
-  }
-  .provider-badge-model::before {
-    display: none;
-  }
-  .provider-badge-model {
-    margin-left: 0;
-    opacity: 1;
   }
 }
 

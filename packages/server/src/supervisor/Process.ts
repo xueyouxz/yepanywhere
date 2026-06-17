@@ -19,7 +19,6 @@ import {
   HELPER_SIDE_MODEL_CHEAPEST,
   HELPER_SIDE_MODEL_SAME_AS_MAIN,
   clampPatientPatienceSeconds,
-  stripPatientQueuePrefix,
 } from "@yep-anywhere/shared";
 import { getLogger } from "../logging/logger.js";
 import { getProjectName } from "../projects/paths.js";
@@ -65,22 +64,6 @@ import { DEFAULT_IDLE_TIMEOUT_MS } from "./types.js";
 
 type Listener = (event: ProcessEvent) => void | Promise<void>;
 type ClaudeSessionState = "idle" | "running" | "requires_action";
-
-export interface DeferredMessagePlacement {
-  afterTempId?: string;
-  beforeTempId?: string;
-  replaceTempId?: string;
-}
-
-export interface TakenDeferredMessage {
-  message: UserMessage;
-  placement: DeferredMessagePlacement;
-}
-
-export interface SteeredDeferredMessage {
-  message: UserMessage;
-  position?: number;
-}
 
 type DeferredQueueEntry = { message: UserMessage; timestamp: string };
 type RecentAssistantRecapEntry = {
@@ -228,18 +211,53 @@ function getSdkMessageSubtype(message: SDKMessage): string | undefined {
   return typeof message.subtype === "string" ? message.subtype : undefined;
 }
 
+// Top-level SDK message types that represent real turn content. Each one is part
+// of a model/tool turn that is guaranteed to eventually reach a `result`, so
+// waking on them can never pin the process `in-turn` forever.
+const WAKE_WORK_MESSAGE_TYPES = new Set<string>([
+  "assistant",
+  "user",
+  "stream_event",
+]);
+
+// `system` message subtypes that represent live Claude-owned background work
+// which can wake the session later. Mirrors the task lifecycle tracked for
+// reap-retention in ClaudeProviderRetentionTracker.observeMessage.
+const WAKE_WORK_SYSTEM_SUBTYPES = new Set<string>([
+  "task_started",
+  "task_progress",
+  "task_updated",
+  "task_notification",
+]);
+
+/**
+ * Decide whether a post-idle provider message should promote a coarse-idle owned
+ * process back to `in-turn` (see promoteIdleForProviderWork and doc
+ * tactical/015-claude-background-task-idle-reap.md).
+ *
+ * This is an allowlist (default-deny) on purpose. The original blacklist ("wake
+ * on everything except result / session_state_changed / init") woke the process
+ * on any message the SDK introduced that we did not model. That included
+ * `prompt_suggestion` — a post-turn, predicted-next-prompt message that is never
+ * followed by a `result` — so finished sessions got pinned as "thinking" forever
+ * and were never idle-reaped. To add a wake trigger, name it here.
+ *
+ * Reap-safety is owned separately by ClaudeProviderRetentionTracker; this
+ * predicate only governs the cosmetic `in-turn` activity flip. So an unmodeled
+ * future message type degrades safely to "no wake" rather than "stuck", and a
+ * genuine background task still shows as live via the retention overlay
+ * (verified-waiting-provider) regardless of this flip.
+ */
 function isProviderWorkWakeMessage(message: SDKMessage): boolean {
-  const claudeState = getClaudeSessionStateChange(message);
-  if (claudeState !== null) {
+  // session_state_changed drives the state machine directly; it is not a wake.
+  if (getClaudeSessionStateChange(message) !== null) {
     return false;
   }
-  if (message.type === "result") {
-    return false;
+  if (message.type === "system") {
+    const subtype = getSdkMessageSubtype(message);
+    return subtype !== undefined && WAKE_WORK_SYSTEM_SUBTYPES.has(subtype);
   }
-  if (message.type === "system" && message.subtype === "init") {
-    return false;
-  }
-  return true;
+  return WAKE_WORK_MESSAGE_TYPES.has(message.type);
 }
 
 function extractMessageText(message: SDKMessage): string | undefined {
@@ -361,10 +379,6 @@ export class Process {
   private legacyQueue: UserMessage[] = [];
   private messageQueue: MessageQueue | null;
   private deferredDeliveryOverrides: DeferredDeliveryOptions | undefined;
-  private deferredEditBarrier: {
-    originalTempId: string;
-    index: number;
-  } | null = null;
   private abortFn: (() => void) | null;
   private _state: ProcessState = { type: "in-turn" };
   private listeners: Set<Listener> = new Set();
@@ -1098,7 +1112,6 @@ export class Process {
       const directDrained = this.messageQueue.drain();
       const deferredDrained = this.deferredQueue.map((e) => e.message);
       this.deferredQueue = [];
-      this.deferredEditBarrier = null;
       this.emitDeferredQueueChange("promoted");
 
       const all = [
@@ -1967,7 +1980,6 @@ export class Process {
     message: UserMessage,
     options?: {
       promoteIfReady?: boolean;
-      placement?: DeferredMessagePlacement;
     },
   ): {
     success: boolean;
@@ -1976,31 +1988,13 @@ export class Process {
     position?: number;
     error?: string;
   } {
-    const replaceTempId = options?.placement?.replaceTempId;
-    const replacesDeferredEdit =
-      !!replaceTempId &&
-      this.deferredEditBarrier?.originalTempId === replaceTempId;
-    if (replaceTempId && !replacesDeferredEdit) {
-      return {
-        success: false,
-        deferred: true,
-        error: "Deferred edit barrier does not match replacement message",
-      };
-    }
-    const deferredEditInsertionIndex = replacesDeferredEdit
-      ? Math.min(
-          this.deferredEditBarrier?.index ?? 0,
-          this.deferredQueue.length,
-        )
-      : null;
-
     const canPromoteIfReady = !!(
       options?.promoteIfReady &&
       this.messageQueue &&
       message.metadata?.deliveryIntent !== "patient" &&
       this._state.type === "idle"
     );
-    if (canPromoteIfReady && !options?.placement) {
+    if (canPromoteIfReady) {
       const result = this.queueMessage(message);
       if (!result.success) {
         return {
@@ -2018,59 +2012,12 @@ export class Process {
       };
     }
 
-    const entry = {
+    this.deferredQueue.push({
       message,
       timestamp: new Date().toISOString(),
-    };
-    const insertionIndex = replacesDeferredEdit
-      ? (deferredEditInsertionIndex as number)
-      : this.getDeferredInsertionIndex(options?.placement);
-    this.deferredQueue.splice(insertionIndex, 0, entry);
-    if (replacesDeferredEdit) {
-      this.deferredEditBarrier = null;
-    }
+    });
     this.emitDeferredQueueChange("queued", message.tempId);
-    if (canPromoteIfReady && this.promoteEligibleDeferredAfterTurn()) {
-      return {
-        success: true,
-        deferred: false,
-        promoted: true,
-      };
-    }
     return { success: true, deferred: true };
-  }
-
-  private getDeferredPlacement(index: number): DeferredMessagePlacement {
-    const afterTempId = this.deferredQueue[index - 1]?.message.tempId;
-    const beforeTempId = this.deferredQueue[index + 1]?.message.tempId;
-    return {
-      ...(afterTempId ? { afterTempId } : {}),
-      ...(beforeTempId ? { beforeTempId } : {}),
-    };
-  }
-
-  private getDeferredInsertionIndex(
-    placement?: DeferredMessagePlacement,
-  ): number {
-    if (placement?.beforeTempId) {
-      const beforeIndex = this.deferredQueue.findIndex(
-        (entry) => entry.message.tempId === placement.beforeTempId,
-      );
-      if (beforeIndex !== -1) {
-        return beforeIndex;
-      }
-    }
-
-    if (placement?.afterTempId) {
-      const afterIndex = this.deferredQueue.findIndex(
-        (entry) => entry.message.tempId === placement.afterTempId,
-      );
-      if (afterIndex !== -1) {
-        return afterIndex + 1;
-      }
-    }
-
-    return this.deferredQueue.length;
   }
 
   /**
@@ -2082,107 +2029,7 @@ export class Process {
     );
     if (index === -1) return false;
     this.deferredQueue.splice(index, 1);
-    if (this.deferredEditBarrier) {
-      if (index < this.deferredEditBarrier.index) {
-        this.deferredEditBarrier.index--;
-      } else if (this.deferredQueue.length <= this.deferredEditBarrier.index) {
-        this.deferredEditBarrier.index = this.deferredQueue.length;
-      }
-    }
     this.emitDeferredQueueChange("cancelled", tempId);
-    return true;
-  }
-
-  updateDeferredMessage(tempId: string, text: string): UserMessage | null {
-    const index = this.deferredQueue.findIndex(
-      (entry) => entry.message.tempId === tempId,
-    );
-    const entry = this.deferredQueue[index];
-    if (index === -1 || !entry) return null;
-
-    const updatedMessage = { ...entry.message, text };
-    this.deferredQueue[index] = { ...entry, message: updatedMessage };
-    this.emitDeferredQueueChange("edited", tempId);
-    return updatedMessage;
-  }
-
-  steerDeferredMessage(tempId: string): SteeredDeferredMessage | null {
-    const index = this.deferredQueue.findIndex(
-      (entry) => entry.message.tempId === tempId,
-    );
-    if (index === -1) return null;
-
-    const previousDeferredEditBarrier = this.deferredEditBarrier
-      ? { ...this.deferredEditBarrier }
-      : null;
-    const [entry] = this.deferredQueue.splice(index, 1);
-    if (!entry) return null;
-
-    const steeredMessage: UserMessage = {
-      ...entry.message,
-      text: stripPatientQueuePrefix(entry.message.text),
-      metadata: {
-        ...entry.message.metadata,
-        deliveryIntent: "steer",
-      },
-    };
-    const strippedEntry: DeferredQueueEntry = {
-      ...entry,
-      message: steeredMessage,
-    };
-
-    if (this.deferredEditBarrier) {
-      if (index < this.deferredEditBarrier.index) {
-        this.deferredEditBarrier.index--;
-      } else if (this.deferredQueue.length <= this.deferredEditBarrier.index) {
-        this.deferredEditBarrier.index = this.deferredQueue.length;
-      }
-    }
-
-    const result = this.queueMessage(steeredMessage, { allowSteer: true });
-    if (!result.success) {
-      this.deferredQueue.splice(index, 0, strippedEntry);
-      this.deferredEditBarrier = previousDeferredEditBarrier;
-      this.emitDeferredQueueChange("queued", tempId);
-      return null;
-    }
-
-    this.emitDeferredQueueChange("promoted", tempId);
-    return { message: steeredMessage, position: result.position };
-  }
-
-  /**
-   * Remove and return a deferred message so a client can edit it safely.
-   */
-  takeDeferredMessage(tempId: string): TakenDeferredMessage | null {
-    const index = this.deferredQueue.findIndex(
-      (entry) => entry.message.tempId === tempId,
-    );
-    if (index === -1) return null;
-    const placement = this.getDeferredPlacement(index);
-    const [entry] = this.deferredQueue.splice(index, 1);
-    this.deferredEditBarrier = { originalTempId: tempId, index };
-    this.emitDeferredQueueChange("edited", tempId);
-    if (!entry) return null;
-    return { message: entry.message, placement };
-  }
-
-  releaseDeferredEditBarrier(originalTempId?: string): boolean {
-    if (!this.deferredEditBarrier) return false;
-    if (
-      originalTempId &&
-      this.deferredEditBarrier.originalTempId !== originalTempId
-    ) {
-      return false;
-    }
-    this.deferredEditBarrier = null;
-    if (this._state.type === "idle") {
-      const promotion = this.promoteNextDeferredMessage({ allowSteer: false });
-      if (promotion === "promoted" || promotion === "failed") {
-        return true;
-      }
-    }
-    this.emitDeferredQueueChange("edited", originalTempId);
     return true;
   }
 
@@ -2196,9 +2043,8 @@ export class Process {
     attachments?: UserMessage["attachments"];
     attachmentCount?: number;
     metadata?: UserMessage["metadata"];
-    blockedByEdit?: boolean;
   }[] {
-    return this.deferredQueue.map((entry, index) => {
+    return this.deferredQueue.map((entry) => {
       const attachmentCount =
         (entry.message.attachments?.length ?? 0) +
         (entry.message.images?.length ?? 0) +
@@ -2213,9 +2059,6 @@ export class Process {
           ? { attachments: entry.message.attachments }
           : {}),
         ...(attachmentCount > 0 ? { attachmentCount } : {}),
-        ...(this.deferredEditBarrier && index >= this.deferredEditBarrier.index
-          ? { blockedByEdit: true }
-          : {}),
       };
     });
   }
@@ -2228,14 +2071,12 @@ export class Process {
     reason: "cancelled" | "promoted" = "promoted",
   ): UserMessage[] {
     if (this.deferredQueue.length === 0) {
-      this.deferredEditBarrier = null;
       return [];
     }
 
     const drained = this.deferredQueue.map((entry) => entry.message);
     const firstTempId = drained[0]?.tempId;
     this.deferredQueue = [];
-    this.deferredEditBarrier = null;
     this.emitDeferredQueueChange(reason, firstTempId);
     return drained;
   }
@@ -2256,7 +2097,7 @@ export class Process {
    * Emit a deferred-queue event with the current queue state.
    */
   private emitDeferredQueueChange(
-    reason?: "queued" | "cancelled" | "edited" | "promoted",
+    reason?: "queued" | "cancelled" | "promoted",
     tempId?: string,
   ): void {
     this.emit({
@@ -2852,20 +2693,31 @@ export class Process {
           // Legacy mock SDK behavior - handle input_request message
           this.handleInputRequest(message);
         } else if (message.type === "result") {
-          // Capture context window from modelUsage in result messages.
-          // Keys may include suffixes like "[1m]" (e.g. "claude-opus-4-6[1m]"),
-          // so we take the max contextWindow across all model entries.
+          // Capture context window from modelUsage in result messages. This is
+          // the authoritative observation point (the only place the real,
+          // account-resolved window exists); we emit a per-model observation
+          // for each entry so it can be durably recorded regardless of whether
+          // any client fetches this session's detail, and keep the max across
+          // entries as this process's live-override window. The model id is
+          // recorded exactly as the SDK reports it in modelUsage (no munging) —
+          // observations should reflect what was actually observed.
           if (message.modelUsage) {
             const mu = message.modelUsage as Record<
               string,
               { contextWindow?: number }
             >;
-            for (const entry of Object.values(mu)) {
+            for (const [model, entry] of Object.entries(mu)) {
               if (entry.contextWindow && entry.contextWindow > 0) {
                 this._contextWindow = Math.max(
                   this._contextWindow ?? 0,
                   entry.contextWindow,
                 );
+                this.emit({
+                  type: "context-window-observed",
+                  model,
+                  contextWindow: entry.contextWindow,
+                  provider: this.provider,
+                });
               }
             }
           }
@@ -3111,11 +2963,7 @@ export class Process {
    * consecutively-composed turns into one `--------`-separated provider turn.
    */
   private promoteEligibleDeferredAfterTurn(): boolean {
-    if (
-      this.deferredQueue.length === 0 ||
-      !this.messageQueue ||
-      this.deferredEditBarrier
-    ) {
+    if (this.deferredQueue.length === 0 || !this.messageQueue) {
       return false;
     }
 
@@ -3156,50 +3004,6 @@ export class Process {
     return true;
   }
 
-  private promoteNextDeferredMessage(options: {
-    allowSteer: boolean;
-    includePatient?: boolean;
-  }): "empty" | "blocked" | "promoted" | "failed" {
-    const nextIndex = this.deferredQueue.findIndex(
-      (entry) => options.includePatient || !isPatientDeferredEntry(entry),
-    );
-    if (nextIndex === -1) {
-      return "empty";
-    }
-    if (
-      this.deferredEditBarrier &&
-      nextIndex >= this.deferredEditBarrier.index
-    ) {
-      return "blocked";
-    }
-    const [next] = this.deferredQueue.splice(nextIndex, 1);
-    if (!next) {
-      return "empty";
-    }
-    const shiftedBeforeBarrier =
-      !!this.deferredEditBarrier && nextIndex < this.deferredEditBarrier.index;
-    if (this.deferredEditBarrier) {
-      this.deferredEditBarrier.index--;
-    }
-
-    const [composeAnchor] = this.deferredComposeAnchors([next]);
-    const result = this.queueMessage(next.message, {
-      allowSteer: options.allowSteer,
-      composeAnchor,
-    });
-    if (!result.success) {
-      this.deferredQueue.splice(nextIndex, 0, next);
-      if (shiftedBeforeBarrier && this.deferredEditBarrier) {
-        this.deferredEditBarrier.index++;
-      }
-      this.emitDeferredQueueChange("queued", next.message.tempId);
-      return "failed";
-    }
-
-    this.emitDeferredQueueChange("promoted", next.message.tempId);
-    return "promoted";
-  }
-
   /**
    * Promote patient deferred entries whose own patience window has elapsed
    * since the session became verifiably quiet. Entries still waiting report
@@ -3214,7 +3018,6 @@ export class Process {
     if (
       this.deferredQueue.length === 0 ||
       !this.messageQueue ||
-      this.deferredEditBarrier ||
       this._state.type !== "idle"
     ) {
       return { promoted: false, nextPatienceMsRemaining: null };

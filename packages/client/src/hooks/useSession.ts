@@ -160,23 +160,20 @@ export interface PendingMessage {
   attachments?: UploadedFile[];
 }
 
-/** Deferred message queued server-side, waiting for agent's turn to end */
+/**
+ * Deferred message queued server-side, waiting for the agent's turn to end.
+ *
+ * This is a pure mirror of the server's queue summary — the client never
+ * persists it, never reconciles it by text, and never adds delivery states of
+ * its own. The server is the single source of truth.
+ */
 export interface DeferredMessage {
   tempId?: string;
   content: string;
   timestamp: string;
-  clientOrder?: number;
   metadata?: UserMessageMetadata;
   attachmentCount?: number;
   attachments?: UploadedFile[];
-  mode?: PermissionMode;
-  blockedByEdit?: boolean;
-  deliveryState?: "queued" | "sending" | "recovered" | "verifying";
-}
-
-interface DeliveredUserEcho {
-  tempId?: string;
-  content: string;
 }
 
 const CONCATENATED_USER_TURN_SEPARATOR = "\n\n--------\n\n";
@@ -259,12 +256,6 @@ function userTextContainsDeferredContent(
     .some(partMatches);
 }
 
-const DEFERRED_DRAFT_KEY_PREFIX = "queued-message-";
-
-function getDeferredStorageKey(sessionId: string): string {
-  return `${DEFERRED_DRAFT_KEY_PREFIX}${sessionId}`;
-}
-
 const PERMISSION_MODE_KEY_PREFIX = "permission-mode-";
 
 function getPermissionModeStorageKey(sessionId: string): string {
@@ -309,101 +300,6 @@ function saveStoredPermissionMode(
   }
 }
 
-function normalizeDeferredMessage(value: unknown): DeferredMessage | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const record = value as Record<string, unknown>;
-  const content = typeof record.content === "string" ? record.content : "";
-  const timestamp =
-    typeof record.timestamp === "string" ? record.timestamp : "";
-  if (!content || !timestamp) {
-    return null;
-  }
-
-  const attachments = Array.isArray(record.attachments)
-    ? (record.attachments as UploadedFile[])
-    : undefined;
-  const attachmentCount =
-    typeof record.attachmentCount === "number"
-      ? record.attachmentCount
-      : attachments?.length;
-  const mode =
-    record.mode === "default" ||
-    record.mode === "acceptEdits" ||
-    record.mode === "plan" ||
-    record.mode === "bypassPermissions"
-      ? record.mode
-      : undefined;
-  const metadata =
-    record.metadata && typeof record.metadata === "object"
-      ? (record.metadata as UserMessageMetadata)
-      : undefined;
-  const deliveryState =
-    record.deliveryState === "sending" || record.deliveryState === "recovered"
-      ? record.deliveryState
-      : record.deliveryState === "verifying"
-        ? record.deliveryState
-        : "queued";
-
-  return {
-    tempId: typeof record.tempId === "string" ? record.tempId : undefined,
-    content,
-    timestamp,
-    ...(typeof record.clientOrder === "number" &&
-    Number.isFinite(record.clientOrder)
-      ? { clientOrder: record.clientOrder }
-      : {}),
-    ...(attachmentCount ? { attachmentCount } : {}),
-    ...(attachments ? { attachments } : {}),
-    ...(mode ? { mode } : {}),
-    ...(metadata ? { metadata } : {}),
-    ...(record.blockedByEdit === true ? { blockedByEdit: true } : {}),
-    deliveryState,
-  };
-}
-
-function loadDeferredMessages(sessionId: string): DeferredMessage[] {
-  if (typeof localStorage === "undefined") {
-    return [];
-  }
-  try {
-    const raw = localStorage.getItem(getDeferredStorageKey(sessionId));
-    if (!raw) {
-      return [];
-    }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed
-      .map((item) => normalizeDeferredMessage(item))
-      .filter((item): item is DeferredMessage => item !== null);
-  } catch {
-    return [];
-  }
-}
-
-function saveDeferredMessages(
-  sessionId: string,
-  messages: DeferredMessage[],
-): void {
-  if (typeof localStorage === "undefined") {
-    return;
-  }
-  try {
-    const key = getDeferredStorageKey(sessionId);
-    if (messages.length === 0) {
-      localStorage.removeItem(key);
-    } else {
-      localStorage.setItem(key, JSON.stringify(messages));
-    }
-  } catch {
-    // localStorage may be unavailable or full; in-memory state still protects
-    // the current page from dropping the user's queued text.
-  }
-}
-
 function removeEchoedQueueMessage<
   T extends { tempId?: string; content: string },
 >(messages: T[], tempIds?: string[], incomingText?: string | null): T[] {
@@ -423,211 +319,6 @@ function removeEchoedQueueMessage<
     (message) =>
       !userTextContainsDeferredContent(incomingText, message.content),
   );
-}
-
-function mergeDeferredMessages(
-  current: DeferredMessage[],
-  incoming: DeferredMessage[],
-  meta?: {
-    reason?: "queued" | "cancelled" | "edited" | "promoted";
-    tempId?: string;
-    source?: "connected" | "event" | "rest";
-  },
-): DeferredMessage[] {
-  const mergeDeferredSummary = (
-    incomingMessage: DeferredMessage,
-    previous: DeferredMessage | undefined,
-    deliveryState: DeferredMessage["deliveryState"],
-  ): DeferredMessage => {
-    const attachments = previous?.attachments;
-    const attachmentCount =
-      incomingMessage.attachmentCount ??
-      previous?.attachmentCount ??
-      attachments?.length;
-    const clientOrder = previous?.clientOrder ?? incomingMessage.clientOrder;
-
-    return {
-      ...incomingMessage,
-      ...(clientOrder !== undefined ? { clientOrder } : {}),
-      ...(attachmentCount ? { attachmentCount } : {}),
-      ...(attachments ? { attachments } : {}),
-      ...(previous?.mode ? { mode: previous.mode } : {}),
-      ...(deliveryState ? { deliveryState } : {}),
-    };
-  };
-
-  const removedTempId =
-    meta?.reason === "cancelled" || meta?.reason === "edited"
-      ? meta.tempId
-      : undefined;
-  const incomingByTempId = new Map(
-    incoming
-      .filter((message) => message.tempId)
-      .map((message) => [message.tempId as string, message]),
-  );
-  const currentByTempId = new Map(
-    current
-      .filter((message) => message.tempId)
-      .map((message) => [message.tempId as string, message]),
-  );
-  if (meta?.reason === "queued" && incoming.length > 0) {
-    const usedIncoming = new Set<string>();
-    const ordered: DeferredMessage[] = incoming
-      .filter((message) => message.tempId !== removedTempId)
-      .map((message) => {
-        if (message.tempId) {
-          usedIncoming.add(message.tempId);
-        }
-        const previous = message.tempId
-          ? currentByTempId.get(message.tempId)
-          : undefined;
-        return mergeDeferredSummary(message, previous, "queued");
-      });
-    for (const message of current) {
-      if (message.tempId && message.tempId === removedTempId) {
-        continue;
-      }
-      if (message.tempId && usedIncoming.has(message.tempId)) {
-        continue;
-      }
-      ordered.push(message);
-    }
-    return ordered;
-  }
-  const usedIncoming = new Set<string>();
-  const merged: DeferredMessage[] = [];
-
-  for (const message of current) {
-    if (message.tempId && message.tempId === removedTempId) {
-      continue;
-    }
-
-    const incomingMatch = message.tempId
-      ? incomingByTempId.get(message.tempId)
-      : undefined;
-    if (incomingMatch) {
-      usedIncoming.add(message.tempId as string);
-      merged.push(mergeDeferredSummary(incomingMatch, message, "queued"));
-      continue;
-    }
-
-    const fallbackState =
-      message.deliveryState === "recovered" ||
-      message.deliveryState === "sending"
-        ? message.deliveryState
-        : undefined;
-    const deliveryState =
-      meta?.reason === "promoted" &&
-      (meta.tempId ? message.tempId === meta.tempId : incoming.length === 0)
-        ? "sending"
-        : meta?.source === "connected"
-          ? (fallbackState ?? (message.tempId ? "verifying" : "recovered"))
-          : message.deliveryState;
-    merged.push({
-      ...message,
-      ...(deliveryState ? { deliveryState } : {}),
-    });
-  }
-
-  for (const message of incoming) {
-    if (message.tempId && usedIncoming.has(message.tempId)) {
-      continue;
-    }
-    if (message.tempId && message.tempId === removedTempId) {
-      continue;
-    }
-    merged.push({ ...message, deliveryState: "queued" });
-  }
-
-  return merged;
-}
-
-function upsertDeferredMessage(
-  messages: DeferredMessage[],
-  nextMessage: DeferredMessage,
-): DeferredMessage[] {
-  if (!nextMessage.tempId) {
-    return [...messages, nextMessage];
-  }
-  const index = messages.findIndex(
-    (message) => message.tempId === nextMessage.tempId,
-  );
-  if (index === -1) {
-    return [...messages, nextMessage];
-  }
-  return messages.map((message, i) =>
-    i === index ? { ...message, ...nextMessage } : message,
-  );
-}
-
-function userTurnMatchesDeferred(
-  message: Message,
-  deferred: DeferredMessage,
-): boolean {
-  if (message.type !== "user" && message.role !== "user") {
-    return false;
-  }
-  if (deferred.tempId && message.tempId === deferred.tempId) {
-    return true;
-  }
-  const text = extractUserMessageText(message as Record<string, unknown>);
-  if (!text || !userTextContainsDeferredContent(text, deferred.content)) {
-    return false;
-  }
-  // Guard a full-history scan against an unrelated identical turn from earlier
-  // in the session: the delivered turn must not clearly predate when the
-  // message was queued. If either timestamp is unparseable, trust the content
-  // match (some provider turns arrive without a usable timestamp).
-  const messageTimestampMs = parseMessageTimestampMs(message.timestamp);
-  const deferredTimestampMs = parseMessageTimestampMs(deferred.timestamp);
-  if (messageTimestampMs !== null && deferredTimestampMs !== null) {
-    return messageTimestampMs + USER_ECHO_CLOCK_SKEW_MS >= deferredTimestampMs;
-  }
-  return true;
-}
-
-function deliveredEchoMatchesDeferred(
-  echo: DeliveredUserEcho,
-  deferred: DeferredMessage,
-): boolean {
-  if (deferred.tempId && echo.tempId === deferred.tempId) {
-    return true;
-  }
-  const echoText = echo.content.trim();
-  if (!echoText) {
-    return false;
-  }
-  return userTextContainsDeferredContent(echoText, deferred.content);
-}
-
-function removeDeliveredDeferredMessages(
-  deferredMessages: DeferredMessage[],
-  messages: Message[],
-  deliveredEchoes: DeliveredUserEcho[] = [],
-): DeferredMessage[] {
-  if (
-    deferredMessages.length === 0 ||
-    (messages.length === 0 && deliveredEchoes.length === 0)
-  ) {
-    return deferredMessages;
-  }
-  // Scan the full transcript rather than only the tail: a queued chip can be
-  // reconciled long after delivery — e.g. when restored from storage on reload,
-  // by which point the delivered turn has scrolled past any fixed-size window.
-  // The timestamp guard in userTurnMatchesDeferred keeps the full scan from
-  // matching an unrelated older turn, and this only runs while chips exist.
-  const filtered = deferredMessages.filter(
-    (deferred) =>
-      !messages.some((message) =>
-        userTurnMatchesDeferred(message, deferred),
-      ) &&
-      !deliveredEchoes.some((echo) =>
-        deliveredEchoMatchesDeferred(echo, deferred),
-      ),
-  );
-  return filtered.length === deferredMessages.length
-    ? deferredMessages
-    : filtered;
 }
 
 function userTurnMatchesPending(
@@ -673,18 +364,6 @@ function removeDeliveredPendingMessages(
   return filtered.length === pendingMessages.length
     ? pendingMessages
     : filtered;
-}
-
-function summarizeDeferredMessages(messages: DeferredMessage[]): Array<{
-  tempId?: string;
-  deliveryState?: DeferredMessage["deliveryState"];
-  blockedByEdit?: boolean;
-}> {
-  return messages.map((message) => ({
-    tempId: message.tempId,
-    deliveryState: message.deliveryState,
-    blockedByEdit: message.blockedByEdit,
-  }));
 }
 
 export function useSession(
@@ -835,38 +514,18 @@ export function useSession(
   // These are displayed separately from the main message list
   const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);
 
-  // Deferred messages queue - messages queued server-side waiting for agent's turn to end
-  const [deferredMessages, setDeferredMessagesState] = useState<
-    DeferredMessage[]
-  >(() => loadDeferredMessages(sessionId));
-
-  useEffect(() => {
-    setDeferredMessagesState(loadDeferredMessages(sessionId));
-  }, [sessionId]);
-
-  const setDeferredMessages = useCallback(
-    (
-      update:
-        | DeferredMessage[]
-        | ((messages: DeferredMessage[]) => DeferredMessage[]),
-    ) => {
-      setDeferredMessagesState((current) => {
-        const next = typeof update === "function" ? update(current) : update;
-        saveDeferredMessages(sessionId, next);
-        if (next !== current) {
-          logSessionUiTrace("deferred-state", {
-            sessionId,
-            beforeCount: current.length,
-            afterCount: next.length,
-            before: summarizeDeferredMessages(current),
-            after: summarizeDeferredMessages(next),
-          });
-        }
-        return next;
-      });
-    },
-    [sessionId],
+  // Deferred messages queue — a pure mirror of the server's queue summary.
+  // The server is authoritative: the client never persists this or reconciles
+  // it by text. It is replaced wholesale whenever the server reports new state
+  // (connected event, deferred-queue event, or a queue/cancel REST response).
+  const [deferredMessages, setDeferredMessages] = useState<DeferredMessage[]>(
+    [],
   );
+
+  // Reset when switching sessions; the server's connected event repopulates it.
+  useEffect(() => {
+    setDeferredMessages([]);
+  }, [sessionId]);
 
   // Compacting state - true when context is being compressed
   const [isCompacting, setIsCompacting] = useState(false);
@@ -1063,26 +722,20 @@ export function useSession(
     onLoadComplete: handleLoadComplete,
     onLoadError: handleLoadError,
   });
-  const deliveredUserEchoesRef = useRef<DeliveredUserEcho[]>([]);
   const nextClientOrderRef = useRef(0);
 
   useEffect(() => {
-    deliveredUserEchoesRef.current = [];
     nextClientOrderRef.current = 0;
   }, [sessionId]);
 
+  // Optimistic pending sends (the normal-send flow) reconcile against the
+  // transcript by content. Deferred messages do not: the server removes them
+  // from its queue and pushes the updated list, which we mirror directly.
   useEffect(() => {
     setPendingMessages((prev) =>
       removeDeliveredPendingMessages(prev, messages),
     );
-    setDeferredMessages((prev) =>
-      removeDeliveredDeferredMessages(
-        prev,
-        messages,
-        deliveredUserEchoesRef.current,
-      ),
-    );
-  }, [messages, setDeferredMessages]);
+  }, [messages]);
 
   // Update local mode (UI selection) and sync to server if process is active
   const setPermissionMode = useCallback(
@@ -1170,68 +823,6 @@ export function useSession(
     },
     [sessionId],
   );
-
-  const addDeferredMessage = useCallback(
-    (message: DeferredMessage) => {
-      setDeferredMessages((prev) =>
-        removeDeliveredDeferredMessages(
-          upsertDeferredMessage(prev, {
-            ...message,
-            deliveryState: message.deliveryState ?? "queued",
-          }),
-          messages,
-          deliveredUserEchoesRef.current,
-        ),
-      );
-    },
-    [messages, setDeferredMessages],
-  );
-
-  const syncDeferredMessages = useCallback(
-    (
-      incomingMessages: DeferredMessage[],
-      meta?: {
-        reason?: "queued" | "cancelled" | "edited" | "promoted";
-        tempId?: string;
-        source?: "connected" | "event" | "rest";
-      },
-    ) => {
-      logSessionUiTrace("deferred-sync", {
-        sessionId,
-        reason: meta?.reason ?? null,
-        source: meta?.source ?? null,
-        tempId: meta?.tempId ?? null,
-        incoming: summarizeDeferredMessages(incomingMessages),
-      });
-      setDeferredMessages((prev) =>
-        removeDeliveredDeferredMessages(
-          mergeDeferredMessages(prev, incomingMessages, meta),
-          messages,
-          deliveredUserEchoesRef.current,
-        ),
-      );
-    },
-    [messages, setDeferredMessages],
-  );
-
-  const removeDeferredMessage = useCallback(
-    (tempId: string) => {
-      setDeferredMessages((prev) =>
-        prev.filter((message) => message.tempId !== tempId),
-      );
-    },
-    [setDeferredMessages],
-  );
-
-  useEffect(() => {
-    setDeferredMessages((prev) =>
-      removeDeliveredDeferredMessages(
-        prev,
-        messages,
-        deliveredUserEchoesRef.current,
-      ),
-    );
-  }, [messages, setDeferredMessages]);
 
   // Track if we've loaded pending agents for this session
   const pendingAgentsLoadedRef = useRef<string | null>(null);
@@ -1433,6 +1024,9 @@ export function useSession(
           ...(event.heartbeatForceAfterMinutes !== undefined && {
             heartbeatForceAfterMinutes:
               event.heartbeatForceAfterMinutes ?? undefined,
+          }),
+          ...(event.promptSuggestionMode !== undefined && {
+            promptSuggestionMode: event.promptSuggestionMode,
           }),
         };
       });
@@ -1795,36 +1389,21 @@ export function useSession(
         if (msgType === "user") {
           setPromptSuggestion(null);
           const incomingText = extractUserMessageText(sdkMessage);
-          if (echoedTempIds.length || incomingText) {
-            const echoContent = incomingText ?? "";
-            const idEchoes: DeliveredUserEcho[] = echoedTempIds.map((id) => ({
-              tempId: id,
-              content: echoContent,
-            }));
-            deliveredUserEchoesRef.current = [
-              ...deliveredUserEchoesRef.current,
-              ...(idEchoes.length ? idEchoes : [{ content: echoContent }]),
-            ].slice(-50);
-          }
           logSessionUiTrace("user-echo", {
             sessionId,
             tempId: tempId ?? null,
             textLength: incomingText?.length ?? 0,
           });
+          // Clear optimistic pending sends (the normal-send flow) by id, or by
+          // content for providers that omit tempId on the user echo. Deferred
+          // messages are not reconciled here — the server removes them from its
+          // queue on promotion and the deferred-queue event mirrors that.
           if (echoedTempIds.length) {
             for (const id of echoedTempIds) {
               removePendingMessage(id);
             }
-            setDeferredMessages((prev) =>
-              removeEchoedQueueMessage(prev, echoedTempIds, incomingText),
-            );
           } else if (incomingText) {
-            // Fallback for providers that omit tempId on user echo:
-            // clear one matching optimistic or deferred message by content.
             setPendingMessages((prev) =>
-              removeEchoedQueueMessage(prev, undefined, incomingText),
-            );
-            setDeferredMessages((prev) =>
               removeEchoedQueueMessage(prev, undefined, incomingText),
             );
           }
@@ -1907,12 +1486,10 @@ export function useSession(
           sessionId,
           reason: deferredData.reason ?? null,
           tempId: deferredData.tempId ?? null,
-          incoming: summarizeDeferredMessages(deferredData.messages ?? []),
+          count: deferredData.messages?.length ?? 0,
         });
-        syncDeferredMessages(deferredData.messages ?? [], {
-          reason: deferredData.reason,
-          tempId: deferredData.tempId,
-        });
+        // Mirror the server's authoritative queue wholesale.
+        setDeferredMessages(deferredData.messages ?? []);
         const sessionProvider = session?.provider;
         const needsDeferredPromotionCatchUp =
           deferredData.reason === "promoted" &&
@@ -2011,12 +1588,10 @@ export function useSession(
           });
         }
 
-        // Sync deferred messages from connected event. Missing server entries
-        // are kept as recoverable local scratchpad state until delivery is
-        // confirmed by a user-message echo or explicit cancel/edit.
-        syncDeferredMessages(connectedData.deferredMessages ?? [], {
-          source: "connected",
-        });
+        // Mirror the server's authoritative queue from the connected event.
+        // This is why a refresh, a new tab, or another device all converge on
+        // the same queue: the server reports it and the client renders it.
+        setDeferredMessages(connectedData.deferredMessages ?? []);
 
         // Fetch messages from JSONL since last known message.
         // For Codex providers, skip the very first connected-event fetch because
@@ -2119,7 +1694,6 @@ export function useSession(
       clearStreaming,
       removePendingMessage,
       setDeferredMessages,
-      syncDeferredMessages,
       streamingMarkdownCallbacks,
       handleStreamMessageEvent,
       handleStreamSubagentMessage,
@@ -2220,10 +1794,8 @@ export function useSession(
     addPendingMessage, // Add to pending queue, returns tempId
     removePendingMessage, // Remove from pending by tempId
     updatePendingMessage, // Update pending message fields (e.g. status)
-    deferredMessages, // Messages queued server-side waiting for agent turn to end
-    addDeferredMessage, // Persist a queued message immediately after REST success
-    syncDeferredMessages, // Merge authoritative server queue summaries
-    removeDeferredMessage, // Remove queued scratchpad text after cancel/edit
+    deferredMessages, // Server-authoritative queued-message mirror
+    setDeferredMessages, // Replace the mirror from a server queue/cancel response
     slashCommands, // Available slash commands from init message
     sessionTools, // Available tools from init message
     mcpServers, // Available MCP servers from init message

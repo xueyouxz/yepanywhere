@@ -195,6 +195,56 @@ describe("Process", () => {
       expect(userEchoes).toHaveLength(1);
     });
 
+    it("emits a context-window-observed event per modelUsage entry (recorded exactly as observed)", async () => {
+      const messages = [
+        { type: "system", subtype: "init", session_id: "sess-1" },
+        {
+          type: "result",
+          session_id: "sess-1",
+          modelUsage: {
+            "claude-opus-4-8": { contextWindow: 1_000_000 },
+            "claude-haiku-4-5-20251001": { contextWindow: 200_000 },
+            "claude-sonnet-4-6[1m]": { contextWindow: 1_000_000 },
+            "zero-window-model": { contextWindow: 0 },
+          },
+        },
+      ] as unknown as SDKMessage[];
+
+      const iterator = createMockIterator(messages);
+      const process = new Process(iterator, {
+        projectPath: "/test",
+        projectId: "proj-1" as UrlProjectId,
+        sessionId: "sess-1",
+        provider: "claude",
+        idleTimeoutMs: 100,
+      });
+
+      const observed: Array<{ model: string; contextWindow: number }> = [];
+      let observedProvider: string | undefined;
+      process.subscribe((event) => {
+        if (event.type === "context-window-observed") {
+          observed.push({
+            model: event.model,
+            contextWindow: event.contextWindow,
+          });
+          observedProvider = event.provider;
+        }
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // One event per non-zero entry; the zero-window entry is skipped. Keys
+      // are recorded verbatim (no [1m] munging).
+      expect(observed).toEqual([
+        { model: "claude-opus-4-8", contextWindow: 1_000_000 },
+        { model: "claude-haiku-4-5-20251001", contextWindow: 200_000 },
+        { model: "claude-sonnet-4-6[1m]", contextWindow: 1_000_000 },
+      ]);
+      expect(observedProvider).toBe("claude");
+      // Live-override window is still the max across entries.
+      expect(process.contextWindow).toBe(1_000_000);
+    });
+
     it("transitions to idle after result", async () => {
       const messages: SDKMessage[] = [
         { type: "system", subtype: "init", session_id: "sess-1" },
@@ -451,6 +501,115 @@ describe("Process", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("does not wake a finished idle process on a prompt_suggestion message", async () => {
+      const controller = createControllableIterator();
+      const process = new Process(controller.iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        provider: "claude",
+        idleTimeoutMs: 10_000,
+      });
+
+      controller.push({
+        type: "system",
+        subtype: "init",
+        session_id: "sess-1",
+      });
+      controller.push({ type: "result", session_id: "sess-1" });
+      await waitFor(() => expect(process.state.type).toBe("idle"));
+
+      // prompt_suggestion is a top-level type emitted after the turn's result.
+      // It is bookkeeping (a predicted next prompt), never followed by another
+      // result, so it must not pin the process in-turn. See doc 015.
+      controller.push({
+        type: "prompt_suggestion",
+        suggestion: "Try the next thing",
+        session_id: "sess-1",
+      } as unknown as SDKMessage);
+
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(process.state.type).toBe("idle");
+      expect(process.getLivenessSnapshot().lastWakeReason ?? null).toBeNull();
+    });
+
+    it("does not wake a finished idle process on unmodeled bookkeeping messages", async () => {
+      const controller = createControllableIterator();
+      const process = new Process(controller.iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        provider: "claude",
+        idleTimeoutMs: 10_000,
+      });
+
+      controller.push({
+        type: "system",
+        subtype: "init",
+        session_id: "sess-1",
+      });
+      controller.push({ type: "result", session_id: "sess-1" });
+      await waitFor(() => expect(process.state.type).toBe("idle"));
+
+      // Default-deny: known non-work subtypes and an invented future subtype all
+      // stay idle rather than pinning the process in-turn.
+      for (const subtype of [
+        "status",
+        "compact_boundary",
+        "stop_hook_summary",
+        "some_future_subtype_we_do_not_model",
+      ]) {
+        controller.push({
+          type: "system",
+          subtype,
+          session_id: "sess-1",
+        } as unknown as SDKMessage);
+      }
+
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(process.state.type).toBe("idle");
+      expect(process.getLivenessSnapshot().lastWakeReason ?? null).toBeNull();
+    });
+
+    it("wakes a finished idle process on assistant turn content", async () => {
+      const controller = createControllableIterator();
+      const process = new Process(controller.iterator, {
+        projectPath: "/test",
+        projectId: "proj-1",
+        sessionId: "sess-1",
+        provider: "claude",
+        idleTimeoutMs: 10_000,
+      });
+
+      controller.push({
+        type: "system",
+        subtype: "init",
+        session_id: "sess-1",
+      });
+      controller.push({ type: "result", session_id: "sess-1" });
+      await waitFor(() => expect(process.state.type).toBe("idle"));
+
+      controller.push({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          model: "claude-opus-4-8",
+          content: [{ type: "text", text: "resuming after background work" }],
+        },
+        session_id: "sess-1",
+        uuid: "33333333-3333-4333-8333-333333333333",
+      } as unknown as SDKMessage);
+
+      await waitFor(() => expect(process.state.type).toBe("in-turn"));
+      expect(process.getLivenessSnapshot().lastWakeReason).toMatchObject({
+        fromState: "idle",
+        reason: "provider-message-after-idle",
+        messageType: "assistant",
+      });
     });
 
     it("keeps Claude idle with session crons out of verified-idle liveness", async () => {
@@ -874,9 +1033,7 @@ describe("Process", () => {
       });
 
       expect(result.success).toBe(true);
-      expect(process.getMessageHistory()[0]?.message?.content).toBe(
-        "/compact",
-      );
+      expect(process.getMessageHistory()[0]?.message?.content).toBe("/compact");
       const queuedProviderTurn = await queue[Symbol.asyncIterator]().next();
       expect(queuedProviderTurn.value?.message.content).toBe("/compact");
 
@@ -1192,395 +1349,6 @@ describe("Process", () => {
         tempId: "temp-1",
         messages: [],
       });
-    });
-
-    it("takes a deferred message for editing and emits queue metadata", async () => {
-      const iterator = createMockIterator([
-        { type: "system", session_id: "sess-1" },
-      ]);
-
-      const process = new Process(iterator, {
-        projectPath: "/test",
-        projectId: "proj-1",
-        sessionId: "sess-1",
-        idleTimeoutMs: 100,
-      });
-      const deferredEvents: ProcessEvent[] = [];
-      process.subscribe((event) => {
-        if (event.type === "deferred-queue") {
-          deferredEvents.push(event);
-        }
-      });
-
-      process.deferMessage({
-        text: "edit me",
-        tempId: "temp-edit",
-        mode: "acceptEdits",
-      });
-
-      const taken = process.takeDeferredMessage("temp-edit");
-
-      expect(taken?.message).toMatchObject({
-        text: "edit me",
-        tempId: "temp-edit",
-        mode: "acceptEdits",
-      });
-      expect(taken?.placement).toEqual({});
-      expect(process.getDeferredQueueSummary()).toEqual([]);
-      expect(deferredEvents[deferredEvents.length - 1]).toMatchObject({
-        type: "deferred-queue",
-        reason: "edited",
-        tempId: "temp-edit",
-        messages: [],
-      });
-    });
-
-    it("updates a deferred message in place without changing queue order", async () => {
-      const iterator = createMockIterator([
-        { type: "system", session_id: "sess-1" },
-      ]);
-
-      const process = new Process(iterator, {
-        projectPath: "/test",
-        projectId: "proj-1",
-        sessionId: "sess-1",
-        idleTimeoutMs: 100,
-      });
-      const deferredEvents: ProcessEvent[] = [];
-      process.subscribe((event) => {
-        if (event.type === "deferred-queue") {
-          deferredEvents.push(event);
-        }
-      });
-      const metadata = {
-        deliveryIntent: "patient" as const,
-        patienceSeconds: 45,
-      };
-
-      process.deferMessage({ text: "first", tempId: "temp-1" });
-      process.deferMessage({
-        text: "second",
-        tempId: "temp-2",
-        metadata,
-      });
-      process.deferMessage({ text: "third", tempId: "temp-3" });
-      const originalTimestamp = process.getDeferredQueueSummary()[1]?.timestamp;
-
-      const updated = process.updateDeferredMessage("temp-2", "second edited");
-
-      expect(updated).toMatchObject({
-        text: "second edited",
-        tempId: "temp-2",
-        metadata,
-      });
-      expect(process.getDeferredQueueSummary()).toEqual([
-        {
-          tempId: "temp-1",
-          content: "first",
-          timestamp: expect.any(String),
-        },
-        {
-          tempId: "temp-2",
-          content: "second edited",
-          timestamp: originalTimestamp,
-          metadata,
-        },
-        {
-          tempId: "temp-3",
-          content: "third",
-          timestamp: expect.any(String),
-        },
-      ]);
-      expect(deferredEvents[deferredEvents.length - 1]).toMatchObject({
-        type: "deferred-queue",
-        reason: "edited",
-        tempId: "temp-2",
-      });
-    });
-
-    it("steers a deferred message and strips patient wording", async () => {
-      const controller = createControllableIterator();
-      const queue = new MessageQueue();
-      const steerFn = vi.fn(async () => true);
-      const process = new Process(controller.iterator, {
-        projectPath: "/test",
-        projectId: "proj-1",
-        sessionId: "sess-1",
-        provider: "claude",
-        idleTimeoutMs: 100,
-        queue,
-        steerFn,
-      });
-      const events: ProcessEvent[] = [];
-      process.subscribe((event) => {
-        events.push(event);
-      });
-
-      process.deferMessage({
-        text: "when done, run tests",
-        tempId: "temp-patient",
-        metadata: { deliveryIntent: "patient" },
-      });
-
-      const steered = process.steerDeferredMessage("temp-patient");
-
-      expect(steered?.message).toMatchObject({
-        text: "run tests",
-        tempId: "temp-patient",
-        metadata: { deliveryIntent: "steer" },
-      });
-      expect(steerFn).toHaveBeenCalledWith(
-        expect.objectContaining({
-          text: "run tests",
-          tempId: "temp-patient",
-          metadata: expect.objectContaining({ deliveryIntent: "steer" }),
-          priority: "next",
-        }),
-      );
-      expect(process.getDeferredQueueSummary()).toEqual([]);
-      expect(events[events.length - 1]).toMatchObject({
-        type: "deferred-queue",
-        reason: "promoted",
-        tempId: "temp-patient",
-        messages: [],
-      });
-      expect(
-        events.find(
-          (event) => event.type === "message" && event.message.type === "user",
-        ),
-      ).toMatchObject({
-        type: "message",
-        message: {
-          tempId: "temp-patient",
-          messageMetadata: { deliveryIntent: "steer" },
-          message: { role: "user", content: "run tests" },
-        },
-      });
-
-      controller.finish();
-      await process.abort();
-    });
-
-    it("reinserts an edited deferred message at its original queue position", async () => {
-      const iterator = createMockIterator([
-        { type: "system", session_id: "sess-1" },
-      ]);
-
-      const process = new Process(iterator, {
-        projectPath: "/test",
-        projectId: "proj-1",
-        sessionId: "sess-1",
-        idleTimeoutMs: 100,
-      });
-
-      process.deferMessage({ text: "first", tempId: "temp-1" });
-      process.deferMessage({ text: "second", tempId: "temp-2" });
-      process.deferMessage({ text: "third", tempId: "temp-3" });
-
-      const taken = process.takeDeferredMessage("temp-2");
-
-      expect(taken?.placement).toEqual({
-        afterTempId: "temp-1",
-        beforeTempId: "temp-3",
-      });
-      process.deferMessage(
-        { text: "second edited", tempId: "temp-2-edited" },
-        { placement: { ...taken?.placement, replaceTempId: "temp-2" } },
-      );
-
-      expect(process.getDeferredQueueSummary()).toMatchObject([
-        { tempId: "temp-1", content: "first" },
-        { tempId: "temp-2-edited", content: "second edited" },
-        { tempId: "temp-3", content: "third" },
-      ]);
-    });
-
-    it("keeps deferred order when a mid-queue edit spans turn completion", async () => {
-      const controller = createControllableIterator();
-      const queue = new MessageQueue();
-      const steerFn = vi.fn(async () => true);
-      const process = new Process(controller.iterator, {
-        projectPath: "/test",
-        projectId: "proj-1",
-        sessionId: "sess-1",
-        idleTimeoutMs: 100,
-        queue,
-        steerFn,
-        // Stitched flush is the opt-in path (YA_DEFERRED_JOIN_WINDOW_S);
-        // it keeps the whole queue's order visible in one provider turn.
-        deferredDelivery: { joinWindowSeconds: 3600, composeAnchors: false },
-      });
-
-      process.deferMessage({ text: "first", tempId: "temp-1" });
-      process.deferMessage({ text: "second", tempId: "temp-2" });
-      process.deferMessage({ text: "third", tempId: "temp-3" });
-
-      const taken = process.takeDeferredMessage("temp-2");
-
-      expect(process.getDeferredQueueSummary()).toMatchObject([
-        { tempId: "temp-1", content: "first" },
-        { tempId: "temp-3", content: "third", blockedByEdit: true },
-      ]);
-
-      controller.push({
-        type: "user",
-        session_id: "sess-1",
-        message: {
-          role: "user",
-          content: [{ type: "tool_result", tool_use_id: "tool-1" }],
-        },
-      });
-
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(steerFn).not.toHaveBeenCalled();
-      expect(process.getDeferredQueueSummary()).toMatchObject([
-        { tempId: "temp-1", content: "first" },
-        { tempId: "temp-3", content: "third", blockedByEdit: true },
-      ]);
-
-      controller.push({
-        type: "result",
-        session_id: "sess-1",
-      });
-
-      await waitFor(() => expect(process.state.type).toBe("idle"));
-      expect(queue.depth).toBe(0);
-
-      const replacement = process.deferMessage(
-        { text: "second edited", tempId: "temp-2-edited" },
-        {
-          placement: { ...taken?.placement, replaceTempId: "temp-2" },
-          promoteIfReady: true,
-        },
-      );
-
-      expect(replacement).toMatchObject({
-        success: true,
-        deferred: false,
-        promoted: true,
-      });
-      expect(steerFn).not.toHaveBeenCalled();
-      expect(process.getDeferredQueueSummary()).toEqual([]);
-      await waitFor(() => expect(queue.depth).toBe(1));
-      const queuedProviderTurn = await queue[Symbol.asyncIterator]().next();
-      expect(queuedProviderTurn.value?.message.content).toBe(
-        `first\n\n${CONCAT_SEPARATOR}\n\nsecond edited\n\n${CONCAT_SEPARATOR}\n\nthird`,
-      );
-
-      controller.finish();
-      await process.abort();
-    });
-
-    it("clears a blocking edit when the edited message has no anchors", async () => {
-      const iterator = createMockIterator([
-        { type: "system", session_id: "sess-1" },
-      ]);
-
-      const process = new Process(iterator, {
-        projectPath: "/test",
-        projectId: "proj-1",
-        sessionId: "sess-1",
-        idleTimeoutMs: 100,
-      });
-
-      process.deferMessage({ text: "first", tempId: "temp-1" });
-      const taken = process.takeDeferredMessage("temp-1");
-      process.deferMessage({ text: "second", tempId: "temp-2" });
-
-      expect(taken?.placement).toEqual({});
-      expect(process.getDeferredQueueSummary()).toMatchObject([
-        { tempId: "temp-2", content: "second", blockedByEdit: true },
-      ]);
-
-      const result = process.deferMessage(
-        { text: "first edited", tempId: "temp-1-edited" },
-        { placement: { replaceTempId: "temp-1" } },
-      );
-
-      expect(result.success).toBe(true);
-      expect(process.getDeferredQueueSummary()).toMatchObject([
-        { tempId: "temp-1-edited", content: "first edited" },
-        { tempId: "temp-2", content: "second" },
-      ]);
-      expect(
-        process
-          .getDeferredQueueSummary()
-          .some((message) => message.blockedByEdit),
-      ).toBe(false);
-
-      await process.abort();
-    });
-
-    it("rejects a deferred edit replacement without a matching barrier", async () => {
-      const iterator = createMockIterator([
-        { type: "system", session_id: "sess-1" },
-      ]);
-
-      const process = new Process(iterator, {
-        projectPath: "/test",
-        projectId: "proj-1",
-        sessionId: "sess-1",
-        idleTimeoutMs: 100,
-      });
-
-      const result = process.deferMessage(
-        { text: "edited", tempId: "temp-edited" },
-        { placement: { replaceTempId: "temp-missing" } },
-      );
-
-      expect(result).toMatchObject({
-        success: false,
-        error: "Deferred edit barrier does not match replacement message",
-      });
-      expect(process.getDeferredQueueSummary()).toEqual([]);
-
-      await process.abort();
-    });
-
-    it("promotes later deferred messages when a blocking edit is cancelled while idle", async () => {
-      const controller = createControllableIterator();
-      const queue = new MessageQueue();
-      const process = new Process(controller.iterator, {
-        projectPath: "/test",
-        projectId: "proj-1",
-        sessionId: "sess-1",
-        idleTimeoutMs: 100,
-        queue,
-      });
-      const deferredEvents: ProcessEvent[] = [];
-      process.subscribe((event) => {
-        if (event.type === "deferred-queue") {
-          deferredEvents.push(event);
-        }
-      });
-
-      process.deferMessage({ text: "first", tempId: "temp-1" });
-      process.deferMessage({ text: "second", tempId: "temp-2" });
-      process.takeDeferredMessage("temp-1");
-
-      controller.push({
-        type: "result",
-        session_id: "sess-1",
-      });
-
-      await waitFor(() => expect(process.state.type).toBe("idle"));
-      expect(process.getDeferredQueueSummary()).toMatchObject([
-        { tempId: "temp-2", content: "second", blockedByEdit: true },
-      ]);
-
-      expect(process.releaseDeferredEditBarrier("temp-1")).toBe(true);
-
-      expect(process.state.type).toBe("in-turn");
-      expect(process.getDeferredQueueSummary()).toEqual([]);
-      expect(deferredEvents[deferredEvents.length - 1]).toMatchObject({
-        type: "deferred-queue",
-        reason: "promoted",
-        tempId: "temp-2",
-        messages: [],
-      });
-
-      controller.finish();
-      await process.abort();
     });
 
     it("keeps steerable active-turn deferred messages editable", async () => {

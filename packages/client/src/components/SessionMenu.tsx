@@ -1,3 +1,4 @@
+import type { PromptSuggestionMode } from "@yep-anywhere/shared";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api/client";
@@ -36,6 +37,13 @@ export interface SessionMenuProps {
   onConfigureHeartbeat?: () => void;
   /** Called to configure session recap settings */
   onConfigureRecaps?: () => void;
+  /**
+   * Current per-session prompt-suggestion mode. When provided alongside
+   * onTogglePromptSuggestions, a toggle entry is shown.
+   */
+  promptSuggestionMode?: PromptSuggestionMode;
+  /** Toggle the per-session prompt-suggestion preference (off <-> native) */
+  onTogglePromptSuggestions?: () => void | Promise<void>;
   /** Whether dismissed warnings can be restored */
   warningRestoreAvailable?: boolean;
   /** Restore dismissed per-session warnings */
@@ -73,6 +81,8 @@ export function SessionMenu({
   onReload,
   onConfigureHeartbeat,
   onConfigureRecaps,
+  promptSuggestionMode,
+  onTogglePromptSuggestions,
   warningRestoreAvailable = false,
   onRestoreWarnings,
   onShare,
@@ -340,6 +350,28 @@ export function SessionMenu({
             <path d="M6 13h8" />
           </svg>
           {t("sessionMenuRecaps")}
+        </button>
+      )}
+      {onTogglePromptSuggestions && (
+        <button
+          type="button"
+          onClick={() => handleAction(onTogglePromptSuggestions)}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
+            <path d="M9.5 2A7.5 7.5 0 0 0 5 15.5V18a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-2.5A7.5 7.5 0 0 0 9.5 2Z" />
+            <path d="M9 22h2" />
+          </svg>
+          {promptSuggestionMode === "native"
+            ? t("sessionMenuPromptSuggestionsOn")
+            : t("sessionMenuPromptSuggestionsOff")}
         </button>
       )}
       {warningRestoreAvailable && onRestoreWarnings && (

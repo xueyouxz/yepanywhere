@@ -385,7 +385,7 @@ const sharingService = new SharingService({
 const publicShareService = new PublicShareService({
   dataDir: config.dataDir,
 });
-const modelInfoService = new ModelInfoService();
+const modelInfoService = new ModelInfoService({ dataDir: config.dataDir });
 
 async function startServer() {
   const startupStart = Date.now();
@@ -450,6 +450,8 @@ async function startServer() {
   markStartup("authService initialized");
   await remoteAccessService.initialize();
   markStartup("remoteAccessService initialized");
+  await modelInfoService.initialize();
+  markStartup("modelInfoService initialized");
   await serverSettingsService.initialize();
   markStartup("serverSettingsService initialized");
   await sharingService.initialize();

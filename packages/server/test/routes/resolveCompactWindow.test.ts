@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { resolveCompactWindow } from "../../src/routes/sessions.js";
 
-// Stand-in for ModelInfoService.getContextWindow, which is already
-// provider-aware (Claude opus → 1M etc. via contextWindowFor). resolveCompactWindow
-// itself special-cases no model — it just picks the first candidate it can
-// resolve a window for. Provider-specific quirks are tested at the provider
-// (see ClaudeProvider.contextWindowFor) and topics/provider-abstraction.md.
+// Stand-in for ModelInfoService.getContextWindow (the real one resolves
+// observed → ingested → heuristic). resolveCompactWindow special-cases no
+// model — it just picks the first candidate it can resolve a window for. The
+// 1M/200K values here are arbitrary stand-ins to exercise that candidate loop.
 const windowFor = (m: string | undefined): number =>
   m === "opus" || m === "claude-opus-4-8"
     ? 1_000_000

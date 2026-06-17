@@ -6,6 +6,7 @@ import type {
   AgentActivity,
   ContextUsage,
   PendingInputType,
+  PromptSuggestionMode,
   UrlProjectId,
 } from "@yep-anywhere/shared";
 import type { SessionOwnership, SessionSummary } from "../supervisor/types.js";
@@ -152,6 +153,8 @@ export interface SessionMetadataChangedEvent {
   heartbeatTurnText?: string | null;
   /** Updated per-session heartbeat force timeout (if changed) */
   heartbeatForceAfterMinutes?: number | null;
+  /** Updated per-session prompt-suggestion preference (if changed) */
+  promptSuggestionMode?: PromptSuggestionMode;
   timestamp: string;
 }
 

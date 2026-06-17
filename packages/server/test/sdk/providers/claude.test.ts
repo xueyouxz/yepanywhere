@@ -1,4 +1,3 @@
-import { getModelContextWindow } from "@yep-anywhere/shared";
 import { describe, expect, it, vi } from "vitest";
 import {
   claudeProvider,
@@ -9,26 +8,6 @@ import {
   withClaudeGoalAlias,
 } from "../../../src/sdk/providers/claude.js";
 import type { Query } from "@anthropic-ai/claude-agent-sdk";
-
-describe("ClaudeProvider.contextWindowFor", () => {
-  const ONE_M = getModelContextWindow("opus[1m]", "claude");
-
-  it("returns 1M for opus (alias, resolved id, and [1m])", () => {
-    expect(claudeProvider.contextWindowFor("opus")).toBe(ONE_M);
-    expect(claudeProvider.contextWindowFor("claude-opus-4-8")).toBe(ONE_M);
-    expect(claudeProvider.contextWindowFor("opus[1m]")).toBe(ONE_M);
-  });
-
-  it("defers (undefined) for sonnet and other models — sonnet 1M needs credits", () => {
-    expect(claudeProvider.contextWindowFor("sonnet")).toBeUndefined();
-    expect(
-      claudeProvider.contextWindowFor("claude-sonnet-4-6"),
-    ).toBeUndefined();
-    expect(claudeProvider.contextWindowFor("opusplan")).toBeUndefined();
-    expect(claudeProvider.contextWindowFor("haiku")).toBeUndefined();
-    expect(claudeProvider.contextWindowFor(undefined)).toBeUndefined();
-  });
-});
 
 describe("ClaudeProvider.yaModelIdForReported", () => {
   it("maps reported ids to the canonical family alias", () => {

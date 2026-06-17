@@ -18,7 +18,7 @@ provider/model conditionals have **not** all been migrated — e.g. the
 codex-spark targeted auto-compact (`tryQueueTargetedAutoCompact`), the
 claude-only preemptive-compaction trigger (`maybeCompactBeforeDelivery`), and
 the alias↔resolved model-identity canonicalization still live as inline
-branches. `contextWindowFor` (below) is the first surface to adopt this seam.
+branches. `yaModelIdForReported` (below) is the first surface to adopt this seam.
 Don't treat the presence of remaining inline conditionals as a bug to sweep;
 migrate them when they next hit a trigger below.
 
@@ -45,8 +45,8 @@ Promote an inline provider/model conditional to an **optional**
 `AgentProvider` method (default: no-op / identity / `undefined`) when any of:
 
 1. **It recurs.** The same provider/model conditional appears in 2+ places.
-   (The Claude always-1M family regex had spread to ~4 call sites — that was
-   the tell that drove `contextWindowFor`.)
+   (The reported→alias model-id mapping had spread across the threshold lookup,
+   the quick-edit, and enrichment — the tell that drove `yaModelIdForReported`.)
 2. **A generic caller has to know provider internals.** A route should not
    "know" that Claude opus runs at 1M, or that codex-spark compacts at 85%.
 3. **Adding a new provider would require editing the generic code** rather
@@ -72,15 +72,26 @@ A new optional method touches only the providers that opt in; every other
 provider and caller is unchanged. That is the property that lets this be
 adopted one surface at a time.
 
-## First instance: `contextWindowFor`
+## First instance: `yaModelIdForReported`
 
-`AgentProvider.contextWindowFor?(model): number | undefined` — the effective
-context window this provider runs `model` at, or `undefined` to defer to
-`getModelContextWindow`. `ModelInfoService.getContextWindow` consults it first
-(before its alias-keyed cache and the shared heuristic), so the Claude
-provider owns "opus is always-1M, sonnet is not" instead of leaking that into
-`resolveCompactWindow`, the settings route, and the client. Sonnet's 1M needs
-paid usage credits, so only opus is overridden; everything else defers.
+`AgentProvider.yaModelIdForReported?(reported): string | undefined` — maps a
+provider-reported model id back to a YA model id (launch alias), default-no-op
+(returns `undefined`). Used by the per-model-settings keying below; see that
+section for the contract.
+
+### Removed: `contextWindowFor`
+
+An earlier surface, `contextWindowFor` (Claude returned 1M for any opus so the
+reported `claude-opus-4-8` wouldn't read as the base 200K), was **removed** when
+we adopted kzahel's observation-based context windows (a kzahel-merge decision,
+2026-06-17). `ModelInfoService` now resolves windows as `observed → ingested →
+getModelContextWindow`: the real window is learned from the SDK's `modelUsage`
+and persisted, which is more robust than a hardcoded override (it self-corrects
+when an account only gets 200K, the same credits caveat that applies to sonnet).
+Opus still *runs* at 1M because the launch alias maps `opus → opus[1m]`
+(`withExtendedClaudeContext`); the SDK then observes and reports 1M. The lesson:
+prefer observing a real value over hardcoding it in a provider quirk when the
+value is observable.
 
 ## Per-model settings keying
 
@@ -193,7 +204,7 @@ the reason the **provider may override the split / canonicalization** — defaul
 is the universal over-split (no-op), a provider overrides only when its naming
 needs re-ordering or to resolve an alias it has learned. This is the
 requested↔reported / split surface, same default-does-nothing contract as
-`contextWindowFor`.
+`yaModelIdForReported`.
 
 ### Recorded tension
 

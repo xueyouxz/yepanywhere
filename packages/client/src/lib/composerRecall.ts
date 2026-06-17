@@ -26,7 +26,6 @@ export function getRecallSubmissionAfterQueuedCancel(
       (message) =>
         message.tempId &&
         message.tempId !== cancelledTempId &&
-        message.deliveryState !== "sending" &&
         message.content.trim(),
     );
 

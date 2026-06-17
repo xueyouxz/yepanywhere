@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import type { ZodError } from "zod";
 import { useSchemaValidationContext } from "../../../contexts/SchemaValidationContext";
 import { useOptionalSessionMetadata } from "../../../contexts/SessionMetadataContext";
+import { useInlineMedia } from "../../../hooks/useInlineMedia";
 import { isMarkdownLikeFile } from "../../../lib/markdownFiles";
 import { useScrollPreservingToggle } from "../../../lib/scrollAnchor";
 import { compactShikiLineBreaks } from "../../../lib/shikiHtml";
@@ -392,13 +393,37 @@ function ImageFileResult({
   const hasDimensions =
     dimensions?.originalWidth != null && dimensions?.originalHeight != null;
 
+  // Respect the "Expand Inline Media by Default" appearance setting. Like the
+  // markdown/transcript media previews, start collapsed unless the user opts in,
+  // and let the setting drive expansion until the user toggles this preview.
+  const { inlineMediaExpandedByDefault } = useInlineMedia();
+  const [override, setOverride] = useState<boolean | null>(null);
+  const expanded = override ?? inlineMediaExpandedByDefault;
+
   return (
     <div className="read-image-result">
-      {filePath && displayPath && (
-        <div className="file-range-inline">
-          <SessionFilePathLink displayPath={displayPath} filePath={filePath} />
-        </div>
-      )}
+      <div className="local-media-link-group">
+        <button
+          type="button"
+          className="local-media-inline-toggle"
+          aria-expanded={expanded}
+          aria-label={expanded ? "Collapse image" : "Expand image"}
+          title={expanded ? "Collapse inline preview" : "Expand inline preview"}
+          onClick={() => setOverride(!expanded)}
+        >
+          {expanded ? "-" : "+"}
+        </button>
+        {filePath && displayPath ? (
+          <span className="file-range-inline">
+            <SessionFilePathLink
+              displayPath={displayPath}
+              filePath={filePath}
+            />
+          </span>
+        ) : (
+          <span className="local-media-type">image</span>
+        )}
+      </div>
       {(hasDimensions || sizeKB > 0) && (
         <div className="image-info">
           {hasDimensions && (
@@ -410,13 +435,15 @@ function ImageFileResult({
           {sizeKB > 0 && <>({sizeKB}\u202fkb)</>}
         </div>
       )}
-      <img
-        className="read-image"
-        src={`data:${file.type};base64,${file.base64}`}
-        alt="File content"
-        width={dimensions?.displayWidth}
-        height={dimensions?.displayHeight}
-      />
+      {expanded && (
+        <img
+          className="read-image"
+          src={`data:${file.type};base64,${file.base64}`}
+          alt="File content"
+          width={dimensions?.displayWidth}
+          height={dimensions?.displayHeight}
+        />
+      )}
     </div>
   );
 }

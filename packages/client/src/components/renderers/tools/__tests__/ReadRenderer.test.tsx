@@ -1,10 +1,29 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { toUrlProjectId } from "@yep-anywhere/shared";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PublicShareProvider } from "../../../../contexts/PublicShareContext";
 import { SessionMetadataProvider } from "../../../../contexts/SessionMetadataContext";
+import { setInlineMediaExpandedPreference } from "../../../../hooks/useInlineMedia";
 import { readRenderer } from "../ReadRenderer";
+
+const PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
+
+const imageResult = {
+  type: "image" as const,
+  file: {
+    base64: PNG_BASE64,
+    type: "image/png",
+    originalSize: 158 * 1024,
+    dimensions: {
+      originalWidth: 1024,
+      originalHeight: 952,
+      displayWidth: 512,
+      displayHeight: 476,
+    },
+  },
+};
 
 vi.mock("../../../../contexts/SchemaValidationContext", () => ({
   useSchemaValidationContext: () => ({
@@ -271,5 +290,70 @@ describe("ReadRenderer", () => {
     expect(screen.getByText("0 lines")).toBeDefined();
     expect(screen.getByText("No content read")).toBeDefined();
     expect(screen.queryByText(/continues in Shell/)).toBeNull();
+  });
+
+  describe("image reads", () => {
+    afterEach(() => {
+      // Unmount first so resetting the store doesn't re-render a mounted tree
+      // outside act(), then reset to the default (collapsed) for the next test.
+      cleanup();
+      setInlineMediaExpandedPreference(false);
+    });
+
+    it("keeps the image collapsed when Expand Inline Media is off", () => {
+      setInlineMediaExpandedPreference(false);
+      const { container } = renderInSession(
+        <div>
+          {readRenderer.renderToolResult(
+            imageResult,
+            false,
+            renderContext,
+            { file_path: "/tmp/screenshot.png" },
+          )}
+        </div>,
+      );
+
+      expect(container.querySelector("img.read-image")).toBeNull();
+      expect(
+        screen.getByRole("button", { name: /expand image/i }),
+      ).toBeDefined();
+    });
+
+    it("expands the image inline when the setting is on", () => {
+      setInlineMediaExpandedPreference(true);
+      const { container } = renderInSession(
+        <div>
+          {readRenderer.renderToolResult(
+            imageResult,
+            false,
+            renderContext,
+            { file_path: "/tmp/screenshot.png" },
+          )}
+        </div>,
+      );
+
+      expect(container.querySelector("img.read-image")).not.toBeNull();
+      expect(
+        screen.getByRole("button", { name: /collapse image/i }),
+      ).toBeDefined();
+    });
+
+    it("lets the user expand a collapsed image on demand", () => {
+      setInlineMediaExpandedPreference(false);
+      const { container } = renderInSession(
+        <div>
+          {readRenderer.renderToolResult(
+            imageResult,
+            false,
+            renderContext,
+            { file_path: "/tmp/screenshot.png" },
+          )}
+        </div>,
+      );
+
+      expect(container.querySelector("img.read-image")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: /expand image/i }));
+      expect(container.querySelector("img.read-image")).not.toBeNull();
+    });
   });
 });

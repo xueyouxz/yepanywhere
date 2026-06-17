@@ -16,7 +16,12 @@ import type {
   UserEntry,
 } from "./claude-sdk-schema/types.js";
 import type { UrlProjectId } from "./projectId.js";
-import type { PermissionMode, ProviderName, SlashCommand } from "./types.js";
+import type {
+  PermissionMode,
+  PromptSuggestionMode,
+  ProviderName,
+  SlashCommand,
+} from "./types.js";
 
 // =============================================================================
 // App Message Extensions
@@ -389,6 +394,8 @@ export interface SessionMetadataPayload
   heartbeatTurnText?: string;
   /** Optional hard cap before forcing a heartbeat turn */
   heartbeatForceAfterMinutes?: number;
+  /** Per-session prompt-suggestion preference (off | native) */
+  promptSuggestionMode?: PromptSuggestionMode;
 }
 
 /**

@@ -1,5 +1,6 @@
 - new session project selection
 - Rich rendering for agent output via yepanywhere
+- Task-list rendering from incremental Claude `Task*` events (problem framing)
 - Codex GPT-5.5 model and protocol compatibility
 - Pluggable speech recognition providers
 - Browser-load session UI reliability
@@ -16,6 +17,7 @@
 - OpenCode ses_ session ID unification with YA session ID
 - MessageQueue batch delivery and steering UI
 - Message-control and queue intent (`/btw`, queue intent, later-interrupt state contract)
+- Queued messages: server-authoritative design (draft-only localStorage, no fuzzy matching)
 - Emulated slash commands
 - Provider-agnostic /btw asides
 - Side session configuration
@@ -23,6 +25,8 @@
 - Session liveness and queue intent
 - Provider process state machine
 - Compact-and-handoff guardrail (targeted provider/model policy)
+- Claude 1M vs 200K context window (resolution, reporting, autocompact)
+- Exposing older Claude models (Opus 4.7/4.6/4.5, Sonnet 4.5) as an opt-in path
 - Heartbeat ownership and timers
 - Claude provider control
 - Codex API provider as a future API-key-backed backend

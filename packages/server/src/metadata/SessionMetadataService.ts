@@ -7,7 +7,11 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { type ProviderName, sanitizeSessionTitle } from "@yep-anywhere/shared";
+import {
+  type ProviderName,
+  type PromptSuggestionMode,
+  sanitizeSessionTitle,
+} from "@yep-anywhere/shared";
 
 export interface SessionMetadata {
   /** Custom title that overrides auto-generated title */
@@ -39,6 +43,8 @@ export interface SessionMetadata {
   heartbeatTurnText?: string;
   /** Per-session grace minutes before forcing output; null = off */
   heartbeatForceAfterMinutes?: number | null;
+  /** Per-session prompt-suggestion preference (off | native) */
+  promptSuggestionMode?: PromptSuggestionMode;
 }
 
 export interface SessionMetadataState {
@@ -235,6 +241,14 @@ export class SessionMetadataService {
   }
 
   /**
+   * Get the persisted prompt-suggestion preference for a session.
+   * Returns undefined if it was never explicitly saved (use provider default).
+   */
+  getPromptSuggestionMode(sessionId: string): PromptSuggestionMode | undefined {
+    return this.state.sessions[sessionId]?.promptSuggestionMode;
+  }
+
+  /**
    * Set the initial prompt accepted for a new session.
    * Used as a durable recovery source if provider startup fails before JSONL
    * persistence writes the user message.
@@ -265,6 +279,7 @@ export class SessionMetadataService {
       heartbeatTurnsAfterMinutes?: number | null;
       heartbeatTurnText?: string | null;
       heartbeatForceAfterMinutes?: number | null;
+      promptSuggestionMode?: PromptSuggestionMode | null;
     },
   ): Promise<void> {
     this.updateSessionMetadata(sessionId, (metadata) => {
@@ -309,6 +324,14 @@ export class SessionMetadataService {
         result.heartbeatForceAfterMinutes = updates.heartbeatForceAfterMinutes;
       }
 
+      // null clears the preference (revert to default); "off"/"native" store
+      // as-is. "off" is a meaningful stored value — it must override the
+      // provider's native default on resume — so it is not collapsed away.
+      if (updates.promptSuggestionMode !== undefined) {
+        result.promptSuggestionMode =
+          updates.promptSuggestionMode ?? undefined;
+      }
+
       return result;
     });
     await this.save();
@@ -346,6 +369,9 @@ export class SessionMetadataService {
     }
     if (updated.heartbeatForceAfterMinutes !== undefined) {
       cleaned.heartbeatForceAfterMinutes = updated.heartbeatForceAfterMinutes;
+    }
+    if (updated.promptSuggestionMode) {
+      cleaned.promptSuggestionMode = updated.promptSuggestionMode;
     }
 
     if (Object.keys(cleaned).length === 0) {

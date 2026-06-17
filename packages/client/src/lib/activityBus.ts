@@ -2,6 +2,7 @@ import type {
   AgentActivity,
   ContextUsage,
   PendingInputType,
+  PromptSuggestionMode,
   UrlProjectId,
 } from "@yep-anywhere/shared";
 import type { SessionStatus, SessionSummary } from "../types";
@@ -81,6 +82,7 @@ export interface SessionMetadataChangedEvent {
   heartbeatTurnsAfterMinutes?: number | null;
   heartbeatTurnText?: string | null;
   heartbeatForceAfterMinutes?: number | null;
+  promptSuggestionMode?: PromptSuggestionMode;
   timestamp: string;
 }
 

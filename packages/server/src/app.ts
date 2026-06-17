@@ -548,6 +548,16 @@ export function createApp(options: AppOptions): AppResult {
           options.sessionMetadataService?.setExecutor(sessionId, executor) ??
           Promise.resolve()
       : undefined,
+    // Durably record a model's real context window the moment a process
+    // observes it (in the result message), independent of any client fetch.
+    onContextWindowObserved: options.modelInfoService
+      ? (model, contextWindow, provider) =>
+          options.modelInfoService?.recordContextWindow(
+            model,
+            contextWindow,
+            provider,
+          )
+      : undefined,
     onSessionSummary: getSessionSummary,
     getHeartbeatTurnSettings:
       options.serverSettingsService || options.sessionMetadataService

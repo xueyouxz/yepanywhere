@@ -802,21 +802,6 @@ export class ClaudeProvider implements AgentProvider {
   }
 
   /**
-   * Effective context window for a Claude model. Opus is always-1M, but its
-   * resolved id ("claude-opus-4-8") otherwise reads as the base 200K family
-   * window (and the alias-keyed cache misses it). Sonnet is NOT always-1M (its
-   * 1M needs paid usage credits) — bare sonnet stays 200K, explicit sonnet[1m]
-   * is 1M — so only opus is overridden here; everything else defers.
-   * See topics/provider-abstraction.md.
-   */
-  contextWindowFor(model: string | undefined): number | undefined {
-    if (model && /(?:^|[-/])opus(?:[-/[]|$)/.test(model.toLowerCase())) {
-      return getModelContextWindow("opus[1m]", "claude");
-    }
-    return undefined;
-  }
-
-  /**
    * Reported Claude model id → canonical YA alias, matched by family component.
    * Anthropic has shipped both "{family}-{version}" (claude-opus-4-8) and
    * "{version}-{family}" (claude-3-5-sonnet), so we look for the family anywhere

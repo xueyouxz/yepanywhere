@@ -154,6 +154,37 @@ Consequences:
 - The collapse/tidy trigger is a UX choice; jitter-safety is a separate,
   always-required property.
 
+## Follow-engagement policy & proposed preferences
+
+The regime boundary — *when* the view (re)engages "following the tail" — is
+currently a fixed heuristic (near-bottom re-engage, send-forces-bottom, and the
+thinking-delta guard). Several observed bugs (#1, #3, #4 below) are at root
+disagreements about that policy, and different users hold different
+expectations. The policy decomposes into a few orthogonal axes; surfacing some
+as preferences would resolve much of the "is this a bug or intended?" ambiguity:
+
+- **Re-engage policy** — how does follow turn back on? *Auto* (current: re-pins
+  whenever the reader lands within the near-bottom band) vs *manual-only* (only
+  the Follow button engages it; reaching the bottom by scrolling does not).
+- **On-send policy** — *jump to bottom and follow this turn* vs *jump once then
+  freeze* vs *stay put*. (Bug #3 is the current send path getting this wrong.)
+- **Background persistence** — is follow *durable session intent* that survives
+  the tab being hidden and refocused, or a viewport-cursor recomputed from
+  geometry on return? (Bug #4.) Some users expect the former.
+- **Content filter while following** — *all output* vs *exclude thinking*
+  (current special case, `cebac6b7`) vs *never auto-follow* (manual Follow is
+  the only thing that ever moves the view to the tail).
+
+Design caution: expose these as a **small set of named modes** (e.g. "Follow
+live output" / "Don't follow thinking" / "Manual follow only"), not four
+orthogonal toggles — orthogonal toggles are 2⁴ states to reason about and test,
+whereas the internal model can stay axis-based. Persist via the existing
+`UI_KEYS` localStorage pattern already used for `sessionThinkingVisible` /
+`sessionThinkingLatestOnly`; `AppearanceSettings.tsx` is the natural home. This
+does not substitute for fixing the bugs — a broken default is broken under every
+preference — but it clarifies which behaviors are bugs versus legitimately
+user-dependent.
+
 ## Planned improvements
 
 Ordered roughly by reader impact.
@@ -180,20 +211,83 @@ Ordered roughly by reader impact.
    reduces `ResizeObserver` re-pins. This only masks the yank (and over-reserve
    would itself shift layout, hence the cap); the latch above is the real fix.
    Same reserve-to-avoid-shift idea as predictive-scroll placeholder heights.
-2. **Wire all height-change paths through the anchor.** Per-row thinking
+2. **Follow falls behind and drops under fast burst output.** *Observed:* with
+   follow engaged and assistant content arriving rapidly (many rows / fast
+   flushes in quick succession), the view fails to keep up and then *loses*
+   follow entirely — it stops re-pinning and the "Follow" button appears,
+   needing a manual click to recover. *Suspected mechanism (not instrumented):*
+   during a burst, a `scroll` event reaches `handleScroll` while content has
+   grown but `scrollTop` has not yet been re-pinned — either a genuine
+   non-programmatic event or a programmatic one whose `isProgrammaticScrollRef`
+   window was already released by its `requestAnimationFrame` — so
+   `isAtScrollBottom` reads false for that frame and latches
+   `shouldAutoScrollRef = false`. The `ResizeObserver` re-pin and the
+   scroll-handler at-bottom check race on every flush; under fast bursts the
+   handler can win, so a single transient "not at bottom" frame during catch-up
+   turns follow off. Related to #1 (same re-pin/at-bottom machinery) but the
+   failure is *under*-following, not over-following. *Fix direction:* during an
+   active catch-up, evaluate at-bottom against the *intended* tail (treat an
+   in-flight programmatic re-pin as authoritative) and/or debounce the
+   follow-cancel so one transient not-at-bottom frame cannot latch off; the #1
+   latch (hold follow until a *deliberate* user scroll) also covers this.
+3. **Send lands short; the live thinking indicator is clipped after submit.**
+   *Observed, streaming-on (screenshot 2026-06-16):* right after the user
+   submits, the view scrolls *most* of the way down but stops a fraction short —
+   the streaming thinking indicator ("Contemplating…") is clipped at the
+   composer edge and the "Follow" button appears, despite the user having just
+   acted at the tail without scrolling up. *Likely mechanism:* the send path
+   forces a scroll via `forceScrollToCurrent(SEND_CATCH_UP_DELAYS_MS)` **without**
+   `allowThinkingDeltas`, unlike the Follow button which passes
+   `{ allowThinkingDeltas: true }`. The programmatic send-scroll never routes
+   through `handleScroll`'s at-bottom branch, so `thinkingDeltaFollowAllowedRef`
+   stays false; the first expanded thinking delta then trips the follow-cancel
+   guard, whose `stopFollowingForUserScroll` also calls
+   `clearForcedCurrentScrollTimers`, aborting the remaining send catch-up retries
+   mid-settle. The indicator keeps growing after that freeze, so its final
+   ~half-line is never scrolled into view. This is the **inverse of #1**: there
+   the near-bottom re-engage heuristic defeats the thinking-delta guard
+   (over-follows a reader); here the thinking-delta guard defeats the send-scroll
+   (under-follows a sender) — same two flags, opposite winner, decided by timing.
+   *Fix direction:* treat a send as explicit intent to follow the resulting
+   turn — the send transition should enter "following the tail" for the
+   just-issued turn (granting thinking-delta follow as the Follow button does),
+   or at minimum land the scroll with the current tail fully visible before any
+   cancel fires. Naively passing `allowThinkingDeltas` on every send risks
+   re-introducing the chase-long-thinking behavior `cebac6b7` deliberately
+   removed; the regime-aware fix (the #1 latch plus "send ⇒ follow this turn")
+   subsumes both.
+4. **Follow disengages after the tab is backgrounded and refocused.**
+   *Observed:* fully at the bottom with follow engaged, background the tab,
+   return — follow is no longer engaged though the reader never scrolled.
+   *Suspected mechanism (not instrumented):* `MessageList` has no
+   `visibilitychange` handler, so this is emergent — while hidden, rAF and
+   `ResizeObserver` callbacks are throttled, so content that streams/arrives in
+   the background grows the transcript without the auto re-pin running; on
+   refocus `scrollTop` is stale (no longer at bottom) and the first
+   `scroll`/`resize`/observer evaluation reads not-at-bottom and clears
+   `shouldAutoScrollRef`. Connection churn may compound it — `ConnectionManager`
+   and `useSession` do react to visibility (reconnect/refetch), which can
+   re-render and reset scroll position. *Preference-adjacent (see
+   "Follow-engagement policy" above):* some users expect follow to be
+   **persistent session intent**, not a viewport-cursor recomputed from geometry
+   only while visible. *Fix direction:* on refocus, if follow was engaged when
+   the tab was hidden, re-assert it (re-pin to the new bottom) instead of
+   letting a stale-geometry evaluation cancel it — persist the *intent* across
+   visibility transitions rather than recomputing it from post-hide geometry.
+5. **Wire all height-change paths through the anchor.** Per-row thinking
    expand/collapse and streaming growth currently bypass
    `preserveScrollAfterTranscriptHeightChange`; route them through it so the
    scrolled-back hold applies regardless of trigger (target #1, #4).
-3. **Sub-item anchor granularity.** Replace the row-granular anchor with a
+6. **Sub-item anchor granularity.** Replace the row-granular anchor with a
    content-position anchor at the ~20% soft target (targets #1–#2) so intra-item
    reflow above the reading line stops moving the view. Evaluate native
    `overflow-anchor` for the scrolled-back hold versus a YA-owned anchor.
-4. **Boundary snap (nice-to-have, not urgent).** Snap the anchor to a nearby
-   item top within threshold `T` (target #3). Lower priority than 1–3, and
+7. **Boundary snap (nice-to-have, not urgent).** Snap the anchor to a nearby
+   item top within threshold `T` (target #3). Lower priority than 1–6, and
    gated: engage only at scroll rest (mobile momentum settle, `PgUp`/`PgDn`),
    never during smooth continuous mousewheel scrolling. Requires a YA-owned
    anchor — native `overflow-anchor` cannot do the snap.
-5. **Re-introduce auto-tidy of thinking, jitter-free.** With the anchor wired,
+8. **Re-introduce auto-tidy of thinking, jitter-free.** With the anchor wired,
    an attention-driven tidy (collapse a thinking block once scrolled past while
    following, or "collapse previous when current completes") can return the
    self-cleaning transcript without the original timer's hazards — deferred while

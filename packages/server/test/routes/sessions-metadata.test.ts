@@ -13,7 +13,10 @@ import {
 } from "../../src/routes/sessions.js";
 import type { CodexSessionReader } from "../../src/sessions/codex-reader.js";
 import type { GrokSessionReader } from "../../src/sessions/grok-reader.js";
-import type { ISessionReader, LoadedSession } from "../../src/sessions/types.js";
+import type {
+  ISessionReader,
+  LoadedSession,
+} from "../../src/sessions/types.js";
 import { ResumeCompactionError } from "../../src/supervisor/Supervisor.js";
 import type { Project, SessionSummary } from "../../src/supervisor/types.js";
 
@@ -250,291 +253,6 @@ describe("Sessions metadata route", () => {
       promoted: true,
       position: 0,
       deferredMessages: [],
-    });
-  });
-
-  it("takes a deferred message for queued-message editing", async () => {
-    const takeDeferredMessage = vi.fn(() => ({
-      message: {
-        text: "queued text",
-        tempId: "temp-edit",
-        mode: "acceptEdits",
-        attachments: [
-          {
-            id: "file-1",
-            originalName: "notes.txt",
-            size: 12,
-            mimeType: "text/plain",
-            path: "/uploads/notes.txt",
-          },
-        ],
-      },
-      placement: {
-        afterTempId: "temp-before",
-        beforeTempId: "temp-after",
-      },
-    }));
-
-    const routes = createSessionsRoutes({
-      supervisor: {
-        getProcessForSession: vi.fn(() => ({
-          takeDeferredMessage,
-        })),
-      } as unknown as SessionsDeps["supervisor"],
-    });
-
-    const response = await routes.request(
-      "/sessions/sess-1/deferred/temp-edit/edit",
-      { method: "POST" },
-    );
-
-    expect(response.status).toBe(200);
-    expect(takeDeferredMessage).toHaveBeenCalledWith("temp-edit");
-    await expect(response.json()).resolves.toMatchObject({
-      message: "queued text",
-      tempId: "temp-edit",
-      mode: "acceptEdits",
-      placement: {
-        afterTempId: "temp-before",
-        beforeTempId: "temp-after",
-      },
-      attachments: [
-        {
-          id: "file-1",
-          originalName: "notes.txt",
-        },
-      ],
-    });
-  });
-
-  it("updates a deferred message in place", async () => {
-    const updateDeferredMessage = vi.fn(() => ({
-      text: "queued text edited",
-      tempId: "temp-edit",
-    }));
-    const getDeferredQueueSummary = vi.fn(() => [
-      {
-        tempId: "temp-edit",
-        content: "queued text edited",
-        timestamp: "2026-04-25T00:00:00.000Z",
-      },
-      {
-        tempId: "temp-next",
-        content: "next queued",
-        timestamp: "2026-04-25T00:00:01.000Z",
-      },
-    ]);
-
-    const routes = createSessionsRoutes({
-      supervisor: {
-        getProcessForSession: vi.fn(() => ({
-          updateDeferredMessage,
-          getDeferredQueueSummary,
-        })),
-      } as unknown as SessionsDeps["supervisor"],
-    });
-
-    const response = await routes.request(
-      "/sessions/sess-1/deferred/temp-edit",
-      {
-        method: "PUT",
-        body: JSON.stringify({ message: "queued text edited" }),
-      },
-    );
-
-    expect(response.status).toBe(200);
-    expect(updateDeferredMessage).toHaveBeenCalledWith(
-      "temp-edit",
-      "queued text edited",
-    );
-    await expect(response.json()).resolves.toMatchObject({
-      updated: true,
-      tempId: "temp-edit",
-      message: "queued text edited",
-      deferredMessages: [
-        { tempId: "temp-edit", content: "queued text edited" },
-        { tempId: "temp-next", content: "next queued" },
-      ],
-    });
-  });
-
-  it("allows a deferred message to be updated to empty text", async () => {
-    const updateDeferredMessage = vi.fn(() => ({
-      text: "",
-      tempId: "temp-edit",
-    }));
-    const getDeferredQueueSummary = vi.fn(() => [
-      {
-        tempId: "temp-edit",
-        content: "",
-        timestamp: "2026-04-25T00:00:00.000Z",
-      },
-    ]);
-
-    const routes = createSessionsRoutes({
-      supervisor: {
-        getProcessForSession: vi.fn(() => ({
-          updateDeferredMessage,
-          getDeferredQueueSummary,
-        })),
-      } as unknown as SessionsDeps["supervisor"],
-    });
-
-    const response = await routes.request(
-      "/sessions/sess-1/deferred/temp-edit",
-      { method: "PUT", body: JSON.stringify({ message: "" }) },
-    );
-
-    expect(response.status).toBe(200);
-    expect(updateDeferredMessage).toHaveBeenCalledWith("temp-edit", "");
-  });
-
-  it("steers a deferred message from its queued chip", async () => {
-    const steerDeferredMessage = vi.fn(() => ({
-      message: {
-        text: "run tests",
-        tempId: "temp-steer",
-      },
-      position: 0,
-    }));
-    const getDeferredQueueSummary = vi.fn(() => [
-      {
-        tempId: "temp-next",
-        content: "next queued",
-        timestamp: "2026-04-25T00:00:01.000Z",
-      },
-    ]);
-
-    const routes = createSessionsRoutes({
-      supervisor: {
-        getProcessForSession: vi.fn(() => ({
-          steerDeferredMessage,
-          getDeferredQueueSummary,
-        })),
-      } as unknown as SessionsDeps["supervisor"],
-    });
-
-    const response = await routes.request(
-      "/sessions/sess-1/deferred/temp-steer/steer",
-      { method: "POST" },
-    );
-
-    expect(response.status).toBe(200);
-    expect(steerDeferredMessage).toHaveBeenCalledWith("temp-steer");
-    await expect(response.json()).resolves.toMatchObject({
-      steered: true,
-      tempId: "temp-steer",
-      message: "run tests",
-      position: 0,
-      deferredMessages: [{ tempId: "temp-next", content: "next queued" }],
-    });
-  });
-
-  it("releases a queued-message edit barrier", async () => {
-    const releaseDeferredEditBarrier = vi.fn(() => true);
-    const getDeferredQueueSummary = vi.fn(() => [
-      {
-        tempId: "temp-3",
-        content: "third",
-        timestamp: "2026-04-25T00:00:02.000Z",
-      },
-    ]);
-
-    const routes = createSessionsRoutes({
-      supervisor: {
-        getProcessForSession: vi.fn(() => ({
-          releaseDeferredEditBarrier,
-          getDeferredQueueSummary,
-        })),
-      } as unknown as SessionsDeps["supervisor"],
-    });
-
-    const response = await routes.request(
-      "/sessions/sess-1/deferred/temp-edit/edit/release",
-      { method: "POST" },
-    );
-
-    expect(response.status).toBe(200);
-    expect(releaseDeferredEditBarrier).toHaveBeenCalledWith("temp-edit");
-    await expect(response.json()).resolves.toMatchObject({
-      released: true,
-      deferredMessages: [{ tempId: "temp-3", content: "third" }],
-    });
-  });
-
-  it("passes deferred queue reinsertion anchors when queuing an edited message", async () => {
-    const primeSupportedCommandsForMessage = vi.fn(async () => {});
-    const deferMessage = vi.fn(() => ({ success: true, deferred: true }));
-    const getDeferredQueueSummary = vi.fn(() => [
-      {
-        tempId: "temp-1",
-        content: "first",
-        timestamp: "2026-04-25T00:00:00.000Z",
-      },
-      {
-        tempId: "temp-edited",
-        content: "second edited",
-        timestamp: "2026-04-25T00:00:01.000Z",
-      },
-      {
-        tempId: "temp-3",
-        content: "third",
-        timestamp: "2026-04-25T00:00:02.000Z",
-      },
-    ]);
-
-    const routes = createSessionsRoutes({
-      supervisor: {
-        getProcessForSession: vi.fn(() => ({
-          isTerminated: false,
-          primeSupportedCommandsForMessage,
-          deferMessage,
-          getDeferredQueueSummary,
-        })),
-      } as unknown as SessionsDeps["supervisor"],
-    });
-
-    const response = await routes.request("/sessions/sess-1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: "second edited",
-        tempId: "temp-edited",
-        deferred: true,
-        insertAfterTempId: "temp-1",
-        insertBeforeTempId: "temp-3",
-        replaceDeferredTempId: "temp-2",
-      }),
-    });
-
-    expect(response.status).toBe(200);
-    expect(primeSupportedCommandsForMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: "second edited",
-        tempId: "temp-edited",
-      }),
-    );
-    expect(deferMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: "second edited",
-        tempId: "temp-edited",
-      }),
-      {
-        promoteIfReady: true,
-        placement: {
-          afterTempId: "temp-1",
-          beforeTempId: "temp-3",
-          replaceTempId: "temp-2",
-        },
-      },
-    );
-    await expect(response.json()).resolves.toMatchObject({
-      queued: true,
-      deferredMessages: [
-        { tempId: "temp-1" },
-        { tempId: "temp-edited" },
-        { tempId: "temp-3" },
-      ],
     });
   });
 
@@ -947,6 +665,8 @@ describe("Sessions metadata route", () => {
       sessionMetadataService: {
         getMetadata: vi.fn(() => undefined),
         getProvider: vi.fn(() => "codex"),
+        getRequestedModel: vi.fn(() => undefined),
+        setRequestedModel: vi.fn(async () => undefined),
       } as unknown as NonNullable<SessionsDeps["sessionMetadataService"]>,
     });
 
@@ -987,6 +707,8 @@ describe("Sessions metadata route", () => {
       sessionMetadataService: {
         getMetadata: vi.fn(() => undefined),
         getProvider: vi.fn(() => "codex"),
+        getRequestedModel: vi.fn(() => undefined),
+        setRequestedModel: vi.fn(async () => undefined),
       } as unknown as NonNullable<SessionsDeps["sessionMetadataService"]>,
     });
 
@@ -1029,6 +751,8 @@ describe("Sessions metadata route", () => {
       ),
       sessionMetadataService: {
         getProvider: vi.fn(() => "codex"),
+        getRequestedModel: vi.fn(() => undefined),
+        setRequestedModel: vi.fn(async () => undefined),
         getExecutor: vi.fn(() => undefined),
       } as unknown as NonNullable<SessionsDeps["sessionMetadataService"]>,
     });
@@ -1123,6 +847,8 @@ describe("Sessions metadata route", () => {
       ),
       sessionMetadataService: {
         getProvider: vi.fn(() => "claude"),
+        getRequestedModel: vi.fn(() => undefined),
+        setRequestedModel: vi.fn(async () => undefined),
         getExecutor: vi.fn(() => undefined),
       } as unknown as NonNullable<SessionsDeps["sessionMetadataService"]>,
     });
@@ -1217,6 +943,8 @@ describe("Sessions metadata route", () => {
       ),
       sessionMetadataService: {
         getProvider: vi.fn(() => "claude"),
+        getRequestedModel: vi.fn(() => undefined),
+        setRequestedModel: vi.fn(async () => undefined),
         getExecutor: vi.fn(() => undefined),
       } as unknown as NonNullable<SessionsDeps["sessionMetadataService"]>,
     });
@@ -1319,6 +1047,8 @@ describe("Sessions metadata route", () => {
       ),
       sessionMetadataService: {
         getProvider: vi.fn(() => "claude"),
+        getRequestedModel: vi.fn(() => undefined),
+        setRequestedModel: vi.fn(async () => undefined),
         getExecutor: vi.fn(() => undefined),
       } as unknown as NonNullable<SessionsDeps["sessionMetadataService"]>,
     });
@@ -1377,6 +1107,8 @@ describe("Sessions metadata route", () => {
       ),
       sessionMetadataService: {
         getProvider: vi.fn(() => "claude"),
+        getRequestedModel: vi.fn(() => undefined),
+        setRequestedModel: vi.fn(async () => undefined),
         getExecutor: vi.fn(() => undefined),
       } as unknown as NonNullable<SessionsDeps["sessionMetadataService"]>,
     });
@@ -1447,6 +1179,8 @@ describe("Sessions metadata route", () => {
       ),
       sessionMetadataService: {
         getProvider: vi.fn(() => "codex"),
+        getRequestedModel: vi.fn(() => undefined),
+        setRequestedModel: vi.fn(async () => undefined),
         getExecutor: vi.fn(() => undefined),
       } as unknown as NonNullable<SessionsDeps["sessionMetadataService"]>,
     });
@@ -1536,6 +1270,8 @@ describe("Sessions metadata route", () => {
       ),
       sessionMetadataService: {
         getProvider: vi.fn(() => "codex"),
+        getRequestedModel: vi.fn(() => undefined),
+        setRequestedModel: vi.fn(async () => undefined),
         getExecutor: vi.fn(() => undefined),
         getMetadata: vi.fn(() => ({ customTitle: "Broken Codex session" })),
         setProvider: vi.fn(async () => undefined),
@@ -1667,6 +1403,8 @@ describe("Sessions metadata route", () => {
       ),
       sessionMetadataService: {
         getProvider: vi.fn(() => "claude"),
+        getRequestedModel: vi.fn(() => undefined),
+        setRequestedModel: vi.fn(async () => undefined),
         getExecutor: vi.fn(() => undefined),
         getMetadata: vi.fn(() => ({ customTitle: "Refactor session" })),
         setProvider: vi.fn(async () => undefined),
@@ -1745,6 +1483,8 @@ describe("Sessions metadata route", () => {
       ),
       sessionMetadataService: {
         getProvider: vi.fn(() => "claude"),
+        getRequestedModel: vi.fn(() => undefined),
+        setRequestedModel: vi.fn(async () => undefined),
         getExecutor: vi.fn(() => undefined),
         getMetadata: vi.fn(() => ({ customTitle: "Refactor session" })),
         setProvider,
@@ -1807,6 +1547,8 @@ describe("Sessions metadata route", () => {
       ),
       sessionMetadataService: {
         getProvider: vi.fn(() => "codex"),
+        getRequestedModel: vi.fn(() => undefined),
+        setRequestedModel: vi.fn(async () => undefined),
         getExecutor: vi.fn(() => undefined),
         getMetadata: vi.fn(() => ({})),
       } as unknown as NonNullable<SessionsDeps["sessionMetadataService"]>,
@@ -1866,6 +1608,8 @@ describe("Sessions metadata route", () => {
       ),
       sessionMetadataService: {
         getProvider: vi.fn(() => "codex"),
+        getRequestedModel: vi.fn(() => undefined),
+        setRequestedModel: vi.fn(async () => undefined),
         getExecutor: vi.fn(() => undefined),
         getMetadata: vi.fn(() => ({})),
       } as unknown as NonNullable<SessionsDeps["sessionMetadataService"]>,
@@ -1940,6 +1684,8 @@ describe("Sessions metadata route", () => {
       readerFactory: vi.fn(() => reader),
       sessionMetadataService: {
         getProvider: vi.fn(() => undefined),
+        getRequestedModel: vi.fn(() => undefined),
+        setRequestedModel: vi.fn(async () => undefined),
         getExecutor: vi.fn(() => undefined),
         getMetadata: vi.fn(() => undefined),
         setProvider,
@@ -2035,6 +1781,8 @@ describe("Sessions metadata route", () => {
       ),
       sessionMetadataService: {
         getProvider: vi.fn(() => "codex"),
+        getRequestedModel: vi.fn(() => undefined),
+        setRequestedModel: vi.fn(async () => undefined),
         getExecutor: vi.fn(() => undefined),
         getMetadata: vi.fn(() => undefined),
         setProvider: vi.fn(async () => undefined),
@@ -2151,6 +1899,8 @@ describe("Sessions metadata route", () => {
       ),
       sessionMetadataService: {
         getProvider: vi.fn(() => "codex"),
+        getRequestedModel: vi.fn(() => undefined),
+        setRequestedModel: vi.fn(async () => undefined),
         getExecutor: vi.fn(() => undefined),
         getMetadata: vi.fn(() => undefined),
         setProvider: vi.fn(async () => undefined),
@@ -2292,6 +2042,8 @@ describe("Sessions metadata route", () => {
       ),
       sessionMetadataService: {
         getProvider: vi.fn(() => "codex"),
+        getRequestedModel: vi.fn(() => undefined),
+        setRequestedModel: vi.fn(async () => undefined),
         getExecutor: vi.fn(() => undefined),
         getMetadata: vi.fn(() => undefined),
         setProvider: vi.fn(async () => undefined),
@@ -2375,6 +2127,8 @@ describe("Sessions metadata route", () => {
       ),
       sessionMetadataService: {
         getProvider: vi.fn(() => "codex"),
+        getRequestedModel: vi.fn(() => undefined),
+        setRequestedModel: vi.fn(async () => undefined),
         getExecutor: vi.fn(() => undefined),
         getMetadata: vi.fn(() => undefined),
       } as unknown as NonNullable<SessionsDeps["sessionMetadataService"]>,

@@ -335,6 +335,49 @@ describe("SessionMetadataService", () => {
 
       expect(service.getMetadata("session-1")).toBeUndefined();
     });
+
+    it("stores an explicit 'off' prompt-suggestion preference", async () => {
+      await service.initialize();
+
+      await service.updateMetadata("session-1", {
+        promptSuggestionMode: "off",
+      });
+
+      // "off" is a meaningful stored value; it must survive the prune block
+      // even when it is the only field.
+      expect(service.getMetadata("session-1")).toEqual({
+        promptSuggestionMode: "off",
+      });
+      expect(service.getPromptSuggestionMode("session-1")).toBe("off");
+    });
+
+    it("clears the prompt-suggestion preference when set to null", async () => {
+      await service.initialize();
+
+      await service.updateMetadata("session-1", {
+        promptSuggestionMode: "native",
+      });
+      expect(service.getPromptSuggestionMode("session-1")).toBe("native");
+
+      await service.updateMetadata("session-1", {
+        promptSuggestionMode: null,
+      });
+
+      expect(service.getMetadata("session-1")).toBeUndefined();
+      expect(service.getPromptSuggestionMode("session-1")).toBeUndefined();
+    });
+
+    it("persists the prompt-suggestion preference across restarts", async () => {
+      await service.initialize();
+      await service.updateMetadata("session-1", {
+        promptSuggestionMode: "off",
+      });
+
+      const newService = new SessionMetadataService({ dataDir: testDir });
+      await newService.initialize();
+
+      expect(newService.getPromptSuggestionMode("session-1")).toBe("off");
+    });
   });
 
   describe("clearSession", () => {
