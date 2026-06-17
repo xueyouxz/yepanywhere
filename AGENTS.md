@@ -86,6 +86,18 @@ compatibility; then summarize the behavioral changes, risks, and follow-on work.
 Also state the likely benefit in one sentence, e.g. that this catches protocol
 or schema drift early and reduces silent breakage in YA's Codex integration.
 
+## Reference Source (local-only)
+
+`references/` holds upstream source cloned for local reading. It is gitignored
+and absent on a fresh checkout, so never assume a given repo is present. When
+working on the Codex provider — schema, scanner, normalization, app-server
+protocol (`packages/server/src/sdk/providers/codex*`,
+`packages/shared/src/codex-schema/`, generated protocol files) — the Codex Rust
+source is invaluable; much of that work is effectively reverse-engineered from
+Codex behavior. If `references/codex` is not present, run `pnpm
+clone-references` (shallow, idempotent), then grep it directly. The Claude SDK
+is not open source, so it is not included.
+
 ## Commit Lock Protocol
 
 Before staging or committing, acquire `.git/yepanywhere-commit.lock`. The
