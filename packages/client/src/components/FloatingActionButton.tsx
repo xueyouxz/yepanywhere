@@ -22,17 +22,13 @@ import {
   getSpeechTranscriptInsertionParts,
   getSpeechTranscriptReplacementParts,
   mapSpeechInsertionRangeThroughEdit,
-  mapSpeechInsertionRangeThroughReplacement,
-  removeLatestSpeechChunkFromRange,
   retargetSpeechInsertionRangeReplacement,
-  replaceSpeechTranscriptBefore,
-  replaceSpeechTranscriptInRange,
   type SpeechInsertionRange,
 } from "../lib/speechRecognition";
 import {
-  captureTextareaAppendSelection,
-  restoreTextareaReplacementSelection,
-} from "../lib/textareaSelection";
+  commitSpeechTranscript,
+  type PendingTextareaSelectionRestore,
+} from "../lib/speechDraftTransaction";
 import type {
   SpeechTranscriptionContext,
   SpeechTranscriptionResultMetadata,
@@ -44,11 +40,6 @@ const FAB_DRAFT_KEY = "fab-draft";
 
 function createSpeechTargetId(): string {
   return `speech-target-${generateUUID()}`;
-}
-
-interface PendingTextareaSelectionRestore {
-  value: string;
-  restore: (textarea: HTMLTextAreaElement) => void;
 }
 
 interface PendingSpeechFinal {
@@ -296,177 +287,22 @@ export function FloatingActionButton() {
   }, [clearPendingSpeechFinal]);
 
   const commitVoiceTranscript = useCallback(
-    (
-      transcript: string,
-      metadata?: SpeechTranscriptionResultMetadata,
-    ) => {
-      const targetId = metadata?.speechTargetId;
-      const getSpeechRange = () =>
-        targetId
-          ? (speechInsertionRangesRef.current.get(targetId) ?? null)
-          : speechInsertionRangeRef.current;
-      const updateSpeechRange = (range: SpeechInsertionRange | null) => {
-        if (targetId) {
-          if (range) {
-            speechInsertionRangesRef.current.set(targetId, range);
-          } else {
-            speechInsertionRangesRef.current.delete(targetId);
-          }
-          if (activeSpeechTargetIdRef.current === targetId) {
-            speechInsertionRangeRef.current = range;
-          }
-          return;
-        }
-        speechInsertionRangeRef.current = range;
-        if (activeSpeechTargetIdRef.current) {
-          if (range) {
-            speechInsertionRangesRef.current.set(
-              activeSpeechTargetIdRef.current,
-              range,
-            );
-          } else {
-            speechInsertionRangesRef.current.delete(
-              activeSpeechTargetIdRef.current,
-            );
-          }
-        }
-      };
-      const mapOtherSpeechRangesThroughReplacement = (
-        replacementStart: number,
-        replacementEnd: number,
-        insertedLength: number,
-        committedRange: SpeechInsertionRange | null,
-      ) => {
-        if (speechInsertionRangesRef.current.size === 0) return;
-        const committedTargetId =
-          targetId ?? activeSpeechTargetIdRef.current;
-        const nextRanges = new Map<string, SpeechInsertionRange>();
-        for (const [rangeTargetId, range] of speechInsertionRangesRef.current) {
-          if (rangeTargetId === committedTargetId) {
-            if (committedRange) nextRanges.set(rangeTargetId, committedRange);
-            continue;
-          }
-          nextRanges.set(
-            rangeTargetId,
-            mapSpeechInsertionRangeThroughReplacement(
-              range,
-              replacementStart,
-              replacementEnd,
-              insertedLength,
-            ),
-          );
-        }
-        speechInsertionRangesRef.current = nextRanges;
-        speechInsertionRangeRef.current =
-          activeSpeechTargetIdRef.current !== null
-            ? (nextRanges.get(activeSpeechTargetIdRef.current) ?? null)
-            : null;
-      };
-      if (metadata?.smartTurnCommand === "cancel") {
-        const current = draftControls.getDraft();
-        const range = getSpeechRange();
-        const removal = range
-          ? removeLatestSpeechChunkFromRange(current, range)
-          : null;
-        if (removal) {
-          if (removal.text !== current) {
-            const selection = captureTextareaAppendSelection(
-              textareaRef.current,
-              current,
-            );
-            pendingTextareaSelectionRef.current = {
-              value: removal.text,
-              restore: (textarea) => {
-                restoreTextareaReplacementSelection(
-                  textarea,
-                  selection,
-                  removal.text,
-                  removal.replacementStart,
-                  removal.replacementEnd,
-                  0,
-                );
-              },
-            };
-            draftControls.setDraft(removal.text);
-            mapOtherSpeechRangesThroughReplacement(
-              removal.replacementStart,
-              removal.replacementEnd,
-              removal.insertedLength,
-              removal.range,
-            );
-            updateSpeechRange(removal.range);
-          } else {
-            pendingTextareaSelectionRef.current = null;
-          }
-        } else {
-          pendingTextareaSelectionRef.current = null;
-          if (targetId) updateSpeechRange(null);
-        }
-        setInterimTranscript("");
-        return;
-      }
-
-      const current = draftControls.getDraft();
-      const trimmedTranscript = transcript.trim();
-      const speechRange = getSpeechRange();
-      let nextSpeechRange: SpeechInsertionRange | null = null;
-      const replacement = speechRange
-        ? (() => {
-            const rangeReplacement = replaceSpeechTranscriptInRange(
-              current,
-              trimmedTranscript,
-              speechRange,
-              metadata?.replacePreviousTranscriptChars ?? 0,
-            );
-            nextSpeechRange = rangeReplacement.range;
-            return rangeReplacement;
-          })()
-        : replaceSpeechTranscriptBefore(
-            current,
-            trimmedTranscript,
-            current.length,
-            0,
-          );
-      const nextMessage =
-        trimmedTranscript || metadata?.replacePreviousTranscriptChars
-          ? replacement.text
-          : current;
-      if (nextMessage !== current) {
-        const selection = captureTextareaAppendSelection(
-          textareaRef.current,
-          current,
-        );
-        pendingTextareaSelectionRef.current = {
-          value: nextMessage,
-          restore: (textarea) => {
-            restoreTextareaReplacementSelection(
-              textarea,
-              selection,
-              nextMessage,
-              replacement.replacementStart,
-              replacement.replacementEnd,
-              replacement.insertedLength,
-            );
-          },
-        };
-        draftControls.setDraft(nextMessage);
-        mapOtherSpeechRangesThroughReplacement(
-          replacement.replacementStart,
-          replacement.replacementEnd,
-          replacement.insertedLength,
-          nextSpeechRange,
-        );
-        if (nextSpeechRange) {
-          updateSpeechRange(nextSpeechRange);
-        }
-      }
-      setInterimTranscript("");
-      if (metadata?.smartTurnCommand) {
-        updateSpeechRange(null);
-      }
-      if (metadata?.smartTurnCommand === "send") {
-        handleSubmit(nextMessage);
-      }
+    (transcript: string, metadata?: SpeechTranscriptionResultMetadata) => {
+      commitSpeechTranscript(
+        {
+          textareaRef,
+          getDraft: draftControls.getDraft,
+          setDraft: draftControls.setDraft,
+          setInterimTranscript,
+          speechInsertionRangeRef,
+          activeSpeechTargetIdRef,
+          speechInsertionRangesRef,
+          pendingTextareaSelectionRef,
+          onSmartTurnSend: handleSubmit,
+        },
+        transcript,
+        metadata,
+      );
     },
     [draftControls, handleSubmit],
   );

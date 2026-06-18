@@ -38,18 +38,14 @@ import {
   getSpeechTranscriptInsertionParts,
   getSpeechTranscriptReplacementParts,
   mapSpeechInsertionRangeThroughEdit,
-  mapSpeechInsertionRangeThroughReplacement,
-  removeLatestSpeechChunkFromRange,
   retargetSpeechInsertionRangeReplacement,
-  replaceSpeechTranscriptBefore,
-  replaceSpeechTranscriptInRange,
   type SpeechInsertionRange,
 } from "../lib/speechRecognition";
-import { getSlashCommandMenuParts } from "../lib/slashCommands";
 import {
-  captureTextareaAppendSelection,
-  restoreTextareaReplacementSelection,
-} from "../lib/textareaSelection";
+  commitSpeechTranscript,
+  type PendingTextareaSelectionRestore,
+} from "../lib/speechDraftTransaction";
+import { getSlashCommandMenuParts } from "../lib/slashCommands";
 import { isVoiceInputShortcut } from "../lib/voiceInputShortcut";
 import type { ContextUsage, PermissionMode } from "../types";
 import { AttachmentChip } from "./AttachmentChip";
@@ -72,11 +68,6 @@ export interface MessageSubmissionMetadata {
   steerNow?: boolean;
   composition: UserMessageCompositionMetadata;
   speech?: UserMessageSpeechMetadata;
-}
-
-interface PendingTextareaSelectionRestore {
-  value: string;
-  restore: (textarea: HTMLTextAreaElement) => void;
 }
 
 interface PendingSpeechFinal {
@@ -980,184 +971,28 @@ export function MessageInput({
 
   const commitVoiceTranscript = useCallback(
     (transcript: string, metadata?: SpeechTranscriptionResultMetadata) => {
-      const targetId = metadata?.speechTargetId;
-      const getSpeechRange = () =>
-        targetId
-          ? (speechInsertionRangesRef.current.get(targetId) ?? null)
-          : speechInsertionRangeRef.current;
-      const updateSpeechRange = (range: SpeechInsertionRange | null) => {
-        if (targetId) {
-          if (range) {
-            speechInsertionRangesRef.current.set(targetId, range);
-          } else {
-            speechInsertionRangesRef.current.delete(targetId);
-          }
-          if (activeSpeechTargetIdRef.current === targetId) {
-            speechInsertionRangeRef.current = range;
-          }
-          return;
-        }
-        speechInsertionRangeRef.current = range;
-        if (activeSpeechTargetIdRef.current) {
-          if (range) {
-            speechInsertionRangesRef.current.set(
-              activeSpeechTargetIdRef.current,
-              range,
-            );
-          } else {
-            speechInsertionRangesRef.current.delete(
-              activeSpeechTargetIdRef.current,
-            );
-          }
-        }
-      };
-      const mapOtherSpeechRangesThroughReplacement = (
-        replacementStart: number,
-        replacementEnd: number,
-        insertedLength: number,
-        committedRange: SpeechInsertionRange | null,
-      ) => {
-        if (speechInsertionRangesRef.current.size === 0) return;
-        const committedTargetId = targetId ?? activeSpeechTargetIdRef.current;
-        const nextRanges = new Map<string, SpeechInsertionRange>();
-        for (const [rangeTargetId, range] of speechInsertionRangesRef.current) {
-          if (rangeTargetId === committedTargetId) {
-            if (committedRange) nextRanges.set(rangeTargetId, committedRange);
-            continue;
-          }
-          nextRanges.set(
-            rangeTargetId,
-            mapSpeechInsertionRangeThroughReplacement(
-              range,
-              replacementStart,
-              replacementEnd,
-              insertedLength,
-            ),
-          );
-        }
-        speechInsertionRangesRef.current = nextRanges;
-        speechInsertionRangeRef.current =
-          activeSpeechTargetIdRef.current !== null
-            ? (nextRanges.get(activeSpeechTargetIdRef.current) ?? null)
-            : null;
-      };
-      // Append transcript to existing text with space separator
-      // Trim the transcript since mobile speech API includes leading/trailing spaces
-      const trimmedTranscript = transcript.trim();
-      if (metadata?.transcriptionId) {
-        speechTranscriptionIdsRef.current = [
-          ...speechTranscriptionIdsRef.current,
-          metadata.transcriptionId,
-        ];
-      }
-      if (metadata?.smartTurnCommand === "cancel") {
-        const currentText = controls.getDraft();
-        const range = getSpeechRange();
-        const removal = range
-          ? removeLatestSpeechChunkFromRange(currentText, range)
-          : null;
-        if (removal) {
-          if (removal.text !== currentText) {
-            const selection = captureTextareaAppendSelection(
-              textareaRef.current,
-              currentText,
-            );
-            pendingTextareaSelectionRef.current = {
-              value: removal.text,
-              restore: (textarea) => {
-                restoreTextareaReplacementSelection(
-                  textarea,
-                  selection,
-                  removal.text,
-                  removal.replacementStart,
-                  removal.replacementEnd,
-                  0,
-                );
-              },
-            };
-            noteComposerEdit(removal.text);
-            controls.setDraft(removal.text);
-            mapOtherSpeechRangesThroughReplacement(
-              removal.replacementStart,
-              removal.replacementEnd,
-              removal.insertedLength,
-              removal.range,
-            );
-            updateSpeechRange(removal.range);
-          } else {
-            pendingTextareaSelectionRef.current = null;
-          }
-        } else {
-          pendingTextareaSelectionRef.current = null;
-          if (targetId) updateSpeechRange(null);
-        }
-        setInterimTranscript("");
-        return;
-      }
-
-      const currentText = controls.getDraft();
-      const speechRange = getSpeechRange();
-      let nextSpeechRange: SpeechInsertionRange | null = null;
-      const replacement = speechRange
-        ? (() => {
-            const rangeReplacement = replaceSpeechTranscriptInRange(
-              currentText,
-              trimmedTranscript,
-              speechRange,
-              metadata?.replacePreviousTranscriptChars ?? 0,
-            );
-            nextSpeechRange = rangeReplacement.range;
-            return rangeReplacement;
-          })()
-        : replaceSpeechTranscriptBefore(
-            currentText,
-            trimmedTranscript,
-            currentText.length,
-            0,
-          );
-      const nextText =
-        trimmedTranscript || metadata?.replacePreviousTranscriptChars
-          ? replacement.text
-          : currentText;
-      const shouldRestoreSelection = metadata?.smartTurnCommand !== "send";
-      if (nextText !== currentText) {
-        const selection = shouldRestoreSelection
-          ? captureTextareaAppendSelection(textareaRef.current, currentText)
-          : null;
-        pendingTextareaSelectionRef.current = shouldRestoreSelection
-          ? {
-              value: nextText,
-              restore: (textarea) => {
-                restoreTextareaReplacementSelection(
-                  textarea,
-                  selection,
-                  nextText,
-                  replacement.replacementStart,
-                  replacement.replacementEnd,
-                  replacement.insertedLength,
-                );
-              },
-            }
-          : null;
-        noteComposerEdit(nextText);
-        controls.setDraft(nextText);
-        mapOtherSpeechRangesThroughReplacement(
-          replacement.replacementStart,
-          replacement.replacementEnd,
-          replacement.insertedLength,
-          nextSpeechRange,
-        );
-        if (nextSpeechRange) {
-          updateSpeechRange(nextSpeechRange);
-        }
-      }
-      setInterimTranscript("");
-      if (metadata?.smartTurnCommand) {
-        updateSpeechRange(null);
-      }
-      if (metadata?.smartTurnCommand === "send") {
-        handleSubmit(nextText);
-      }
+      commitSpeechTranscript(
+        {
+          textareaRef,
+          getDraft: controls.getDraft,
+          setDraft: controls.setDraft,
+          setInterimTranscript,
+          speechInsertionRangeRef,
+          activeSpeechTargetIdRef,
+          speechInsertionRangesRef,
+          pendingTextareaSelectionRef,
+          onEdit: noteComposerEdit,
+          onTranscriptionId: (id) => {
+            speechTranscriptionIdsRef.current = [
+              ...speechTranscriptionIdsRef.current,
+              id,
+            ];
+          },
+          onSmartTurnSend: handleSubmit,
+        },
+        transcript,
+        metadata,
+      );
     },
     [controls, handleSubmit, noteComposerEdit],
   );
