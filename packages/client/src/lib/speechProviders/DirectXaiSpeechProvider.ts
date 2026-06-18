@@ -383,6 +383,9 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
       }
     } catch (err: unknown) {
       if (this.disposed) return;
+      // A cancelled pending transcription is a no-op even when it fails: the
+      // user already abandoned it, so do not surface its error.
+      if (this.cancelledBatchTokens.delete(recording.token)) return;
       const message = err instanceof Error ? err.message : String(err);
       this.options.onError?.(message);
       if (

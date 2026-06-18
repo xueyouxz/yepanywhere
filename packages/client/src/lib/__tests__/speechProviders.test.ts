@@ -786,6 +786,91 @@ describe("YA server speech provider", () => {
     provider.dispose();
   });
 
+  it("suppresses the error of a batch transcription that fails after cancel()", async () => {
+    const fakeStream = {
+      getTracks: () => [{ stop: vi.fn() }],
+    } as unknown as MediaStream;
+    const getUserMedia = vi.fn(async () => fakeStream);
+    const pendingFetch = deferred<Response>();
+    const fetchMock = vi.fn(() => pendingFetch.promise);
+
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia },
+    });
+
+    class FakeMediaRecorder {
+      static isTypeSupported() {
+        return true;
+      }
+      state: RecordingState = "inactive";
+      ondataavailable: ((event: BlobEvent) => void) | null = null;
+      onstop: (() => void) | null = null;
+      start() {
+        this.state = "recording";
+      }
+      stop() {
+        this.state = "inactive";
+        this.ondataavailable?.({
+          data: new Blob(["audio"], { type: "audio/webm;codecs=opus" }),
+        } as BlobEvent);
+        this.onstop?.();
+      }
+    }
+
+    class FakeBlob {
+      readonly size: number;
+      readonly type: string;
+      constructor(parts: Array<{ size?: number } | string> = [], options = {}) {
+        this.size = parts.reduce(
+          (total, part) =>
+            total + (typeof part === "string" ? part.length : (part.size ?? 1)),
+          0,
+        );
+        this.type = (options as { type?: string }).type ?? "";
+      }
+      async arrayBuffer(): Promise<ArrayBuffer> {
+        return new Uint8Array([1]).buffer;
+      }
+    }
+
+    vi.stubGlobal("Blob", FakeBlob);
+    vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("btoa", () => "YXVkaW8=");
+
+    const onResult = vi.fn();
+    const onError = vi.fn();
+    const onEnd = vi.fn();
+    const provider = new YaServerProvider("ya-whisper", "", {
+      onResult,
+      onError,
+      onEnd,
+    });
+
+    provider.start();
+    await Promise.resolve();
+    provider.stop();
+    await Promise.resolve();
+    expect(provider.getState().status).toBe("processing");
+
+    provider.cancel();
+    expect(provider.getState().status).toBe("idle");
+
+    // The backend request fails after cancel: it is the slow/stuck case cancel
+    // exists for, so the error must stay inert — no onError, still idle.
+    pendingFetch.reject(new Error("backend timed out"));
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(onResult).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+    expect(provider.getState().status).toBe("idle");
+
+    provider.dispose();
+  });
+
   it("commits provider-owned streaming final segments", async () => {
     const stopTrack = vi.fn();
     const fakeStream = {
