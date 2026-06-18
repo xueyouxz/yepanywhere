@@ -156,8 +156,8 @@ describe("binary-framing", () => {
       }
     });
 
-    it("throws for format byte 0x04 (reserved)", () => {
-      const buffer = new Uint8Array([0x04, 0x01, 0x02]);
+    it("throws for format byte 0x05 (reserved)", () => {
+      const buffer = new Uint8Array([0x05, 0x01, 0x02]);
       expect(() => decodeBinaryFrame(buffer)).toThrow(BinaryFrameError);
       try {
         decodeBinaryFrame(buffer);
@@ -182,6 +182,13 @@ describe("binary-framing", () => {
       const buffer = new Uint8Array([BinaryFormat.COMPRESSED_JSON, 0x01, 0x02]);
       const result = decodeBinaryFrame(buffer);
       expect(result.format).toBe(BinaryFormat.COMPRESSED_JSON);
+      expect(result.payload).toEqual(new Uint8Array([0x01, 0x02]));
+    });
+
+    it("accepts format 0x04 (SPEECH_AUDIO)", () => {
+      const buffer = new Uint8Array([BinaryFormat.SPEECH_AUDIO, 0x01, 0x02]);
+      const result = decodeBinaryFrame(buffer);
+      expect(result.format).toBe(BinaryFormat.SPEECH_AUDIO);
       expect(result.payload).toEqual(new Uint8Array([0x01, 0x02]));
     });
   });
