@@ -465,6 +465,9 @@ export class YaServerProvider implements SpeechProvider {
   private recorder: MediaRecorder | null = null;
   private stream: MediaStream | null = null;
   private prewarmRequest: Promise<void> | null = null;
+  // backendId:model already warmed this session, so a repeated pointer-near
+  // does not re-hit /speech/prewarm. Cleared on failure to allow a retry.
+  private prewarmedBackendKey: string | null = null;
   private ws: SpeechStreamingSocket | null = null;
   private audioContext: AudioContext | null = null;
   private audioSource: MediaStreamAudioSourceNode | null = null;
@@ -555,6 +558,11 @@ export class YaServerProvider implements SpeechProvider {
     ) {
       return;
     }
+    // Warm the server STT model alongside the mic so the first dictation skips
+    // the backend's cold model load (e.g. parakeet's ~20s first-load). This is
+    // a one-shot /speech/prewarm HTTP call — no audio, no held WebSocket — and
+    // needs no mic permission, so it runs even where the mic warm cannot.
+    this.prewarmBackendModel();
     const permissions = navigator.permissions;
     if (typeof permissions?.query !== "function") return;
     if (this.prewarmRequest) return;
@@ -574,6 +582,26 @@ export class YaServerProvider implements SpeechProvider {
       .finally(() => {
         this.prewarmRequest = null;
       });
+  }
+
+  private prewarmBackendModel(): void {
+    const model =
+      this.backendId === "ya-parakeet" || this.backendId === "ya-nemo"
+        ? this.options.parakeetModel
+        : undefined;
+    const key = `${this.backendId}:${model ?? ""}`;
+    if (this.prewarmedBackendKey === key) return;
+    this.prewarmedBackendKey = key;
+    void prewarmYaServerSpeechBackend(this.backendId, model).catch(
+      (err: unknown) => {
+        // Let a later pointer-near retry a failed warm.
+        if (this.prewarmedBackendKey === key) this.prewarmedBackendKey = null;
+        console.warn(
+          "[YaSTT] Speech model prewarm failed",
+          err instanceof Error ? err.message : String(err),
+        );
+      },
+    );
   }
 
   start(): void {

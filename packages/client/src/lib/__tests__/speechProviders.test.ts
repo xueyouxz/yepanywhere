@@ -267,6 +267,75 @@ describe("server speech prewarm", () => {
       }),
     );
   });
+
+  it("warms the backend model on pointer-near prewarm when keeping the mic warm", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    // prewarm() only needs MediaRecorder to be defined; it never constructs one.
+    vi.stubGlobal("MediaRecorder", class FakeMediaRecorder {});
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: vi.fn(async () => ({ getTracks: () => [] })) },
+    });
+
+    const provider = new YaServerProvider("ya-nemo", "", {
+      keepMicWarm: true,
+      parakeetModel: "nvidia/parakeet-rnnt-1.1b",
+    });
+    provider.prewarm();
+    await Promise.resolve();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/speech/prewarm",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          backendId: "ya-nemo",
+          model: "nvidia/parakeet-rnnt-1.1b",
+        }),
+      }),
+    );
+
+    // A repeated pointer-near must not re-load an already-warmed model.
+    fetchMock.mockClear();
+    provider.prewarm();
+    await Promise.resolve();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    provider.dispose();
+  });
+
+  it("does not warm the backend model when keep-mic-warm is off", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    // prewarm() only needs MediaRecorder to be defined; it never constructs one.
+    vi.stubGlobal("MediaRecorder", class FakeMediaRecorder {});
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: vi.fn() },
+    });
+
+    const provider = new YaServerProvider("ya-nemo", "", {
+      parakeetModel: "nvidia/parakeet-rnnt-1.1b",
+    });
+    provider.prewarm();
+    await Promise.resolve();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    provider.dispose();
+  });
 });
 
 describe("browser-native speech provider", () => {
