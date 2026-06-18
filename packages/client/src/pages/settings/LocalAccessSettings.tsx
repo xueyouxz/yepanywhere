@@ -76,8 +76,12 @@ export function LocalAccessSettings() {
     applying,
     updateBinding,
   } = useNetworkBinding();
-  const { settings: serverSettings, isLoading: settingsLoading } =
-    useServerSettings();
+  const {
+    settings: serverSettings,
+    isLoading: settingsLoading,
+    error: settingsError,
+    updateSettings: updateServerSettings,
+  } = useServerSettings();
 
   // Network binding form state
   const [localhostPort, setLocalhostPort] = useState<string>("");
@@ -109,9 +113,9 @@ export function LocalAccessSettings() {
   const [isApplying, setIsApplying] = useState(false);
 
   // Fetch read-only file-access info (env-pin state + resolved hint paths).
-  // Only meaningful in direct/cookie mode; harmless to ignore failures.
+  // Supported by both direct/cookie clients and relayed SecureConnection fetches.
   useEffect(() => {
-    if (!auth) return;
+    if (!auth && !remoteConnection) return;
     let cancelled = false;
     api
       .getFileAccessInfo()
@@ -124,7 +128,7 @@ export function LocalAccessSettings() {
     return () => {
       cancelled = true;
     };
-  }, [auth]);
+  }, [auth, remoteConnection]);
 
   // Initialize form from binding, auth, and settings state when it loads
   const [formInitialized, setFormInitialized] = useState(false);
@@ -153,6 +157,19 @@ export function LocalAccessSettings() {
     setFormInitialized(true);
   }, [auth, binding, formInitialized, serverSettings]);
 
+  // Relay mode has no cookie-auth or network-binding context, but it can still
+  // edit file access through the encrypted API connection.
+  useEffect(() => {
+    if (!remoteConnection || auth || !serverSettings || formInitialized) {
+      return;
+    }
+
+    setFileAccess(
+      settingsToFileAccessForm(serverSettings.fileAccess ?? DEFAULT_FILE_ACCESS),
+    );
+    setFormInitialized(true);
+  }, [auth, formInitialized, remoteConnection, serverSettings]);
+
   // Compute the effective allowedHosts value for comparison/saving
   const getAllowedHostsValue = (
     toggle: boolean,
@@ -175,7 +192,14 @@ export function LocalAccessSettings() {
     newLocalhostOpen: boolean,
     newFileAccess: FileAccessForm,
   ) => {
-    if (!binding || !auth || !serverSettings) return false;
+    if (!serverSettings) return false;
+    const fileAccessChanged = !fileAccessEquals(
+      fileAccessFormToSettings(newFileAccess),
+      serverSettings.fileAccess ?? DEFAULT_FILE_ACCESS,
+    );
+
+    if (!binding || !auth) return fileAccessChanged;
+
     const portChanged = newPort !== String(binding.localhost.port);
     const networkEnabledChanged = newNetworkEnabled !== binding.network.enabled;
     const interfaceChanged = newInterface !== (binding.network.host ?? "");
@@ -188,10 +212,6 @@ export function LocalAccessSettings() {
     );
     const oldValue = serverSettings.allowedHosts;
     const allowedHostsChanged = (newValue ?? "") !== (oldValue ?? "");
-    const fileAccessChanged = !fileAccessEquals(
-      fileAccessFormToSettings(newFileAccess),
-      serverSettings.fileAccess ?? DEFAULT_FILE_ACCESS,
-    );
     return (
       portChanged ||
       networkEnabledChanged ||
@@ -244,7 +264,22 @@ export function LocalAccessSettings() {
   // Unlike snapshot panes, it never re-applies an old binding: applying is a
   // network-rebind action and must stay behind the explicit Apply button.
   const resetFormFromServer = useCallback(() => {
-    if (!binding || !auth || !serverSettings) return;
+    if (!serverSettings) return;
+
+    const resetFileAccess = () =>
+      setFileAccess(
+        settingsToFileAccessForm(
+          serverSettings.fileAccess ?? DEFAULT_FILE_ACCESS,
+        ),
+      );
+
+    if (!binding || !auth) {
+      resetFileAccess();
+      setFormError(null);
+      setHasChanges(false);
+      return;
+    }
+
     setLocalhostPort(String(binding.localhost.port));
     setNetworkEnabled(binding.network.enabled);
     setSelectedInterface(binding.network.host ?? "");
@@ -261,13 +296,127 @@ export function LocalAccessSettings() {
       setAllowAllHostsToggle(false);
       setAllowedHostsText(ah ?? "");
     }
-    setFileAccess(
-      settingsToFileAccessForm(serverSettings.fileAccess ?? DEFAULT_FILE_ACCESS),
-    );
+    resetFileAccess();
     setFormError(null);
     setHasChanges(false);
   }, [auth, binding, serverSettings]);
   useSettingsUndo(hasChanges, resetFormFromServer);
+
+  const renderFileAccessSettings = () => (
+    <>
+      {/* File access — which local paths the HTTP file doors may read */}
+      <div className="settings-item">
+        <div className="settings-item-info">
+          <strong>{t("fileAccessTitle")}</strong>
+          <p>{t("fileAccessDescription")}</p>
+        </div>
+      </div>
+      {fileAccessInfo?.envPinned ? (
+        <div className="settings-item settings-item-inline-field">
+          <div className="settings-item-info">
+            <strong>{t("fileAccessAllowedFoldersTitle")}</strong>
+            <p>{t("fileAccessEnvPinnedHint")}</p>
+          </div>
+          <span className="settings-value-readonly">
+            {fileAccessInfo.envPaths.length > 0
+              ? fileAccessInfo.envPaths.join(", ")
+              : t("fileAccessNone")}{" "}
+            <span className="settings-hint">{t("fileAccessSetViaEnv")}</span>
+          </span>
+        </div>
+      ) : (
+        <>
+          <div className="settings-item">
+            <div className="settings-item-info">
+              <strong>{t("fileAccessProjects")}</strong>
+            </div>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={fileAccess.projects}
+                onChange={(e) =>
+                  patchFileAccess({ projects: e.target.checked })
+                }
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
+          <div className="settings-item">
+            <div className="settings-item-info">
+              <strong>{t("fileAccessUploads")}</strong>
+            </div>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={fileAccess.uploads}
+                onChange={(e) =>
+                  patchFileAccess({ uploads: e.target.checked })
+                }
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
+          <div className="settings-item">
+            <div className="settings-item-info">
+              <strong>{t("fileAccessTemp")}</strong>
+              {fileAccessInfo && fileAccessInfo.tempPaths.length > 0 && (
+                <p className="settings-hint">
+                  {fileAccessInfo.tempPaths.join(", ")}
+                </p>
+              )}
+            </div>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={fileAccess.temp}
+                onChange={(e) => patchFileAccess({ temp: e.target.checked })}
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
+          <div className="settings-item">
+            <div className="settings-item-info">
+              <strong>{t("fileAccessHome")}</strong>
+              <p>{t("fileAccessHomeDescription")}</p>
+            </div>
+            {fileAccess.home && (
+              <span className="settings-status-badge settings-status-warning">
+                {t("fileAccessHomeCaution")}
+              </span>
+            )}
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={fileAccess.home}
+                onChange={(e) => patchFileAccess({ home: e.target.checked })}
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
+          <div className="settings-item settings-item-inline-field">
+            <div className="settings-item-info">
+              <strong>{t("fileAccessCustomTitle")}</strong>
+              <p>{t("fileAccessCustomDescription")}</p>
+            </div>
+            <textarea
+              className="settings-input"
+              rows={3}
+              value={fileAccess.customText}
+              placeholder={t("fileAccessCustomPlaceholder")}
+              onChange={(e) =>
+                patchFileAccess({ customText: e.target.value })
+              }
+            />
+          </div>
+          {fileAccess.customText
+            .split("\n")
+            .some((line) => isWholeDiskPath(line)) && (
+            <p className="form-warning">{t("fileAccessWholeDiskWarning")}</p>
+          )}
+        </>
+      )}
+    </>
+  );
 
   const handleApplyChanges = async () => {
     if (!auth) return;
@@ -336,7 +485,7 @@ export function LocalAccessSettings() {
         allowAllHostsToggle,
         allowedHostsText,
       );
-      await api.updateServerSettings({
+      await updateServerSettings({
         allowedHosts: newAllowedHosts ?? "",
         // Skip when env-pinned (server ignores it, but avoid a confusing write).
         ...(fileAccessInfo?.envPinned
@@ -353,6 +502,25 @@ export function LocalAccessSettings() {
       } else {
         setHasChanges(false);
       }
+    } catch (err) {
+      setFormError(
+        err instanceof Error ? err.message : t("localAccessErrorApplyFailed"),
+      );
+    } finally {
+      setIsApplying(false);
+    }
+  };
+
+  const handleApplyRemoteFileAccess = async () => {
+    if (!serverSettings || fileAccessInfo?.envPinned) return;
+    setFormError(null);
+    setIsApplying(true);
+
+    try {
+      await updateServerSettings({
+        fileAccess: fileAccessFormToSettings(fileAccess),
+      });
+      setHasChanges(false);
     } catch (err) {
       setFormError(
         err instanceof Error ? err.message : t("localAccessErrorApplyFailed"),
@@ -611,125 +779,7 @@ export function LocalAccessSettings() {
           )}
           <p className="form-hint">{t("localAccessAllowedHostsHint")}</p>
 
-          {/* File access — which local paths the HTTP file doors may read */}
-          <div className="settings-item">
-            <div className="settings-item-info">
-              <strong>{t("fileAccessTitle")}</strong>
-              <p>{t("fileAccessDescription")}</p>
-            </div>
-          </div>
-          {fileAccessInfo?.envPinned ? (
-            <div className="settings-item settings-item-inline-field">
-              <div className="settings-item-info">
-                <strong>{t("fileAccessAllowedFoldersTitle")}</strong>
-                <p>{t("fileAccessEnvPinnedHint")}</p>
-              </div>
-              <span className="settings-value-readonly">
-                {fileAccessInfo.envPaths.length > 0
-                  ? fileAccessInfo.envPaths.join(", ")
-                  : t("fileAccessNone")}{" "}
-                <span className="settings-hint">
-                  {t("fileAccessSetViaEnv")}
-                </span>
-              </span>
-            </div>
-          ) : (
-            <>
-              <div className="settings-item">
-                <div className="settings-item-info">
-                  <strong>{t("fileAccessProjects")}</strong>
-                </div>
-                <label className="toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={fileAccess.projects}
-                    onChange={(e) =>
-                      patchFileAccess({ projects: e.target.checked })
-                    }
-                  />
-                  <span className="toggle-slider" />
-                </label>
-              </div>
-              <div className="settings-item">
-                <div className="settings-item-info">
-                  <strong>{t("fileAccessUploads")}</strong>
-                </div>
-                <label className="toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={fileAccess.uploads}
-                    onChange={(e) =>
-                      patchFileAccess({ uploads: e.target.checked })
-                    }
-                  />
-                  <span className="toggle-slider" />
-                </label>
-              </div>
-              <div className="settings-item">
-                <div className="settings-item-info">
-                  <strong>{t("fileAccessTemp")}</strong>
-                  {fileAccessInfo && fileAccessInfo.tempPaths.length > 0 && (
-                    <p className="settings-hint">
-                      {fileAccessInfo.tempPaths.join(", ")}
-                    </p>
-                  )}
-                </div>
-                <label className="toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={fileAccess.temp}
-                    onChange={(e) =>
-                      patchFileAccess({ temp: e.target.checked })
-                    }
-                  />
-                  <span className="toggle-slider" />
-                </label>
-              </div>
-              <div className="settings-item">
-                <div className="settings-item-info">
-                  <strong>{t("fileAccessHome")}</strong>
-                  <p>{t("fileAccessHomeDescription")}</p>
-                </div>
-                {fileAccess.home && (
-                  <span className="settings-status-badge settings-status-warning">
-                    {t("fileAccessHomeCaution")}
-                  </span>
-                )}
-                <label className="toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={fileAccess.home}
-                    onChange={(e) =>
-                      patchFileAccess({ home: e.target.checked })
-                    }
-                  />
-                  <span className="toggle-slider" />
-                </label>
-              </div>
-              <div className="settings-item settings-item-inline-field">
-                <div className="settings-item-info">
-                  <strong>{t("fileAccessCustomTitle")}</strong>
-                  <p>{t("fileAccessCustomDescription")}</p>
-                </div>
-                <textarea
-                  className="settings-input"
-                  rows={3}
-                  value={fileAccess.customText}
-                  placeholder={t("fileAccessCustomPlaceholder")}
-                  onChange={(e) =>
-                    patchFileAccess({ customText: e.target.value })
-                  }
-                />
-              </div>
-              {fileAccess.customText
-                .split("\n")
-                .some((line) => isWholeDiskPath(line)) && (
-                <p className="form-warning">
-                  {t("fileAccessWholeDiskWarning")}
-                </p>
-              )}
-            </>
-          )}
+          {renderFileAccessSettings()}
 
           {/* Require Password toggle */}
           {!auth.authDisabledByEnv && (
@@ -879,12 +929,48 @@ export function LocalAccessSettings() {
 
   // Remote mode (SRP auth)
   if (remoteConnection) {
+    const remoteFileAccessReady = !!serverSettings && formInitialized;
+
     return (
       <section className="settings-section">
         <h2>{t("settingsLocalAccessTitle")}</h2>
         <p className="settings-section-description">
           {t("localAccessRemoteDescription")}
         </p>
+
+        {remoteFileAccessReady ? (
+          <form
+            className="settings-group"
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleApplyRemoteFileAccess();
+            }}
+          >
+            {renderFileAccessSettings()}
+            <div className="settings-item">
+              {formError && <p className="form-error">{formError}</p>}
+              <button
+                type="submit"
+                className="settings-button"
+                disabled={
+                  !hasChanges || isApplying || fileAccessInfo?.envPinned
+                }
+              >
+                {isApplying ? t("localAccessApplying") : t("localAccessApply")}
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="settings-group">
+            <div className="settings-item">
+              <div className="settings-item-info">
+                <strong>{t("fileAccessTitle")}</strong>
+                <p>{settingsError ?? t("localAccessLoading")}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="settings-group">
           <div className="settings-item">
             <div className="settings-item-info">
