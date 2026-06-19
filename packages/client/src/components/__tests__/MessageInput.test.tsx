@@ -699,21 +699,22 @@ describe("MessageInput", () => {
     });
   });
 
-  it("keeps the composer editable and shows a cancellable chip while transcribing", async () => {
+  it("shows the Transcribing label inline at the cursor and cancels on Escape", async () => {
     const textarea = renderMessageInput() as HTMLTextAreaElement;
 
-    expect(document.querySelector(".speech-transcribing-chip")).toBeNull();
+    expect(document.querySelector(".speech-processing-inline")).toBeNull();
 
     // Enter the batch processing wait (no interim), e.g. parakeet first-load.
     act(() => {
       voicePropsState.current?.onPendingSpeechChange?.("transcribing");
     });
 
-    const chip = await waitFor(() => {
-      const el = document.querySelector(".speech-transcribing-chip");
+    const badge = await waitFor(() => {
+      const el = document.querySelector(".speech-processing-inline");
       expect(el).not.toBeNull();
       return el as HTMLElement;
     });
+    expect(badge.textContent).toContain("Transcribing");
 
     // The field stays editable while transcription is pending.
     expect(textarea.disabled).toBe(false);
@@ -722,75 +723,60 @@ describe("MessageInput", () => {
     });
     expect(textarea.value).toBe("typed while transcribing");
 
-    // The chip's ✕ is the only cancel path; backspace cannot reach it.
-    const cancel = chip.querySelector(
-      ".speech-transcribing-cancel",
-    ) as HTMLButtonElement;
-    fireEvent.click(cancel);
+    // Escape is the deliberate cancel path now (no chip ✕; backspace can't
+    // reach it). Cancel leaves the user's typed text intact.
+    fireEvent.keyDown(textarea, { key: "Escape" });
     expect(mockVoiceCancelProcessing).toHaveBeenCalledTimes(1);
-
     await waitFor(() => {
-      expect(document.querySelector(".speech-transcribing-chip")).toBeNull();
+      expect(document.querySelector(".speech-processing-inline")).toBeNull();
     });
-    // Cancel leaves the user's typed text intact.
     expect(textarea.value).toBe("typed while transcribing");
   });
 
-  it("previews streaming interim inline, then shows a Finalizing chip on flush", async () => {
-    renderMessageInput();
+  it("previews interim inline, then shows the Finalizing label inline; Escape cancels", async () => {
+    const textarea = renderMessageInput() as HTMLTextAreaElement;
 
-    // Active streaming: interim text previews inline, no pending chip.
+    // Active streaming: interim text previews inline (green highlight).
     act(() => {
       voicePropsState.current?.onInterimTranscript?.("live words");
     });
     await waitFor(() => {
       expect(document.querySelector(".speech-interim-inline")).not.toBeNull();
     });
-    expect(document.querySelector(".speech-transcribing-chip")).toBeNull();
+    expect(document.querySelector(".speech-processing-inline")).toBeNull();
 
-    // Flush (stop): the streaming finalize wait shows the chip with its own
-    // word, and the ✕ cancels — parity with the batch transcribe wait.
+    // Flush (stop): the finalize wait shows its label inline at the same place,
+    // unified with the batch transcribe wait; Escape cancels.
     act(() => {
       voicePropsState.current?.onInterimTranscript?.("");
       voicePropsState.current?.onPendingSpeechChange?.("finalizing");
     });
-    const chip = await waitFor(() => {
-      const el = document.querySelector(".speech-transcribing-chip");
+    const badge = await waitFor(() => {
+      const el = document.querySelector(".speech-processing-inline");
       expect(el).not.toBeNull();
       return el as HTMLElement;
     });
-    expect(chip.textContent).toContain("Finalizing");
+    expect(badge.textContent).toContain("Finalizing");
 
-    fireEvent.click(
-      chip.querySelector(".speech-transcribing-cancel") as HTMLButtonElement,
-    );
+    fireEvent.keyDown(textarea, { key: "Escape" });
     expect(mockVoiceCancelProcessing).toHaveBeenCalledTimes(1);
   });
 
-  it("shows a cancellable Listening chip during active capture", async () => {
-    const textarea = renderMessageInput() as HTMLTextAreaElement;
+  it("shows the Listening label inline during active capture", async () => {
+    renderMessageInput();
 
-    // Active live capture surfaces the same chip with its own word, so the user
-    // can abandon the in-flight utterance mid-stream (committed finals stay).
+    // Active live capture previews the pending state inline at the insertion
+    // point too, not as a chip below the composer.
     act(() => {
+      voicePropsState.current?.onListeningStart?.();
       voicePropsState.current?.onPendingSpeechChange?.("listening");
     });
-    const chip = await waitFor(() => {
-      const el = document.querySelector(".speech-transcribing-chip");
+    const badge = await waitFor(() => {
+      const el = document.querySelector(".speech-processing-inline");
       expect(el).not.toBeNull();
       return el as HTMLElement;
     });
-    expect(chip.textContent).toContain("Listening");
-
-    // The field stays editable, and the ✕ routes to the unified cancel().
-    expect(textarea.disabled).toBe(false);
-    fireEvent.click(
-      chip.querySelector(".speech-transcribing-cancel") as HTMLButtonElement,
-    );
-    expect(mockVoiceCancelProcessing).toHaveBeenCalledTimes(1);
-    await waitFor(() => {
-      expect(document.querySelector(".speech-transcribing-chip")).toBeNull();
-    });
+    expect(badge.textContent).toContain("Listening");
   });
 
   it("does not grace-delay the selection that started the mic transaction", () => {

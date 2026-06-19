@@ -51,7 +51,6 @@ import { isVoiceInputShortcut } from "../lib/voiceInputShortcut";
 import type { ContextUsage, PermissionMode } from "../types";
 import { AttachmentChip } from "./AttachmentChip";
 import { MessageInputToolbar } from "./MessageInputToolbar";
-import { SpeechTranscribingChip } from "./SpeechTranscribingChip";
 import type {
   SpeechPendingKind,
   VoiceInputButtonRef,
@@ -306,11 +305,19 @@ export function MessageInput({
     matchingSlashCommands.length > 0;
   const canSubmit = !!(text.trim() || attachments.length > 0);
   const interimDisplayTranscript = interimTranscript.trim();
-  // The inline mirror previews streaming interim text in place. A post-capture
-  // wait (batch transcribe or streaming flush) instead shows a sibling chip so
-  // the textarea stays visible and freely editable. See
-  // topics/mic-button-speech-ui.md (Batch Behavior, Cancel contract).
-  const speechInlineTranscript = interimDisplayTranscript;
+  // The inline mirror previews speech in place at the insertion point (replacing
+  // any selected span): streaming interim text while words arrive, otherwise the
+  // pending-state label (Listening…/Transcribing…/Finalizing…) so the wait shows
+  // where the result will land — unified with the streaming preview rather than a
+  // separate chip below the composer. See topics/mic-button-speech-ui.md.
+  const speechPendingLabel = speechPending
+    ? speechPending === "finalizing"
+      ? t("speechFinalizingPlaceholder" as never)
+      : speechPending === "listening"
+        ? t("speechListeningPlaceholder" as never)
+        : t("speechTranscribingPlaceholder" as never)
+    : "";
+  const speechInlineTranscript = interimDisplayTranscript || speechPendingLabel;
   const speechInsertionRange = speechInsertionRangeRef.current;
   const interimInsertion = speechInsertionRange
     ? getSpeechTranscriptReplacementParts(
@@ -685,6 +692,23 @@ export function MessageInput({
         handleSlashCommand(matchingSlashCommands[selectedSlashIndex] ?? "");
         return;
       }
+    }
+
+    // The pending post-capture wait now shows its label inline at the cursor
+    // (no chip ✕). Escape cancels it — drops the uncommitted result, keeps any
+    // already-committed text. (Active listening still finalizes on Escape below.)
+    if (
+      e.key === "Escape" &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.shiftKey &&
+      !e.altKey &&
+      (speechPending === "transcribing" || speechPending === "finalizing")
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleCancelTranscription();
+      return;
     }
 
     if (
@@ -1225,13 +1249,6 @@ export function MessageInput({
             </div>
           )}
         </div>
-
-        {speechPending && (
-          <SpeechTranscribingChip
-            kind={speechPending}
-            onCancel={handleCancelTranscription}
-          />
-        )}
 
         {showSlashSuggestions && (
           <div
