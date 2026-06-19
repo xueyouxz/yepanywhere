@@ -1,55 +1,101 @@
-import { useSyncExternalStore } from "react";
+export type SpeechWaveformRenderer = (
+  samples: Float32Array,
+  sampleCount: number,
+) => void;
 
-const SILENCE_DB = -80;
-const CLIP_PEAK = 0.8;
-const EMPTY_SAMPLES = Object.freeze([0]);
-const listeners = new Set<() => void>();
-let snapshot: readonly number[] = EMPTY_SAMPLES;
-let lastPublishedAt = 0;
+const EMPTY_SAMPLES = new Float32Array(0);
+const MAX_FRAME_RATE = 60;
+const MIN_FRAME_INTERVAL_MS = 1000 / MAX_FRAME_RATE;
+const FRAME_INTERVAL_TOLERANCE_MS = 0.5;
 
-function emit(): void {
-  for (const listener of listeners) listener();
+let latestSamples = EMPTY_SAMPLES;
+let latestSampleCount = 0;
+let samplesPending = false;
+let renderer: SpeechWaveformRenderer | null = null;
+let animationFrameId: number | null = null;
+let lastRenderedAt = Number.NEGATIVE_INFINITY;
+
+function isDocumentVisible(): boolean {
+  return typeof document === "undefined" || document.visibilityState !== "hidden";
+}
+
+function cancelPendingFrame(): void {
+  if (animationFrameId === null || typeof cancelAnimationFrame === "undefined") {
+    animationFrameId = null;
+    return;
+  }
+  cancelAnimationFrame(animationFrameId);
+  animationFrameId = null;
+}
+
+function scheduleFrame(): void {
+  if (
+    animationFrameId !== null ||
+    renderer === null ||
+    !samplesPending ||
+    !isDocumentVisible() ||
+    typeof requestAnimationFrame === "undefined"
+  ) {
+    return;
+  }
+  animationFrameId = requestAnimationFrame(renderFrame);
+}
+
+function renderFrame(timestamp: number): void {
+  animationFrameId = null;
+  if (renderer === null || !samplesPending || !isDocumentVisible()) return;
+  if (
+    timestamp - lastRenderedAt + FRAME_INTERVAL_TOLERANCE_MS <
+    MIN_FRAME_INTERVAL_MS
+  ) {
+    scheduleFrame();
+    return;
+  }
+
+  samplesPending = false;
+  lastRenderedAt = timestamp;
+  renderer(latestSamples, latestSampleCount);
+  // Audio may publish again while a renderer is doing other synchronous work.
+  // Keep a single-frame queue rather than allowing a render backlog.
+  scheduleFrame();
+}
+
+function handleVisibilityChange(): void {
+  if (isDocumentVisible()) {
+    scheduleFrame();
+  } else {
+    cancelPendingFrame();
+  }
 }
 
 export function publishSpeechWaveformSamples(samples: Float32Array): void {
-  const now =
-    typeof performance === "undefined" ? Date.now() : performance.now();
-  if (now - lastPublishedAt < 40 || samples.length === 0) return;
-  lastPublishedAt = now;
-
-  const normalizedSamples = Array.from(samples, (sample) => {
-    const peak = Math.abs(sample);
-    if (peak <= 0) return 0;
-    // Map raw peak amplitude through a bounded logarithmic scale. Quiet speech
-    // stays legible, while peaks at 80% amplitude and above visibly saturate.
-    const clippedPeak = Math.min(CLIP_PEAK, peak);
-    const decibels = 20 * Math.log10(clippedPeak);
-    const clipDecibels = 20 * Math.log10(CLIP_PEAK);
-    return Math.min(
-      1,
-      Math.max(0, (decibels - SILENCE_DB) / (clipDecibels - SILENCE_DB)),
-    );
-  });
-  snapshot = Object.freeze(normalizedSamples);
-  emit();
+  if (samples.length === 0) return;
+  if (latestSamples.length < samples.length) {
+    latestSamples = new Float32Array(samples.length);
+  }
+  latestSamples.set(samples);
+  latestSampleCount = samples.length;
+  samplesPending = true;
+  scheduleFrame();
 }
 
 export function clearSpeechWaveform(): void {
-  lastPublishedAt = 0;
-  if (snapshot === EMPTY_SAMPLES) return;
-  snapshot = EMPTY_SAMPLES;
-  emit();
+  latestSampleCount = 0;
+  samplesPending = true;
+  scheduleFrame();
 }
 
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-
-function getSnapshot(): readonly number[] {
-  return snapshot;
-}
-
-export function useSpeechWaveformSamples(): readonly number[] {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+export function attachSpeechWaveformRenderer(
+  nextRenderer: SpeechWaveformRenderer,
+): () => void {
+  renderer = nextRenderer;
+  lastRenderedAt = Number.NEGATIVE_INFINITY;
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+  scheduleFrame();
+  return () => {
+    if (renderer !== nextRenderer) return;
+    renderer = null;
+    cancelPendingFrame();
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+  };
 }

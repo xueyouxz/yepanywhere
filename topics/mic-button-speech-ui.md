@@ -310,8 +310,12 @@ background or outline. The visible sample count is a client-side presentation
 effect derived from the waveform element's measured pixel width; capture and
 transport remain layout-independent. It renders one sample vertex per measured
 CSS pixel in a continuous mirrored envelope, so there are no visual gaps and
-saturation intentionally becomes a visibly clipped band. Spoken commands may
-be shown as
+saturation intentionally becomes a visibly clipped band. The envelope is
+painted directly to a canvas, not rebuilt through React or SVG state. Audio
+callbacks only overwrite the latest pending sample buffer; at most one
+`requestAnimationFrame` is queued, accepted draws are capped at 60 fps, and
+intermediate samples are coalesced when the browser is busy. Hidden documents
+queue no paints. Spoken commands may be shown as
 temporary UI feedback near the mic, such as a small command chip, but the chip
 is advisory UI only: the command word still must not appear in the textarea
 value.

@@ -1,80 +1,120 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useSpeechWaveformSamples } from "../lib/speechWaveform";
+import { useLayoutEffect, useRef } from "react";
+import { attachSpeechWaveformRenderer } from "../lib/speechWaveform";
 
-const WAVEFORM_HEIGHT = 36;
-const WAVEFORM_MIDLINE = WAVEFORM_HEIGHT / 2;
+const SILENCE_DB = -80;
+const CLIP_PEAK = 0.8;
+const CLIP_DB = 20 * Math.log10(CLIP_PEAK);
 
-function resamplePeaks(
-  samples: readonly number[],
-  targetCount: number,
-): readonly number[] {
-  if (targetCount <= 0) return [];
-  return Array.from({ length: targetCount }, (_, index) => {
-    const start = Math.floor((index * samples.length) / targetCount);
-    const end = Math.max(
-      start + 1,
-      Math.floor(((index + 1) * samples.length) / targetCount),
-    );
-    let peak = 0;
-    for (
-      let sampleIndex = start;
-      sampleIndex < Math.min(end, samples.length);
-      sampleIndex += 1
-    ) {
-      peak = Math.max(peak, samples[sampleIndex] ?? 0);
-    }
-    return peak;
-  });
+function normalizedAmplitude(peak: number): number {
+  if (peak <= 0) return 0;
+  const decibels = 20 * Math.log10(Math.min(CLIP_PEAK, peak));
+  return Math.min(
+    1,
+    Math.max(0, (decibels - SILENCE_DB) / (CLIP_DB - SILENCE_DB)),
+  );
 }
 
-function createWaveformPath(samples: readonly number[]): string {
-  if (samples.length === 0) return "";
-  const xAt = (index: number) =>
-    samples.length === 1 ? 50 : (index * 100) / (samples.length - 1);
-  const halfHeightAt = (sample: number) =>
-    Math.max(1, sample * WAVEFORM_MIDLINE);
-  const top = samples.map(
-    (sample, index) =>
-      `${xAt(index)} ${WAVEFORM_MIDLINE - halfHeightAt(sample)}`,
+function peakForColumn(
+  samples: Float32Array,
+  sampleCount: number,
+  column: number,
+  columnCount: number,
+): number {
+  if (sampleCount === 0) return 0;
+  const start = Math.floor((column * sampleCount) / columnCount);
+  const end = Math.max(
+    start + 1,
+    Math.floor(((column + 1) * sampleCount) / columnCount),
   );
-  const bottom = samples
-    .map(
-      (sample, index) =>
-        `${xAt(index)} ${WAVEFORM_MIDLINE + halfHeightAt(sample)}`,
-    )
-    .reverse();
-  return `M ${top.join(" L ")} L ${bottom.join(" L ")} Z`;
+  let peak = 0;
+  for (let index = start; index < Math.min(end, sampleCount); index += 1) {
+    peak = Math.max(peak, Math.abs(samples[index] ?? 0));
+  }
+  return normalizedAmplitude(peak);
+}
+
+function drawWaveform(
+  canvas: HTMLCanvasElement,
+  context: CanvasRenderingContext2D,
+  samples: Float32Array,
+  sampleCount: number,
+  halfHeights: Float32Array,
+  width: number,
+  height: number,
+  color: string,
+): void {
+  if (width === 0 || height === 0) return;
+
+  const deviceScale = Math.max(1, window.devicePixelRatio || 1);
+  const backingWidth = Math.max(1, Math.round(width * deviceScale));
+  const backingHeight = Math.max(1, Math.round(height * deviceScale));
+  if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
+    canvas.width = backingWidth;
+    canvas.height = backingHeight;
+    context.fillStyle = color;
+  }
+  context.setTransform(deviceScale, 0, 0, deviceScale, 0, 0);
+  context.clearRect(0, 0, width, height);
+  if (sampleCount === 0) return;
+
+  const columnCount = Math.max(1, Math.ceil(width));
+  const midpoint = height / 2;
+  for (let column = 0; column <= columnCount; column += 1) {
+    const sampleColumn = Math.min(column, columnCount - 1);
+    halfHeights[column] = Math.max(
+      1,
+      peakForColumn(samples, sampleCount, sampleColumn, columnCount) * midpoint,
+    );
+  }
+
+  context.beginPath();
+  context.moveTo(0, midpoint - (halfHeights[0] ?? 1));
+  for (let column = 1; column <= columnCount; column += 1) {
+    const x = Math.min(width, column);
+    context.lineTo(x, midpoint - (halfHeights[column] ?? 1));
+  }
+  for (let column = columnCount; column >= 0; column -= 1) {
+    const x = Math.min(width, column);
+    context.lineTo(x, midpoint + (halfHeights[column] ?? 1));
+  }
+  context.closePath();
+  context.fill();
 }
 
 export function SpeechWaveform() {
-  const samples = useSpeechWaveformSamples();
-  const waveformRef = useRef<SVGSVGElement>(null);
-  const [widthPx, setWidthPx] = useState(0);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useLayoutEffect(() => {
-    const waveform = waveformRef.current;
-    if (!waveform) return;
-    const updateWidth = (width: number) => {
-      setWidthPx(Math.max(0, width));
-    };
-    updateWidth(waveform.getBoundingClientRect().width);
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver((entries) => {
-      updateWidth(entries[0]?.contentRect.width ?? 0);
-    });
-    observer.observe(waveform);
-    return () => observer.disconnect();
-  }, []);
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !context) return;
 
-  const barCount = Math.max(1, Math.floor(widthPx));
-  const visibleSamples = useMemo(
-    () => resamplePeaks(samples, barCount),
-    [barCount, samples],
-  );
-  const waveformPath = useMemo(
-    () => createWaveformPath(visibleSamples),
-    [visibleSamples],
-  );
+    let halfHeights = new Float32Array(0);
+    const color = getComputedStyle(canvas).color;
+    context.fillStyle = color;
+    const detachRenderer = attachSpeechWaveformRenderer(
+      (samples, sampleCount) => {
+        const bounds = canvas.getBoundingClientRect();
+        const width = Math.max(0, bounds.width);
+        const height = Math.max(0, bounds.height);
+        const requiredColumns = Math.max(1, Math.ceil(width)) + 1;
+        if (halfHeights.length < requiredColumns) {
+          halfHeights = new Float32Array(requiredColumns);
+        }
+        drawWaveform(
+          canvas,
+          context,
+          samples,
+          sampleCount,
+          halfHeights,
+          width,
+          height,
+          color,
+        );
+      },
+    );
+    return detachRenderer;
+  }, []);
 
   return (
     <div
@@ -82,15 +122,7 @@ export function SpeechWaveform() {
       data-composer-elastic="true"
       aria-hidden="true"
     >
-      <svg
-        ref={waveformRef}
-        viewBox={`0 0 100 ${WAVEFORM_HEIGHT}`}
-        preserveAspectRatio="none"
-        focusable="false"
-      >
-        <title>Microphone waveform</title>
-        <path className="composer-speech-waveform-shape" d={waveformPath} />
-      </svg>
+      <canvas ref={canvasRef} />
     </div>
   );
 }

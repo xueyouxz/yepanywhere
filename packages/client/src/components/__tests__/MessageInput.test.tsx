@@ -467,6 +467,7 @@ function renderToolbarView(
 
 describe("MessageInput", () => {
   beforeEach(() => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
     versionState.version = {
       current: "test",
       latest: null,

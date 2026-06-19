@@ -4927,14 +4927,10 @@ a.sidebar-nav-item {
   align-self: center;
 }
 
-.composer-speech-waveform svg {
+.composer-speech-waveform canvas {
   display: block;
   width: 100%;
   height: 100%;
-}
-
-.composer-speech-waveform-shape {
-  fill: currentColor;
 }
 
 /* Attach button */

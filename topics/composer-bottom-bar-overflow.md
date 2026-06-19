@@ -121,4 +121,6 @@ they can reach a control.
   center width remains, while measurement excludes the elastic width and the
   fully collapsed child consumes no extra control gap. Its client renderer
   derives sample-vertex count from the measured pixel width and uses the full
-  toolbar control height.
+  toolbar control height. Canvas drawing is browser-paint-paced, capped at
+  60 fps, and coalesces intermediate audio updates instead of accumulating
+  offscreen frame work.
