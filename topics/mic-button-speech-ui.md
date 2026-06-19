@@ -163,9 +163,11 @@ clear its red/listening state immediately; slower upload, provider latency,
 local model load, or a slow CPU plus large ASR model are post-capture
 processing and must not make the mic look active.
 
-While the batch result is pending, the composer stays fully editable. The
-textarea keeps its real, visible draft and the user may type or edit anywhere,
-including the spot where the pending transcript will land. The pending state is
+While the batch result is pending, the composer stays usable: the textarea
+keeps its real, visible draft and the user may type or edit **before** the
+insertion point freely (the primary use case). Editing at or after the
+insertion span is limited while a preview is active — see the known limitation
+below. The pending state is
 surfaced **inline at the insertion point** — in place of any selected span —
 through the same draft mirror that previews streaming interim text: a muted
 `Transcribing…` label shows where the result will land. The label lives in an
@@ -178,6 +180,17 @@ non-editable, not why it lives below the field. Streaming interim text and the
 post-capture label share the one inline mirror; the label shows for the
 no-interim waits (`processing`/`finalizing`) and during active `listening`
 before any interim arrives.
+
+**Known limitation — typing at/after the insertion span.** While a speech
+preview is active (streaming interim *or* a pending label), the inline
+span/tag is zero-width in the textarea value but the overlaid mirror reserves
+visual space for it, so the native caret and the rendered text diverge at and
+after that point. In practice the caret is "stolen" to the pre-span position:
+typing to edit text *at or after* the insertion/replaced span is effectively
+unavailable until the preview resolves. This is the textarea/mirror divergence,
+not a race. Editing *before* the span works normally — the primary use case —
+so the limitation is accepted; the clean fix is a richer input (see
+[composer-rich-input.md](composer-rich-input.md)).
 
 ### Cancel contract
 
