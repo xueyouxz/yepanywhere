@@ -1590,6 +1590,16 @@ export function NewSessionForm({
         transcript,
         metadata,
       );
+      // A completed overlapping (non-active) target's result has landed; forget
+      // its range so its tag clears (active target is forgotten on pending->null).
+      const committedTargetId = metadata?.speechTargetId;
+      if (
+        committedTargetId &&
+        committedTargetId !== activeSpeechTargetIdRef.current &&
+        speechInsertionRangesRef.current.delete(committedTargetId)
+      ) {
+        setSpeechPreviewRevision((revision) => revision + 1);
+      }
     },
     [draftControls, handleStartSession],
   );
@@ -1639,6 +1649,16 @@ export function NewSessionForm({
 
   const handlePendingSpeechChange = useCallback(
     (kind: SpeechPendingKind | null) => {
+      if (kind === null) {
+        // Active recording finished: forget its target so the inline tag clears
+        // and completed targets don't accumulate (see MessageInput).
+        const targetId = activeSpeechTargetIdRef.current;
+        if (targetId) {
+          speechInsertionRangesRef.current.delete(targetId);
+        }
+        speechInsertionRangeRef.current = null;
+        activeSpeechTargetIdRef.current = null;
+      }
       setSpeechPending(kind);
     },
     [],

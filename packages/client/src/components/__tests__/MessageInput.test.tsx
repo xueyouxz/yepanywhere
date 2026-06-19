@@ -820,6 +820,40 @@ describe("MessageInput", () => {
     expect(ordinals[0]?.textContent).toContain("2");
   });
 
+  it("clears a completed recording's tag; a later activation does not revive it", async () => {
+    renderMessageInput();
+
+    act(() => {
+      voicePropsState.current?.onListeningStart?.();
+      voicePropsState.current?.onPendingSpeechChange?.("transcribing");
+    });
+    await waitFor(() => {
+      expect(
+        document.querySelectorAll(".speech-processing-inline").length,
+      ).toBe(1);
+    });
+
+    // Recording completes (result committed, pending ends) -> tag clears.
+    act(() => {
+      voicePropsState.current?.onPendingSpeechChange?.(null);
+    });
+    await waitFor(() => {
+      expect(document.querySelector(".speech-processing-inline")).toBeNull();
+    });
+
+    // A second activation shows exactly one tag, not a revived stack.
+    act(() => {
+      voicePropsState.current?.onListeningStart?.();
+      voicePropsState.current?.onPendingSpeechChange?.("listening");
+    });
+    await waitFor(() => {
+      expect(
+        document.querySelectorAll(".speech-processing-inline").length,
+      ).toBe(1);
+    });
+    expect(document.querySelector(".speech-tag-ordinal")).toBeNull();
+  });
+
   it("does not grace-delay the selection that started the mic transaction", () => {
     vi.useFakeTimers();
     const textarea = renderMessageInput() as HTMLTextAreaElement;

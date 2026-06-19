@@ -1076,6 +1076,18 @@ export function MessageInput({
         transcript,
         metadata,
       );
+      // An overlapping (non-active) target's batch result has now landed; forget
+      // its range so its tag clears. The active target is forgotten on the
+      // pending->null transition instead (it may still get more streaming
+      // finals).
+      const committedTargetId = metadata?.speechTargetId;
+      if (
+        committedTargetId &&
+        committedTargetId !== activeSpeechTargetIdRef.current &&
+        speechInsertionRangesRef.current.delete(committedTargetId)
+      ) {
+        setSpeechPreviewRevision((revision) => revision + 1);
+      }
     },
     [controls, handleSubmit, noteComposerEdit],
   );
@@ -1126,6 +1138,18 @@ export function MessageInput({
 
   const handlePendingSpeechChange = useCallback(
     (kind: SpeechPendingKind | null) => {
+      if (kind === null) {
+        // The active recording finished (its result has already committed);
+        // forget its insertion target so the inline tag clears and the range
+        // map does not accumulate completed targets (which would revive as
+        // stale "Transcribing…" tags on the next mic activation).
+        const targetId = activeSpeechTargetIdRef.current;
+        if (targetId) {
+          speechInsertionRangesRef.current.delete(targetId);
+        }
+        speechInsertionRangeRef.current = null;
+        activeSpeechTargetIdRef.current = null;
+      }
       setSpeechPending(kind);
     },
     [],
