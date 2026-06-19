@@ -1722,7 +1722,11 @@ export function NewSessionForm({
   const inputArea = (
     <>
       <div
-        className={`speech-draft-field ${speechInlineTranscript ? "has-interim" : ""}`}
+        className={`speech-draft-field ${speechInlineTranscript ? "has-interim" : ""}${
+          speechInlineTranscript && !interimDisplayTranscript
+            ? " has-pending-tag"
+            : ""
+        }`}
       >
         <div className="speech-draft-inline">
           {speechInlineTranscript && (
@@ -1737,7 +1741,23 @@ export function NewSessionForm({
                 }
               >
                 {interimInsertion.transcript}
+                {!interimDisplayTranscript && (
+                  <button
+                    type="button"
+                    className="speech-tag-cancel"
+                    tabIndex={-1}
+                    aria-hidden="true"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={handleCancelTranscription}
+                    title={t("speechTranscribingCancel" as never)}
+                  >
+                    ×
+                  </button>
+                )}
               </span>
+              {!interimDisplayTranscript && (
+                <span className="speech-tag-caret" />
+              )}
               {interimInsertion.separatorAfter}
               <span>{interimInsertion.after}</span>
             </div>

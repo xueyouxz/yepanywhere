@@ -3460,6 +3460,51 @@ a.sidebar-nav-item {
   padding: 0 0.2em;
 }
 
+/* A pending tag (Listening…/Transcribing…/Finalizing…) is zero-width in the
+   textarea value, so the native caret would sit before it. Hide the native
+   caret and draw a faked one after the tag instead. See composer-rich-input.md. */
+.speech-draft-field.has-pending-tag textarea {
+  caret-color: transparent;
+}
+
+.speech-tag-cancel {
+  pointer-events: auto;
+  margin-left: 0.3em;
+  padding: 0 0.15em;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-style: normal;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.speech-tag-cancel:hover {
+  color: var(--text-primary);
+}
+
+.speech-tag-caret {
+  display: inline-block;
+  width: 1px;
+  height: 1.05em;
+  margin: 0 1px;
+  background: var(--text-primary);
+  vertical-align: text-bottom;
+  animation: speech-tag-caret-blink 1.06s step-end infinite;
+}
+
+@keyframes speech-tag-caret-blink {
+  0%,
+  49.99% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
 .speech-interim-status {
   position: absolute;
   width: 1px;

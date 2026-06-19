@@ -779,6 +779,24 @@ describe("MessageInput", () => {
     expect(badge.textContent).toContain("Listening");
   });
 
+  it("cancels the inline pending tag via its ✕ button", async () => {
+    renderMessageInput();
+
+    act(() => {
+      voicePropsState.current?.onPendingSpeechChange?.("transcribing");
+    });
+    const badge = await waitFor(() => {
+      const el = document.querySelector(".speech-processing-inline");
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    fireEvent.click(badge.querySelector(".speech-tag-cancel") as HTMLButtonElement);
+    expect(mockVoiceCancelProcessing).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(document.querySelector(".speech-processing-inline")).toBeNull();
+    });
+  });
+
   it("does not grace-delay the selection that started the mic transaction", () => {
     vi.useFakeTimers();
     const textarea = renderMessageInput() as HTMLTextAreaElement;

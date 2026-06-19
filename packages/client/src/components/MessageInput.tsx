@@ -1156,7 +1156,11 @@ export function MessageInput({
         className={`message-input ${collapsed ? "message-input-collapsed" : ""} ${interimTranscript ? "voice-recording" : ""}`}
       >
         <div
-          className={`speech-draft-field ${speechInlineTranscript ? "has-interim" : ""}`}
+          className={`speech-draft-field ${speechInlineTranscript ? "has-interim" : ""}${
+            speechInlineTranscript && !interimDisplayTranscript
+              ? " has-pending-tag"
+              : ""
+          }`}
         >
           <div className="speech-draft-inline">
             {speechInlineTranscript && (
@@ -1171,7 +1175,25 @@ export function MessageInput({
                   }
                 >
                   {interimInsertion.transcript}
+                  {!interimDisplayTranscript && (
+                    <button
+                      type="button"
+                      className="speech-tag-cancel"
+                      tabIndex={-1}
+                      aria-hidden="true"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={handleCancelTranscription}
+                      title={t("speechTranscribingCancel" as never)}
+                    >
+                      ×
+                    </button>
+                  )}
                 </span>
+                {/* Faked caret after the tag: the real value-driven caret can't
+                    sit after a zero-width-in-value tag (see composer-rich-input.md). */}
+                {!interimDisplayTranscript && (
+                  <span className="speech-tag-caret" />
+                )}
                 {interimInsertion.separatorAfter}
                 <span>{interimInsertion.after}</span>
               </div>
