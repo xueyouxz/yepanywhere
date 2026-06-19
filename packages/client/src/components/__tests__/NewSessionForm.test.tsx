@@ -919,27 +919,26 @@ describe("NewSessionForm", () => {
       "newSessionPlaceholder",
     ) as HTMLTextAreaElement;
 
-    expect(document.querySelector(".speech-transcribing-chip")).toBeNull();
+    expect(document.querySelector(".speech-processing-inline")).toBeNull();
 
     act(() => {
       voicePropsState.current?.onPendingSpeechChange?.("transcribing");
     });
-    const chip = await waitFor(() => {
-      const el = document.querySelector(".speech-transcribing-chip");
+    const badge = await waitFor(() => {
+      const el = document.querySelector(".speech-processing-inline");
       expect(el).not.toBeNull();
       return el as HTMLElement;
     });
+    expect(badge.textContent).toContain("Transcribing");
 
     expect(textarea.disabled).toBe(false);
     fireEvent.change(textarea, { target: { value: "typed while transcribing" } });
     expect(textarea.value).toBe("typed while transcribing");
 
-    fireEvent.click(
-      chip.querySelector(".speech-transcribing-cancel") as HTMLButtonElement,
-    );
+    fireEvent.keyDown(textarea, { key: "Escape" });
     expect(mockVoiceCancelProcessing).toHaveBeenCalledTimes(1);
     await waitFor(() => {
-      expect(document.querySelector(".speech-transcribing-chip")).toBeNull();
+      expect(document.querySelector(".speech-processing-inline")).toBeNull();
     });
     expect(textarea.value).toBe("typed while transcribing");
   });

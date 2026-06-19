@@ -34,7 +34,6 @@ import type {
   SpeechTranscriptionContext,
   SpeechTranscriptionResultMetadata,
 } from "../lib/speechProviders/SpeechProvider";
-import { SpeechTranscribingChip } from "./SpeechTranscribingChip";
 import {
   VoiceInputButton,
   type SpeechPendingKind,
@@ -88,10 +87,18 @@ export function FloatingActionButton() {
   const pendingTextareaSelectionRef =
     useRef<PendingTextareaSelectionRestore | null>(null);
   const interimDisplayTranscript = interimTranscript.trim();
-  // Inline mirror is streaming-interim preview only; a post-capture wait (batch
-  // transcribe or streaming flush) uses a sibling chip so the textarea stays
-  // editable. See topics/mic-button-speech-ui.md (Batch Behavior, Cancel).
-  const speechInlineTranscript = interimDisplayTranscript;
+  // The inline mirror previews speech in place at the insertion point: streaming
+  // interim text, otherwise the pending-state label (Listening…/Transcribing…/
+  // Finalizing…), unified with the streaming preview rather than a sibling chip.
+  // See topics/mic-button-speech-ui.md.
+  const speechPendingLabel = speechPending
+    ? speechPending === "finalizing"
+      ? t("speechFinalizingPlaceholder" as never)
+      : speechPending === "listening"
+        ? t("speechListeningPlaceholder" as never)
+        : t("speechTranscribingPlaceholder" as never)
+    : "";
+  const speechInlineTranscript = interimDisplayTranscript || speechPendingLabel;
   const speechInsertionRange = speechInsertionRangeRef.current;
   const interimInsertion = speechInsertionRange
     ? getSpeechTranscriptReplacementParts(
@@ -176,6 +183,22 @@ export function FloatingActionButton() {
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Skip Enter during IME composition (e.g. Chinese/Japanese/Korean input)
     if (e.key === "Enter" && e.nativeEvent.isComposing) return;
+
+    // Escape cancels a pending post-capture wait (its label is inline at the
+    // cursor; no chip ✕). Active listening still finalizes on Escape below.
+    if (
+      e.key === "Escape" &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.shiftKey &&
+      !e.altKey &&
+      (speechPending === "transcribing" || speechPending === "finalizing")
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleCancelTranscription();
+      return;
+    }
 
     if (
       e.key === "Escape" &&
@@ -506,12 +529,6 @@ export function FloatingActionButton() {
               </div>
             )}
           </div>
-          {speechPending && (
-            <SpeechTranscribingChip
-              kind={speechPending}
-              onCancel={handleCancelTranscription}
-            />
-          )}
           <div className="fab-input-toolbar">
             <VoiceInputButton
               ref={voiceButtonRef}

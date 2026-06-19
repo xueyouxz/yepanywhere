@@ -165,22 +165,28 @@ processing and must not make the mic look active.
 
 While the batch result is pending, the composer stays fully editable. The
 textarea keeps its real, visible draft and the user may type or edit anywhere,
-including the spot where the pending transcript will land. The pending
-transcription is surfaced as a sibling `Transcribing…` chip beside the field —
-a status affordance, never characters in the textarea value — so no keystroke
-or backspace can disturb or delete it. This sibling chip replaces the earlier
-transparent-textarea inline mirror for the batch wait: that mirror hid the
-whole draft behind a `Transcribing…` overlay (the field read as frozen) and let
-an accidental backspace edit invisible draft text. Streaming interim preview
-still renders inline at the insertion point; only the no-interim batch wait
-(`status: "processing"` with no interim) uses the chip.
+including the spot where the pending transcript will land. The pending state is
+surfaced **inline at the insertion point** — in place of any selected span —
+through the same draft mirror that previews streaming interim text: a muted
+`Transcribing…` label shows where the result will land. The label lives in an
+aria-hidden mirror, never as characters in the textarea value, so no keystroke
+or backspace can disturb or delete it. The mirror keeps the live draft visible
+and the textarea editable (the caret shows through), so this is **not** the old
+transparent-textarea overlay that hid the whole draft and let an accidental
+backspace edit invisible text — that earlier hazard is why the label is
+non-editable, not why it lives below the field. Streaming interim text and the
+post-capture label share the one inline mirror; the label shows for the
+no-interim waits (`processing`/`finalizing`) and during active `listening`
+before any interim arrives.
 
 ### Cancel contract
 
-The `Transcribing…` chip carries an explicit cancel control (an `✕`). Cancel is
-the only way to abandon a pending batch transcription; there is deliberately no
-keyboard path, so an inadvertent backspace cannot trigger it. Cancel removes the
-chip, ends the pending speech transaction, and drops its insertion target.
+Cancel during the post-capture wait is **Escape** — a deliberate key, distinct
+from the accidental-backspace path the inline label must never trigger. The
+mirror is non-interactive (`pointer-events: none`), so there is no inline `✕`.
+Escape ends the pending speech transaction and drops its insertion target;
+active `listening` still finalizes on Escape instead (keeping interim), and the
+mic can still start an overlapping new recording during the wait.
 
 The guarantee is result-suppression, not necessarily work-interruption: a
 transcription that finishes after cancel must be fully inert — it inserts
@@ -196,14 +202,14 @@ result is a no-op.
 Batch is a special case of streaming: one `is_final` block per mic activation,
 possibly with a high startup latency (model cold-load). The pending-result wait
 (`processing`) and the streaming finalize wait (`finalizing`) are the same
-conceptual state at different latencies, surfaced by one cancellable chip with
-mode-conditional behavior. The distinct surface wording is deliberate and
-stays — `Transcribing…` for batch, `Finalizing…` for streaming — only the
-mechanism unifies. The composer receives a single pending *kind*
-(`listening` | `transcribing` | `finalizing`) from the mic button and shows the
-chip for all three; the chip's label follows the kind.
+conceptual state at different latencies, surfaced by one inline label at the
+insertion point. The distinct surface wording is deliberate and stays —
+`Transcribing…` for batch, `Finalizing…` for streaming, `Listening…` during
+active capture — only the mechanism unifies. The composer receives a single
+pending *kind* (`listening` | `transcribing` | `finalizing`) from the mic button
+and renders the matching label inline through the streaming-preview mirror.
 
-The unified `✕` cancels only the in-progress, non-final portion of the active
+Cancel (Escape) abandons only the in-progress, non-final portion of the active
 mini-turn; already-accepted `is_final` blocks remain in the draft. For batch
 there is no committed block during the wait, so cancel drops the whole pending
 result. For streaming, `cancel()` discards the uncommitted preview / in-flight
@@ -211,17 +217,27 @@ tail and ignores any racing `final` (a start-token bump makes later socket
 messages inert), while the `is_final` blocks already emitted to the draft stay;
 this is distinct from `stop()`, which finalizes/flushes the tail.
 
-Implemented: the chip + `✕` across the whole mic transaction — `listening`
+Implemented: the inline label across the whole mic transaction — `listening`
 (active capture), `processing`, and `finalizing` — plus the streaming
-`cancel()`. The chip surfaces `Listening…` during active capture, then
-`Transcribing…` (batch) or `Finalizing…` (streaming flush); its `✕` always
-routes to the unified `cancel()`. During active capture the mic button stays
-stop/finalize (flush the tail and finalize) while the `✕` cancels (drop the
-uncommitted preview/tail, keep committed finals, go idle) — both controls show
-at once because they are genuinely distinct actions. On desktop the mic's own
-status text and the chip's word can both read `Listening…`/`Finalizing…`; that
-redundancy is accepted under the chosen surfacing (the chip is the cancel
-affordance, the mic status is the capture-state readout), not a defect.
+`cancel()`. The draft mirror surfaces `Listening…` during active capture, then
+`Transcribing…` (batch) or `Finalizing…` (streaming flush) at the insertion
+point; Escape cancels the post-capture wait and routes to the unified
+`cancel()`. During active capture the mic button stays stop/finalize (flush the
+tail and finalize); on desktop the mic's own status text and the inline label
+may both read `Listening…`/`Finalizing…` (the label is the in-draft readout, the
+mic status is the capture-state readout) — an accepted minor redundancy.
+
+Open follow-up (agreed target): make the inline label an interactive tag. Each
+pending batch transcription renders as its own `Transcribing… ✕` tag at its own
+insertion point, placed before the cursor, in arrival order (the second lands
+after the first). Each tag carries its own `✕` cancel; if per-tag proves
+impractical, a single `✕` on the last/newest tag is acceptable. This restores a
+pointer cancel that Escape currently stands in for. The likely path is making
+just the label span interactive (`pointer-events` on the tag only) since the
+mirror already positions it inline. Overlapping transcriptions are uncommon
+(usually provoked by switch-latency impatience), but the ordering of their
+inserts and one-label-per-pending are not yet correct for N>1 — current code
+shows a single label and can insert the second result before the first.
 
 When the batch result arrives, YA treats it as one delayed finalized streaming
 chunk. It uses the speech transaction target captured at mic start, including

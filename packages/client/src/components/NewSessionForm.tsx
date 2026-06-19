@@ -105,7 +105,6 @@ import { getPermissionModeOptions } from "../lib/permissionModes";
 import type { PermissionMode, Project } from "../types";
 import { FilterDropdown, type FilterOption } from "./FilterDropdown";
 import { SpeechControlMenu } from "./SpeechControlMenu";
-import { SpeechTranscribingChip } from "./SpeechTranscribingChip";
 import { ThinkingControlsPanel } from "./ThinkingControls";
 import {
   VoiceInputButton,
@@ -1385,6 +1384,22 @@ export function NewSessionForm({
   };
 
   const handleKeyDown = (e: KeyboardEvent) => {
+    // Escape cancels a pending post-capture wait (its label is inline at the
+    // cursor; no chip ✕). Active listening still finalizes on Escape below.
+    if (
+      e.key === "Escape" &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.shiftKey &&
+      !e.altKey &&
+      (speechPending === "transcribing" || speechPending === "finalizing")
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleCancelTranscription();
+      return;
+    }
+
     if (
       e.key === "Escape" &&
       !e.ctrlKey &&
@@ -1666,10 +1681,18 @@ export function NewSessionForm({
   const hasContent = message.trim() || pendingFiles.length > 0;
   const canStart = Boolean(hasContent);
   const interimDisplayTranscript = interimTranscript.trim();
-  // Inline mirror is streaming-interim preview only; a post-capture wait (batch
-  // transcribe or streaming flush) uses a sibling chip so the textarea stays
-  // editable. See topics/mic-button-speech-ui.md (Batch Behavior, Cancel).
-  const speechInlineTranscript = interimDisplayTranscript;
+  // The inline mirror previews speech in place at the insertion point: streaming
+  // interim text, otherwise the pending-state label (Listening…/Transcribing…/
+  // Finalizing…), unified with the streaming preview rather than a sibling chip.
+  // See topics/mic-button-speech-ui.md.
+  const speechPendingLabel = speechPending
+    ? speechPending === "finalizing"
+      ? t("speechFinalizingPlaceholder" as never)
+      : speechPending === "listening"
+        ? t("speechListeningPlaceholder" as never)
+        : t("speechTranscribingPlaceholder" as never)
+    : "";
+  const speechInlineTranscript = interimDisplayTranscript || speechPendingLabel;
   const speechInsertionRange = speechInsertionRangeRef.current;
   const interimInsertion = speechInsertionRange
     ? getSpeechTranscriptReplacementParts(
@@ -1781,12 +1804,6 @@ export function NewSessionForm({
           </div>
         )}
       </div>
-      {speechPending && (
-        <SpeechTranscribingChip
-          kind={speechPending}
-          onCancel={handleCancelTranscription}
-        />
-      )}
       <div className="new-session-form-toolbar">
         <div className="new-session-form-toolbar-left">
           <input
