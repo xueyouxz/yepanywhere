@@ -94,6 +94,7 @@ import {
 } from "../lib/speechRecognition";
 import {
   commitSpeechTranscript,
+  hasNonWhitespaceEdit,
   type PendingTextareaSelectionRestore,
 } from "../lib/speechDraftTransaction";
 import { isVoiceInputShortcut } from "../lib/voiceInputShortcut";
@@ -404,6 +405,10 @@ export function NewSessionForm({
     new Map(),
   );
   const pendingSpeechFinalRef = useRef<PendingSpeechFinal | null>(null);
+  // True once the user manually edits (non-whitespace) during the active mic
+  // transaction; holds an automatic Smart Turn endpoint send. Speech-inserted
+  // finals go through setDraft (not onChange) and never set this.
+  const composerEditedDuringSpeechRef = useRef(false);
   const pendingTextareaSelectionRef =
     useRef<PendingTextareaSelectionRestore | null>(null);
   const hasInitializedDefaultsRef = useRef(false);
@@ -1473,6 +1478,7 @@ export function NewSessionForm({
     speechInsertionRangeRef.current = range;
     speechInsertionRangesRef.current.set(targetId, range);
     pendingTextareaSelectionRef.current = null;
+    composerEditedDuringSpeechRef.current = false;
     if (textarea) {
       textarea.focus();
       textarea.setSelectionRange(selectionStart, selectionEnd);
@@ -1561,6 +1567,8 @@ export function NewSessionForm({
           onSmartTurnSend: (text) => {
             void handleStartSession(text);
           },
+          composerEditedDuringSpeech: () =>
+            composerEditedDuringSpeechRef.current,
         },
         transcript,
         metadata,
@@ -1737,6 +1745,12 @@ export function NewSessionForm({
                   activeSpeechTargetIdRef.current !== null
                     ? (nextRanges.get(activeSpeechTargetIdRef.current) ?? null)
                     : null;
+              }
+              if (
+                activeSpeechTargetIdRef.current !== null &&
+                hasNonWhitespaceEdit(message, nextMessage)
+              ) {
+                composerEditedDuringSpeechRef.current = true;
               }
               setMessage(nextMessage);
             }}

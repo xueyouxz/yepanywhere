@@ -43,6 +43,7 @@ import {
 } from "../lib/speechRecognition";
 import {
   commitSpeechTranscript,
+  hasNonWhitespaceEdit,
   type PendingTextareaSelectionRestore,
 } from "../lib/speechDraftTransaction";
 import { getSlashCommandMenuParts } from "../lib/slashCommands";
@@ -270,6 +271,10 @@ export function MessageInput({
     new Map(),
   );
   const pendingSpeechFinalRef = useRef<PendingSpeechFinal | null>(null);
+  // True once the user manually edits (non-whitespace) during the active mic
+  // transaction; holds an automatic Smart Turn endpoint send. Speech-inserted
+  // finals go through setDraft (not onChange) and never set this.
+  const composerEditedDuringSpeechRef = useRef(false);
   const pendingTextareaSelectionRef =
     useRef<PendingTextareaSelectionRestore | null>(null);
   // User-controlled collapse state (independent of external collapse from approval panel)
@@ -900,6 +905,7 @@ export function MessageInput({
     speechInsertionRangeRef.current = range;
     speechInsertionRangesRef.current.set(targetId, range);
     pendingTextareaSelectionRef.current = null;
+    composerEditedDuringSpeechRef.current = false;
     if (textarea) {
       textarea.focus();
       textarea.setSelectionRange(selectionStart, selectionEnd);
@@ -993,6 +999,8 @@ export function MessageInput({
             ];
           },
           onSmartTurnSend: handleSubmit,
+          composerEditedDuringSpeech: () =>
+            composerEditedDuringSpeechRef.current,
         },
         transcript,
         metadata,
@@ -1173,6 +1181,12 @@ export function MessageInput({
                       ? (nextRanges.get(activeSpeechTargetIdRef.current) ??
                         null)
                       : null;
+                }
+                if (
+                  activeSpeechTargetIdRef.current !== null &&
+                  hasNonWhitespaceEdit(text, nextText)
+                ) {
+                  composerEditedDuringSpeechRef.current = true;
                 }
                 noteComposerEdit(nextText);
                 setText(nextText);

@@ -39,6 +39,23 @@ export interface SpeechCommitContext {
   onTranscriptionId?: (id: string) => void;
   /** Submit the composer when a batch/streaming `send` command commits. */
   onSmartTurnSend?: (text: string) => void;
+  /**
+   * Whether the user has manually edited the draft (non-whitespace) during the
+   * active mic transaction. When true, an automatic Smart Turn endpoint send is
+   * held: the dictated text still commits but the composer is not submitted, so
+   * the user reviews and sends manually. An explicit spoken `send` is never held.
+   * No-op if absent. See topics/mic-button-speech-ui.md.
+   */
+  composerEditedDuringSpeech?: () => boolean;
+}
+
+/**
+ * True when `before` → `after` adds or deletes non-whitespace characters.
+ * Whitespace-only changes (extra spacing, a trailing newline) and pure cursor
+ * moves do not count, so they never hold a Smart Turn auto-send.
+ */
+export function hasNonWhitespaceEdit(before: string, after: string): boolean {
+  return before.replace(/\s+/g, "") !== after.replace(/\s+/g, "");
 }
 
 /**
@@ -65,6 +82,7 @@ export function commitSpeechTranscript(
     onEdit,
     onTranscriptionId,
     onSmartTurnSend,
+    composerEditedDuringSpeech,
   } = ctx;
   const targetId = metadata?.speechTargetId;
   const getSpeechRange = () =>
@@ -236,6 +254,15 @@ export function commitSpeechTranscript(
     updateSpeechRange(null);
   }
   if (metadata?.smartTurnCommand === "send") {
-    onSmartTurnSend?.(nextText);
+    // Hold an automatic Smart Turn endpoint send once the user has manually
+    // edited the draft mid-dictation: the dictated text is already committed
+    // above, so only the submit is skipped. An explicit spoken `send`
+    // (smartTurnAutoSend !== true) always submits.
+    const holdAutoSend =
+      metadata.smartTurnAutoSend === true &&
+      composerEditedDuringSpeech?.() === true;
+    if (!holdAutoSend) {
+      onSmartTurnSend?.(nextText);
+    }
   }
 }

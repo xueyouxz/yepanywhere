@@ -2806,6 +2806,9 @@ describe("direct xAI speech provider", () => {
     expect(onResult).toHaveBeenCalledWith("Does it work", undefined);
     expect(onResult).toHaveBeenCalledWith("at all?", {
       smartTurnCommand: "send",
+      // No spoken command word, so this endpoint send is automatic — the
+      // composer may hold it when the user has typed mid-dictation.
+      smartTurnAutoSend: true,
     });
     expect(onEnd).toHaveBeenCalledTimes(1);
 

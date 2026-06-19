@@ -85,6 +85,18 @@ When Smart Turn triggers an automatic send from an endpoint event, the provider
 may still deliver additional final text in its done event. YA must commit that
 uncommitted tail before applying the send command metadata.
 
+An automatic Smart Turn endpoint send is held — committed to the draft but not
+submitted — once the user has manually edited the composer during the active
+mic transaction. This protects a turn the user is co-authoring by hand from
+being submitted out from under them by an endpoint. The hold is specific: it
+applies only to the *automatic* endpoint send (carried as `smartTurnAutoSend`
+in the result metadata, distinct from an explicit spoken `send`); an explicit
+`send` command and a manual Enter always submit. The triggering edit must add or
+delete non-whitespace text — whitespace-only changes and cursor moves do not
+count — and speech-inserted finals (which reach the draft programmatically, not
+through the textarea's change event) are never treated as manual edits. The hold
+is scoped to the current mic transaction and resets when the next one starts.
+
 xAI may also send one or more non-empty final partials after YA has sent
 `audio.done`, then send an empty `transcript.done`. YA stages such post-stop
 final partials in order and uses them only if the final done event has no text,

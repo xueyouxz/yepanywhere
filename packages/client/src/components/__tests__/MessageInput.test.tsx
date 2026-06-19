@@ -88,6 +88,7 @@ const {
         text: string,
         metadata?: {
           smartTurnCommand?: "cancel" | "send" | "wait";
+          smartTurnAutoSend?: boolean;
           replacePreviousTranscriptChars?: number;
           speechTargetId?: string;
         },
@@ -287,6 +288,7 @@ vi.mock("../VoiceInputButton", async () => {
             text: string,
             metadata?: {
               smartTurnCommand?: "cancel" | "send" | "wait";
+              smartTurnAutoSend?: boolean;
               replacePreviousTranscriptChars?: number;
               speechTargetId?: string;
             },
@@ -1125,6 +1127,101 @@ describe("MessageInput", () => {
 
     await waitFor(() => {
       expectSubmission(onSend, "Okay.", "direct");
+      expect(textarea.value).toBe("");
+    });
+  });
+
+  it("holds a Smart Turn auto-send after a manual non-whitespace edit", async () => {
+    const onSend = vi.fn();
+    const textarea = renderMessageInput(vi.fn(), {
+      onSend,
+    }) as HTMLTextAreaElement;
+
+    act(() => {
+      voicePropsState.current?.onListeningStart?.();
+      voicePropsState.current?.onTranscript?.("Hello world.");
+    });
+    await waitFor(() => expect(textarea.value).toBe("Hello world."));
+
+    // The user types into the composer mid-dictation.
+    fireEvent.change(textarea, { target: { value: "Hello world. mine" } });
+
+    // The automatic endpoint send must not submit; the draft is left for review.
+    act(() => {
+      voicePropsState.current?.onTranscript?.("", {
+        smartTurnCommand: "send",
+        smartTurnAutoSend: true,
+      });
+    });
+    await waitFor(() => expect(textarea.value).toBe("Hello world. mine"));
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("auto-sends when only speech (not manual typing) filled the draft", async () => {
+    const onSend = vi.fn();
+    const textarea = renderMessageInput(vi.fn(), {
+      onSend,
+    }) as HTMLTextAreaElement;
+
+    // Speech-inserted finals go through setDraft, not onChange, so they do not
+    // count as a manual edit and the auto-send still fires.
+    act(() => {
+      voicePropsState.current?.onListeningStart?.();
+      voicePropsState.current?.onTranscript?.("Ship it.");
+      voicePropsState.current?.onTranscript?.("", {
+        smartTurnCommand: "send",
+        smartTurnAutoSend: true,
+      });
+    });
+    await waitFor(() => {
+      expectSubmission(onSend, "Ship it.", "direct");
+      expect(textarea.value).toBe("");
+    });
+  });
+
+  it("still auto-sends after a whitespace-only manual edit", async () => {
+    const onSend = vi.fn();
+    const textarea = renderMessageInput(vi.fn(), {
+      onSend,
+    }) as HTMLTextAreaElement;
+
+    act(() => {
+      voicePropsState.current?.onListeningStart?.();
+      voicePropsState.current?.onTranscript?.("Go now.");
+    });
+    await waitFor(() => expect(textarea.value).toBe("Go now."));
+
+    // A trailing space adds no non-whitespace text, so the auto-send proceeds.
+    fireEvent.change(textarea, { target: { value: "Go now. " } });
+    act(() => {
+      voicePropsState.current?.onTranscript?.("", {
+        smartTurnCommand: "send",
+        smartTurnAutoSend: true,
+      });
+    });
+    await waitFor(() => expectSubmission(onSend, "Go now.", "direct"));
+  });
+
+  it("submits an explicit spoken send even after a manual edit", async () => {
+    const onSend = vi.fn();
+    const textarea = renderMessageInput(vi.fn(), {
+      onSend,
+    }) as HTMLTextAreaElement;
+
+    act(() => {
+      voicePropsState.current?.onListeningStart?.();
+      voicePropsState.current?.onTranscript?.("Reply done.");
+    });
+    await waitFor(() => expect(textarea.value).toBe("Reply done."));
+
+    fireEvent.change(textarea, { target: { value: "Reply done. plus" } });
+
+    // An explicit spoken `send` (no smartTurnAutoSend) is never held.
+    act(() => {
+      voicePropsState.current?.onTranscript?.("", { smartTurnCommand: "send" });
+    });
+    await waitFor(() => {
+      expectSubmission(onSend, "Reply done. plus", "direct");
       expect(textarea.value).toBe("");
     });
   });

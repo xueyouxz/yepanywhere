@@ -1056,6 +1056,12 @@ export class YaServerProvider implements SpeechProvider {
       }
       if (metadata && smartTurnCommand) {
         metadata.smartTurnCommand = smartTurnCommand;
+        // An automatic endpoint send (no spoken command) is held by a composer
+        // when the user has typed mid-dictation; mark it so the composer can
+        // tell it apart from an explicit spoken `send`.
+        if (smartTurnCommand === "send" && !pendingSmartTurn?.recognizedCommand) {
+          metadata.smartTurnAutoSend = true;
+        }
       }
       const resultMetadata = withSpeechContextMetadata(
         metadata,

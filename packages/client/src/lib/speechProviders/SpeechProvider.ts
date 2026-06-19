@@ -80,6 +80,13 @@ export interface SpeechTranscriptionResultMetadata {
   transcriptionId?: string;
   speechTargetId?: string;
   smartTurnCommand?: SpeechTurnCommand;
+  /**
+   * True when a `send` is an automatic Smart Turn *endpoint* send (no spoken
+   * command word), as opposed to an explicit spoken `send`. A composer may hold
+   * the auto-send when the user has manually edited the draft mid-dictation;
+   * an explicit `send` always submits. See topics/mic-button-speech-ui.md.
+   */
+  smartTurnAutoSend?: boolean;
   /** Replace this many characters immediately before the current speech range. */
   replacePreviousTranscriptChars?: number;
 }
