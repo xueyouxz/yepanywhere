@@ -9,6 +9,7 @@ import {
 } from "@yep-anywhere/shared";
 import {
   type ClipboardEvent,
+  Fragment,
   type KeyboardEvent,
   useCallback,
   useEffect,
@@ -35,6 +36,7 @@ import {
   clearSpeechInsertionRangeReplacement,
   createSpeechInsertionRange,
   getSpeechSelectionFinalDelayMs,
+  getSpeechMirrorSegments,
   getSpeechTranscriptInsertionParts,
   getSpeechTranscriptReplacementParts,
   mapSpeechInsertionRangeThroughEdit,
@@ -331,6 +333,51 @@ export function MessageInput({
         speechInlineTranscript,
         text.length,
       );
+
+  // Pending tags for the no-interim (batch/pending) mirror: one per active
+  // speech target at its own insertion point, in arrival order, so overlapping
+  // batch transcriptions each show where they will land. The active target's
+  // label follows speechPending; the rest are still transcribing. Streaming
+  // interim keeps the single interimInsertion path above. Range-map changes are
+  // accompanied by state updates (setText/setInterimTranscript/setSpeechPending
+  // or setSpeechPreviewRevision), so this recomputes on re-render.
+  const pendingTagLabel = (kind: SpeechPendingKind | null): string =>
+    kind === "finalizing"
+      ? t("speechFinalizingPlaceholder" as never)
+      : kind === "listening"
+        ? t("speechListeningPlaceholder" as never)
+        : t("speechTranscribingPlaceholder" as never);
+  const speechRangeTags = interimDisplayTranscript
+    ? []
+    : [...speechInsertionRangesRef.current.entries()].map(
+        ([targetId, range], index) => {
+          const active = targetId === activeSpeechTargetIdRef.current;
+          return {
+            targetId,
+            position: range.end,
+            replaceEnd: range.replaceEnd ?? range.end,
+            active,
+            ordinal: index + 1,
+            label: pendingTagLabel(active ? speechPending : "transcribing"),
+          };
+        },
+      );
+  // Pending but no tracked range yet: show a single tag at the cursor end so
+  // the label still appears inline.
+  const speechPendingTags =
+    speechRangeTags.length === 0 && !interimDisplayTranscript && speechPending
+      ? [
+          {
+            targetId: "pending",
+            position: text.length,
+            replaceEnd: text.length,
+            active: true,
+            ordinal: 1,
+            label: pendingTagLabel(speechPending),
+          },
+        ]
+      : speechRangeTags;
+  const speechMirrorSegments = getSpeechMirrorSegments(text, speechPendingTags);
 
   useEffect(() => {
     setSelectedSlashIndex(0);
@@ -1165,37 +1212,53 @@ export function MessageInput({
           <div className="speech-draft-inline">
             {speechInlineTranscript && (
               <div className="speech-draft-mirror" aria-hidden="true">
-                <span>{interimInsertion.before}</span>
-                {interimInsertion.separatorBefore}
-                <span
-                  className={
-                    interimDisplayTranscript
-                      ? "speech-interim-inline"
-                      : "speech-processing-inline"
-                  }
-                >
-                  {interimInsertion.transcript}
-                  {!interimDisplayTranscript && (
-                    <button
-                      type="button"
-                      className="speech-tag-cancel"
-                      tabIndex={-1}
-                      aria-hidden="true"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={handleCancelTranscription}
-                      title={t("speechTranscribingCancel" as never)}
-                    >
-                      ×
-                    </button>
-                  )}
-                </span>
-                {/* Faked caret after the tag: the real value-driven caret can't
-                    sit after a zero-width-in-value tag (see composer-rich-input.md). */}
-                {!interimDisplayTranscript && (
-                  <span className="speech-tag-caret" />
+                {interimDisplayTranscript ? (
+                  <>
+                    <span>{interimInsertion.before}</span>
+                    {interimInsertion.separatorBefore}
+                    <span className="speech-interim-inline">
+                      {interimInsertion.transcript}
+                    </span>
+                    {interimInsertion.separatorAfter}
+                    <span>{interimInsertion.after}</span>
+                  </>
+                ) : (
+                  // One tag per pending speech target at its own insertion point,
+                  // in arrival order; the Nth (N>1) carries a "(N)" ordinal. The
+                  // active tag gets the ✕ and the faked caret. The real caret
+                  // can't sit after a zero-width-in-value tag — see
+                  // composer-rich-input.md.
+                  speechMirrorSegments.map((seg) =>
+                    seg.type === "text" ? (
+                      <span key={seg.key}>{seg.text}</span>
+                    ) : (
+                      <Fragment key={seg.tag.targetId}>
+                        <span className="speech-processing-inline">
+                          {seg.tag.label}
+                          {seg.tag.ordinal > 1 && (
+                            <span className="speech-tag-ordinal">
+                              {` (${seg.tag.ordinal})`}
+                            </span>
+                          )}
+                          {seg.tag.active && (
+                            <button
+                              type="button"
+                              className="speech-tag-cancel"
+                              tabIndex={-1}
+                              aria-hidden="true"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={handleCancelTranscription}
+                              title={t("speechTranscribingCancel" as never)}
+                            >
+                              ×
+                            </button>
+                          )}
+                        </span>
+                        {seg.tag.active && <span className="speech-tag-caret" />}
+                      </Fragment>
+                    ),
+                  )
                 )}
-                {interimInsertion.separatorAfter}
-                <span>{interimInsertion.after}</span>
               </div>
             )}
             <textarea

@@ -797,6 +797,29 @@ describe("MessageInput", () => {
     });
   });
 
+  it("renders one tag per overlapping pending target, ordinal on the 2nd", async () => {
+    const textarea = renderMessageInput() as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "draft" } });
+
+    // Two recordings started before either result lands: each gets its own tag.
+    act(() => {
+      voicePropsState.current?.onListeningStart?.();
+      voicePropsState.current?.onPendingSpeechChange?.("transcribing");
+      voicePropsState.current?.onListeningStart?.();
+      voicePropsState.current?.onPendingSpeechChange?.("listening");
+    });
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".speech-processing-inline").length).toBe(
+        2,
+      );
+    });
+    // Only the 2nd (later) tag carries a "(N)" ordinal.
+    const ordinals = document.querySelectorAll(".speech-tag-ordinal");
+    expect(ordinals.length).toBe(1);
+    expect(ordinals[0]?.textContent).toContain("2");
+  });
+
   it("does not grace-delay the selection that started the mic transaction", () => {
     vi.useFakeTimers();
     const textarea = renderMessageInput() as HTMLTextAreaElement;

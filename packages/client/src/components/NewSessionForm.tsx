@@ -14,6 +14,7 @@ import {
 import {
   type ChangeEvent,
   type ClipboardEvent,
+  Fragment,
   type KeyboardEvent,
   type ReactNode,
   useCallback,
@@ -86,6 +87,7 @@ import {
   clearSpeechInsertionRangeReplacement,
   createSpeechInsertionRange,
   getSpeechSelectionFinalDelayMs,
+  getSpeechMirrorSegments,
   getSpeechTranscriptInsertionParts,
   getSpeechTranscriptReplacementParts,
   mapSpeechInsertionRangeThroughEdit,
@@ -1706,6 +1708,48 @@ export function NewSessionForm({
         speechInlineTranscript,
         message.length,
       );
+
+  // One tag per pending speech target at its own insertion point (arrival
+  // order, "(N)" on the Nth>1); see MessageInput / topics/mic-button-speech-ui.md.
+  const pendingTagLabel = (kind: SpeechPendingKind | null): string =>
+    kind === "finalizing"
+      ? t("speechFinalizingPlaceholder" as never)
+      : kind === "listening"
+        ? t("speechListeningPlaceholder" as never)
+        : t("speechTranscribingPlaceholder" as never);
+  const speechRangeTags = interimDisplayTranscript
+    ? []
+    : [...speechInsertionRangesRef.current.entries()].map(
+        ([targetId, range], index) => {
+          const active = targetId === activeSpeechTargetIdRef.current;
+          return {
+            targetId,
+            position: range.end,
+            replaceEnd: range.replaceEnd ?? range.end,
+            active,
+            ordinal: index + 1,
+            label: pendingTagLabel(active ? speechPending : "transcribing"),
+          };
+        },
+      );
+  const speechPendingTags =
+    speechRangeTags.length === 0 && !interimDisplayTranscript && speechPending
+      ? [
+          {
+            targetId: "pending",
+            position: message.length,
+            replaceEnd: message.length,
+            active: true,
+            ordinal: 1,
+            label: pendingTagLabel(speechPending),
+          },
+        ]
+      : speechRangeTags;
+  const speechMirrorSegments = getSpeechMirrorSegments(
+    message,
+    speechPendingTags,
+  );
+
   const getTranscriptionContext =
     useCallback((): SpeechTranscriptionContext => {
       if (!speechTurnIdRef.current) {
@@ -1731,35 +1775,48 @@ export function NewSessionForm({
         <div className="speech-draft-inline">
           {speechInlineTranscript && (
             <div className="speech-draft-mirror" aria-hidden="true">
-              <span>{interimInsertion.before}</span>
-              {interimInsertion.separatorBefore}
-              <span
-                className={
-                  interimDisplayTranscript
-                    ? "speech-interim-inline"
-                    : "speech-processing-inline"
-                }
-              >
-                {interimInsertion.transcript}
-                {!interimDisplayTranscript && (
-                  <button
-                    type="button"
-                    className="speech-tag-cancel"
-                    tabIndex={-1}
-                    aria-hidden="true"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={handleCancelTranscription}
-                    title={t("speechTranscribingCancel" as never)}
-                  >
-                    ×
-                  </button>
-                )}
-              </span>
-              {!interimDisplayTranscript && (
-                <span className="speech-tag-caret" />
+              {interimDisplayTranscript ? (
+                <>
+                  <span>{interimInsertion.before}</span>
+                  {interimInsertion.separatorBefore}
+                  <span className="speech-interim-inline">
+                    {interimInsertion.transcript}
+                  </span>
+                  {interimInsertion.separatorAfter}
+                  <span>{interimInsertion.after}</span>
+                </>
+              ) : (
+                speechMirrorSegments.map((seg) =>
+                  seg.type === "text" ? (
+                    <span key={seg.key}>{seg.text}</span>
+                  ) : (
+                    <Fragment key={seg.tag.targetId}>
+                      <span className="speech-processing-inline">
+                        {seg.tag.label}
+                        {seg.tag.ordinal > 1 && (
+                          <span className="speech-tag-ordinal">
+                            {` (${seg.tag.ordinal})`}
+                          </span>
+                        )}
+                        {seg.tag.active && (
+                          <button
+                            type="button"
+                            className="speech-tag-cancel"
+                            tabIndex={-1}
+                            aria-hidden="true"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={handleCancelTranscription}
+                            title={t("speechTranscribingCancel" as never)}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </span>
+                      {seg.tag.active && <span className="speech-tag-caret" />}
+                    </Fragment>
+                  ),
+                )
               )}
-              {interimInsertion.separatorAfter}
-              <span>{interimInsertion.after}</span>
             </div>
           )}
           <textarea

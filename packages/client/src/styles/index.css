@@ -3484,6 +3484,12 @@ a.sidebar-nav-item {
   color: var(--text-primary);
 }
 
+.speech-tag-ordinal {
+  font-style: normal;
+  font-size: 0.85em;
+  opacity: 0.7;
+}
+
 .speech-tag-caret {
   display: inline-block;
   width: 1px;

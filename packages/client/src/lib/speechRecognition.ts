@@ -151,6 +151,46 @@ export function getSpeechTranscriptInsertionParts(
   };
 }
 
+export interface SpeechMirrorTagPosition {
+  /** Insertion point in the base text (where this pending result will land). */
+  position: number;
+  /** End of any selected span this tag replaces (>= position), else equals it. */
+  replaceEnd: number;
+}
+
+export type SpeechMirrorSegment<T extends SpeechMirrorTagPosition> =
+  | { type: "text"; text: string; key: string }
+  | { type: "tag"; tag: T };
+
+/**
+ * Split `base` into text runs interleaved with pending-speech tags, each placed
+ * at its own insertion point, sorted left to right (ties keep arrival order).
+ * Lets the composer mirror render one tag per pending request at its own
+ * position — e.g. two overlapping batch transcriptions — instead of a single
+ * tag standing in for all of them. A tag that replaces a selected span consumes
+ * `[position, replaceEnd]` of the base.
+ */
+export function getSpeechMirrorSegments<T extends SpeechMirrorTagPosition>(
+  base: string,
+  tags: readonly T[],
+): SpeechMirrorSegment<T>[] {
+  const sorted = [...tags].sort((a, b) => a.position - b.position);
+  const segments: SpeechMirrorSegment<T>[] = [];
+  let cursor = 0;
+  for (const tag of sorted) {
+    const at = Math.max(cursor, Math.min(tag.position, base.length));
+    if (at > cursor) {
+      segments.push({ type: "text", text: base.slice(cursor, at), key: `t${cursor}` });
+    }
+    segments.push({ type: "tag", tag });
+    cursor = Math.max(at, Math.min(tag.replaceEnd, base.length));
+  }
+  if (cursor < base.length) {
+    segments.push({ type: "text", text: base.slice(cursor), key: `t${cursor}` });
+  }
+  return segments;
+}
+
 function lowercaseInitialTitleCaseWord(transcript: string): string {
   return transcript.replace(
     INITIAL_TITLE_CASE_WORD,
