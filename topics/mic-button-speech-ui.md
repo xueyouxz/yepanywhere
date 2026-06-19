@@ -188,8 +188,8 @@ conceptual state at different latencies, surfaced by one cancellable chip with
 mode-conditional behavior. The distinct surface wording is deliberate and
 stays — `Transcribing…` for batch, `Finalizing…` for streaming — only the
 mechanism unifies. The composer receives a single pending *kind*
-(`transcribing` | `finalizing`) from the mic button and shows the chip for
-both; the chip's label follows the kind.
+(`listening` | `transcribing` | `finalizing`) from the mic button and shows the
+chip for all three; the chip's label follows the kind.
 
 The unified `✕` cancels only the in-progress, non-final portion of the active
 mini-turn; already-accepted `is_final` blocks remain in the draft. For batch
@@ -199,10 +199,17 @@ tail and ignores any racing `final` (a start-token bump makes later socket
 messages inert), while the `is_final` blocks already emitted to the draft stay;
 this is distinct from `stop()`, which finalizes/flushes the tail.
 
-Implemented: the chip + `✕` for both `processing` and `finalizing`, and the
-streaming `cancel()`. Still planned: offering the `✕` during *active* live
-capture (cancel the current utterance mid-stream, keeping committed finals) —
-today the chip and its cancel cover the post-capture waits only.
+Implemented: the chip + `✕` across the whole mic transaction — `listening`
+(active capture), `processing`, and `finalizing` — plus the streaming
+`cancel()`. The chip surfaces `Listening…` during active capture, then
+`Transcribing…` (batch) or `Finalizing…` (streaming flush); its `✕` always
+routes to the unified `cancel()`. During active capture the mic button stays
+stop/finalize (flush the tail and finalize) while the `✕` cancels (drop the
+uncommitted preview/tail, keep committed finals, go idle) — both controls show
+at once because they are genuinely distinct actions. On desktop the mic's own
+status text and the chip's word can both read `Listening…`/`Finalizing…`; that
+redundancy is accepted under the chosen surfacing (the chip is the cancel
+affordance, the mic status is the capture-state readout), not a defect.
 
 When the batch result arrives, YA treats it as one delayed finalized streaming
 chunk. It uses the speech transaction target captured at mic start, including

@@ -9,19 +9,22 @@ interface Props {
 }
 
 /**
- * Sibling status chip shown while speech is pending after capture — a batch
- * transcription (`transcribing`) or a streaming flush (`finalizing`). The
- * pending speech is never characters in the textarea value, so no keystroke or
- * backspace can disturb it; the explicit ✕ is the only way to abandon it.
- * Cancel keeps already-committed text and drops only the in-progress portion.
+ * Sibling status chip shown while speech is in progress and cancellable —
+ * active capture (`listening`), a batch transcription (`transcribing`), or a
+ * streaming flush (`finalizing`). The pending speech is never characters in the
+ * textarea value, so no keystroke or backspace can disturb it; the explicit ✕
+ * is the only pointer way to abandon it. Cancel keeps already-committed text and
+ * drops only the in-progress portion.
  * See topics/mic-button-speech-ui.md (Batch Behavior, Cancel contract).
  */
 export function SpeechTranscribingChip({ kind, onCancel }: Props) {
   const { t } = useI18n();
   const label =
-    kind === "finalizing"
-      ? t("speechFinalizingPlaceholder" as never)
-      : t("speechTranscribingPlaceholder" as never);
+    kind === "listening"
+      ? t("speechListeningPlaceholder" as never)
+      : kind === "finalizing"
+        ? t("speechFinalizingPlaceholder" as never)
+        : t("speechTranscribingPlaceholder" as never);
   return (
     <div className="speech-transcribing-chip" role="status" aria-live="polite">
       <span className="speech-transcribing-spinner" aria-hidden="true" />

@@ -178,4 +178,23 @@ describe("VoiceInputButton", () => {
     expect(button.getAttribute("aria-pressed")).toBe("false");
     expect(document.querySelector(".voice-input-recording")).toBeNull();
   });
+
+  it("reports a listening pending kind during active capture", () => {
+    speechState.status = "listening";
+    speechState.isListening = true;
+    const onPendingSpeechChange = vi.fn();
+
+    render(
+      <VoiceInputButton
+        onTranscript={vi.fn()}
+        onInterimTranscript={vi.fn()}
+        onPendingSpeechChange={onPendingSpeechChange}
+        speechMethod="browser-native"
+      />,
+    );
+
+    // The composer surfaces capture as a cancellable chip too, so the ✕ can
+    // abandon the in-flight utterance — not just the post-capture waits.
+    expect(onPendingSpeechChange).toHaveBeenCalledWith("listening");
+  });
 });

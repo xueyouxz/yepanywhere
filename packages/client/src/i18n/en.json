@@ -1375,6 +1375,7 @@
   "voiceInputStop": "Stop voice input (Ctrl+Space)",
   "voiceInputStartLabel": "Start voice input",
   "voiceInputStopLabel": "Stop voice input",
+  "speechListeningPlaceholder": "Listening...",
   "speechTranscribingPlaceholder": "Transcribing...",
   "speechFinalizingPlaceholder": "Finalizing...",
   "speechTranscribingCancel": "Cancel transcription",

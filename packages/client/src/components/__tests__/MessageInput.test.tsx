@@ -96,7 +96,7 @@ const {
       onListeningStart?: () => void;
       onListeningStop?: () => void;
       onPendingSpeechChange?: (
-        kind: "transcribing" | "finalizing" | null,
+        kind: "listening" | "transcribing" | "finalizing" | null,
       ) => void;
       getTranscriptionContext?: () => { speechTargetId?: string };
     },
@@ -267,6 +267,7 @@ vi.mock("../../i18n", () => ({
           toolbarShortcutRenderedSourceMode: "Rendered/source mode",
           speechSettingsXaiKeyTitle: "Browser xAI STT Key",
           speechSettingsXaiKeyPlaceholder: "Borrow from server when empty",
+          speechListeningPlaceholder: "Listening...",
           speechTranscribingPlaceholder: "Transcribing...",
           speechFinalizingPlaceholder: "Finalizing...",
           speechTranscribingCancel: "Cancel transcription",
@@ -762,6 +763,32 @@ describe("MessageInput", () => {
       chip.querySelector(".speech-transcribing-cancel") as HTMLButtonElement,
     );
     expect(mockVoiceCancelProcessing).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a cancellable Listening chip during active capture", async () => {
+    const textarea = renderMessageInput() as HTMLTextAreaElement;
+
+    // Active live capture surfaces the same chip with its own word, so the user
+    // can abandon the in-flight utterance mid-stream (committed finals stay).
+    act(() => {
+      voicePropsState.current?.onPendingSpeechChange?.("listening");
+    });
+    const chip = await waitFor(() => {
+      const el = document.querySelector(".speech-transcribing-chip");
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    expect(chip.textContent).toContain("Listening");
+
+    // The field stays editable, and the ✕ routes to the unified cancel().
+    expect(textarea.disabled).toBe(false);
+    fireEvent.click(
+      chip.querySelector(".speech-transcribing-cancel") as HTMLButtonElement,
+    );
+    expect(mockVoiceCancelProcessing).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(document.querySelector(".speech-transcribing-chip")).toBeNull();
+    });
   });
 
   it("does not grace-delay the selection that started the mic transaction", () => {

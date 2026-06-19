@@ -32,10 +32,12 @@ import type {
 } from "../lib/speechProviders/SpeechProvider";
 
 /**
- * A post-capture pending-speech state the composer shows as a cancellable chip:
- * `transcribing` for a batch wait, `finalizing` for a streaming flush.
+ * A cancellable in-progress speech state the composer surfaces as a chip:
+ * `listening` during active capture, `transcribing` for a batch wait,
+ * `finalizing` for a streaming flush. The chip's ✕ cancels the non-final
+ * portion in every case; already-committed finals stay in the draft.
  */
-export type SpeechPendingKind = "transcribing" | "finalizing";
+export type SpeechPendingKind = "listening" | "transcribing" | "finalizing";
 
 export interface VoiceInputButtonRef {
   /** Stop listening and return any pending interim text */
@@ -197,13 +199,17 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
   const isActive = isCapturing || isBusy;
   const isPressed = isCapturing || isStarting || status === "reconnecting";
   const isProcessing = status === "processing";
-  // A post-capture wait the composer surfaces as a cancellable chip. Batch
-  // goes through "processing"; streaming flushes through "finalizing".
+  // A cancellable in-progress speech state the composer surfaces as a chip.
+  // Active capture is "listening"; the batch wait is "transcribing"; the
+  // streaming flush is "finalizing". The chip's ✕ routes to the unified
+  // cancel() (drops the non-final portion, keeps committed finals) in all three.
   const pendingKind: SpeechPendingKind | null = isProcessing
     ? "transcribing"
     : isFinalizing
       ? "finalizing"
-      : null;
+      : isCapturing
+        ? "listening"
+        : null;
 
   const isAvailable = isSupported && voiceInputEnabled && serverVoiceEnabled;
 

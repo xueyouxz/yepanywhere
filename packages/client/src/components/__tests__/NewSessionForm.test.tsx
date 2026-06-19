@@ -59,7 +59,7 @@ const {
   voicePropsState: {
     current: null as null | {
       onPendingSpeechChange?: (
-        kind: "transcribing" | "finalizing" | null,
+        kind: "listening" | "transcribing" | "finalizing" | null,
       ) => void;
       onInterimTranscript?: (text: string) => void;
     },
