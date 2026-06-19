@@ -1630,20 +1630,47 @@ export class YaServerProvider implements SpeechProvider {
 
   cancel(): void {
     if (this.disposed) return;
-    if (this.state.status !== "processing") return;
-    // Mark the in-flight transcription so its late result is discarded; the
-    // backend request may still complete but stays inert.
-    if (this.processingBatchToken !== null) {
-      this.cancelledBatchTokens.add(this.processingBatchToken);
-      this.processingBatchToken = null;
+    if (this.state.status === "processing") {
+      // Batch: mark the in-flight transcription so its late result is discarded;
+      // the backend request may still complete but stays inert.
+      if (this.processingBatchToken !== null) {
+        this.cancelledBatchTokens.add(this.processingBatchToken);
+        this.processingBatchToken = null;
+      }
+      this.setState({
+        status: "idle",
+        isListening: false,
+        interimTranscript: "",
+        error: null,
+      });
+      this.options.onEnd?.();
+      return;
     }
-    this.setState({
-      status: "idle",
-      isListening: false,
-      interimTranscript: "",
-      error: null,
-    });
-    this.options.onEnd?.();
+    if (
+      this.options.serverStreaming &&
+      this.state.status !== "idle" &&
+      this.state.status !== "error"
+    ) {
+      // Streaming: drop the uncommitted preview / in-flight tail and ignore any
+      // racing final (the token bump makes later socket messages inert), while
+      // the is_final blocks already committed to the draft stay. This is cancel,
+      // not the finalize/flush that stop() performs.
+      this.startToken += 1;
+      this.pendingSmartTurnCommand = null;
+      this.pendingStreamingFinalPartials = [];
+      this.streamingStopRequested = false;
+      this.clearStreamingPreview();
+      this.cleanupStreamingMedia();
+      this.ws?.close();
+      this.ws = null;
+      this.setState({
+        status: "idle",
+        isListening: false,
+        interimTranscript: "",
+        error: null,
+      });
+      this.options.onEnd?.();
+    }
   }
 
   private releaseActiveStream(): void {

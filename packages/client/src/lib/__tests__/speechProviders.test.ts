@@ -1784,6 +1784,137 @@ describe("YA server speech provider", () => {
     provider.dispose();
   });
 
+  it("cancel during streaming discards the in-progress tail, keeps committed finals", async () => {
+    const fakeStream = {
+      getTracks: () => [{ stop: vi.fn() }],
+    } as unknown as MediaStream;
+    const onResult = vi.fn();
+    const onEnd = vi.fn();
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: vi.fn(async () => fakeStream) },
+    });
+
+    class FakeWebSocket {
+      static readonly CONNECTING = 0;
+      static readonly OPEN = 1;
+      static readonly CLOSED = 3;
+      static readonly instances: FakeWebSocket[] = [];
+      binaryType: BinaryType = "blob";
+      readyState = FakeWebSocket.CONNECTING;
+      onopen: ((event: Event) => void) | null = null;
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      onclose: ((event: CloseEvent) => void) | null = null;
+      send = vi.fn();
+      constructor(readonly url: string) {
+        FakeWebSocket.instances.push(this);
+      }
+      open() {
+        this.readyState = FakeWebSocket.OPEN;
+        this.onopen?.(new Event("open"));
+      }
+      receive(message: unknown) {
+        this.onmessage?.(
+          new MessageEvent("message", { data: JSON.stringify(message) }),
+        );
+      }
+      close() {
+        this.readyState = FakeWebSocket.CLOSED;
+        this.onclose?.(new CloseEvent("close"));
+      }
+    }
+
+    class FakeAudioContext {
+      readonly state = "running";
+      readonly sampleRate = 48_000;
+      readonly destination = {};
+      close = vi.fn(async () => undefined);
+      createMediaStreamSource() {
+        return { connect: vi.fn(), disconnect: vi.fn() };
+      }
+      createScriptProcessor() {
+        const node = {
+          connect: vi.fn(() => {
+            queueMicrotask(() =>
+              node.onaudioprocess?.({
+                inputBuffer: { getChannelData: () => new Float32Array(4096) },
+              }),
+            );
+          }),
+          disconnect: vi.fn(),
+          onaudioprocess: null as
+            | null
+            | ((event: {
+                inputBuffer: { getChannelData: () => Float32Array };
+              }) => void),
+        };
+        return node;
+      }
+      createGain() {
+        return { gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() };
+      }
+    }
+
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+
+    let lastState: { status: string; isListening: boolean } | undefined;
+    const provider = new YaServerProvider("ya-grok", "", {
+      serverStreaming: true,
+      onResult,
+      onEnd,
+    });
+    provider.subscribe((state) => {
+      lastState = state;
+    });
+    provider.start();
+    await Promise.resolve();
+    await Promise.resolve();
+    FakeWebSocket.instances[0]?.open();
+    await Promise.resolve();
+    await Promise.resolve();
+    const ws = FakeWebSocket.instances[0]!;
+
+    // A finalized block commits to the draft.
+    ws.receive({
+      type: "interim",
+      text: "Hello world",
+      isFinal: true,
+      speechFinal: false,
+      start: 0,
+      duration: 1,
+    });
+    expect(onResult).toHaveBeenLastCalledWith("Hello world", undefined);
+
+    // An in-progress, non-final tail is only previewed.
+    ws.receive({
+      type: "interim",
+      text: "Hello world and then some",
+      isFinal: false,
+      start: 1,
+      duration: 1,
+    });
+
+    onResult.mockClear();
+    provider.cancel();
+    expect(lastState?.status).toBe("idle");
+    expect(lastState?.isListening).toBe(false);
+    expect(onEnd).toHaveBeenCalledTimes(1);
+
+    // A final racing in after cancel must be inert: the tail is dropped and the
+    // turn is not submitted. The committed "Hello world" already reached the
+    // draft and is untouched.
+    ws.receive({
+      type: "final",
+      text: "Hello world and then some",
+      transcriptionId: "late",
+    });
+    expect(onResult).not.toHaveBeenCalled();
+
+    provider.dispose();
+  });
+
   it("never shows listening and errors when no audio frame ever arrives", async () => {
     vi.useFakeTimers();
     try {
