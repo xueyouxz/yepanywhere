@@ -25,12 +25,18 @@ export class SpeechBackendRegistry {
     string,
     { info: SpeechBackendInfo; backend: SpeechBackend }
   >();
+  private readonly validations = new Set<Promise<void>>();
 
   /** Currently enabled backend ids in insertion order. */
   enabledIds(): string[] {
     return [...this.entries.values()]
       .filter(({ info }) => info.enabled)
       .map(({ info }) => info.id);
+  }
+
+  /** All configured backend ids, including pending and disabled entries. */
+  knownIds(): string[] {
+    return [...this.entries.keys()];
   }
 
   /** All known backends, including disabled ones, for diagnostics. */
@@ -59,21 +65,53 @@ export class SpeechBackendRegistry {
     return entry.backend;
   }
 
-  async register(backend: SpeechBackend): Promise<void> {
-    const result = await backend.validate();
+  register(backend: SpeechBackend): void {
+    // Record configured backends immediately for discovery, but keep them out
+    // of the routable set until validation succeeds. This separates "known"
+    // from "usable" instead of optimistically weakening enabled semantics.
     const info: SpeechBackendInfo = {
       id: backend.id,
       label: backend.label,
-      enabled: result.ok,
+      enabled: false,
+      validationStatus: "pending",
       capabilities: backend.capabilities ?? {},
-      disabledReason: result.ok ? undefined : result.reason,
     };
     this.entries.set(backend.id, { info, backend });
-    if (!result.ok) {
-      logger.warn(`[Voice] Backend "${backend.id}" disabled: ${result.reason}`);
-    } else {
-      logger.info(`[Voice] Backend "${backend.id}" enabled`);
-    }
+
+    const validation = backend
+      .validate()
+      .then((result) => {
+        info.enabled = result.ok;
+        info.validationStatus = result.ok ? "enabled" : "disabled";
+        if (result.ok) {
+          info.disabledReason = undefined;
+          logger.info(`[Voice] Backend "${backend.id}" enabled`);
+        } else {
+          info.disabledReason = result.reason;
+          logger.warn(
+            `[Voice] Backend "${backend.id}" disabled: ${result.reason}`,
+          );
+        }
+      })
+      .catch((error) => {
+        const message =
+          error instanceof Error ? error.message : String(error ?? "unknown");
+        info.enabled = false;
+        info.validationStatus = "disabled";
+        info.disabledReason = message;
+        logger.warn(
+          `[Voice] Backend "${backend.id}" validate threw: ${message}`,
+        );
+      })
+      .finally(() => {
+        this.validations.delete(validation);
+      });
+    this.validations.add(validation);
+  }
+
+  /** Wait for startup validations currently in flight; useful for tests/tools. */
+  async waitForValidation(): Promise<void> {
+    await Promise.all([...this.validations]);
   }
 }
 
@@ -146,7 +184,7 @@ export async function registerSpeechBackends(
   for (const backendId of getRequestedSpeechBackendIds(options)) {
     switch (backendId) {
       case "ya-dummy":
-        await registry.register(new DummyBackend());
+        registry.register(new DummyBackend());
         break;
 
       case "ya-deepgram": {
@@ -156,7 +194,7 @@ export async function registerSpeechBackends(
             "[Voice] ya-deepgram requested but YA_stt__DEEPGRAM_API_KEY is not set",
           );
         } else {
-          await registry.register(new DeepgramBackend(key));
+          registry.register(new DeepgramBackend(key));
         }
         break;
       }
@@ -168,13 +206,13 @@ export async function registerSpeechBackends(
             "[Voice] ya-grok requested but YA_stt__XAI_API_KEY is not set",
           );
         } else {
-          await registry.register(new XaiSttBackend(key));
+          registry.register(new XaiSttBackend(key));
         }
         break;
       }
 
       case "ya-whisper":
-        await registry.register(
+        registry.register(
           new LocalWhisperBackend({
             model: options.whisperModel,
             device: options.whisperDevice,
@@ -184,7 +222,7 @@ export async function registerSpeechBackends(
         break;
 
       case "ya-parakeet":
-        await registry.register(
+        registry.register(
           new LocalParakeetBackend({
             model: options.parakeetModel,
             device: options.parakeetDevice,
@@ -193,7 +231,7 @@ export async function registerSpeechBackends(
         break;
 
       case "ya-nemo":
-        await registry.register(
+        registry.register(
           new LocalNemoBackend({
             model: options.nemoModel,
             device: options.nemoDevice,

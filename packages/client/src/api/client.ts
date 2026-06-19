@@ -306,6 +306,15 @@ export interface VersionInfo {
   capabilities?: string[];
   /** Server-routed speech backend ids validated by the server. */
   voiceBackends?: string[];
+  /** Configured server-routed speech backends, including validation state. */
+  voiceBackendStatuses?: Array<{
+    id: string;
+    label: string;
+    enabled: boolean;
+    validationStatus: "pending" | "enabled" | "disabled";
+    capabilities?: { streaming?: boolean; smartTurn?: boolean };
+    disabledReason?: string;
+  }>;
   /** Capability map keyed by server-routed speech backend id. */
   voiceBackendCapabilities?: Record<
     string,

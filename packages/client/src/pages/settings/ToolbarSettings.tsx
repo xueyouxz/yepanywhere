@@ -68,6 +68,11 @@ export function ToolbarSettings() {
       description: t("appearanceToolbarMicrophoneDescription"),
     },
     {
+      key: "waveform",
+      title: t("appearanceToolbarWaveformTitle"),
+      description: t("appearanceToolbarWaveformDescription"),
+    },
+    {
       key: "sessionStatus",
       title: t("appearanceToolbarStatusTitle"),
       description: t("appearanceToolbarStatusDescription"),

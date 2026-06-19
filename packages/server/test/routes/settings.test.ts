@@ -353,6 +353,7 @@ describe("Settings Routes", () => {
             },
             sessionToolbarVisibility: {
               microphone: true,
+              waveform: false,
             },
           },
         }),
@@ -372,6 +373,7 @@ describe("Settings Routes", () => {
           },
           sessionToolbarVisibility: {
             microphone: true,
+            waveform: false,
             queueControls: false,
           },
         },

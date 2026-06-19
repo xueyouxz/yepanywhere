@@ -99,6 +99,10 @@ const {
       onPendingSpeechChange?: (
         kind: "listening" | "transcribing" | "finalizing" | null,
       ) => void;
+      onTranscriptionSettled?: (settlement: {
+        speechTargetId?: string;
+        status: "completed" | "cancelled" | "error";
+      }) => void;
       getTranscriptionContext?: () => { speechTargetId?: string };
     },
   },
@@ -182,6 +186,7 @@ vi.mock("../../hooks/useSessionToolbarVisibility", () => ({
       thinkingToggle: true,
       renderMode: true,
       microphone: true,
+      waveform: true,
       shortcutsHelp: true,
       contextUsage: true,
       btw: true,
@@ -395,6 +400,7 @@ const toolbarVisibility: MessageInputToolbarViewProps["visibility"] = {
   thinkingToggle: true,
   renderMode: false,
   microphone: false,
+  waveform: false,
   shortcutsHelp: false,
   contextUsage: false,
   btw: false,
@@ -818,6 +824,42 @@ describe("MessageInput", () => {
     const ordinals = document.querySelectorAll(".speech-tag-ordinal");
     expect(ordinals.length).toBe(1);
     expect(ordinals[0]?.textContent).toContain("2");
+  });
+
+  it("retires an older failed target while a newer recording stays active", async () => {
+    const textarea = renderMessageInput() as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "draft" } });
+
+    let firstTargetId: string | undefined;
+    act(() => {
+      voicePropsState.current?.onListeningStart?.();
+      firstTargetId =
+        voicePropsState.current?.getTranscriptionContext?.().speechTargetId;
+      voicePropsState.current?.onPendingSpeechChange?.("transcribing");
+      voicePropsState.current?.onListeningStart?.();
+      voicePropsState.current?.onPendingSpeechChange?.("listening");
+    });
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".speech-processing-inline")).toHaveLength(
+        2,
+      );
+    });
+
+    act(() => {
+      voicePropsState.current?.onTranscriptionSettled?.({
+        speechTargetId: firstTargetId,
+        status: "error",
+      });
+    });
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".speech-processing-inline")).toHaveLength(
+        1,
+      );
+    });
+    expect(document.querySelector(".speech-tag-ordinal")).toBeNull();
+    expect(document.querySelector(".speech-tag-cancel")).not.toBeNull();
   });
 
   it("clears a completed recording's tag; a later activation does not revive it", async () => {
@@ -2095,6 +2137,39 @@ describe("MessageInput", () => {
     const indicator = container.querySelector(".context-usage-indicator");
     expect(indicator).toBeTruthy();
     expect(indicator?.closest("button")).toBe(null);
+  });
+
+  it("renders the active speech waveform in the toolbar center slot", () => {
+    const { container } = render(
+      <MessageInputToolbarView
+        t={toolbarT}
+        visibility={toolbarVisibility}
+        speechWaveformActive
+        attachmentControl={{ attachmentCount: 0 }}
+        shortcutsControl={{
+          open: false,
+          isearchScope: null,
+          setOpen:
+            vi.fn() as unknown as MessageInputToolbarViewProps["shortcutsControl"]["setOpen"],
+          settingsOpen: false,
+          setSettingsOpen:
+            vi.fn() as unknown as MessageInputToolbarViewProps["shortcutsControl"]["setSettingsOpen"],
+          hasDualActions: false,
+          enterActionKind: "send",
+          canSwapEnterAction: false,
+          queueShortcutLabel: "Queue while agent runs",
+        }}
+        actionsControl={{}}
+      />,
+    );
+
+    const toolbar = container.querySelector(".message-input-toolbar");
+    const waveform = container.querySelector(".composer-speech-waveform");
+    expect(waveform).toBeTruthy();
+    expect(waveform?.parentElement?.classList.contains("message-input-left")).toBe(
+      true,
+    );
+    expect(toolbar?.contains(waveform)).toBe(true);
   });
 
   it("uses only the custom tooltip on the primary send action", () => {

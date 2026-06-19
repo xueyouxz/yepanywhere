@@ -733,7 +733,11 @@ describe("YA server speech provider", () => {
     } as unknown as MediaStream;
     const getUserMedia = vi.fn(async () => fakeStream);
     const firstFetch = deferred<Response>();
-    const fetchMock = vi.fn(() => firstFetch.promise);
+    const secondFetch = deferred<Response>();
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => firstFetch.promise)
+      .mockImplementationOnce(() => secondFetch.promise);
     let currentSpeechTargetId = "target-1";
 
     Object.defineProperty(navigator, "mediaDevices", {
@@ -796,11 +800,13 @@ describe("YA server speech provider", () => {
     vi.stubGlobal("btoa", () => "YXVkaW8=");
 
     const onResult = vi.fn();
+    const onTranscriptionSettled = vi.fn();
     const provider = new YaServerProvider("ya-whisper", "", {
       getTranscriptionContext: () => ({
         speechTargetId: currentSpeechTargetId,
       }),
       onResult,
+      onTranscriptionSettled,
     });
 
     provider.start();
@@ -833,6 +839,26 @@ describe("YA server speech provider", () => {
       expect(onResult).toHaveBeenCalledWith("first transcript", {
         speechTargetId: "target-1",
         transcriptionId: "tx-1",
+      }),
+    );
+    expect(onTranscriptionSettled).toHaveBeenCalledWith({
+      speechTargetId: "target-1",
+      status: "completed",
+    });
+    expect(provider.getState().status).toBe("listening");
+
+    provider.stop();
+    await Promise.resolve();
+    currentSpeechTargetId = "target-3";
+    provider.start();
+    await Promise.resolve();
+    expect(provider.getState().status).toBe("listening");
+
+    secondFetch.reject(new Error("model load failed"));
+    await vi.waitFor(() =>
+      expect(onTranscriptionSettled).toHaveBeenCalledWith({
+        speechTargetId: "target-2",
+        status: "error",
       }),
     );
     expect(provider.getState().status).toBe("listening");
@@ -895,9 +921,12 @@ describe("YA server speech provider", () => {
 
     const onResult = vi.fn();
     const onEnd = vi.fn();
+    const onTranscriptionSettled = vi.fn();
     const provider = new YaServerProvider("ya-whisper", "", {
+      getTranscriptionContext: () => ({ speechTargetId: "target-cancelled" }),
       onResult,
       onEnd,
+      onTranscriptionSettled,
     });
 
     provider.start();
@@ -911,6 +940,10 @@ describe("YA server speech provider", () => {
     provider.cancel();
     expect(provider.getState().status).toBe("idle");
     expect(onEnd).toHaveBeenCalledTimes(1);
+    expect(onTranscriptionSettled).toHaveBeenCalledWith({
+      speechTargetId: "target-cancelled",
+      status: "cancelled",
+    });
 
     // The backend request still resolves, but the result must be a no-op.
     pendingFetch.resolve(
@@ -2865,10 +2898,13 @@ describe("direct xAI speech provider", () => {
 
     const onResult = vi.fn();
     const onEnd = vi.fn();
+    const onTranscriptionSettled = vi.fn();
     const provider = new DirectXaiSpeechProvider({
       micDeviceId: "usb-mic",
+      getTranscriptionContext: () => ({ speechTargetId: "direct-target" }),
       onResult,
       onEnd,
+      onTranscriptionSettled,
     });
 
     provider.start();
@@ -2903,8 +2939,14 @@ describe("direct xAI speech provider", () => {
     expect(form.get("language")).toBe("en");
     expect(form.get("file")).toBeInstanceOf(Blob);
     await vi.waitFor(() =>
-      expect(onResult).toHaveBeenCalledWith("direct transcript", undefined),
+      expect(onResult).toHaveBeenCalledWith("direct transcript", {
+        speechTargetId: "direct-target",
+      }),
     );
+    expect(onTranscriptionSettled).toHaveBeenCalledWith({
+      speechTargetId: "direct-target",
+      status: "completed",
+    });
     expect(onEnd).toHaveBeenCalledTimes(1);
 
     provider.dispose();

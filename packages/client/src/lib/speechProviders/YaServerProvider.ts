@@ -11,11 +11,13 @@ import {
   type SpeechProviderState,
   type SpeechProviderSubscriber,
   type SpeechWordTimestamp,
+  type SpeechTranscriptionSettlementStatus,
 } from "./SpeechProvider";
 import {
   getSpeechMicStream,
   isSharedSpeechMicStream,
   SPEECH_CAPTURE_SAMPLE_RATE,
+  startSpeechWaveformMonitor,
   stopSpeechStreamTracks,
 } from "./sharedMicCapture";
 import {
@@ -480,6 +482,7 @@ export class YaServerProvider implements SpeechProvider {
   private recorder: MediaRecorder | null = null;
   private stream: MediaStream | null = null;
   private prewarmRequest: Promise<void> | null = null;
+  private stopWaveformMonitor: (() => void) | null = null;
   // backendId:model already warmed this session, so a repeated pointer-near
   // does not re-hit /speech/prewarm. Cleared on failure to allow a retry.
   private prewarmedBackendKey: string | null = null;
@@ -510,6 +513,10 @@ export class YaServerProvider implements SpeechProvider {
   // the in-flight token so its late result becomes a no-op.
   private processingBatchToken: number | null = null;
   private cancelledBatchTokens = new Set<number>();
+  private pendingBatchContexts = new Map<
+    number,
+    SpeechTranscriptionContext | undefined
+  >();
   private disposed = false;
 
   constructor(
@@ -658,6 +665,11 @@ export class YaServerProvider implements SpeechProvider {
       return;
     }
     this.stream = stream;
+    this.stopWaveformMonitor?.();
+    this.stopWaveformMonitor = startSpeechWaveformMonitor(
+      stream,
+      this.options.onAudioSamples,
+    );
     const mimeType = preferredMimeType();
     this.mimeType = mimeType;
     const recording: BatchRecording = {
@@ -669,6 +681,7 @@ export class YaServerProvider implements SpeechProvider {
       submitOnStop: true,
     };
     this.batchRecording = recording;
+    this.pendingBatchContexts.set(recording.token, recording.context);
 
     const recorder = new MediaRecorder(stream, {
       mimeType,
@@ -840,6 +853,7 @@ export class YaServerProvider implements SpeechProvider {
         mark(`frame peak=${peak.toFixed(3)}`);
         loudnessFramesLeft -= 1;
       }
+      this.options.onAudioSamples?.(input);
       pcmChunker.writeFloatSamples(input, audioContext.sampleRate);
     };
     source.connect(processor);
@@ -1507,6 +1521,7 @@ export class YaServerProvider implements SpeechProvider {
     recording.chunks = [];
     releaseSpeechStream(recording.stream);
 
+    let settlementStatus: SpeechTranscriptionSettlementStatus = "cancelled";
     try {
       const response =
         audio.size > 0
@@ -1550,6 +1565,7 @@ export class YaServerProvider implements SpeechProvider {
         );
         if (metadata) this.options.onResult?.("", metadata);
       }
+      settlementStatus = "completed";
       if (
         recording.token === this.startToken &&
         !this.state.isListening &&
@@ -1569,6 +1585,7 @@ export class YaServerProvider implements SpeechProvider {
       // user already abandoned it, so do not surface its error.
       if (this.cancelledBatchTokens.delete(recording.token)) return;
       const message = err instanceof Error ? err.message : String(err);
+      settlementStatus = "error";
       this.options.onError?.(message);
       if (
         recording.token === this.startToken &&
@@ -1583,7 +1600,24 @@ export class YaServerProvider implements SpeechProvider {
         });
         this.options.onEnd?.();
       }
+    } finally {
+      if (this.processingBatchToken === recording.token) {
+        this.processingBatchToken = null;
+      }
+      this.settleBatchTranscription(recording.token, settlementStatus);
     }
+  }
+
+  private settleBatchTranscription(
+    token: number,
+    status: SpeechTranscriptionSettlementStatus,
+  ): void {
+    const context = this.pendingBatchContexts.get(token);
+    if (!this.pendingBatchContexts.delete(token)) return;
+    this.options.onTranscriptionSettled?.({
+      speechTargetId: context?.speechTargetId,
+      status,
+    });
   }
 
   stop(): void {
@@ -1621,6 +1655,8 @@ export class YaServerProvider implements SpeechProvider {
     }
 
     this.setState({ status: "processing", isListening: false });
+    this.stopWaveformMonitor?.();
+    this.stopWaveformMonitor = null;
     const recorder = this.recorder;
     const recording = this.batchRecording;
     this.processingBatchToken = recording?.token ?? null;
@@ -1640,8 +1676,10 @@ export class YaServerProvider implements SpeechProvider {
       // Batch: mark the in-flight transcription so its late result is discarded;
       // the backend request may still complete but stays inert.
       if (this.processingBatchToken !== null) {
-        this.cancelledBatchTokens.add(this.processingBatchToken);
+        const token = this.processingBatchToken;
+        this.cancelledBatchTokens.add(token);
         this.processingBatchToken = null;
+        this.settleBatchTranscription(token, "cancelled");
       }
       this.setState({
         status: "idle",
@@ -1685,6 +1723,8 @@ export class YaServerProvider implements SpeechProvider {
   }
 
   private cleanupStreamingMedia(): void {
+    this.stopWaveformMonitor?.();
+    this.stopWaveformMonitor = null;
     this.clearAudioFlowWatchdog();
     this.processor?.disconnect();
     this.audioSource?.disconnect();
@@ -1699,6 +1739,8 @@ export class YaServerProvider implements SpeechProvider {
   }
 
   private cleanupMedia(submitOnStop: boolean): void {
+    this.stopWaveformMonitor?.();
+    this.stopWaveformMonitor = null;
     this.cleanupStreamingMedia();
     this.ws?.close();
     this.ws = null;
@@ -1720,6 +1762,7 @@ export class YaServerProvider implements SpeechProvider {
       if (recording) {
         recording.chunks = [];
         releaseSpeechStream(recording.stream);
+        this.settleBatchTranscription(recording.token, "cancelled");
       }
     }
   }
@@ -1727,6 +1770,9 @@ export class YaServerProvider implements SpeechProvider {
   dispose(): void {
     this.disposed = true;
     this.startToken += 1;
+    for (const token of this.pendingBatchContexts.keys()) {
+      this.settleBatchTranscription(token, "cancelled");
+    }
     this.processingBatchToken = null;
     this.cancelledBatchTokens.clear();
     this.cleanupMedia(false);

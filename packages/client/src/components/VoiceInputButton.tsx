@@ -5,6 +5,7 @@ import {
   useEffect,
   useImperativeHandle,
   useMemo,
+  useRef,
 } from "react";
 import { useBrowserXaiSttApiKey } from "../hooks/useBrowserXaiSttApiKey";
 import { useModelSettings } from "../hooks/useModelSettings";
@@ -20,16 +21,22 @@ import { useViewportWidth } from "../hooks/useViewportWidth";
 import { useI18n } from "../i18n";
 import { hasCoarsePointer } from "../lib/deviceDetection";
 import {
+  DEFAULT_SPEECH_METHOD,
   canSpeechMethodStream,
   isServerRoutedSpeechMethod,
   resolveSpeechMethod,
   type SpeechMethodId,
 } from "../lib/speechProviders/methods";
 import { reconcileParakeetBackendForModel } from "../lib/speechProviders/parakeetModels";
+import {
+  clearSpeechWaveform,
+  publishSpeechWaveformSamples,
+} from "../lib/speechWaveform";
 import type {
   SpeechSmartTurnSettings,
   SpeechTranscriptionContext,
   SpeechTranscriptionResultMetadata,
+  SpeechTranscriptionSettlement,
 } from "../lib/speechProviders/SpeechProvider";
 
 /**
@@ -69,6 +76,8 @@ interface VoiceInputButtonProps {
   onListeningStop?: () => void;
   /** Callback when a post-capture pending state (transcribing/finalizing) starts or ends. */
   onPendingSpeechChange?: (kind: SpeechPendingKind | null) => void;
+  /** Callback when one batch transcription target reaches a terminal state. */
+  onTranscriptionSettled?: (settlement: SpeechTranscriptionSettlement) => void;
   /** Whether the button should be disabled */
   disabled?: boolean;
   /** Additional class name */
@@ -79,6 +88,8 @@ interface VoiceInputButtonProps {
   getTranscriptionContext?: () => SpeechTranscriptionContext | undefined;
   /** Smart Turn settings for streaming STT backends that support it. */
   smartTurn?: SpeechSmartTurnSettings;
+  /** Publish real mic samples for the enclosing session-toolbar waveform. */
+  showWaveform?: boolean;
 }
 
 /**
@@ -94,11 +105,13 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
     onListeningStart,
     onListeningStop,
     onPendingSpeechChange,
+    onTranscriptionSettled,
     disabled,
     className = "",
     speechMethod: selectedSpeechMethod,
     getTranscriptionContext,
     smartTurn,
+    showWaveform = false,
   }: VoiceInputButtonProps,
   ref: ForwardedRef<VoiceInputButtonRef>,
 ) {
@@ -193,10 +206,12 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
     smartTurn: serverStreaming ? smartTurn : undefined,
     keepMicWarm,
     micDeviceId,
+    onAudioSamples: showWaveform ? publishSpeechWaveformSamples : undefined,
     parakeetModel: parakeetSpeechModel,
     openRelayedSpeechSocket,
     onResult: handleResult,
     onInterimResult: handleInterim,
+    onTranscriptionSettled,
   });
   const isStarting = status === "starting";
   const isCapturing =
@@ -208,6 +223,9 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
   const isActive = isCapturing || isBusy;
   const isPressed = isCapturing || isStarting || status === "reconnecting";
   const isProcessing = status === "processing";
+  const wasCapturingRef = useRef(false);
+  const waveformVisible =
+    showWaveform && speechMethod !== DEFAULT_SPEECH_METHOD && isCapturing;
   // A cancellable in-progress speech state the composer surfaces as a chip.
   // Active capture is "listening"; the batch wait is "transcribing"; the
   // streaming flush is "finalizing". The chip's ✕ routes to the unified
@@ -261,6 +279,16 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
   }, [isCapturing, interimTranscript, onInterimTranscript]);
 
   useEffect(() => {
+    if (wasCapturingRef.current && !isCapturing) {
+      clearSpeechWaveform();
+    }
+    wasCapturingRef.current = isCapturing;
+    return () => {
+      if (isCapturing) clearSpeechWaveform();
+    };
+  }, [isCapturing]);
+
+  useEffect(() => {
     onPendingSpeechChange?.(pendingKind);
     return () => {
       if (pendingKind) onPendingSpeechChange?.(null);
@@ -292,15 +320,15 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
         ? "status-reconnecting"
         : status === "finalizing"
           ? "status-finalizing"
-        : status === "processing"
-          ? "status-processing"
-        : status === "starting"
-          ? "status-starting"
-          : status === "receiving"
-            ? "status-receiving"
-            : status === "listening"
-              ? "status-listening"
-              : "";
+          : status === "processing"
+            ? "status-processing"
+            : status === "starting"
+              ? "status-starting"
+              : status === "receiving"
+                ? "status-receiving"
+                : status === "listening"
+                  ? "status-listening"
+                  : "";
 
   const button = (
     <button
@@ -314,15 +342,15 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
           : isFinalizing
             ? statusLabel
             : isActive
-            ? t("voiceInputStop" as never)
-            : t("voiceInputStart" as never)
+              ? t("voiceInputStop" as never)
+              : t("voiceInputStart" as never)
       }
       aria-label={
         isFinalizing
           ? statusLabel
           : isActive
-          ? t("voiceInputStopLabel" as never)
-          : t("voiceInputStartLabel" as never)
+            ? t("voiceInputStopLabel" as never)
+            : t("voiceInputStartLabel" as never)
       }
       aria-pressed={isPressed}
     >
@@ -384,7 +412,7 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
   // through the desktop-only gate: on a phone (coarse pointer / narrow) the
   // status text is normally hidden, which left mic failures with no feedback
   // at all — the original complaint. An error must always be visible.
-  if ((showStatusText && isActive) || error) {
+  if ((showStatusText && isActive && !waveformVisible) || error) {
     return (
       <div
         className={`voice-input-container ${isCapturing ? "listening" : ""} ${statusClass}`}

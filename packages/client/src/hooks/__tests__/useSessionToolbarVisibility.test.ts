@@ -99,6 +99,7 @@ describe("useSessionToolbarVisibility", () => {
 
     expect(result.current.visibility.slashMenu).toBe(false);
     expect(result.current.visibility.microphone).toBe(true);
+    expect(result.current.visibility.waveform).toBe(true);
     expect(result.current.visibility.contextUsage).toBe(true);
   });
 
@@ -152,7 +153,7 @@ describe("useSessionToolbarVisibility", () => {
     });
   });
 
-  it("defaults mic visible and patient queue controls hidden on mobile", async () => {
+  it("defaults mic and waveform visible on mobile", async () => {
     stubToolbarLayout(true);
     const { useSessionToolbarVisibility } = await import(
       "../useSessionToolbarVisibility"
@@ -161,6 +162,7 @@ describe("useSessionToolbarVisibility", () => {
     const { result } = renderHook(() => useSessionToolbarVisibility());
 
     expect(result.current.visibility.microphone).toBe(true);
+    expect(result.current.visibility.waveform).toBe(true);
   });
 
   it("stores only explicit toolbar choices and reset returns to default", async () => {

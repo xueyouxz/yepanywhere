@@ -17,6 +17,7 @@ import {
   type SpeechSmartTurnSettings,
   type SpeechTranscriptionContext,
   type SpeechTranscriptionResultMetadata,
+  type SpeechTranscriptionSettlement,
 } from "../lib/speechProviders/SpeechProvider";
 
 export interface UseSpeechRecognitionOptions {
@@ -36,6 +37,8 @@ export interface UseSpeechRecognitionOptions {
   keepMicWarm?: boolean;
   /** Browser-local microphone device id for YA-server capture. */
   micDeviceId?: string | null;
+  /** Receive real microphone samples for local waveform rendering. */
+  onAudioSamples?: (samples: Float32Array) => void;
   /** Browser-selected local Parakeet model id for the YA Parakeet backend. */
   parakeetModel?: string;
   /** Dedicated secure relay speech socket opener. */
@@ -51,6 +54,8 @@ export interface UseSpeechRecognitionOptions {
   onEnd?: () => void;
   /** Callback on error. */
   onError?: (error: string) => void;
+  /** Callback when a batch recording's transcription reaches a terminal state. */
+  onTranscriptionSettled?: (settlement: SpeechTranscriptionSettlement) => void;
 }
 
 export type SpeechRecognitionStatus = SpeechProviderStatus;
@@ -80,6 +85,7 @@ function createProvider(
     smartTurn?: SpeechSmartTurnSettings;
     keepMicWarm?: boolean;
     micDeviceId?: string | null;
+    onAudioSamples?: (samples: Float32Array) => void;
     parakeetModel?: string;
     openRelayedSpeechSocket?: () => Promise<ConnectionSpeechSocket>;
     onResult?: (
@@ -89,6 +95,9 @@ function createProvider(
     onInterimResult?: (t: string) => void;
     onEnd?: () => void;
     onError?: (e: string) => void;
+    onTranscriptionSettled?: (
+      settlement: SpeechTranscriptionSettlement,
+    ) => void;
   },
 ): SpeechProvider {
   if (speechMethod === XAI_DIRECT_STREAMING_SPEECH_METHOD) {
@@ -126,26 +135,41 @@ export function useSpeechRecognition(
     smartTurn,
     keepMicWarm,
     micDeviceId,
+    onAudioSamples,
     parakeetModel,
     openRelayedSpeechSocket,
     onResult,
     onInterimResult,
     onEnd,
     onError,
+    onTranscriptionSettled,
   } = options;
 
   const onResultRef = useRef(onResult);
   const onInterimResultRef = useRef(onInterimResult);
   const onEndRef = useRef(onEnd);
   const onErrorRef = useRef(onError);
+  const onTranscriptionSettledRef = useRef(onTranscriptionSettled);
+  const onAudioSamplesRef = useRef(onAudioSamples);
+  const onAudioSamplesEnabledRef = useRef(Boolean(onAudioSamples));
   const getTranscriptionContextRef = useRef(getTranscriptionContext);
   useEffect(() => {
     onResultRef.current = onResult;
     onInterimResultRef.current = onInterimResult;
     onEndRef.current = onEnd;
     onErrorRef.current = onError;
+    onTranscriptionSettledRef.current = onTranscriptionSettled;
+    onAudioSamplesRef.current = onAudioSamples;
     getTranscriptionContextRef.current = getTranscriptionContext;
-  }, [onResult, onInterimResult, onEnd, onError, getTranscriptionContext]);
+  }, [
+    onResult,
+    onInterimResult,
+    onEnd,
+    onError,
+    onTranscriptionSettled,
+    onAudioSamples,
+    getTranscriptionContext,
+  ]);
 
   const speechMethodRef = useRef(speechMethod);
   const basePathRef = useRef(basePath);
@@ -168,12 +192,17 @@ export function useSpeechRecognition(
         smartTurn: smartTurnRef.current,
         keepMicWarm: keepMicWarmRef.current,
         micDeviceId: micDeviceIdRef.current,
+        onAudioSamples: onAudioSamples
+          ? (samples) => onAudioSamplesRef.current?.(samples)
+          : undefined,
         parakeetModel: parakeetModelRef.current,
         openRelayedSpeechSocket: openRelayedSpeechSocketRef.current,
         onResult: (t, metadata) => onResultRef.current?.(t, metadata),
         onInterimResult: (t) => onInterimResultRef.current?.(t),
         onEnd: () => onEndRef.current?.(),
         onError: (e) => onErrorRef.current?.(e),
+        onTranscriptionSettled: (settlement) =>
+          onTranscriptionSettledRef.current?.(settlement),
       },
     );
   }
@@ -196,6 +225,7 @@ export function useSpeechRecognition(
       smartTurn === smartTurnRef.current &&
       keepMicWarm === keepMicWarmRef.current &&
       micDeviceId === micDeviceIdRef.current &&
+      Boolean(onAudioSamples) === onAudioSamplesEnabledRef.current &&
       parakeetModel === parakeetModelRef.current &&
       openRelayedSpeechSocket === openRelayedSpeechSocketRef.current
     ) {
@@ -207,6 +237,8 @@ export function useSpeechRecognition(
     smartTurnRef.current = smartTurn;
     keepMicWarmRef.current = keepMicWarm;
     micDeviceIdRef.current = micDeviceId;
+    onAudioSamplesRef.current = onAudioSamples;
+    onAudioSamplesEnabledRef.current = Boolean(onAudioSamples);
     parakeetModelRef.current = parakeetModel;
     openRelayedSpeechSocketRef.current = openRelayedSpeechSocket;
 
@@ -220,12 +252,17 @@ export function useSpeechRecognition(
       smartTurn,
       keepMicWarm,
       micDeviceId,
+      onAudioSamples: onAudioSamples
+        ? (samples) => onAudioSamplesRef.current?.(samples)
+        : undefined,
       parakeetModel,
       openRelayedSpeechSocket,
       onResult: (t, metadata) => onResultRef.current?.(t, metadata),
       onInterimResult: (t) => onInterimResultRef.current?.(t),
       onEnd: () => onEndRef.current?.(),
       onError: (e) => onErrorRef.current?.(e),
+      onTranscriptionSettled: (settlement) =>
+        onTranscriptionSettledRef.current?.(settlement),
     });
     providerRef.current = next;
     setState(next.getState());
@@ -238,6 +275,7 @@ export function useSpeechRecognition(
     smartTurn,
     keepMicWarm,
     micDeviceId,
+    onAudioSamples,
     parakeetModel,
     openRelayedSpeechSocket,
   ]);

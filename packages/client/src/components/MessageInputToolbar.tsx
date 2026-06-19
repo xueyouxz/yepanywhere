@@ -53,6 +53,7 @@ import {
   type SessionIsearchScope,
 } from "../lib/sessionIsearchGuide";
 import {
+  DEFAULT_SPEECH_METHOD,
   canSpeechMethodStream,
   getSpeechMethodCapabilities,
   getSpeechMethods,
@@ -64,6 +65,7 @@ import type {
   SpeechSmartTurnSettings,
   SpeechTranscriptionContext,
   SpeechTranscriptionResultMetadata,
+  SpeechTranscriptionSettlement,
 } from "../lib/speechProviders/SpeechProvider";
 import type { ContextUsage, PermissionMode } from "../types";
 import { ContextThresholdQuickEdit } from "./ContextThresholdQuickEdit";
@@ -72,6 +74,7 @@ import { MessageAge } from "./MessageAge";
 import { ModeSelector } from "./ModeSelector";
 import { SlashCommandButton } from "./SlashCommandButton";
 import { SpeechControlMenu } from "./SpeechControlMenu";
+import { SpeechWaveform } from "./SpeechWaveform";
 import { ThinkingControlsPanel, ThinkingIcon } from "./ThinkingControls";
 import { RenderModeGlyph } from "./ui/RenderModeGlyph";
 import {
@@ -96,6 +99,9 @@ function getFlexGapPx(element: HTMLElement): number {
 }
 
 function getVisibleControlWidth(element: HTMLElement): number {
+  if (element.dataset.composerElastic === "true") {
+    return 0;
+  }
   const style = getComputedStyle(element);
   if (style.display === "none" || style.position === "absolute") {
     return 0;
@@ -192,6 +198,7 @@ export interface MessageInputToolbarProps {
   onListeningStart?: () => void;
   onListeningStop?: () => void;
   onPendingSpeechChange?: (kind: SpeechPendingKind | null) => void;
+  onTranscriptionSettled?: (settlement: SpeechTranscriptionSettlement) => void;
   voiceDisabled?: boolean;
   getTranscriptionContext?: () => SpeechTranscriptionContext | undefined;
 
@@ -475,6 +482,10 @@ type ToolbarVoiceButtonControl =
       onListeningStart?: () => void;
       onListeningStop?: () => void;
       onPendingSpeechChange?: (kind: SpeechPendingKind | null) => void;
+      onTranscriptionSettled?: (
+        settlement: SpeechTranscriptionSettlement,
+      ) => void;
+      showWaveform?: boolean;
       disabled?: boolean;
       speechMethod: SpeechMethodId;
       getTranscriptionContext?: () => SpeechTranscriptionContext | undefined;
@@ -579,6 +590,7 @@ export interface MessageInputToolbarViewProps {
   renderModeControl?: ToolbarRenderModeControl | null;
   nudgeControl?: ToolbarNudgeControl | null;
   speechControl?: ToolbarSpeechControl | null;
+  speechWaveformActive?: boolean;
   statusControl?: ToolbarStatusControl | null;
   pendingApproval?: MessageInputToolbarProps["pendingApproval"];
   shortcutsControl: ToolbarShortcutsControl;
@@ -778,6 +790,7 @@ export function MessageInputToolbarView({
   renderModeControl,
   nudgeControl,
   speechControl,
+  speechWaveformActive = false,
   statusControl,
   pendingApproval,
   shortcutsControl,
@@ -1127,16 +1140,21 @@ export function MessageInputToolbarView({
                   onPendingSpeechChange={
                     speechControl.voiceButton.onPendingSpeechChange
                   }
+                  onTranscriptionSettled={
+                    speechControl.voiceButton.onTranscriptionSettled
+                  }
                   disabled={speechControl.voiceButton.disabled}
                   speechMethod={speechControl.voiceButton.speechMethod}
                   getTranscriptionContext={
                     speechControl.voiceButton.getTranscriptionContext
                   }
                   smartTurn={speechControl.voiceButton.smartTurn}
+                  showWaveform={speechControl.voiceButton.showWaveform}
                 />
               }
             />
           )}
+        {speechWaveformActive && <SpeechWaveform />}
       </div>
       {showToolbarStatus && statusControl && (
         <div ref={refs?.status} className="composer-status-ages">
@@ -1763,6 +1781,7 @@ export function MessageInputToolbar({
   onListeningStart,
   onListeningStop,
   onPendingSpeechChange,
+  onTranscriptionSettled,
   voiceDisabled,
   getTranscriptionContext,
   slashCommands = [],
@@ -1822,6 +1841,7 @@ export function MessageInputToolbar({
   const [isearchScope, setIsearchScope] = useState<SessionIsearchScope | null>(
     null,
   );
+  const [speechCaptureActive, setSpeechCaptureActive] = useState(false);
   const lastNonOffThinkingModeRef =
     useRef<Exclude<ThinkingMode, "off">>("auto");
   const toolbarRef = useRef<HTMLDivElement | null>(null);
@@ -2198,6 +2218,13 @@ export function MessageInputToolbar({
   };
 
   const heartbeatTitle = t("sessionHeartbeatTitle");
+  const handleToolbarPendingSpeechChange = useCallback(
+    (kind: SpeechPendingKind | null) => {
+      setSpeechCaptureActive(kind === "listening");
+      onPendingSpeechChange?.(kind);
+    },
+    [onPendingSpeechChange],
+  );
 
   return (
     <MessageInputToolbarView
@@ -2294,7 +2321,9 @@ export function MessageInputToolbar({
                 onInterimTranscript,
                 onListeningStart,
                 onListeningStop,
-                onPendingSpeechChange,
+                onPendingSpeechChange: handleToolbarPendingSpeechChange,
+                onTranscriptionSettled,
+                showWaveform: toolbarVisibility.waveform,
                 disabled: voiceDisabled,
                 speechMethod: selectedSpeechMethod,
                 getTranscriptionContext,
@@ -2302,6 +2331,11 @@ export function MessageInputToolbar({
               }
             : undefined,
       }}
+      speechWaveformActive={
+        toolbarVisibility.waveform &&
+        speechCaptureActive &&
+        selectedSpeechMethod !== DEFAULT_SPEECH_METHOD
+      }
       statusControl={{
         showToolbarStatus,
         showLivenessChip,

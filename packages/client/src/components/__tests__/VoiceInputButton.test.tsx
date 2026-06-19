@@ -197,4 +197,39 @@ describe("VoiceInputButton", () => {
     // abandon the in-flight utterance — not just the post-capture waits.
     expect(onPendingSpeechChange).toHaveBeenCalledWith("listening");
   });
+
+  it("suppresses redundant listening text when a live waveform is available", () => {
+    speechState.status = "listening";
+    speechState.isListening = true;
+
+    render(
+      <VoiceInputButton
+        onTranscript={vi.fn()}
+        onInterimTranscript={vi.fn()}
+        speechMethod="ya-parakeet"
+        showWaveform
+      />,
+    );
+
+    expect(document.querySelector(".voice-input-status")).toBeNull();
+    expect(document.querySelector(".voice-input-recording")).toBeTruthy();
+  });
+
+  it("keeps listening text for browser-native capture without sample access", () => {
+    speechState.status = "listening";
+    speechState.isListening = true;
+
+    render(
+      <VoiceInputButton
+        onTranscript={vi.fn()}
+        onInterimTranscript={vi.fn()}
+        speechMethod="browser-native"
+        showWaveform
+      />,
+    );
+
+    expect(document.querySelector(".voice-input-status")?.textContent).toBe(
+      "Listening",
+    );
+  });
 });

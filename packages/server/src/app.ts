@@ -675,6 +675,8 @@ export function createApp(options: AppOptions): AppResult {
       voiceInputEnabled: options.voiceInputEnabled,
       getEnabledVoiceBackends: () =>
         options.speechBackendRegistry?.enabledIds() ?? [],
+      getVoiceBackendStatuses: () =>
+        options.speechBackendRegistry?.allInfo() ?? [],
       getVoiceBackendCapabilities: () =>
         options.speechBackendRegistry?.enabledCapabilities() ?? {},
       getClientDefaults: () =>

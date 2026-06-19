@@ -26,6 +26,15 @@ they can reach a control.
   space. Avoid mobile-only absolute positioning or `display: contents` wrappers
   for row participants such as shortcut help (`?`) and context percentage,
   because they can overlap while the responsive model thinks space remains.
+- While microphone capture is active, an enabled live waveform should occupy
+  the measured free interval between the bottom row's left- and right-aligned
+  control groups. The waveform is elastic, opportunistic content rather than
+  another anchor: it may use any available center width, but must shrink and
+  disappear before displacing, reordering, or overlapping anchored controls.
+  When capture is inactive it occupies no row space. It is configurable with
+  the other session-toolbar elements and defaults on by deliberate product
+  decision: while active it is ordinary microphone feedback, not a new
+  interaction mode.
 - Use a stable, tappable overflow (`...`) affordance, likely near the middle of
   the composer bottom row.
 - Tapping `...` opens a popup/fold-out row; tapping `...` again dismisses it.
@@ -106,3 +115,10 @@ they can reach a control.
   the right when left space would be tight.
 - Context percentage, microphone, queue/patient controls, Stop, and send remain
   inline in that first pass.
+- Active-microphone waveform landed on 2026-06-19 as a configurable,
+  default-on session-toolbar element. It is an elastic child of the
+  measured left control list: real YA-controlled capture samples fill whatever
+  center width remains, while measurement excludes the elastic width and the
+  fully collapsed child consumes no extra control gap. Its client renderer
+  derives sample-vertex count from the measured pixel width and uses the full
+  toolbar control height.

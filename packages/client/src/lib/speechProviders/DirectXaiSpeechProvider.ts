@@ -6,10 +6,12 @@ import {
   type SpeechProviderSubscriber,
   type SpeechTranscriptionContext,
   type SpeechTranscriptionResultMetadata,
+  type SpeechTranscriptionSettlementStatus,
 } from "./SpeechProvider";
 import {
   getSpeechMicStream,
   isSharedSpeechMicStream,
+  startSpeechWaveformMonitor,
   stopSpeechStreamTracks,
 } from "./sharedMicCapture";
 import {
@@ -138,6 +140,7 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
   private recorder: MediaRecorder | null = null;
   private stream: MediaStream | null = null;
   private prewarmRequest: Promise<void> | null = null;
+  private stopWaveformMonitor: (() => void) | null = null;
   private batchRecording: DirectBatchRecording | null = null;
   private mimeType = "audio/webm";
   private startToken = 0;
@@ -146,6 +149,10 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
   // result delivery (every start() bumps startToken).
   private processingBatchToken: number | null = null;
   private cancelledBatchTokens = new Set<number>();
+  private pendingBatchContexts = new Map<
+    number,
+    SpeechTranscriptionContext | undefined
+  >();
   private disposed = false;
 
   constructor(options: SpeechProviderOptions = {}) {
@@ -247,6 +254,11 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
     }
 
     this.stream = stream;
+    this.stopWaveformMonitor?.();
+    this.stopWaveformMonitor = startSpeechWaveformMonitor(
+      stream,
+      this.options.onAudioSamples,
+    );
     const mimeType = preferredMimeType();
     this.mimeType = mimeType;
     const recording: DirectBatchRecording = {
@@ -259,6 +271,7 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
       submitOnStop: true,
     };
     this.batchRecording = recording;
+    this.pendingBatchContexts.set(recording.token, recording.context);
 
     const recorder = new MediaRecorder(stream, {
       mimeType,
@@ -304,6 +317,8 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
     }
     if (!this.state.isListening) return;
     this.setState({ status: "processing", isListening: false });
+    this.stopWaveformMonitor?.();
+    this.stopWaveformMonitor = null;
 
     const recorder = this.recorder;
     const recording = this.batchRecording;
@@ -324,8 +339,10 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
     // Mark the in-flight transcription so its late result is discarded; the
     // backend request may still complete but stays inert.
     if (this.processingBatchToken !== null) {
-      this.cancelledBatchTokens.add(this.processingBatchToken);
+      const token = this.processingBatchToken;
+      this.cancelledBatchTokens.add(token);
       this.processingBatchToken = null;
+      this.settleBatchTranscription(token, "cancelled");
     }
     this.setState({
       status: "idle",
@@ -344,6 +361,7 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
     recording.chunks = [];
     releaseSpeechStream(recording.stream);
 
+    let settlementStatus: SpeechTranscriptionSettlementStatus = "cancelled";
     try {
       const text =
         audio.size > 0
@@ -368,6 +386,7 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
         const metadata = withSpeechContextMetadata(undefined, recording.context);
         if (metadata) this.options.onResult?.("", metadata);
       }
+      settlementStatus = "completed";
       if (
         recording.token === this.startToken &&
         !this.state.isListening &&
@@ -387,6 +406,7 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
       // user already abandoned it, so do not surface its error.
       if (this.cancelledBatchTokens.delete(recording.token)) return;
       const message = err instanceof Error ? err.message : String(err);
+      settlementStatus = "error";
       this.options.onError?.(message);
       if (
         recording.token === this.startToken &&
@@ -401,10 +421,29 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
         });
         this.options.onEnd?.();
       }
+    } finally {
+      if (this.processingBatchToken === recording.token) {
+        this.processingBatchToken = null;
+      }
+      this.settleBatchTranscription(recording.token, settlementStatus);
     }
   }
 
+  private settleBatchTranscription(
+    token: number,
+    status: SpeechTranscriptionSettlementStatus,
+  ): void {
+    const context = this.pendingBatchContexts.get(token);
+    if (!this.pendingBatchContexts.delete(token)) return;
+    this.options.onTranscriptionSettled?.({
+      speechTargetId: context?.speechTargetId,
+      status,
+    });
+  }
+
   private cleanupMedia(submitOnStop: boolean): void {
+    this.stopWaveformMonitor?.();
+    this.stopWaveformMonitor = null;
     const recorder = this.recorder;
     const recording = this.batchRecording;
     this.recorder = null;
@@ -420,6 +459,7 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
       if (recording) {
         recording.chunks = [];
         releaseSpeechStream(recording.stream);
+        this.settleBatchTranscription(recording.token, "cancelled");
       }
     }
   }
@@ -427,6 +467,9 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
   dispose(): void {
     this.disposed = true;
     this.startToken += 1;
+    for (const token of this.pendingBatchContexts.keys()) {
+      this.settleBatchTranscription(token, "cancelled");
+    }
     this.processingBatchToken = null;
     this.cancelledBatchTokens.clear();
     this.cleanupMedia(false);

@@ -226,6 +226,35 @@ describe("GET /version", () => {
     expect(json.voiceBackendCapabilities).toEqual({ "ya-dummy": {} });
   });
 
+  it("reports configured speech backends while validation is pending", async () => {
+    mockFetch(() => new Response(null, { status: 204 }));
+
+    const { createVersionRoutes } = await importVersion();
+    const routes = createVersionRoutes({
+      getEnabledVoiceBackends: () => [],
+      getVoiceBackendStatuses: () => [
+        {
+          id: "ya-nemo",
+          label: "Local NeMo Parakeet",
+          enabled: false,
+          validationStatus: "pending",
+          capabilities: {},
+        },
+      ],
+    });
+    const res = await routes.request("/");
+    const json = await res.json();
+
+    expect(json.voiceBackends).toEqual([]);
+    expect(json.voiceBackendStatuses).toEqual([
+      expect.objectContaining({
+        id: "ya-nemo",
+        enabled: false,
+        validationStatus: "pending",
+      }),
+    ]);
+  });
+
   it("advertises streaming voice backend capabilities", async () => {
     mockFetch(() => new Response(null, { status: 204 }));
 

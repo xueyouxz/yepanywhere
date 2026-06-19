@@ -95,15 +95,30 @@ export function SpeechSettings() {
   const serverVoiceEnabled =
     versionInfo?.capabilities?.includes("voiceInput") ?? true;
   const serverBackends = versionInfo?.voiceBackends ?? [];
+  const backendStatuses = versionInfo?.voiceBackendStatuses ?? [];
+  const discoverableServerBackends =
+    backendStatuses.length > 0
+      ? backendStatuses.map((backend) => backend.id)
+      : serverBackends;
   const backendOptions: FilterOption<SpeechMethodId>[] = getSpeechMethods(
-    serverBackends,
+    discoverableServerBackends,
     undefined,
     { directXaiAvailable: hasBrowserXaiSttApiKey },
-  ).map((method) => ({
-    value: method.id,
-    label: method.label,
-    description: method.description,
-  }));
+  ).map((method) => {
+    const backend = backendStatuses.find((entry) => entry.id === method.id);
+    const validating = backend?.validationStatus === "pending";
+    const unavailable = backend?.validationStatus === "disabled";
+    return {
+      value: method.id,
+      label: method.label,
+      description: validating
+        ? t("speechSettingsBackendValidating")
+        : unavailable
+          ? backend.disabledReason || t("speechSettingsBackendUnavailable")
+          : method.description,
+      disabled: validating || unavailable,
+    };
+  });
   const selectedBackend = resolveSpeechMethod(
     speechMethod,
     serverBackends,

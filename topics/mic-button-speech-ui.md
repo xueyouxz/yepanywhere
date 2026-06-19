@@ -12,6 +12,8 @@ See also:
   backend selection, server/direct STT routing, and provider capability rules.
 - [streaming-speech-capture.md](streaming-speech-capture.md) for the client
   Web Audio PCM pipeline, warm mic, and readiness indicators.
+- [composer-bottom-bar-overflow.md](composer-bottom-bar-overflow.md) for the
+  active-capture waveform's measured center-space and overflow contract.
 - [direct-xai-speech.md](direct-xai-speech.md) for direct browser-to-xAI STT.
 
 ## Speech Insertion Transaction
@@ -240,17 +242,12 @@ tail and finalize); on desktop the mic's own status text and the inline label
 may both read `Listening…`/`Finalizing…` (the label is the in-draft readout, the
 mic status is the capture-state readout) — an accepted minor redundancy.
 
-Open follow-up (agreed target): make the inline label an interactive tag. Each
-pending batch transcription renders as its own `Transcribing… ✕` tag at its own
-insertion point, placed before the cursor, in arrival order (the second lands
-after the first). Each tag carries its own `✕` cancel; if per-tag proves
-impractical, a single `✕` on the last/newest tag is acceptable. This restores a
-pointer cancel that Escape currently stands in for. The likely path is making
-just the label span interactive (`pointer-events` on the tag only) since the
-mirror already positions it inline. Overlapping transcriptions are uncommon
-(usually provoked by switch-latency impatience), but the ordering of their
-inserts and one-label-per-pending are not yet correct for N>1 — current code
-shows a single label and can insert the second result before the first.
+Implemented: the inline label is an interactive tag. Each pending batch
+transcription renders as its own `Transcribing… ✕` tag at its insertion point,
+before the faked caret and in arrival order. Each tag has its own cancel action;
+later overlapping targets carry an ordinal so their order remains legible.
+Only the tag enables pointer events inside the otherwise aria-hidden,
+non-interactive mirror.
 
 When the batch result arrives, YA treats it as one delayed finalized streaming
 chunk. It uses the speech transaction target captured at mic start, including
@@ -296,6 +293,31 @@ speech chunk and keeps recognition running.
 
 The mic's capture readiness stays event-driven. Yellow means capture is
 starting or connecting; red/listening means the active path has produced a real
-listening/capture event. Spoken commands may be shown as temporary UI feedback
-near the mic, such as a small command chip, but the chip is advisory UI only:
-the command word still must not appear in the textarea value.
+listening/capture event. While capture is active, the configurable live waveform
+uses whatever measured center space remains between the bottom row's anchored
+control groups; it yields before moving or overlapping those controls, as
+specified in
+[composer-bottom-bar-overflow.md](composer-bottom-bar-overflow.md). The
+waveform is a default-on element in Appearance → Session toolbar. The
+waveform is available for YA-controlled capture paths, where YA receives real
+audio samples; browser-native Web Speech does not expose its microphone samples
+and therefore does not show a fabricated waveform. When the waveform is shown,
+the desktop `Listening…` text beside the mic is suppressed as redundant;
+connecting, finalizing, and error text remain useful state feedback. Waveform
+amplitude uses a bounded decibel scale, saturates at 80% input amplitude, and
+may reach the toolbar's exact top and bottom bounds without a rectangular
+background or outline. The visible sample count is a client-side presentation
+effect derived from the waveform element's measured pixel width; capture and
+transport remain layout-independent. It renders one sample vertex per measured
+CSS pixel in a continuous mirrored envelope, so there are no visual gaps and
+saturation intentionally becomes a visibly clipped band. Spoken commands may
+be shown as
+temporary UI feedback near the mic, such as a small command chip, but the chip
+is advisory UI only: the command word still must not appear in the textarea
+value.
+
+Each stopped batch recording also owns a terminal settlement event keyed by
+its captured speech target. A later mic activation does not cancel or replace
+that queued request. Completion, cancellation, or failure retires exactly that
+target; in particular, an older failure while a newer capture is active must
+not leave an orphan `Transcribing…` tag or clear the newer target.

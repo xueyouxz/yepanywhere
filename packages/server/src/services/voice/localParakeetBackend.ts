@@ -57,29 +57,16 @@ export class LocalParakeetBackend implements PrewarmableSpeechBackend {
   }
 
   async validate(): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const runtime = await ensureLocalSttRuntime({
+    // Availability check only — confirm the pixi env + Transformers import (and
+    // auto-bootstrap if missing). The model load is deferred to prewarm() /
+    // first transcribe() so a ~30-50s load never blocks registration: the
+    // backend is advertised immediately and stays selectable while its model is
+    // still loading; only sending audio to it waits on the load.
+    return ensureLocalSttRuntime({
       backendLabel: "local Parakeet",
       checkPython: "import torch; from transformers import pipeline",
       bootstrapTask: "stt-bootstrap-parakeet",
     });
-    if (!runtime.ok) return runtime;
-
-    const cacheDir = defaultHuggingFaceHubCache();
-    logger.info(
-      `[Voice] ya-parakeet model preflight: loading fallback model "${this.model}" on device=${this.device} (cache=${cacheDir}; ${cacheFreeSpaceSummary(cacheDir)})`,
-    );
-    logger.info(`[Voice] ya-parakeet repair hints: ${PARAKEET_REPAIR_HINT}`);
-
-    try {
-      await this.startWorker(this.model, this.device);
-      return { ok: true };
-    } catch (error) {
-      this.stopWorker();
-      return {
-        ok: false,
-        reason: `${summarizeChildError(error)} ${PARAKEET_REPAIR_HINT}`,
-      };
-    }
   }
 
   private stopWorker(): void {
@@ -200,7 +187,15 @@ export class LocalParakeetBackend implements PrewarmableSpeechBackend {
 
   async prewarm(options: TranscribeOptions = {}): Promise<void> {
     const model = options.model?.trim() || this.model;
-    await this.queue.run(() => this.startWorker(model, this.device));
+    const cacheDir = defaultHuggingFaceHubCache();
+    logger.info(
+      `[Voice] ya-parakeet preload: loading model "${model}" on device=${this.device} (cache=${cacheDir}; ${cacheFreeSpaceSummary(cacheDir)})`,
+    );
+    try {
+      await this.queue.run(() => this.startWorker(model, this.device));
+    } catch (error) {
+      throw new Error(`${summarizeChildError(error)} ${PARAKEET_REPAIR_HINT}`);
+    }
   }
 
   async transcribe(
@@ -211,7 +206,13 @@ export class LocalParakeetBackend implements PrewarmableSpeechBackend {
     // Queue behind any in-flight load/transcribe: record audio, block on the
     // load, then transcribe — instead of rejecting as "busy".
     return this.queue.run(async () => {
-      await this.startWorker(model, this.device);
+      try {
+        await this.startWorker(model, this.device);
+      } catch (error) {
+        throw new Error(
+          `${summarizeChildError(error)} ${PARAKEET_REPAIR_HINT}`,
+        );
+      }
 
       if (!this.proc?.stdin) {
         throw new Error("Parakeet worker is not running");

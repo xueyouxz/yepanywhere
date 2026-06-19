@@ -31,6 +31,7 @@ import { generateUUID } from "../lib/uuid";
 import type {
   SpeechTranscriptionContext,
   SpeechTranscriptionResultMetadata,
+  SpeechTranscriptionSettlement,
 } from "../lib/speechProviders/SpeechProvider";
 import {
   clearSpeechInsertionRangeReplacement,
@@ -1155,6 +1156,26 @@ export function MessageInput({
     [],
   );
 
+  const handleTranscriptionSettled = useCallback(
+    (settlement: SpeechTranscriptionSettlement) => {
+      const targetId = settlement.speechTargetId;
+      if (!targetId || settlement.status === "completed") return;
+
+      const removed = speechInsertionRangesRef.current.delete(targetId);
+      if (targetId === activeSpeechTargetIdRef.current) {
+        clearPendingSpeechFinal();
+        speechInsertionRangeRef.current = null;
+        activeSpeechTargetIdRef.current = null;
+        setSpeechPending(null);
+        setInterimTranscript("");
+      }
+      if (removed) {
+        setSpeechPreviewRevision((revision) => revision + 1);
+      }
+    },
+    [clearPendingSpeechFinal],
+  );
+
   // Cancel a pending transcription/finalization from the chip's ✕. The provider
   // discards the in-flight result (keeping any committed text); here we drop the
   // pending speech target so the composer forgets the reserved insertion point.
@@ -1514,6 +1535,7 @@ export function MessageInput({
             onListeningStart={handleListeningStart}
             onListeningStop={handleListeningStop}
             onPendingSpeechChange={handlePendingSpeechChange}
+            onTranscriptionSettled={handleTranscriptionSettled}
             voiceDisabled={disabled}
             getTranscriptionContext={getTranscriptionContext}
             slashCommands={slashCommands}

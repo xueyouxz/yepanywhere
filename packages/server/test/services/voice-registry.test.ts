@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { getLogger } from "../../src/logging/logger.js";
 import { LocalNemoBackend } from "../../src/services/voice/localNemoBackend.js";
 import { LocalParakeetBackend } from "../../src/services/voice/localParakeetBackend.js";
-import { initSpeechBackendRegistry } from "../../src/services/voice/registry.js";
+import {
+  initSpeechBackendRegistry,
+  SpeechBackendRegistry,
+} from "../../src/services/voice/registry.js";
+import type { SpeechBackend } from "../../src/services/voice/SpeechBackend.js";
 
 describe("initSpeechBackendRegistry", () => {
   afterEach(() => {
@@ -23,6 +27,7 @@ describe("initSpeechBackendRegistry", () => {
       voiceInputEnabled: true,
       voiceBackends: ["ya-dummy"],
     });
+    await registry.waitForValidation();
 
     expect(registry.enabledIds()).toEqual(["ya-dummy"]);
     expect(registry.allInfo()).toEqual([
@@ -30,6 +35,7 @@ describe("initSpeechBackendRegistry", () => {
         id: "ya-dummy",
         label: "YA dummy (test only)",
         enabled: true,
+        validationStatus: "enabled",
         capabilities: {},
         disabledReason: undefined,
       },
@@ -47,6 +53,7 @@ describe("initSpeechBackendRegistry", () => {
       deepgramApiKey: "dg-key",
       xaiSttApiKey: "xai-key",
     });
+    await registry.waitForValidation();
 
     expect(registry.enabledIds()).toEqual(["ya-deepgram", "ya-grok"]);
     expect(infoSpy).toHaveBeenCalledWith(
@@ -60,6 +67,7 @@ describe("initSpeechBackendRegistry", () => {
       voiceInputEnabled: false,
       voiceBackends: ["ya-dummy"],
     });
+    await registry.waitForValidation();
 
     expect(registry.enabledIds()).toEqual([]);
   });
@@ -89,6 +97,7 @@ describe("initSpeechBackendRegistry", () => {
       parakeetModel: "nvidia/parakeet-tdt-0.6b-v3",
       parakeetDevice: "cuda:0",
     });
+    await registry.waitForValidation();
 
     expect(registry.enabledIds()).toEqual(["ya-parakeet"]);
     expect(registry.allInfo()).toEqual([
@@ -96,6 +105,7 @@ describe("initSpeechBackendRegistry", () => {
         id: "ya-parakeet",
         label: "Local Parakeet (pixi stt)",
         enabled: true,
+        validationStatus: "enabled",
         capabilities: {},
         disabledReason: undefined,
       },
@@ -113,6 +123,7 @@ describe("initSpeechBackendRegistry", () => {
       nemoModel: "nvidia/parakeet-rnnt-1.1b",
       nemoDevice: "cuda:0",
     });
+    await registry.waitForValidation();
 
     expect(registry.enabledIds()).toEqual(["ya-nemo"]);
     expect(registry.allInfo()).toEqual([
@@ -120,9 +131,45 @@ describe("initSpeechBackendRegistry", () => {
         id: "ya-nemo",
         label: "Local NeMo Parakeet (pixi stt)",
         enabled: true,
+        validationStatus: "enabled",
         capabilities: {},
         disabledReason: undefined,
       },
     ]);
+  });
+
+  it("discovers a backend immediately without routing before validation", async () => {
+    let finishValidation: ((result: { ok: true }) => void) | undefined;
+    const backend: SpeechBackend = {
+      id: "ya-pending",
+      label: "Pending backend",
+      validate: () =>
+        new Promise((resolve) => {
+          finishValidation = resolve;
+        }),
+      transcribe: async () => "",
+    };
+    const registry = new SpeechBackendRegistry();
+
+    registry.register(backend);
+
+    expect(registry.knownIds()).toEqual(["ya-pending"]);
+    expect(registry.enabledIds()).toEqual([]);
+    expect(registry.getBackend("ya-pending")).toBeNull();
+    expect(registry.allInfo()).toEqual([
+      {
+        id: "ya-pending",
+        label: "Pending backend",
+        enabled: false,
+        validationStatus: "pending",
+        capabilities: {},
+      },
+    ]);
+
+    finishValidation?.({ ok: true });
+    await registry.waitForValidation();
+
+    expect(registry.enabledIds()).toEqual(["ya-pending"]);
+    expect(registry.getBackend("ya-pending")).toBe(backend);
   });
 });

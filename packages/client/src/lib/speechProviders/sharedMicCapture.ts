@@ -24,6 +24,51 @@ export function stopSpeechStreamTracks(stream: MediaStream): void {
   });
 }
 
+export function startSpeechWaveformMonitor(
+  stream: MediaStream,
+  onAudioSamples: ((samples: Float32Array) => void) | undefined,
+): () => void {
+  if (!onAudioSamples || typeof window === "undefined") return () => {};
+  const AudioContextCtor =
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext })
+      .webkitAudioContext;
+  if (!AudioContextCtor) return () => {};
+
+  let context: AudioContext | null = null;
+  let source: MediaStreamAudioSourceNode | null = null;
+  let processor: ScriptProcessorNode | null = null;
+  let silentGain: GainNode | null = null;
+  try {
+    context = new AudioContextCtor();
+    source = context.createMediaStreamSource(stream);
+    processor = context.createScriptProcessor(1024, 1, 1);
+    silentGain = context.createGain();
+    silentGain.gain.value = 0;
+    processor.onaudioprocess = (event) => {
+      onAudioSamples(event.inputBuffer.getChannelData(0));
+    };
+    source.connect(processor);
+    processor.connect(silentGain);
+    silentGain.connect(context.destination);
+    void context.resume().catch(() => undefined);
+  } catch {
+    processor?.disconnect();
+    source?.disconnect();
+    silentGain?.disconnect();
+    void context?.close().catch(() => undefined);
+    return () => {};
+  }
+
+  return () => {
+    if (processor) processor.onaudioprocess = null;
+    processor?.disconnect();
+    source?.disconnect();
+    silentGain?.disconnect();
+    void context?.close();
+  };
+}
+
 export function isSharedSpeechMicStream(stream: MediaStream | null): boolean {
   return stream !== null && stream === sharedWarmStream;
 }

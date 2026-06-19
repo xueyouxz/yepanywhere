@@ -314,6 +314,7 @@ export interface SessionToolbarVisibilityClientDefaults {
   thinkingToggle?: boolean;
   renderMode?: boolean;
   microphone?: boolean;
+  waveform?: boolean;
   shortcutsHelp?: boolean;
   contextUsage?: boolean;
   btw?: boolean;

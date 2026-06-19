@@ -64,6 +64,7 @@ const SESSION_TOOLBAR_VISIBILITY_CLIENT_DEFAULT_KEYS = [
   "thinkingToggle",
   "renderMode",
   "microphone",
+  "waveform",
   "shortcutsHelp",
   "contextUsage",
   "btw",

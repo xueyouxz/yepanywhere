@@ -60,29 +60,16 @@ export class LocalNemoBackend implements PrewarmableSpeechBackend {
   }
 
   async validate(): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const runtime = await ensureLocalSttRuntime({
+    // Availability check only — confirm the pixi env + NeMo import (and
+    // auto-bootstrap if missing). The model load is deferred to prewarm() /
+    // first transcribe() so a ~30-50s load never blocks registration: the
+    // backend is advertised immediately and stays selectable while its model is
+    // still loading; only sending audio to it waits on the load.
+    return ensureLocalSttRuntime({
       backendLabel: "local NeMo Parakeet",
       checkPython: NEMO_IMPORT_CHECK,
       bootstrapTask: "stt-bootstrap-nemo",
     });
-    if (!runtime.ok) return runtime;
-
-    const cacheDir = defaultHuggingFaceHubCache();
-    logger.info(
-      `[Voice] ya-nemo model preflight: loading fallback model "${this.model}" on device=${this.device} (cache=${cacheDir}; ${cacheFreeSpaceSummary(cacheDir)})`,
-    );
-    logger.info(`[Voice] ya-nemo repair hints: ${NEMO_REPAIR_HINT}`);
-
-    try {
-      await this.startWorker(this.model, this.device);
-      return { ok: true };
-    } catch (error) {
-      this.stopWorker();
-      return {
-        ok: false,
-        reason: `${summarizeChildError(error)} ${NEMO_REPAIR_HINT}`,
-      };
-    }
   }
 
   private stopWorker(): void {
@@ -203,7 +190,15 @@ export class LocalNemoBackend implements PrewarmableSpeechBackend {
 
   async prewarm(options: TranscribeOptions = {}): Promise<void> {
     const model = options.model?.trim() || this.model;
-    await this.queue.run(() => this.startWorker(model, this.device));
+    const cacheDir = defaultHuggingFaceHubCache();
+    logger.info(
+      `[Voice] ya-nemo preload: loading model "${model}" on device=${this.device} (cache=${cacheDir}; ${cacheFreeSpaceSummary(cacheDir)})`,
+    );
+    try {
+      await this.queue.run(() => this.startWorker(model, this.device));
+    } catch (error) {
+      throw new Error(`${summarizeChildError(error)} ${NEMO_REPAIR_HINT}`);
+    }
   }
 
   async transcribe(
@@ -214,7 +209,11 @@ export class LocalNemoBackend implements PrewarmableSpeechBackend {
     // Queue behind any in-flight load/transcribe: record audio, block on the
     // load, then transcribe — instead of rejecting as "busy".
     return this.queue.run(async () => {
-      await this.startWorker(model, this.device);
+      try {
+        await this.startWorker(model, this.device);
+      } catch (error) {
+        throw new Error(`${summarizeChildError(error)} ${NEMO_REPAIR_HINT}`);
+      }
 
       if (!this.proc?.stdin) {
         throw new Error("NeMo worker is not running");

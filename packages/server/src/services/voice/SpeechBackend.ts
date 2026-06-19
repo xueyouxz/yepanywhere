@@ -24,9 +24,11 @@ export interface SpeechBackendInfo {
   label: string;
   /** True when this backend is usable right now (credentials validated, etc.). */
   enabled: boolean;
+  /** Startup validation state; pending backends are known but not routable. */
+  validationStatus: "pending" | "enabled" | "disabled";
   /** Runtime capabilities available for this backend. */
   capabilities?: SpeechBackendCapabilities;
-  /** Optional reason this backend is not enabled (for /api/version diagnostics). */
+  /** Optional reason this backend is disabled (for /api/version diagnostics). */
   disabledReason?: string;
 }
 

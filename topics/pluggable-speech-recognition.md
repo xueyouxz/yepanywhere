@@ -21,8 +21,9 @@ behavior across streaming and batch STT.
   Local/test backends (`ya-whisper`, `ya-parakeet`, `ya-nemo`, `ya-dummy`) must
   be named in `YA_VOICE_BACKENDS`; cloud backends (`ya-deepgram`, `ya-grok`)
   auto-enable when their YA-scoped key is provided, since providing a metered
-  key is the operator's explicit opt-in. Only backends that pass startup
-  validation are advertised through `/api/version` as `voiceBackends`.
+  key is the operator's explicit opt-in. Configured backends appear immediately
+  through `/api/version.voiceBackendStatuses`, but only backends that pass
+  startup validation are routable and advertised as `voiceBackends`.
 - Browser-native Web Speech recognition is a selectable local escape hatch,
   not a YA server backend. The browser still owns its recognizer, credentials,
   latency, and failure modes.
@@ -61,9 +62,12 @@ behavior across streaming and batch STT.
   post-capture (`processing`) transcription. The contract is result-suppression,
   not work-interruption: after `cancel()`, a transcription that still completes
   must be discarded — no `onResult`, and no state change beyond returning to
-  idle. Both batch paths gate result delivery on the start token, so a token
-  bump suffices; aborting the underlying request or model work is an optional
-  optimization. See the batch cancel chip in
+  idle. Cancellation is batch-token-specific: starting a newer recording must
+  not cancel or suppress an older queued transcription. Aborting the underlying
+  request or model work is an optional optimization. Every stopped batch also
+  emits one terminal settlement keyed by its captured speech target, including
+  completion, cancellation, and failure, so consumers can retire the exact
+  pending insertion target independently. See the batch cancel chip in
   [mic-button-speech-ui.md](mic-button-speech-ui.md).
 
 ## Intended Architecture
@@ -87,7 +91,8 @@ PCM multiplexed through the app/control relay socket.
 
 Backends should implement a common `SpeechBackend` contract:
 
-- validate credentials or local runtime readiness at startup;
+- validate credentials or local runtime/import readiness at startup without
+  forcing an expensive local model load;
 - advertise only validated ids plus their capabilities;
 - transcribe a complete utterance with optional `mimeType`, `prompt`, and
   `keyterms` options;
@@ -201,9 +206,11 @@ streaming/confidence surface exists.
   `YA_stt__XAI_API_KEY` takes precedence for `ya-grok`; `XAI_API_KEY` is a
   convenience fallback that is scrubbed from `process.env` after config load.
 - `SpeechBackendRegistry` supports `ya-dummy`, `ya-deepgram`,
-  `ya-grok`, `ya-whisper`, `ya-parakeet`, and `ya-nemo`; it validates
-  configured backends and exposes enabled ids plus capability metadata to
-  `/api/version`.
+  `ya-grok`, `ya-whisper`, `ya-parakeet`, and `ya-nemo`. It records configured
+  backends immediately as pending, validates them asynchronously, and keeps
+  pending/disabled entries out of routing. `/api/version` exposes validated ids
+  plus capabilities separately from the full pending/enabled/disabled status
+  catalog, allowing clients to show startup state without sending audio early.
 - `ya-grok` posts batch multipart audio to xAI's `POST /v1/stt`
   endpoint and implements xAI's `wss://api.x.ai/v1/stt` streaming endpoint.
   In streaming mode it can enable Smart Turn and pass through xAI word
@@ -242,7 +249,10 @@ streaming/confidence surface exists.
   (single worker by design), but the swap-load is just another queued step, so
   it blocks rather than errors. A failed load (e.g. a NeMo-only model sent to
   the Transformers `ya-parakeet` backend) rejects only that request; the queue
-  continues.
+  continues. Client batch providers retain each recording's captured speech
+  target while it waits and emit a target-specific terminal settlement, so
+  overlapping requests can complete or fail independently without orphaning
+  composer tags.
 - The normal `index.ts` runtime mounts `/api/speech` after
   `createNodeWebSocket()` creates the shared `upgradeWebSocket` helper.
 - `createSpeechRoutes` implements `POST /api/speech/transcribe` for batch

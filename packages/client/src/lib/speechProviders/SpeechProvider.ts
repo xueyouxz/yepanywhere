@@ -91,6 +91,16 @@ export interface SpeechTranscriptionResultMetadata {
   replacePreviousTranscriptChars?: number;
 }
 
+export type SpeechTranscriptionSettlementStatus =
+  | "completed"
+  | "cancelled"
+  | "error";
+
+export interface SpeechTranscriptionSettlement {
+  speechTargetId?: string;
+  status: SpeechTranscriptionSettlementStatus;
+}
+
 /** Events emitted by a provider during a listening session. */
 export interface SpeechProviderEvents {
   /** Final transcript delta (only the new text since the last final). */
@@ -104,6 +114,12 @@ export interface SpeechProviderEvents {
   onEnd?: () => void;
   /** Error event; also reflected in state.error / state.status. */
   onError?: (error: string) => void;
+  /**
+   * A batch transcription reached a terminal state. Emitted once per stopped
+   * recording even when a newer recording is active, so consumers can retire
+   * the exact reserved insertion target.
+   */
+  onTranscriptionSettled?: (settlement: SpeechTranscriptionSettlement) => void;
 }
 
 /** Options at construction time. */
@@ -120,6 +136,11 @@ export interface SpeechProviderOptions extends SpeechProviderEvents {
   keepMicWarm?: boolean;
   /** Browser-local microphone device id for YA-server capture. */
   micDeviceId?: string | null;
+  /**
+   * Receive browser microphone samples for local visualization. The callback
+   * must consume the view synchronously; capture buffers may be reused.
+   */
+  onAudioSamples?: (samples: Float32Array) => void;
   /** Browser-selected local Parakeet model id for YA Parakeet backends. */
   parakeetModel?: string;
   /** Open a dedicated relayed speech socket when YA is reached through relay. */

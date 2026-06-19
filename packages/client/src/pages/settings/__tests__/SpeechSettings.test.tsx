@@ -39,6 +39,13 @@ const browserXaiKey = vi.hoisted(() => ({
 }));
 const versionState = vi.hoisted(() => ({
   voiceBackends: ["ya-grok", "ya-parakeet", "ya-nemo"],
+  voiceBackendStatuses: [] as Array<{
+    id: string;
+    label: string;
+    enabled: boolean;
+    validationStatus: "pending" | "enabled" | "disabled";
+    disabledReason?: string;
+  }>,
 }));
 const prewarmYaServerSpeechBackend = vi.hoisted(() => vi.fn(async () => {}));
 
@@ -63,6 +70,7 @@ vi.mock("../../../hooks/useVersion", () => ({
     version: {
       capabilities: ["voiceInput"],
       voiceBackends: versionState.voiceBackends,
+      voiceBackendStatuses: versionState.voiceBackendStatuses,
       voiceBackendCapabilities: {
         "ya-grok": { streaming: true, smartTurn: true },
       },
@@ -92,6 +100,7 @@ describe("SpeechSettings", () => {
     modelSettings.speechMethod = "ya-parakeet";
     modelSettings.parakeetSpeechModel = "nvidia/parakeet-tdt-0.6b-v3";
     versionState.voiceBackends = ["ya-grok", "ya-parakeet", "ya-nemo"];
+    versionState.voiceBackendStatuses = [];
     modelSettings.setSpeechMethod.mockClear();
     modelSettings.setParakeetSpeechModel.mockClear();
     speechCaptureSettings.setKeepMicWarm.mockClear();
@@ -116,6 +125,36 @@ describe("SpeechSettings", () => {
       "ya-parakeet",
       "nvidia/parakeet-ctc-1.1b",
     );
+  });
+
+  it("shows a validating backend immediately but does not allow selection", () => {
+    versionState.voiceBackends = ["ya-grok"];
+    versionState.voiceBackendStatuses = [
+      {
+        id: "ya-grok",
+        label: "Grok",
+        enabled: true,
+        validationStatus: "enabled",
+      },
+      {
+        id: "ya-nemo",
+        label: "NeMo",
+        enabled: false,
+        validationStatus: "pending",
+      },
+    ];
+    render(<SpeechSettings />);
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "filterByLabel speechSettingsBackendTitle",
+      }),
+    );
+
+    const option = screen.getByRole("button", {
+      name: /NeMo Parakeet STT speechSettingsBackendValidating/,
+    }) as HTMLButtonElement;
+    expect(option.disabled).toBe(true);
   });
 
   it("switches to a compatible enabled backend for a selected Parakeet preset", () => {

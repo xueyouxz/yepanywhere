@@ -21,6 +21,7 @@ export interface FilterOption<T extends string> {
   color?: string; // For provider colors (colored dot)
   clearSelection?: false;
   dividerBefore?: boolean;
+  disabled?: boolean;
 }
 
 export interface FilterResetOption {
@@ -32,6 +33,7 @@ export interface FilterResetOption {
   color?: string;
   clearSelection: true; // Option row that resets selected values
   dividerBefore?: boolean;
+  disabled?: boolean;
 }
 
 export type FilterDropdownOption<T extends string> =
@@ -84,6 +86,7 @@ export function FilterDropdown<T extends string>({
   );
 
   const handleOptionClick = (option: FilterDropdownOption<T>) => {
+    if (option.disabled) return;
     if (option.clearSelection) {
       onChange([]);
       setIsOpen(false);
@@ -216,6 +219,7 @@ export function FilterDropdown<T extends string>({
               type="button"
               className={`filter-dropdown-option ${isSelected ? "selected" : ""} ${!multiSelect ? "single-select" : ""} ${option.clearSelection ? "clear-selection" : ""}`}
               onClick={() => handleOptionClick(option)}
+              disabled={option.disabled}
               aria-pressed={isSelected}
             >
               {showCheckbox && (
