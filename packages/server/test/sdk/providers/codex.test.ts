@@ -284,6 +284,54 @@ describe("CodexProvider app-server lifecycle", () => {
     },
   );
 
+  it("sets AGENTCTL_SESSION_ID directly in the app-server env on resume", async () => {
+    // Resume knows the session id at spawn, so it is set directly in the
+    // app-server's own env (not only via the BASH_ENV bridge), surviving even
+    // if codex never sources BASH_ENV. The fake server records the value it
+    // reads straight from process.env at the first request.
+    const tempDir = mkdtempSync(
+      join(tmpdir(), "codex-provider-agentctl-resume-"),
+    );
+    const logPath = join(tempDir, "fake-codex-requests.jsonl");
+    const codexPath = createFakeCodexCommand(
+      tempDir,
+      "fake-codex-agentctl-resume",
+      buildFakeCodexAppServerWithAgentctlShellProbe(logPath),
+    );
+
+    let session: Awaited<ReturnType<CodexProvider["startSession"]>> | undefined;
+    let consume: Promise<void> | undefined;
+
+    try {
+      const testProvider = new CodexProvider({ codexPath });
+      session = await testProvider.startSession({
+        cwd: tempDir,
+        resumeSessionId: "thread-resume-direct",
+        initialMessage: { text: "resume the agentctl session" },
+        effort: "low",
+      });
+
+      consume = (async () => {
+        for await (const _message of session?.iterator ?? []) {
+          // drain until abort below
+        }
+      })();
+
+      await waitForFakeCodexRequest(logPath, "initialize");
+
+      const initializeRequest = readFakeCodexRequests(logPath).find(
+        (request) => request.method === "initialize",
+      );
+      expect(initializeRequest?.processEnvAgentctlSessionId).toBe(
+        "thread-resume-direct",
+      );
+    } finally {
+      session?.abort();
+      await consume?.catch(() => undefined);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("uses the steered turn id for soft interrupt completion", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "codex-provider-lifecycle-"));
     const logPath = join(tempDir, "fake-codex-requests.jsonl");
@@ -1426,6 +1474,7 @@ function logRequest(message) {
     id: message.id,
     method: message.method,
     params: message.params,
+    processEnvAgentctlSessionId: process.env.AGENTCTL_SESSION_ID ?? "",
   };
   if (message.method === "turn/start") {
     record.agentctlSessionId = agentctlSessionIdFromBash();
@@ -1449,6 +1498,13 @@ function handleMessage(message) {
     case "thread/start":
       respond(message.id, {
         thread: { id: "thread-agentctl" },
+        model: "gpt-5.4-mini",
+        reasoningEffort: "low",
+      });
+      break;
+    case "thread/resume":
+      respond(message.id, {
+        thread: { id: message.params?.threadId ?? "thread-agentctl" },
         model: "gpt-5.4-mini",
         reasoningEffort: "low",
       });
@@ -1481,6 +1537,7 @@ function readFakeCodexRequests(logPath: string): Array<{
   method?: string;
   params?: Record<string, unknown>;
   agentctlSessionId?: string;
+  processEnvAgentctlSessionId?: string;
 }> {
   if (!existsSync(logPath)) return [];
   return readFileSync(logPath, "utf-8")

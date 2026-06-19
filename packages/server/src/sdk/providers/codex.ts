@@ -1753,10 +1753,19 @@ export class CodexProvider implements AgentProvider {
     const agentctlSessionEnvBridge = createAgentctlSessionEnvBridge(
       options.resumeSessionId,
     );
+    const codexEnv = agentctlSessionEnvBridge.extendEnv(this.getCodexEnv());
+    if (options.resumeSessionId) {
+      // The bridge only reaches bash tool shells that source BASH_ENV, which
+      // codex's sandbox may strip. For resume the id is known at spawn, so set
+      // it directly in the app-server env too; every shell codex launches
+      // inherits it regardless of BASH_ENV. New sessions (id unknown until
+      // thread/start) stay on the bridge alone.
+      codexEnv.AGENTCTL_SESSION_ID = options.resumeSessionId;
+    }
     const appServer = new CodexAppServerClient(
       codexCommand,
       options.cwd,
-      agentctlSessionEnvBridge.extendEnv(this.getCodexEnv()),
+      codexEnv,
       (notification) =>
         this.shouldSuppressLiveDeltaNotification(notification, options),
     );
