@@ -120,6 +120,17 @@ export function filterEnvForChildProcess(
   }
 
   filtered.ENABLE_PROMPT_CACHING_1H ??= "1";
+  // Claude Code's retry watchdog keeps temporary 429/529 failures inside the
+  // original provider turn instead of exhausting the normal ten attempts and
+  // emitting a synthetic terminal response. Its exponential backoff caps at
+  // five minutes, and the SDK abort signal still stops the wait immediately.
+  // Preserve an explicit operator choice through ??=.
+  filtered.CLAUDE_CODE_RETRY_WATCHDOG ??= "1";
+  // The documented retry limit also governs other transient server, timeout,
+  // and connection failures. Use a conventional signed-32-bit maximum as an
+  // effectively unbounded default; Claude still rejects non-retryable errors
+  // immediately, and operators can set a smaller limit explicitly.
+  filtered.CLAUDE_CODE_MAX_RETRIES ??= "2147483647";
   // Default the Claude Code Bash ceiling to 59 min so a bounded 55-min
   // `agentctl wait` (re-polled while a long job runs) fits under it with
   // headroom. The agent still requests the long timeout per call; the 2-min

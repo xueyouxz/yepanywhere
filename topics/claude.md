@@ -6,6 +6,7 @@
 Topic: claude
 
 Related topics: [session liveness and queue intent](session-liveness.md),
+[API failures and retries](claude-api-failures-and-retries.md),
 [emulated slash commands](emulated-slash-commands.md),
 [provider refresh](provider-refresh.md),
 [provider state machine](provider-state-machine.md), and
@@ -75,6 +76,16 @@ Related topics: [session liveness and queue intent](session-liveness.md),
   docs, Cache lifetime section
   (<https://code.claude.com/docs/en/prompt-caching#cache-lifetime>).
   <!-- verified: docs 2026-06-11 -->
+- YA-owned Claude launches keep transient backend failures inside Claude's
+  original request loop. `CLAUDE_CODE_RETRY_WATCHDOG=1` makes retryable
+  429/529 responses persistent with exponential backoff capped at five
+  minutes; `CLAUDE_CODE_MAX_RETRIES=2147483647` is an effectively unbounded
+  attempt budget for other failures Claude classifies as retryable. Explicit
+  operator values override both defaults. Stop/abort remains the cancellation
+  path, and YA must not append a synthetic resend turn after an API failure
+  because that can reuse a synthetic `previous_message_id`. See
+  [claude-api-failures-and-retries](claude-api-failures-and-retries.md).
+  <!-- verified: Claude Code 2.1.183 source + tests 2026-06-19 -->
 - Claude SDK/API package refreshes are source refreshes when they add message
   types, control methods, transcript fields, model/command metadata, or resume
   behavior that YA consumes. Unknown SDK message types may be temporarily

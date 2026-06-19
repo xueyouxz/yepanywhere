@@ -244,6 +244,30 @@ Difference detectors:
 - Model ids, effort levels, or context windows change enough to make fallback
   constants or model glyph rules misleading.
 
+Current source refresh, 2026-06-19:
+
+- `@anthropic-ai/claude-agent-sdk` was refreshed from `0.3.170` to `0.3.183`,
+  whose package metadata declares bundled Claude Code `2.1.183`.
+- Claude Code 2.1.181 added automatic recovery for API connection drops during
+  thinking. This matters to YA because local provider startup prefers the
+  SDK-bundled executable over an independently installed `claude` binary.
+- YA now opts into Claude Code's persistent retry watchdog for retryable
+  429/529 responses and preserves the original in-flight request with
+  exponential backoff capped at five minutes. The documented retry-count limit
+  is set to an effectively unbounded value for other transient server, timeout,
+  and connection failures. Both launch values preserve explicit operator
+  overrides.
+- SDK type drift adds `system/informational` user-visible banners and
+  `system/worker_shutting_down` remote-worker lifecycle events. YA's loose
+  server pass-through accepts both. `worker_shutting_down` is not authoritative
+  for YA's locally owned process lifecycle; `informational` still needs a
+  deliberate client rendering policy because the current system-message
+  allowlist drops it.
+
+Status: retry compatibility is refreshed through Claude Code 2.1.183. The new
+informational-message rendering surface remains a known follow-up rather than a
+retry-path blocker.
+
 Current read-only/local audit, 2026-06-14:
 
 - Local `claude --version` reports `2.1.177 (Claude Code)`.

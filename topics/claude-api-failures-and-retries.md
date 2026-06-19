@@ -2,20 +2,21 @@
 
 > The Claude SDK auto-retries transient API failures internally (observed:
 > `max_retries: 10`, exponential backoff, ~3.3 min for a 529 Overloaded
-> episode). When that budget is exhausted it emits a terminal synthetic
-> assistant message. On the live stream YA does **not** detect that terminal
-> error (it transitions to idle); the error is only recognized later on the
-> read/resume path. This doc records verified observations toward building a
-> YA-side auto-retry.
+> episode). YA-owned Claude launches now keep retryable failures inside that
+> original provider turn: 429/529 retries use Claude Code's persistent retry
+> watchdog with exponential backoff capped at five minutes, while the documented
+> retry-count limit is effectively unbounded for other retryable server,
+> timeout, and connection failures. Stop/abort still cancels the wait; YA does
+> not synthesize or resend a second user turn.
 
 See also:
-- [`CLAUDE.md`](CLAUDE.md) — "Transcript Structure" documents the SDK's
+- [`claude.md`](claude.md) — "Transcript Structure" documents the SDK's
   internal retry bookkeeping (`api_error` connector rows) and the
   resume-context-loss bug it can cause.
 - [`provider-state-machine.md`](provider-state-machine.md) — process lifecycle.
 - [`compact-and-handoff.md`](compact-and-handoff.md) /
   [`resume-compaction.md`](resume-compaction.md) — the resume-at-message-id
-  prefix-resume mechanism a retry could reuse.
+  prefix-resume fallback for persisted synthetic error tails.
 
 Topic: claude-api-failures-and-retries
 
@@ -25,13 +26,16 @@ Codex was reported (by the user, not verified here) to recover transient server
 failures automatically at the harness/SDK level, keeping the turn alive. The
 question was whether the Claude SDK does the same. The evidence below shows it
 **does** retry transient failures internally — but after exhausting its budget
-it surfaces a terminal error that YA currently does not handle live, so the turn
-ends. All observations come from session
+it used to surface a terminal error that YA did not handle live, so the turn
+ended. YA now opts into the harness's persistent retry path instead of trying to
+reconstruct and resend the turn outside Claude. Baseline observations come from
+session
 `84aae708-b140-483b-a324-9e0603b5028d` (a 529 on 2026-06-17, claude CLI
 2.1.170 / `@anthropic-ai/claude-agent-sdk@0.3.170`) plus an aggregate scan of
-local session jsonl, except where noted.
+local session jsonl. The implemented path was source-audited against Claude Code
+2.1.183 / Agent SDK 0.3.183 on 2026-06-19.
 
-## Verified: the SDK's internal retry (Layer 1)
+## Verified: the SDK's default finite retry
 
 The Claude CLI/SDK retries transient failures itself and **streams progress
 live** as `system` messages with `subtype: "api_retry"`. Each carries:
@@ -64,9 +68,36 @@ So a single overload episode pins the turn "thinking" for ~3 minutes before any
 terminal error appears. The `retry_delay_ms` numeric code (`error_status`) **is**
 present on these live `api_retry` messages.
 
-A separate verified case in [`CLAUDE.md`](CLAUDE.md) (Cloudflare 502, session
+A separate verified case in [`claude.md`](claude.md) (Cloudflare 502, session
 `c5b32eda`) shows this layer **succeeding** after a transport error, recorded as
 a `system` `api_error` connector row.
+
+## Verified: Claude Code 2.1.183 persistent retry
+
+Claude Code's current public error reference says server errors, overloaded
+responses, request timeouts, temporary 429 throttles, and dropped connections
+are retryable, and documents `CLAUDE_CODE_MAX_RETRIES` as the attempt limit:
+<https://code.claude.com/docs/en/errors#automatic-retries>.
+
+Source inspection of the bundled 2.1.183 executable establishes the stronger
+watchdog behavior used by YA:
+
+- `CLAUDE_CODE_RETRY_WATCHDOG=1` puts retryable 429 and 529 responses into a
+  persistent branch that does not exhaust `CLAUDE_CODE_MAX_RETRIES`.
+- Backoff starts at 500 ms with jitter and caps at 300,000 ms (five minutes).
+  A server-provided unified 429 reset may request a longer wait, capped at six
+  hours; the normal exponential path itself stays at five minutes.
+- Long waits are split into 30-second chunks and remain abort-signal aware.
+- Credit/extra-usage-required 429 responses are rejected before this persistent
+  branch, so enabling the watchdog does not loop the observed 1M billing error.
+- Other retryable failures still use the documented attempt limit. YA sets that
+  limit to `2147483647`, an effectively unbounded operational value, while
+  preserving an explicit operator override.
+
+This keeps the request that failed inside Claude's own API loop. It avoids the
+known unsafe alternative: appending a second user turn after a synthetic API
+error can make Claude send the synthetic `previous_message_id` and receive a
+400.
 
 ## Verified: the terminal failure signal
 
@@ -136,21 +167,30 @@ From all session jsonl under `~/.claude/projects/`:
 This is only what was observed on this machine; it is not an exhaustive list of
 what Anthropic can return.
 
-Two observations grounded in the text above:
+Three observations grounded in the text above:
 - `server_error` (500, 529) self-describes as transient ("usually temporary —
   try again in a moment").
-- The observed `rate_limit` (429) is a **billing** condition ("usage credits
-  required"), not a backoff signal — re-issuing it would loop. `error` (semantic
-  string) is therefore a better discriminator than the numeric code, and it is
-  present in both the live stream and the persisted form.
+- The locally observed `rate_limit` (429) was a **billing** condition ("usage
+  credits required"), while Claude's current error reference also defines a
+  temporary 429 throttle unrelated to plan quota. Status or the broad
+  `rate_limit` semantic alone cannot safely distinguish them; Claude Code's own
+  retry classifier checks the credit-specific detail before entering persistent
+  retry.
 - `authentication_failed` (401) and `model_not_found` (404) require user action.
 
 ## Verified: current YA handling
 
+- **Launch policy** —
+  `packages/server/src/sdk/providers/env-filter.ts` defaults
+  `CLAUDE_CODE_RETRY_WATCHDOG=1` and
+  `CLAUDE_CODE_MAX_RETRIES=2147483647`, preserving explicit operator values.
+  YA uses Agent SDK 0.3.183, whose bundled executable is Claude Code 2.1.183.
+  Targeted transient failures therefore remain in the original provider turn
+  until success or user/process abort.
 - **Schema** — `packages/shared/src/claude-sdk-schema/entry/AssistantEntrySchema.ts`
   declares `isApiErrorMessage` (optional bool). `apiErrorStatus` is **not** in
   the schema; it is read as an untyped field.
-- **Live path** — `packages/server/src/supervisor/Process.ts`:
+- **Terminal fallback** — `packages/server/src/supervisor/Process.ts`:
   - The only live error-termination hook is `isClaudeSdkApiErrorMessage()`
     (L184), which requires `message.isApiErrorMessage === true`; on match (L2676)
     it `abortFn()` + `markTerminated("Claude SDK API error; restart required")`.
@@ -158,7 +198,10 @@ Two observations grounded in the text above:
     lacks `isApiErrorMessage`, so the predicate is false. The trailing `result`
     message then runs `transitionToIdle()` (L2724); the `result` handler does
     **not** inspect `is_error`. Net live behavior: the session goes **idle**, not
-    terminated, and no API error is surfaced to YA's state machine.
+    terminated, and no API error is surfaced to YA's state machine. With YA's
+    default launch policy, retryable 429/529 failures should no longer reach
+    this terminal shape; the limitation remains relevant when an operator
+    disables persistent retry or an upstream behavior changes.
   - (The L2676 termination path is real and unit-tested in `process.test.ts`,
     but the tests feed a message that already has `isApiErrorMessage: true`.)
 - **Read/resume path** — `packages/server/src/routes/sessions.ts`
@@ -167,11 +210,12 @@ Two observations grounded in the text above:
   blocker carrying `apiErrorStatus` plus a **`resumeAtMessageId`** (uuid of the
   last good assistant message before the error tail, a prefix-resume point).
   Recovery is `"handoff-required"` (`CLAUDE_RESUME_API_ERROR_RECOVERY`) and
-  user-triggered. This is the contract noted in [`CLAUDE.md`](CLAUDE.md): an
+  user-triggered. This is the contract noted in [`claude.md`](claude.md): an
   SDK API-error row blocks normal resume.
 
-So the structured 529/500 signal is acted on **only on the read/resume path**,
-not live.
+The read/resume guard remains necessary for old transcripts, external Claude
+processes, and explicit launch overrides that allow the finite retry budget to
+be exhausted.
 
 ## Verified: retries are not rendered (and why)
 
@@ -205,10 +249,8 @@ cannot be amended. Doing it durably would require YA to **persist its own SDK
 session enrichment sidecar to disk** and merge it at render time.
 
 **Decision: we are not doing that yet.** The cost (a parallel persistence layer
-mirroring/augmenting CLI transcripts) is not worth it for retry visibility alone.
-Revisit if/when there is a broader need for YA-owned transcript enrichment, or
-alongside the auto-retry mechanic (which would already be accumulating the
-per-turn `api_retry` stats server-side).
+mirroring/augmenting CLI transcripts) is not worth it for retry visibility
+alone. Persistent retry works without it because Claude owns the retry loop.
 
 ## Observed recovery for this session
 
@@ -217,32 +259,33 @@ for ~20 minutes. At 15:41:15Z a new user message was enqueued and the session
 then ran normal turns again (real model `claude-opus-4-8`, not `<synthetic>`) —
 i.e. it recovered once the overload cleared, via a manual re-send.
 
-## Implications for an auto-retry mechanic (design notes, not yet built)
+## Implemented recovery (2026-06-19)
 
-Grounded in the verified observations above:
+YA delegates retry ownership to Claude Code rather than adding a second
+supervisor timer or resend path:
 
-1. The SDK already does fine-grained first-tier retry (10 attempts, ~3 min). A
-   YA mechanic is about recovering *after* that budget is exhausted, for outages
-   that outlast it.
-2. Live detection cannot use `isApiErrorMessage`/`apiErrorStatus` — they are
-   absent on the live terminal message. The live signals available are the
-   `result.is_error: true` flag, the synthetic assistant's top-level `error`
-   field, and the preceding `system`/`api_retry` telemetry (`error_status`,
-   `attempt`, `max_retries`). Today YA reads none of these as an error live.
-3. Classification should key on the semantic `error` value: retry `server_error`
-   (500/529); do not retry `authentication_failed` (401), `model_not_found`
-   (404), or the billing `rate_limit` (429).
-4. A retry could reuse the existing `resumeAtMessageId` prefix-resume point so it
-   re-issues from the last good assistant message rather than replaying tool
-   side effects, and fall through to the existing `handoff-required` recovery
-   when its own budget is exhausted.
+1. Start and mid-session API calls share the same Claude request loop, so the
+   launch env covers both failure locations.
+2. Persistent 429/529 retry uses Claude's original request and five-minute
+   backoff cap.
+3. Other failures that Claude classifies as retryable use an effectively
+   unbounded attempt limit.
+4. User stop, process abort, or server process teardown cancels the SDK wait.
+5. Non-retryable billing, authentication, model, permission, and malformed
+   request failures still surface normally.
+6. The existing unsafe-resume blocker remains the fallback for persisted
+   synthetic API-error tails created by older or explicitly overridden
+   processes.
 
 ## Not yet observed / unknown
 
-- Whether other status codes (e.g. 503, timeouts) appear, and what their
-  `error` / `error_status` look like. Only `server_error` (500/529),
-  `rate_limit` (429), `authentication_failed` (401), and `model_not_found` (404)
-  have been seen.
+- A real outage smoke has not yet held a YA-owned 2.1.183 process through more
+  than ten retries to success; the persistent behavior is source-audited and
+  launch-policy tested.
+- Whether other status codes (e.g. 503, timeouts) appear in local transcripts,
+  and what their `error` / `error_status` look like. Only `server_error`
+  (500/529), `rate_limit` (429), `authentication_failed` (401), and
+  `model_not_found` (404) have been seen locally.
 - Whether `isApiErrorMessage` presence on the **live** stream varies by SDK
   version (it was absent for 2.1.170 / sdk 0.3.170; the L2676 hook and its tests
   imply some path expects it).
