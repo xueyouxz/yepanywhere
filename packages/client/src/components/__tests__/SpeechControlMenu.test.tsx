@@ -251,9 +251,8 @@ describe("SpeechControlMenu", () => {
     expect(screen.queryByText("RNNT 1.1B English lowercase")).toBeNull();
   });
 
-  it("switches to an enabled compatible backend when selecting a Parakeet preset", () => {
+  it("lists only the selected backend's own models, keeping backends separate", () => {
     installMediaDevices([]);
-    const onMethodChange = vi.fn();
 
     renderSpeechControlMenu({
       trigger: <button type="button">voice</button>,
@@ -263,22 +262,37 @@ describe("SpeechControlMenu", () => {
         { value: "ya-nemo", label: "NeMo Parakeet" },
       ],
       selectedMethod: "ya-parakeet",
-      onMethodChange,
+      onMethodChange: vi.fn(),
     });
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "voice" }));
-    fireEvent.change(screen.getByLabelText("Parakeet model preset"), {
-      target: { value: "nvidia/parakeet-rnnt-1.1b" },
+
+    // ya-parakeet runs TDT + CTC but not the NeMo-only RNNT, even though
+    // ya-nemo is enabled — no cross-backend auto-switch from this dropdown.
+    expect(screen.getByText("TDT 0.6B v3 multilingual")).toBeDefined();
+    expect(screen.getByText("CTC 1.1B English lowercase")).toBeDefined();
+    expect(screen.queryByText("RNNT 1.1B English lowercase")).toBeNull();
+  });
+
+  it("lists all three models for the ya-nemo backend", () => {
+    installMediaDevices([]);
+
+    renderSpeechControlMenu({
+      trigger: <button type="button">voice</button>,
+      showMethodSelector: false,
+      methodOptions: [
+        { value: "ya-parakeet", label: "Parakeet" },
+        { value: "ya-nemo", label: "NeMo Parakeet" },
+      ],
+      selectedMethod: "ya-nemo",
+      onMethodChange: vi.fn(),
     });
 
-    expect(modelSettings.setParakeetSpeechModel).toHaveBeenCalledWith(
-      "nvidia/parakeet-rnnt-1.1b",
-    );
-    expect(onMethodChange).toHaveBeenCalledWith(["ya-nemo"]);
-    expect(prewarmYaServerSpeechBackend).toHaveBeenCalledWith(
-      "ya-nemo",
-      "nvidia/parakeet-rnnt-1.1b",
-    );
+    fireEvent.contextMenu(screen.getByRole("button", { name: "voice" }));
+
+    expect(screen.getByText("TDT 0.6B v3 multilingual")).toBeDefined();
+    expect(screen.getByText("CTC 1.1B English lowercase")).toBeDefined();
+    expect(screen.getByText("RNNT 1.1B English lowercase")).toBeDefined();
   });
 
   it("prewarms a custom Parakeet model on free-text commit", () => {

@@ -103,16 +103,19 @@ export function SpeechControlMenu({
     }
     return backends;
   }, [methodOptions, selectedMethod]);
+  // Show only the models the *selected* backend can actually run, so each
+  // backend lists its own models (ya-parakeet: tdt+ctc; ya-nemo: all three).
+  // The backends are kept separate on purpose; no cross-backend auto-switch
+  // from this dropdown. Switching backends still normalizes an incompatible
+  // model (see prepareParakeetBackend) and the mic reconciles as a safety net.
   const parakeetPresetOptions = useMemo(
     () =>
-      PARAKEET_SPEECH_MODEL_PRESETS.filter((preset) =>
-        resolveParakeetModelBackend(
-          preset.value,
-          selectedMethod,
-          enabledParakeetBackends,
-        ),
-      ),
-    [enabledParakeetBackends, selectedMethod],
+      isParakeetModelBackend(selectedMethod)
+        ? PARAKEET_SPEECH_MODEL_PRESETS.filter((preset) =>
+            preset.supportedBackends.includes(selectedMethod),
+          )
+        : [],
+    [selectedMethod],
   );
   const storedParakeetPreset =
     getParakeetSpeechPresetValue(parakeetSpeechModel);
