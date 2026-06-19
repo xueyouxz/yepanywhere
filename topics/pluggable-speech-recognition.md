@@ -224,7 +224,16 @@ streaming/confidence surface exists.
   needed before handing NeMo a mono 16 kHz WAV. The browser can choose the
   Parakeet model id per request from STT settings or the mic options panel for
   either Parakeet backend; `PARAKEET_MODEL` / `NEMO_MODEL` remain server
-  fallbacks for clients that send no model. The implemented presets are
+  fallbacks for clients that send no model. Each local backend keeps a single
+  warm worker, so a request for a model other than the warmed one triggers a
+  full cold model-swap (the old worker is killed before the new one loads, and a
+  concurrent request for a different model while one is loading is rejected as
+  busy). The first dictation after switching to a backend whose warmed model is
+  not the user's selection therefore pays that load. To avoid it, YA records the
+  last model each local backend used successfully (`lastLocalSpeechModels` in
+  server settings) and preflights that on the next startup instead of the
+  hardcoded default; an explicit `WHISPER_MODEL`/`PARAKEET_MODEL`/`NEMO_MODEL`
+  still wins. The implemented presets are
   limited to model ids tested in the current runtimes:
   `nvidia/parakeet-tdt-0.6b-v3`, `nvidia/parakeet-ctc-1.1b`, and
   `nvidia/parakeet-rnnt-1.1b`. Presets carry backend compatibility metadata:

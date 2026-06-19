@@ -355,6 +355,26 @@ function getRetentionSettings(deps: SpeechSessionDeps) {
   );
 }
 
+/**
+ * Remember the model a local STT backend just used successfully, so the next
+ * startup preflights it (skipping a cold model-swap when the user switches to
+ * that backend). Persists only on change; a no-op without a settings service or
+ * an explicit model. See topics/pluggable-speech-recognition.md.
+ */
+async function recordLastLocalSpeechModel(
+  deps: SpeechSessionDeps,
+  backendId: string,
+  model: string | undefined,
+): Promise<void> {
+  const settings = deps.serverSettingsService;
+  if (!settings || !model) return;
+  const current = settings.getSetting("lastLocalSpeechModels") ?? {};
+  if (current[backendId] === model) return;
+  await settings.updateSettings({
+    lastLocalSpeechModels: { ...current, [backendId]: model },
+  });
+}
+
 async function transcribeWithAudit(
   deps: SpeechSessionDeps,
   input: {
@@ -390,6 +410,7 @@ async function transcribeWithAudit(
       input.audio,
       input.options,
     );
+    void recordLastLocalSpeechModel(deps, input.backendId, input.options.model);
     const completedAtMs = Date.now();
     const completedAt = new Date(completedAtMs).toISOString();
     const retention = await persistSpeechAudio({
@@ -997,6 +1018,11 @@ export function createSpeechRoutes(deps: SpeechRouteDeps): Hono {
             model: parsed.options.model,
           },
           "Speech backend prewarm completed",
+        );
+        void recordLastLocalSpeechModel(
+          deps,
+          parsed.backendId,
+          parsed.options.model,
         );
       })
       .catch((err: unknown) => {

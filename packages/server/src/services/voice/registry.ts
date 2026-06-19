@@ -109,6 +109,26 @@ export interface SpeechRegistryInitOptions {
   nemoDevice?: string;
 }
 
+/**
+ * Fill each local backend's model from the last-used map, but only where no
+ * explicit model is configured (env/config wins). This lets the next startup
+ * preflight the model the user actually uses instead of the hardcoded default,
+ * so switching to that backend finds it already warm rather than paying a cold
+ * model-swap. Returns a new options object; the input is not mutated.
+ */
+export function applyLastUsedSpeechModels(
+  options: SpeechRegistryInitOptions,
+  lastUsed: Record<string, string> | undefined,
+): SpeechRegistryInitOptions {
+  if (!lastUsed) return options;
+  return {
+    ...options,
+    whisperModel: options.whisperModel ?? lastUsed["ya-whisper"],
+    parakeetModel: options.parakeetModel ?? lastUsed["ya-parakeet"],
+    nemoModel: options.nemoModel ?? lastUsed["ya-nemo"],
+  };
+}
+
 export async function initSpeechBackendRegistry(
   options: SpeechRegistryInitOptions = {},
 ): Promise<SpeechBackendRegistry> {

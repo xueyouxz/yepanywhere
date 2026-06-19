@@ -122,6 +122,13 @@ export interface ServerSettings {
    * delivered queued turns. Unset falls back to env `YA_COMPOSE_ANCHORS`.
    */
   composeAnchorsEnabled?: boolean;
+  /**
+   * Last successfully prewarmed/used model per local STT backend
+   * (backendId → model id, e.g. `{ "ya-nemo": "nvidia/parakeet-rnnt-1.1b" }`).
+   * Preflighted on the next startup so switching to that backend skips the cold
+   * model-swap. Explicit env model config (e.g. `NEMO_MODEL`) still wins.
+   */
+  lastLocalSpeechModels?: Record<string, string>;
 }
 
 export const CODEX_UPDATE_POLICIES = ["auto", "notify", "off"] as const;

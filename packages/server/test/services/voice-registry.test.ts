@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { getLogger } from "../../src/logging/logger.js";
 import { LocalNemoBackend } from "../../src/services/voice/localNemoBackend.js";
 import { LocalParakeetBackend } from "../../src/services/voice/localParakeetBackend.js";
-import { initSpeechBackendRegistry } from "../../src/services/voice/registry.js";
+import {
+  applyLastUsedSpeechModels,
+  initSpeechBackendRegistry,
+} from "../../src/services/voice/registry.js";
 
 describe("initSpeechBackendRegistry", () => {
   afterEach(() => {
@@ -124,5 +127,49 @@ describe("initSpeechBackendRegistry", () => {
         disabledReason: undefined,
       },
     ]);
+  });
+});
+
+describe("applyLastUsedSpeechModels", () => {
+  it("fills a backend model from the last-used map when unset", () => {
+    const merged = applyLastUsedSpeechModels(
+      { voiceInputEnabled: true },
+      { "ya-nemo": "nvidia/parakeet-rnnt-1.1b" },
+    );
+    expect(merged.nemoModel).toBe("nvidia/parakeet-rnnt-1.1b");
+  });
+
+  it("keeps an explicit (env) model over the last-used one", () => {
+    const merged = applyLastUsedSpeechModels(
+      { nemoModel: "nvidia/parakeet-ctc-1.1b" },
+      { "ya-nemo": "nvidia/parakeet-rnnt-1.1b" },
+    );
+    expect(merged.nemoModel).toBe("nvidia/parakeet-ctc-1.1b");
+  });
+
+  it("maps each local backend id to its own model field", () => {
+    const merged = applyLastUsedSpeechModels(
+      {},
+      {
+        "ya-whisper": "distil-large-v3",
+        "ya-parakeet": "nvidia/parakeet-ctc-1.1b",
+        "ya-nemo": "nvidia/parakeet-rnnt-1.1b",
+      },
+    );
+    expect(merged.whisperModel).toBe("distil-large-v3");
+    expect(merged.parakeetModel).toBe("nvidia/parakeet-ctc-1.1b");
+    expect(merged.nemoModel).toBe("nvidia/parakeet-rnnt-1.1b");
+  });
+
+  it("returns options unchanged when there is no last-used map", () => {
+    const options = { nemoModel: "x", parakeetModel: "y" };
+    expect(applyLastUsedSpeechModels(options, undefined)).toEqual(options);
+  });
+
+  it("ignores backend ids without a local model field", () => {
+    const merged = applyLastUsedSpeechModels({}, { "ya-grok": "whatever" });
+    expect(merged.nemoModel).toBeUndefined();
+    expect(merged.parakeetModel).toBeUndefined();
+    expect(merged.whisperModel).toBeUndefined();
   });
 });
