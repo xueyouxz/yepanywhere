@@ -233,6 +233,16 @@ streaming/confidence surface exists.
   enabled backend can run. Custom model ids stay backend-neutral and are sent to
   the currently selected Parakeet backend. Both local Parakeet backends are
   batch-only until a local streaming/chunking surface is proven.
+- Each local backend (Whisper, Parakeet, NeMo) keeps a single worker and
+  serializes all loads and transcriptions onto one FIFO queue (`SerialQueue`).
+  A request that arrives while a model is still loading — or while a model swap
+  is in flight — waits its turn (record audio, block on the load, then
+  transcribe) instead of being rejected with "backend is busy with another
+  request". A model swap still kills the old worker before loading the new one
+  (single worker by design), but the swap-load is just another queued step, so
+  it blocks rather than errors. A failed load (e.g. a NeMo-only model sent to
+  the Transformers `ya-parakeet` backend) rejects only that request; the queue
+  continues.
 - The normal `index.ts` runtime mounts `/api/speech` after
   `createNodeWebSocket()` creates the shared `upgradeWebSocket` helper.
 - `createSpeechRoutes` implements `POST /api/speech/transcribe` for batch

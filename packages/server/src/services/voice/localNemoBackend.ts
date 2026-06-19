@@ -16,6 +16,7 @@ import {
   defaultHuggingFaceHubCache,
   summarizeChildError,
 } from "./localSttRuntime.js";
+import { SerialQueue } from "./serialQueue.js";
 
 const logger = getLogger();
 
@@ -49,6 +50,9 @@ export class LocalNemoBackend implements PrewarmableSpeechBackend {
   private workerDevice: string | null = null;
   private pendingResolve: ((text: string) => void) | null = null;
   private pendingReject: ((err: Error) => void) | null = null;
+  // Serializes loads + transcriptions onto one queue (single worker by design),
+  // so a request during a load waits instead of failing as "busy".
+  private readonly queue = new SerialQueue();
 
   constructor(opts: { model?: string; device?: string } = {}) {
     this.model = opts.model ?? DEFAULT_NEMO_PARAKEET_MODEL;
@@ -199,34 +203,34 @@ export class LocalNemoBackend implements PrewarmableSpeechBackend {
 
   async prewarm(options: TranscribeOptions = {}): Promise<void> {
     const model = options.model?.trim() || this.model;
-    await this.startWorker(model, this.device);
+    await this.queue.run(() => this.startWorker(model, this.device));
   }
 
   async transcribe(
     audio: Buffer,
     options: TranscribeOptions = {},
   ): Promise<string> {
-    if (this.pendingResolve) {
-      throw new Error("NeMo backend is busy with another request");
-    }
-
     const model = options.model?.trim() || this.model;
-    await this.startWorker(model, this.device);
+    // Queue behind any in-flight load/transcribe: record audio, block on the
+    // load, then transcribe — instead of rejecting as "busy".
+    return this.queue.run(async () => {
+      await this.startWorker(model, this.device);
 
-    if (!this.proc?.stdin) {
-      throw new Error("NeMo worker is not running");
-    }
+      if (!this.proc?.stdin) {
+        throw new Error("NeMo worker is not running");
+      }
 
-    return new Promise<string>((resolve, reject) => {
-      this.pendingResolve = resolve;
-      this.pendingReject = reject;
+      return new Promise<string>((resolve, reject) => {
+        this.pendingResolve = resolve;
+        this.pendingReject = reject;
 
-      const req = {
-        audio_b64: audio.toString("base64"),
-        mime_type: options.mimeType ?? "audio/webm;codecs=opus",
-      };
+        const req = {
+          audio_b64: audio.toString("base64"),
+          mime_type: options.mimeType ?? "audio/webm;codecs=opus",
+        };
 
-      this.proc!.stdin!.write(`${JSON.stringify(req)}\n`);
+        this.proc!.stdin!.write(`${JSON.stringify(req)}\n`);
+      });
     });
   }
 }

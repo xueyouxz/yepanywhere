@@ -10,6 +10,7 @@ import {
   PIXI_PYTHON_ARGS,
   PIXI_STT_ENV,
 } from "./localSttRuntime.js";
+import { SerialQueue } from "./serialQueue.js";
 const logger = getLogger();
 
 const WORKER_SCRIPT = join(
@@ -32,6 +33,9 @@ export class LocalWhisperBackend implements SpeechBackend {
   private warmPromise: Promise<void> | null = null;
   private pendingResolve: ((text: string) => void) | null = null;
   private pendingReject: ((err: Error) => void) | null = null;
+  // Serializes transcriptions onto one queue (single worker), so a request
+  // during a load or another transcription waits instead of failing as "busy".
+  private readonly queue = new SerialQueue();
 
   constructor(opts: { model?: string; device?: string; computeType?: string } = {}) {
     this.model = opts.model ?? "distil-large-v3";
@@ -140,27 +144,27 @@ export class LocalWhisperBackend implements SpeechBackend {
   }
 
   async transcribe(audio: Buffer, options: TranscribeOptions = {}): Promise<string> {
-    if (this.pendingResolve) {
-      throw new Error("Whisper backend is busy with another request");
-    }
+    // Queue behind any in-flight load/transcribe: record audio, block on the
+    // load, then transcribe — instead of rejecting as "busy".
+    return this.queue.run(async () => {
+      await this.startWorker();
 
-    await this.startWorker();
+      if (!this.proc?.stdin) {
+        throw new Error("Whisper worker is not running");
+      }
 
-    if (!this.proc?.stdin) {
-      throw new Error("Whisper worker is not running");
-    }
+      return new Promise<string>((resolve, reject) => {
+        this.pendingResolve = resolve;
+        this.pendingReject = reject;
 
-    return new Promise<string>((resolve, reject) => {
-      this.pendingResolve = resolve;
-      this.pendingReject = reject;
+        const req = {
+          audio_b64: audio.toString("base64"),
+          mime_type: options.mimeType ?? "audio/webm;codecs=opus",
+          prompt: options.prompt ?? "",
+        };
 
-      const req = {
-        audio_b64: audio.toString("base64"),
-        mime_type: options.mimeType ?? "audio/webm;codecs=opus",
-        prompt: options.prompt ?? "",
-      };
-
-      this.proc!.stdin!.write(`${JSON.stringify(req)}\n`);
+        this.proc!.stdin!.write(`${JSON.stringify(req)}\n`);
+      });
     });
   }
 }
