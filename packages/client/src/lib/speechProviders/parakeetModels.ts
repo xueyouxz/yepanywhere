@@ -95,6 +95,27 @@ export function resolveParakeetModelBackend(
   );
 }
 
+/**
+ * Guard against pairing a Parakeet model with a backend that can't run it.
+ * If `method` is a Parakeet backend that doesn't support `model` (e.g.
+ * `rnnt-1.1b` is NeMo-only), route to a backend that does when one is
+ * available — keeping the user's model. Non-Parakeet methods and
+ * already-compatible pairs pass through unchanged. When no compatible backend
+ * is available the original `method` is returned, so the request fails with a
+ * clear model-load error rather than being silently sent somewhere that can't
+ * run it.
+ */
+export function reconcileParakeetBackendForModel(
+  method: string,
+  model: string,
+  availableBackends: readonly string[],
+): string {
+  if (!isParakeetModelBackend(method)) return method;
+  const preset = getParakeetSpeechPreset(cleanParakeetSpeechModel(model));
+  if (!preset || preset.supportedBackends.includes(method)) return method;
+  return resolveParakeetModelBackend(model, method, availableBackends) ?? method;
+}
+
 export function getCompatibleParakeetModelForBackend(
   modelValue: string,
   backendId: ParakeetModelBackendId,

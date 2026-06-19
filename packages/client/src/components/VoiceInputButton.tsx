@@ -25,6 +25,7 @@ import {
   resolveSpeechMethod,
   type SpeechMethodId,
 } from "../lib/speechProviders/methods";
+import { reconcileParakeetBackendForModel } from "../lib/speechProviders/parakeetModels";
 import type {
   SpeechSmartTurnSettings,
   SpeechTranscriptionContext,
@@ -115,23 +116,31 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
   const { keepMicWarm, micDeviceId } = useSpeechCaptureSettings();
   const serverVoiceEnabled =
     versionInfo?.capabilities?.includes("voiceInput") ?? true;
-  const speechMethod = useMemo(
-    () =>
+  const speechMethod = useMemo(() => {
+    const resolved =
       selectedSpeechMethod ??
       resolveSpeechMethod(
         storedSpeechMethod,
         versionInfo?.voiceBackends,
         hasStoredSpeechMethod,
         { directXaiAvailable: hasBrowserXaiSttApiKey },
-      ),
-    [
-      selectedSpeechMethod,
-      storedSpeechMethod,
-      versionInfo?.voiceBackends,
-      hasStoredSpeechMethod,
-      hasBrowserXaiSttApiKey,
-    ],
-  );
+      );
+    // Never pair a Parakeet model with a backend that can't run it: a NeMo-only
+    // model (rnnt-1.1b) routes to ya-nemo, not ya-parakeet — even if a backend
+    // flap left the selection on ya-parakeet. Keeps the chosen model.
+    return reconcileParakeetBackendForModel(
+      resolved,
+      parakeetSpeechModel,
+      versionInfo?.voiceBackends ?? [],
+    ) as SpeechMethodId;
+  }, [
+    selectedSpeechMethod,
+    storedSpeechMethod,
+    versionInfo?.voiceBackends,
+    hasStoredSpeechMethod,
+    hasBrowserXaiSttApiKey,
+    parakeetSpeechModel,
+  ]);
   const relayTransport = basePath !== "";
   const openRelayedSpeechSocket = useMemo(() => {
     const openSpeechSocket = connection.openSpeechSocket;
