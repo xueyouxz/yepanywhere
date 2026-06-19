@@ -9231,12 +9231,8 @@ a.sidebar-nav-item {
 .settings-category-item {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  /* Vertical padding trimmed ~15% then 2px more to shorten the category list.
-     Right pad halved: the chevron (single-column) or empty space (two-column)
-     left an unbalanced gap against the icon-side left pad. */
-  padding: calc(var(--space-3) * 0.85 - 2px) calc(var(--space-3) * 0.5)
-    calc(var(--space-3) * 0.85 - 2px) var(--space-3);
+  gap: var(--space-2);
+  padding: var(--space-2);
   background: var(--bg-code);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
@@ -9259,7 +9255,6 @@ a.sidebar-nav-item {
 
 .settings-category-icon {
   flex-shrink: 0;
-  /* 30px box around the 22px glyph trims the L/R air ~20% (5px -> 4px). */
   width: 30px;
   height: 32px;
   display: flex;
@@ -9298,26 +9293,30 @@ a.sidebar-nav-item {
   flex-shrink: 0;
 }
 
-/* Two-column layout for desktop */
+/* Two-column layout when the settings container can support both panes */
 .settings-two-column {
-  display: flex;
+  display: grid;
+  grid-template-columns: max-content minmax(0, var(--content-max-width));
   gap: var(--space-4);
   min-height: 0;
-  width: 100%;
+  width: fit-content;
+  max-width: 100%;
   padding: 1rem;
   box-sizing: border-box;
-  max-width: calc(17.5rem + var(--content-max-width) + var(--space-4));
   margin: 0 auto;
 }
 
 .settings-category-nav {
-  flex-shrink: 0;
-  width: clamp(13rem, 28vw, 17.5rem);
+  width: max-content;
   overflow-y: auto;
 }
 
+.settings-two-column .settings-category-label,
+.settings-two-column .settings-category-description {
+  white-space: nowrap;
+}
+
 .settings-content-panel {
-  flex: 1;
   min-width: 0;
   max-width: var(--content-max-width);
   overflow-y: auto;

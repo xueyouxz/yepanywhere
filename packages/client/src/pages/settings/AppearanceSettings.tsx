@@ -389,7 +389,6 @@ export function AppearanceSettings() {
         <div className="settings-item">
           <div className="settings-item-info">
             <strong>{t("appearanceThemeTitle")}</strong>
-            <p>{t("appearanceThemeDescription")}</p>
           </div>
           <div className="font-size-selector">
             {THEMES.map((themeValue) => (
@@ -407,7 +406,6 @@ export function AppearanceSettings() {
         <div className="settings-item">
           <div className="settings-item-info">
             <strong>{t("appearanceFontSizeTitle")}</strong>
-            <p>{t("appearanceFontSizeDescription")}</p>
           </div>
           <div className="font-size-selector">
             {FONT_SIZES.map((size) => (
@@ -426,7 +424,6 @@ export function AppearanceSettings() {
           <div className="output-appearance-header">
             <div className="settings-item-info">
               <strong>{t("appearanceOutputTypographyTitle")}</strong>
-              <p>{t("appearanceOutputTypographyDescription")}</p>
             </div>
             <button
               type="button"
@@ -509,6 +506,50 @@ export function AppearanceSettings() {
                 ))}
               </datalist>
 
+              <label
+                className="output-appearance-control"
+                htmlFor="output-thinking-size-offset"
+              >
+                <span className="output-appearance-label">
+                  {t("appearanceOutputThinkingSizeOffsetLabel")}
+                </span>
+                <span className="output-appearance-slider-row">
+                  <input
+                    id="output-thinking-size-offset"
+                    type="range"
+                    min={OUTPUT_THINKING_FONT_SIZE_OFFSET_MIN_PX}
+                    max={OUTPUT_THINKING_FONT_SIZE_OFFSET_MAX_PX}
+                    step={OUTPUT_THINKING_FONT_SIZE_OFFSET_STEP_PX}
+                    value={outputThinkingFontSizeOffsetPx}
+                    onChange={(e) =>
+                      setOutputThinkingFontSizeOffsetPx(Number(e.target.value))
+                    }
+                  />
+                  <span className="output-appearance-number-wrap">
+                    <input
+                      type="number"
+                      className="settings-input-small output-appearance-number"
+                      min={OUTPUT_THINKING_FONT_SIZE_OFFSET_MIN_PX}
+                      max={OUTPUT_THINKING_FONT_SIZE_OFFSET_MAX_PX}
+                      step={OUTPUT_THINKING_FONT_SIZE_OFFSET_STEP_PX}
+                      value={outputThinkingFontSizeOffsetDraft}
+                      onChange={(e) =>
+                        setOutputThinkingFontSizeOffsetDraft(e.target.value)
+                      }
+                      onBlur={commitOutputThinkingFontSizeOffset}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          commitOutputThinkingFontSizeOffset();
+                          e.currentTarget.blur();
+                        }
+                      }}
+                      aria-label={t("appearanceOutputThinkingSizeOffsetLabel")}
+                    />
+                    <span className="output-appearance-unit">px</span>
+                  </span>
+                </span>
+              </label>
+
               <div className="output-appearance-control">
                 <span className="output-appearance-label">
                   {t("appearanceOutputFixedFontLabel")}
@@ -565,50 +606,6 @@ export function AppearanceSettings() {
                         }
                       }}
                       aria-label={t("appearanceOutputFixedSizeOffsetLabel")}
-                    />
-                    <span className="output-appearance-unit">px</span>
-                  </span>
-                </span>
-              </label>
-
-              <label
-                className="output-appearance-control"
-                htmlFor="output-thinking-size-offset"
-              >
-                <span className="output-appearance-label">
-                  {t("appearanceOutputThinkingSizeOffsetLabel")}
-                </span>
-                <span className="output-appearance-slider-row">
-                  <input
-                    id="output-thinking-size-offset"
-                    type="range"
-                    min={OUTPUT_THINKING_FONT_SIZE_OFFSET_MIN_PX}
-                    max={OUTPUT_THINKING_FONT_SIZE_OFFSET_MAX_PX}
-                    step={OUTPUT_THINKING_FONT_SIZE_OFFSET_STEP_PX}
-                    value={outputThinkingFontSizeOffsetPx}
-                    onChange={(e) =>
-                      setOutputThinkingFontSizeOffsetPx(Number(e.target.value))
-                    }
-                  />
-                  <span className="output-appearance-number-wrap">
-                    <input
-                      type="number"
-                      className="settings-input-small output-appearance-number"
-                      min={OUTPUT_THINKING_FONT_SIZE_OFFSET_MIN_PX}
-                      max={OUTPUT_THINKING_FONT_SIZE_OFFSET_MAX_PX}
-                      step={OUTPUT_THINKING_FONT_SIZE_OFFSET_STEP_PX}
-                      value={outputThinkingFontSizeOffsetDraft}
-                      onChange={(e) =>
-                        setOutputThinkingFontSizeOffsetDraft(e.target.value)
-                      }
-                      onBlur={commitOutputThinkingFontSizeOffset}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          commitOutputThinkingFontSizeOffset();
-                          e.currentTarget.blur();
-                        }
-                      }}
-                      aria-label={t("appearanceOutputThinkingSizeOffsetLabel")}
                     />
                     <span className="output-appearance-unit">px</span>
                   </span>

@@ -1,10 +1,11 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 interface MainContentProps {
   children: ReactNode;
   isWideScreen: boolean;
   className?: string;
   innerClassName?: string;
+  innerRef?: Ref<HTMLDivElement>;
 }
 
 function classNames(...values: Array<string | undefined>): string {
@@ -16,6 +17,7 @@ export function MainContent({
   isWideScreen,
   className,
   innerClassName,
+  innerRef,
 }: MainContentProps) {
   return (
     <div
@@ -25,6 +27,7 @@ export function MainContent({
       )}
     >
       <div
+        ref={innerRef}
         className={classNames(
           isWideScreen
             ? "main-content-constrained"
