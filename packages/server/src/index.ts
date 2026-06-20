@@ -1,3 +1,4 @@
+import "./startupEnv.js";
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import { createServer as createHttpsServer } from "node:https";

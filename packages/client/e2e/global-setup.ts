@@ -250,7 +250,7 @@ export default async function globalSetup() {
         CLAUDE_SESSIONS_DIR: E2E_CLAUDE_SESSIONS_DIR,
         CODEX_SESSIONS_DIR: E2E_CODEX_SESSIONS_DIR,
         GEMINI_SESSIONS_DIR: E2E_GEMINI_SESSIONS_DIR,
-        YEP_ANYWHERE_DATA_DIR: E2E_DATA_DIR,
+        YEP_DATA_DIR: E2E_DATA_DIR,
       },
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,

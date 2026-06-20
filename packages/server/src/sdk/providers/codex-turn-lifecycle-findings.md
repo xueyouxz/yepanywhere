@@ -102,7 +102,7 @@ default. It uses a fake app-server to prove YA updates the active turn id from
 To run the real contract probe through Vitest:
 
 ```bash
-YA_CODEX_REAL_CONTRACT_TEST=true pnpm --filter @yep-anywhere/server exec vitest test/sdk/providers/codex.test.ts --run -t "real contract"
+YEP_CODEX_REAL_CONTRACT_TEST=true pnpm --filter @yep-anywhere/server exec vitest test/sdk/providers/codex.test.ts --run -t "real contract"
 ```
 
 To run the probe script directly:

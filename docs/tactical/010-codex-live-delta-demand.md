@@ -8,7 +8,7 @@ processed by each active session subscription. A browser-local "response
 streaming" preference can suppress rendering on that client, but by itself it
 does not tell the server that live deltas are unwanted.
 
-The server-level `YA_CODEX_DISABLE_LIVE_DELTAS=true` diagnostic switch is useful
+The server-level `YEP_CODEX_DISABLE_LIVE_DELTAS=true` diagnostic switch is useful
 for isolating event-loop pressure, but it is too coarse for normal use: it
 affects every connected client regardless of whether one of them actually wants
 live streaming.

@@ -148,13 +148,10 @@ long-term contract for production routing.
 - Validate `yaClientBaseUrl` as an HTTP(S) base URL. Allow a path prefix such
   as `/remote`, but reject query/hash components. Bare hosts such as
   `ya.graehl.org` normalize to `https://ya.graehl.org`.
-- Continue honoring `YEP_PUBLIC_SHARE_ORIGIN` as an environment override or
-  bootstrap fallback for compatibility, but make the precedence explicit and
-  consider renaming it to a base-URL variable.
-  Implementation now treats saved `yaClientBaseUrl` first, then
-  `YEP_YA_CLIENT_BASE_URL`, then legacy saved `publicShareViewerBaseUrl`,
-  then `YEP_PUBLIC_SHARE_VIEWER_BASE_URL`, then legacy
-  `YEP_PUBLIC_SHARE_ORIGIN`, then the hosted default.
+- Continue honoring old public-share environment names through the destructive
+  startup compatibility map. Runtime code sees only `YEP_CLIENT_BASE_URL`.
+  Precedence is saved `yaClientBaseUrl`, then `YEP_CLIENT_BASE_URL`, then
+  legacy saved `publicShareViewerBaseUrl`, then the hosted default.
 - Enforce `publicSharesEnabled` server-side:
   - block `POST /api/public-shares`;
   - return not found for public reads when the setting is off;

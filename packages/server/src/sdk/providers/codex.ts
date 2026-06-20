@@ -153,7 +153,7 @@ const CODEX_RECAP_CHEAPEST_MODEL_PREFERENCES = [
   "gpt-5.1-codex-mini",
   "gpt-5.3-codex-spark",
 ] as const;
-const CODEX_DISABLE_LIVE_DELTAS_ENV = "YA_CODEX_DISABLE_LIVE_DELTAS";
+const CODEX_DISABLE_LIVE_DELTAS_ENV = "YEP_CODEX_DISABLE_LIVE_DELTAS";
 const CODEX_LIVE_DELTA_NOTIFICATION_METHODS = new Set<string>([
   "item/agentMessage/delta",
   "item/plan/delta",

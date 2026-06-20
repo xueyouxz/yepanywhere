@@ -273,7 +273,7 @@ pub async fn start_server(app: AppHandle) -> Result<(), String> {
         cmd.args(["--login", "-c", "exec pnpm dev"])
             .current_dir(&dev_dir)
             .env("PORT", port.to_string())
-            .env("YEP_ANYWHERE_DATA_DIR", data_dir.to_string_lossy().as_ref())
+            .env("YEP_DATA_DIR", data_dir.to_string_lossy().as_ref())
             .env("DESKTOP_AUTH_TOKEN", &token);
         apply_desktop_server_env(&mut cmd);
         setup_child_process(&mut cmd);
@@ -288,7 +288,7 @@ pub async fn start_server(app: AppHandle) -> Result<(), String> {
             .arg(&entry)
             .env("NODE_ENV", "production")
             .env("PORT", port.to_string())
-            .env("YEP_ANYWHERE_DATA_DIR", data_dir.to_string_lossy().as_ref())
+            .env("YEP_DATA_DIR", data_dir.to_string_lossy().as_ref())
             .env("DESKTOP_AUTH_TOKEN", &token);
         apply_desktop_server_env(&mut cmd);
         setup_child_process(&mut cmd);

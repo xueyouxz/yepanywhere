@@ -70,7 +70,7 @@ accidentally switch to pay-as-you-go model billing.
 If the user intentionally wants Grok Build to use xAI API-key billing, the
 Providers settings page exposes a default-off opt-in. That opt-in reinjects
 only the ambient `XAI_API_KEY` captured at YA startup; it does not reuse
-`YA_stt__XAI_API_KEY`, so STT can remain on different billing from Grok Build.
+`YEP_STT_XAI_API_KEY`, so STT can remain on different billing from Grok Build.
 
 ## Integration Plan (Explicitly Isolated — Zero Risk to Other Providers)
 

@@ -41,7 +41,7 @@ replacement for YA-mediated speech in general:
   has no xAI STT key and therefore does not advertise `ya-grok`.
 - **Upstream default is no key exposure.** Sharing a server STT key with
   clients must be an explicit operator setting, not implied by
-  `YA_stt__XAI_API_KEY` existing. Minting a short-lived xAI client secret for
+  `YEP_STT_XAI_API_KEY` existing. Minting a short-lived xAI client secret for
   authenticated private clients does not reveal the long-lived key. Long-lived
   key sharing remains a separate explicit opt-in for direct batch.
 
@@ -105,13 +105,13 @@ The client chooses one effective xAI credential source:
 1. **Browser-local key.** Stored only in this browser profile. This is the most
    honest "client-owned key" path and needs no YA server key exposure.
 2. **Server-minted client secret.** When the browser-local key is absent and
-   the YA server has `YA_stt__XAI_API_KEY`, `POST /api/speech/xai-client-secret`
+   the YA server has `YEP_STT_XAI_API_KEY`, `POST /api/speech/xai-client-secret`
    mints a short-lived xAI client secret for authenticated private direct
    streaming. The long-lived key stays on the YA server.
 3. **Server-provided borrowed key.** The YA server returns its configured xAI
    STT key only to authenticated private clients and only when the operator has
    explicitly enabled long-lived key sharing with
-   `YA_stt__SHARE_XAI_KEY_WITH_CLIENTS=1`. This path exists for direct batch
+   `YEP_STT_SHARE_XAI_KEY_WITH_CLIENTS=1`. This path exists for direct batch
    REST STT, where `fetch` needs `Authorization: Bearer ...`.
 
 Do not blur these in UI or logs. A server-provided key should be described as
@@ -154,10 +154,10 @@ Current implementation, 2026-06-15:
 - The browser-local xAI STT key lives in server-scoped local storage.
 - When the browser-local key is empty, direct streaming asks
   `POST /api/speech/xai-client-secret` for a short-lived xAI client secret
-  minted by the YA server from `YA_stt__XAI_API_KEY`.
+  minted by the YA server from `YEP_STT_XAI_API_KEY`.
 - When the browser-local key is empty, the client asks
   `POST /api/speech/xai-client-key` for the borrowed server key. The server
-  returns it only when `YA_stt__SHARE_XAI_KEY_WITH_CLIENTS=1` is set.
+  returns it only when `YEP_STT_SHARE_XAI_KEY_WITH_CLIENTS=1` is set.
 - Direct streaming is selectable in the STT backend menu and can be saved like
   any other speech method when either `ya-grok` is advertised or this browser
   has a local xAI STT key. The direct batch implementation remains in code for

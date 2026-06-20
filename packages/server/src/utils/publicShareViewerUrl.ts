@@ -6,9 +6,7 @@ import {
   normalizeYaClientBaseUrlFromShareViewerUrl,
 } from "@yep-anywhere/shared";
 
-const NEW_YA_CLIENT_BASE_URL_ENV = "YEP_YA_CLIENT_BASE_URL";
-const LEGACY_VIEWER_BASE_URL_ENV = "YEP_PUBLIC_SHARE_VIEWER_BASE_URL";
-const LEGACY_VIEWER_ORIGIN_ENV = "YEP_PUBLIC_SHARE_ORIGIN";
+const YA_CLIENT_BASE_URL_ENV = "YEP_CLIENT_BASE_URL";
 
 export function getDefaultYaClientBaseUrl(): string {
   return DEFAULT_YA_CLIENT_BASE_URL;
@@ -24,10 +22,6 @@ export function normalizePublicShareViewerBaseUrl(raw: string): string {
   );
 }
 
-function normalizeLegacyPublicShareOrigin(raw: string): string {
-  return normalizeYaClientBaseUrl(raw);
-}
-
 export function resolveYaClientBaseUrl(
   configured?: string | null,
   legacyShareViewerBaseUrl?: string | null,
@@ -36,23 +30,13 @@ export function resolveYaClientBaseUrl(
     return normalizeYaClientBaseUrl(configured);
   }
 
-  const envYaClientBaseUrl = process.env[NEW_YA_CLIENT_BASE_URL_ENV];
+  const envYaClientBaseUrl = process.env[YA_CLIENT_BASE_URL_ENV];
   if (envYaClientBaseUrl) {
     return normalizeYaClientBaseUrl(envYaClientBaseUrl);
   }
 
   if (legacyShareViewerBaseUrl) {
     return normalizeYaClientBaseUrlFromShareViewerUrl(legacyShareViewerBaseUrl);
-  }
-
-  const legacyEnvBaseUrl = process.env[LEGACY_VIEWER_BASE_URL_ENV];
-  if (legacyEnvBaseUrl) {
-    return normalizeYaClientBaseUrlFromShareViewerUrl(legacyEnvBaseUrl);
-  }
-
-  const legacyOrigin = process.env[LEGACY_VIEWER_ORIGIN_ENV];
-  if (legacyOrigin) {
-    return normalizeLegacyPublicShareOrigin(legacyOrigin);
   }
 
   return DEFAULT_YA_CLIENT_BASE_URL;

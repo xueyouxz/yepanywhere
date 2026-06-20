@@ -73,7 +73,7 @@ async function getBridgeVersion(options?: {
 }
 const ANDROID_SERVER_APK_NAME = "yep-device-server.apk";
 const ANDROID_SERVER_APK_ENV_VAR = "ANDROID_DEVICE_SERVER_APK";
-const DATA_DIR_ENV_VAR = "YEP_ANYWHERE_DATA_DIR";
+const DATA_DIR_ENV_VAR = "YEP_DATA_DIR";
 const USE_APK_FOR_EMULATORS_ENV_VAR = "DEVICE_BRIDGE_USE_APK_FOR_EMULATOR";
 
 /** Sidecar stdout handshake message */

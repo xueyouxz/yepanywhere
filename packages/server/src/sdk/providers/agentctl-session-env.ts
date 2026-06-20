@@ -1,14 +1,9 @@
-import {
-  mkdtempSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const AGENTCTL_SESSION_ID_ENV = "AGENTCTL_SESSION_ID";
-const ORIGINAL_BASH_ENV_ENV = "YEP_ANYWHERE_ORIGINAL_BASH_ENV";
+const ORIGINAL_BASH_ENV_ENV = "YEP_ORIGINAL_BASH_ENV";
 
 export interface AgentctlSessionEnvBridge {
   readonly bashEnvPath: string;

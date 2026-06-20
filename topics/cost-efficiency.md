@@ -30,16 +30,17 @@ never reach the Grok child process.
 Two complementary layers enforce this — one for YA's own keys, one for
 vendor-named keys that may be in the env for other reasons.
 
-**Layer 1 — `YA_<module>__<NAME>` consume-and-strip (the primary guard for
+**Layer 1 — `YEP_<MODULE>_<NAME>` consume-and-strip (the primary guard for
 YA-owned keys).** A secret YA needs for a subsystem is provided under a
-`YA_<module>__<NAME>` name (e.g. `YA_stt__XAI_API_KEY`,
-`YA_stt__DEEPGRAM_API_KEY`). On server load, `harvestYaModuleEnv`
+registered module prefix (e.g. `YEP_STT_XAI_API_KEY`,
+`YEP_STT_DEEPGRAM_API_KEY`). On server load, `harvestYaModuleEnv`
 (`packages/server/src/yaModuleEnv.ts`) moves every such var into a private
 in-process store and **deletes it from `process.env`**, so it can never ride
 the ambient environment into *any* spawned child — no per-provider masking
 required. The subsystem reads it via `getModuleEnv("stt")[NAME]`, never
-`process.env`. The `YA_` prefix means "consume and strip"; module and name
-split on the **first** `__`, so the name half may itself contain `__`.
+`process.env`. Private prefixes such as `YEP_STT_` are registered explicitly;
+ordinary `YEP_*` toggles are not consumed merely because they contain an
+underscore.
 
 **Layer 2 — startup scrub plus per-provider `excludeEnv` for vendor-named
 keys.** A literal `XAI_API_KEY` may be set because xAI's public docs use that
@@ -53,7 +54,7 @@ provider passes `GROK_BILLING_ENV_DENYLIST =
 ["XAI_API_KEY", "GROK_CODE_XAI_API_KEY"]` (local to `grok-acp.ts`) unless the
 user has enabled the Grok Build provider option to pass the scrubbed
 `XAI_API_KEY`; that opt-in injects only the ambient `XAI_API_KEY`, not
-`YA_stt__XAI_API_KEY`. It is
+`YEP_STT_XAI_API_KEY`. It is
 scoped to that one provider on purpose: the shared
 `filterEnvForChildProcess` allowlist is **not** widened to drop vendor API
 keys, because that would change the child env of established providers that
@@ -77,7 +78,7 @@ free-local and metered-cloud options. Local Whisper is free CPU/GPU time;
 Deepgram (`ya-deepgram`) and xAI STT (`ya-grok`) are metered. Cloud
 backends **auto-enable when their key is present** — a single-user
 operator providing the key is itself the opt-in signal — while local/test
-backends (`ya-whisper`, `ya-dummy`) stay explicit via `YA_VOICE_BACKENDS`
+backends (`ya-whisper`, `ya-dummy`) stay explicit via `YEP_VOICE_BACKENDS`
 (see [ya-env-vars.md](ya-env-vars.md)). xAI STT batch is ~$0.10/hr,
 realtime ~$0.20/hr — cheap, but still a metered path, never a silent
 default for a user who has not provisioned a key.

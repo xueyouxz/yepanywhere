@@ -35,7 +35,7 @@ interface XaiSttStreamEvent {
  * xAI Speech-to-Text (Grok voice) cloud backend.
  *
  * Posts a complete utterance to `POST /v1/stt` (multipart) and returns the
- * top-level `text`. The key is YA-private (`YA_stt__XAI_API_KEY`, harvested
+ * top-level `text`. The key is YA-private (`YEP_STT_XAI_API_KEY`, harvested
  * and stripped from process.env on load) so it never reaches the Grok coding
  * CLI and cannot flip that subscription to metered billing — see
  * topics/cost-efficiency.md.
@@ -53,7 +53,7 @@ export class XaiSttBackend implements SpeechBackend {
     // enable signal; a genuinely bad key surfaces on the first transcription.
     return this.apiKey
       ? { ok: true }
-      : { ok: false, reason: "YA_stt__XAI_API_KEY is not set" };
+      : { ok: false, reason: "YEP_STT_XAI_API_KEY is not set" };
   }
 
   async transcribe(

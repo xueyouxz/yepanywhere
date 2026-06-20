@@ -114,12 +114,12 @@ export interface ServerSettings {
    * Max seconds between consecutive compose times for queued-while-busy turns
    * to join into one `--------`-joined provider turn at a delivery boundary.
    * 0 = never join (the vanilla default). Unset falls back to env
-   * `YA_DEFERRED_JOIN_WINDOW_S` (topics/compose-time-context-anchors.md).
+   * `YEP_DEFERRED_JOIN_WINDOW_S` (topics/compose-time-context-anchors.md).
    */
   deferredJoinWindowSeconds?: number;
   /**
    * Prepend `(Ns ago)` / `(Ms later)` compose-time staleness anchors to
-   * delivered queued turns. Unset falls back to env `YA_COMPOSE_ANCHORS`.
+   * delivered queued turns. Unset falls back to env `YEP_COMPOSE_ANCHORS`.
    */
   composeAnchorsEnabled?: boolean;
 }

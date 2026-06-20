@@ -19,7 +19,7 @@ behavior across streaming and batch STT.
   not advertise voice input or server-routed speech backends.
 - Server-routed backends are off unless an explicit signal enables them.
   Local/test backends (`ya-whisper`, `ya-parakeet`, `ya-nemo`, `ya-dummy`) must
-  be named in `YA_VOICE_BACKENDS`; cloud backends (`ya-deepgram`, `ya-grok`)
+  be named in `YEP_VOICE_BACKENDS`; cloud backends (`ya-deepgram`, `ya-grok`)
   auto-enable when their YA-scoped key is provided, since providing a metered
   key is the operator's explicit opt-in. Configured backends appear immediately
   through `/api/version.voiceBackendStatuses`, but only backends that pass
@@ -30,7 +30,7 @@ behavior across streaming and batch STT.
 - The user chooses among advertised methods. YA should not silently fall back
   from one configured server method to another, and it should not auto-enable
   a backend merely because its code exists — enablement requires an explicit
-  signal: a `YA_VOICE_BACKENDS` entry, or a provided cloud key.
+  signal: a `YEP_VOICE_BACKENDS` entry, or a provided cloud key.
 - OS keyboard dictation is outside YA's speech stack. If the user taps the
   keyboard's mic glyph, that is device-native text entry, not YA-mediated
   speech recognition.
@@ -199,11 +199,11 @@ streaming/confidence surface exists.
   server-routed STT over browser-native, with `ya-deepgram` ranked ahead of
   unknown server backends. Browser-native remains the explicit local escape
   hatch.
-- Server config parses `VOICE_INPUT`, `YA_VOICE_BACKENDS`,
-  `YA_stt__DEEPGRAM_API_KEY`, `YA_stt__XAI_API_KEY`, `XAI_API_KEY`,
+- Server config parses `VOICE_INPUT`, `YEP_VOICE_BACKENDS`,
+  `YEP_STT_DEEPGRAM_API_KEY`, `YEP_STT_XAI_API_KEY`, `XAI_API_KEY`,
   `WHISPER_MODEL`, `WHISPER_DEVICE`, `WHISPER_COMPUTE_TYPE`,
   `PARAKEET_MODEL`, `PARAKEET_DEVICE`, `NEMO_MODEL`, and `NEMO_DEVICE`.
-  `YA_stt__XAI_API_KEY` takes precedence for `ya-grok`; `XAI_API_KEY` is a
+  `YEP_STT_XAI_API_KEY` takes precedence for `ya-grok`; `XAI_API_KEY` is a
   convenience fallback that is scrubbed from `process.env` after config load.
 - `SpeechBackendRegistry` supports `ya-dummy`, `ya-deepgram`,
   `ya-grok`, `ya-whisper`, `ya-parakeet`, and `ya-nemo`. It records configured
@@ -216,8 +216,8 @@ streaming/confidence surface exists.
   In streaming mode it can enable Smart Turn and pass through xAI word
   timestamps so the client can recognize optional paused end commands.
   Both cloud backends auto-enable when their key is present
-  (`YA_stt__XAI_API_KEY` or scrubbed `XAI_API_KEY` for `ya-grok`,
-  `YA_stt__DEEPGRAM_API_KEY` for `ya-deepgram`) because providing a metered key
+  (`YEP_STT_XAI_API_KEY` or scrubbed `XAI_API_KEY` for `ya-grok`,
+  `YEP_STT_DEEPGRAM_API_KEY` for `ya-deepgram`) because providing a metered key
   is the operator's explicit opt-in. `ya-grok` is currently the only backend
   advertising streaming.
 - Deepgram and local faster-whisper backend implementations exist. The local
@@ -265,7 +265,7 @@ streaming/confidence surface exists.
   `/api/speech/xai-client-secret` mints a short-lived xAI client secret for
   browser WebSocket streaming to `/v1/stt`, while
   `/api/speech/xai-client-key` returns the long-lived STT key only when
-  `YA_stt__SHARE_XAI_KEY_WITH_CLIENTS=1` enables direct batch borrowing.
+  `YEP_STT_SHARE_XAI_KEY_WITH_CLIENTS=1` enables direct batch borrowing.
 - `xai-grok-direct-streaming` reuses the YA Web Audio PCM16 capture path but
   opens `wss://api.x.ai/v1/stt` directly from the browser with
   `Sec-WebSocket-Protocol: xai-client-secret.*`. `xai-grok-direct-batch`
@@ -305,7 +305,7 @@ current implementation fixes those blockers for batch transcription by
 mounting `/api/speech`, preserving backend ids, and routing the production
 client through `fetchJSON("/speech/transcribe", ...)`.
 
-- With no cloud STT keys and an empty `YA_VOICE_BACKENDS`, a server advertises
+- With no cloud STT keys and an empty `YEP_VOICE_BACKENDS`, a server advertises
   `voiceInput` but `voiceBackends: []`, causing the UI to expose only
   browser-native recognition. Seeing device-native speech on mobile is
   therefore expected in that bare runtime.
@@ -404,8 +404,8 @@ Deploy it in stages:
    it behind the same warm-worker `SpeechBackend` boundary only if install plus
    cold/warm latency beats `faster-whisper` for this server.
 3. **Ship explicit operator configuration.** The opt-in is
-   `YA_VOICE_BACKENDS=ya-whisper`, `YA_VOICE_BACKENDS=ya-parakeet`, or
-   `YA_VOICE_BACKENDS=ya-nemo`. The backend is pixi-only in the first
+   `YEP_VOICE_BACKENDS=ya-whisper`, `YEP_VOICE_BACKENDS=ya-parakeet`, or
+   `YEP_VOICE_BACKENDS=ya-nemo`. The backend is pixi-only in the first
    implementation: the YA checkout commits a `stt` pixi environment, and the
    server validates the backend by importing the required Python packages; if
    that import probe fails for an explicitly enabled local backend, startup runs
@@ -479,14 +479,14 @@ Node/PNPM install. To enable local Whisper on a server:
      Parakeet.
    These commands create the `stt` environment from `pixi.lock` and install the
    relevant Python requirements file(s).
-3. Start YA with `YA_VOICE_BACKENDS` containing `ya-whisper`, `ya-parakeet`,
+3. Start YA with `YEP_VOICE_BACKENDS` containing `ya-whisper`, `ya-parakeet`,
    `ya-nemo`, or any comma-separated combination.
 
 For the private `reyep` helper, the local-STT switch should be set-union logic,
-not assignment. A `YA_LOCAL_STT=1 reyep`-style wrapper should append
-`ya-whisper` only when the current comma-separated `YA_VOICE_BACKENDS` does not
+not assignment. A `YEP_LOCAL_STT=1 reyep`-style wrapper should append
+`ya-whisper` only when the current comma-separated `YEP_VOICE_BACKENDS` does not
 already contain it. Cloud STT backends still auto-enable from their
-`YA_stt__*` keys; the wrapper must not read or print those keys.
+`YEP_STT_*` keys; the wrapper must not read or print those keys.
 
 Transformers Parakeet reuses this deployment shape through
 `requirements/stt-parakeet.txt` and `stt-bootstrap-parakeet`. NeMo Parakeet
@@ -578,10 +578,10 @@ to a local model remains a later optimization after local batch is solid.
 
 ## Verification Checklist
 
-- With no cloud keys and empty `YA_VOICE_BACKENDS`, `/api/version` returns
+- With no cloud keys and empty `YEP_VOICE_BACKENDS`, `/api/version` returns
   `voiceBackends: []`, the selector is hidden, and browser-native remains the
   only YA mic method.
-- With `YA_VOICE_BACKENDS=ya-dummy`, `/api/version.voiceBackends` includes
+- With `YEP_VOICE_BACKENDS=ya-dummy`, `/api/version.voiceBackends` includes
   `ya-dummy`, the selector appears, and choosing it posts `backendId:
   "ya-dummy"` to `/api/speech/transcribe`.
 - The dummy backend returns a deterministic transcript through both
@@ -589,18 +589,18 @@ to a local model remains a later optimization after local batch is solid.
 - Remote clients use the existing `fetchJSON` / `SecureConnection` path for
   batch transcription; direct WS streaming needs a separate remote transport
   decision before it is treated as a remote-supported path.
-- With `YA_stt__DEEPGRAM_API_KEY` present, startup validation auto-enables and
+- With `YEP_STT_DEEPGRAM_API_KEY` present, startup validation auto-enables and
   advertises `ya-deepgram`; with a missing or rejected key, it does not.
-- With `YA_stt__XAI_API_KEY` exported in the YA server environment,
+- With `YEP_STT_XAI_API_KEY` exported in the YA server environment,
   `/api/version.voiceBackends` includes `ya-grok`, and a short batch
   transcription through `/api/speech/transcribe` returns text or a provider
   error from xAI.
-- With `YA_stt__XAI_API_KEY` exported in the YA server environment,
+- With `YEP_STT_XAI_API_KEY` exported in the YA server environment,
   `/api/version.voiceBackendCapabilities["ya-grok"].streaming` is true, the
   client uses `/api/speech/ws` for Grok STT, interim events update the composer,
   chunk-final events commit locked deltas into the draft, and the final event
   includes the retained transcription id.
-- With `YA_stt__XAI_API_KEY` exported, the version response advertises
+- With `YEP_STT_XAI_API_KEY` exported, the version response advertises
   `voiceBackendCapabilities["ya-grok"].smartTurn: true`. Selecting Grok STT
   shows Smart Turn threshold and timeout controls; selecting browser-native,
   Deepgram, Whisper, or dummy hides those controls unless that backend later
@@ -629,16 +629,16 @@ to a local model remains a later optimization after local batch is solid.
   metadata as an ordered one-line-per-event trace.
 - With an advertised backend id not hardcoded in the client, the selector still
   displays that id generically and sends it unchanged as `backendId`.
-- With `YA_VOICE_BACKENDS=ya-whisper` and `faster_whisper` importable, startup
+- With `YEP_VOICE_BACKENDS=ya-whisper` and `faster_whisper` importable, startup
   validation advertises `ya-whisper`; the first utterance warms the model once
   and later utterances reuse the worker.
-- With `YA_VOICE_BACKENDS=ya-parakeet`, the Parakeet Transformers runtime
+- With `YEP_VOICE_BACKENDS=ya-parakeet`, the Parakeet Transformers runtime
   importable, and the configured fallback model loadable, startup validation
   advertises `ya-parakeet`; otherwise it logs the cache/auth/model-load repair
   hint and hides the backend from the UI. Choosing a different Parakeet model
   in STT settings or mic options sends that model id to `/api/speech/transcribe`
   and restarts the warm worker for the new model.
-- With `YA_VOICE_BACKENDS=ya-nemo`, the NeMo ASR runtime importable, and the
+- With `YEP_VOICE_BACKENDS=ya-nemo`, the NeMo ASR runtime importable, and the
   configured fallback model loadable, startup validation advertises `ya-nemo`;
   otherwise it logs cache/auth/model-load repair hints and hides the backend
   from the UI. The same Parakeet model selector sends model ids to `ya-nemo`;

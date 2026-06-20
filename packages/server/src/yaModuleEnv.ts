@@ -1,5 +1,5 @@
 /**
- * YA-private module environment: `YA_<module>__<NAME>` variables.
+ * YA-private module environment: registered `YEP_<MODULE>_` prefixes.
  *
  * These carry secrets/config that belong to a YA subsystem, not to any agent
  * CLI. On server load they are harvested into a private in-process store and
@@ -9,28 +9,30 @@
  * topics/cost-efficiency.md). A YA subsystem reads its value via
  * `getModuleEnv(module)[NAME]` instead of `process.env`.
  *
- * Naming: the `YA_` prefix marks "consume and strip"; the module and name are
- * split on the **first** `__`, so the name half may itself contain `__`
- * (e.g. `YA_stt__XAI_API_KEY` → module `stt`, name `XAI_API_KEY`).
+ * Ordinary `YEP_*` variables are not private automatically. Each private
+ * module prefix is registered explicitly because the canonical naming scheme
+ * uses one underscore for both module-scoped and ordinary config names.
  */
 
 const store = new Map<string, Record<string, string>>();
+const MODULE_PREFIXES = new Map([["YEP_STT_", "stt"]]);
 
 /**
- * Harvest and remove every `YA_<module>__<NAME>` var from `env`. Idempotent on
+ * Harvest and remove registered private module vars from `env`. Idempotent on
  * a given env object: harvested keys are deleted, so a second pass finds
  * nothing. Call early in server startup (loadConfig does) so stripping happens
  * before any child process can be spawned.
  */
 export function harvestYaModuleEnv(env: NodeJS.ProcessEnv = process.env): void {
-  const pattern = /^YA_(.+?)__(.+)$/; // split on the first "__"
   for (const key of Object.keys(env)) {
-    const match = pattern.exec(key);
-    if (!match) continue;
-    const module = match[1];
-    const name = match[2];
+    const prefixEntry = Array.from(MODULE_PREFIXES).find(([prefix]) =>
+      key.startsWith(prefix),
+    );
+    if (!prefixEntry) continue;
+    const [prefix, module] = prefixEntry;
+    const name = key.slice(prefix.length);
     const value = env[key];
-    if (module !== undefined && name !== undefined && value !== undefined) {
+    if (name.length > 0 && value !== undefined) {
       const existing = store.get(module) ?? {};
       existing[name] = value;
       store.set(module, existing);
@@ -39,7 +41,7 @@ export function harvestYaModuleEnv(env: NodeJS.ProcessEnv = process.env): void {
   }
 }
 
-/** Values for a module's harvested `YA_<module>__*` vars (empty if none). */
+/** Values for a module's harvested private vars (empty if none). */
 export function getModuleEnv(module: string): Record<string, string> {
   harvestYaModuleEnv();
   return store.get(module) ?? {};

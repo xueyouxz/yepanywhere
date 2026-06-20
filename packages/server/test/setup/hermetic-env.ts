@@ -3,7 +3,7 @@
  *
  * `loadConfig()` reads `process.env`, and `run-with-safe-home.js` passes the
  * full environment through to vitest. So a dev who exports a runtime knob for
- * their live server (e.g. `YA_DEFERRED_JOIN_WINDOW_S=30` in local.sh) silently
+ * their live server (e.g. `YEP_DEFERRED_JOIN_WINDOW_S=30` in local.sh) silently
  * changes behavior under test — a test can pass on CI (clean env) and fail
  * locally, or vice versa. This is exactly what made the deferred one-per-boundary
  * test non-reproducible.
@@ -71,11 +71,30 @@ const CONFIG_ENV_VARS = [
   "WHISPER_DEVICE",
   "WHISPER_MODEL",
   "XAI_API_KEY",
+  "YEP_COMPOSE_ANCHORS",
+  "YEP_DEFERRED_JOIN_WINDOW_S",
+  "YEP_STT_DEEPGRAM_API_KEY",
+  "YEP_STT_SHARE_XAI_KEY_WITH_CLIENTS",
+  "YEP_STT_XAI_API_KEY",
+  "YEP_VOICE_BACKENDS",
+  "YEP_CLIENT_BASE_URL",
+  "YEP_CODEX_DISABLE_LIVE_DELTAS",
+  "YEP_DATA_DIR",
+  "YEP_PROFILE",
+  // Legacy names are also cleared so tests can opt into compatibility
+  // explicitly without inheriting a developer shell value.
   "YA_COMPOSE_ANCHORS",
+  "YA_CODEX_DISABLE_LIVE_DELTAS",
   "YA_DEFERRED_JOIN_WINDOW_S",
   "YA_VOICE_BACKENDS",
+  "YA_stt__DEEPGRAM_API_KEY",
+  "YA_stt__SHARE_XAI_KEY_WITH_CLIENTS",
+  "YA_stt__XAI_API_KEY",
   "YEP_ANYWHERE_DATA_DIR",
   "YEP_ANYWHERE_PROFILE",
+  "YEP_PUBLIC_SHARE_ORIGIN",
+  "YEP_PUBLIC_SHARE_VIEWER_BASE_URL",
+  "YEP_YA_CLIENT_BASE_URL",
   "YEP_DESKTOP",
   "YEP_DESKTOP_CODEX_CLI_PATH",
 ];

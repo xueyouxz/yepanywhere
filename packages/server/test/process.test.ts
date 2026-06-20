@@ -1482,7 +1482,7 @@ describe("Process", () => {
         provider: "claude",
         idleTimeoutMs: 100,
         queue,
-        // Stitched flush is the opt-in path (YA_DEFERRED_JOIN_WINDOW_S).
+        // Stitched flush is the opt-in path (YEP_DEFERRED_JOIN_WINDOW_S).
         deferredDelivery: { joinWindowSeconds: 3600, composeAnchors: false },
       });
       const events: ProcessEvent[] = [];

@@ -162,16 +162,22 @@ export const ENV_VAR_REGISTRY: EnvVarDescriptor[] = [
     description:
       "File to write the actually-bound maintenance port (test harnesses).",
   },
+  {
+    name: "YEP_CLIENT_BASE_URL",
+    group: "Server & network",
+    description:
+      "Hosted YA client base URL used when generating public-share links.",
+  },
 
   // Data & profiles
   {
-    name: "YEP_ANYWHERE_DATA_DIR",
+    name: "YEP_DATA_DIR",
     group: "Data & profiles",
     description:
       "Full path override for the server data directory (logs, indexes, uploads, metadata).",
   },
   {
-    name: "YEP_ANYWHERE_PROFILE",
+    name: "YEP_PROFILE",
     group: "Data & profiles",
     description:
       "Profile suffix; data dir becomes ~/.yep-anywhere-{profile}. Run multiple instances side by side.",
@@ -307,6 +313,18 @@ export const ENV_VAR_REGISTRY: EnvVarDescriptor[] = [
       "Show the voice input (microphone) button. Set false to disable. Default true.",
   },
   {
+    name: "YEP_DEFERRED_JOIN_WINDOW_S",
+    group: "Providers & features",
+    description:
+      "Maximum compose-time gap in seconds for joining deferred turns. 0 keeps each turn separate.",
+  },
+  {
+    name: "YEP_COMPOSE_ANCHORS",
+    group: "Providers & features",
+    description:
+      "Set 1 to prepend compose-time staleness anchors to delivered deferred turns.",
+  },
+  {
     name: "OLLAMA_URL",
     group: "Providers & features",
     description:
@@ -332,25 +350,25 @@ export const ENV_VAR_REGISTRY: EnvVarDescriptor[] = [
 
   // Speech & transcription
   {
-    name: "YA_VOICE_BACKENDS",
+    name: "YEP_VOICE_BACKENDS",
     group: "Speech & transcription",
     description:
       "Comma-separated server-routed STT backends to enable (e.g. ya-whisper).",
   },
   {
-    name: "YA_stt__DEEPGRAM_API_KEY",
+    name: "YEP_STT_DEEPGRAM_API_KEY",
     group: "Speech & transcription",
     secret: true,
     description: "Deepgram API key for the ya-deepgram STT backend.",
   },
   {
-    name: "YA_stt__XAI_API_KEY",
+    name: "YEP_STT_XAI_API_KEY",
     group: "Speech & transcription",
     secret: true,
     description: "xAI API key for the ya-grok STT backend.",
   },
   {
-    name: "YA_stt__SHARE_XAI_KEY_WITH_CLIENTS",
+    name: "YEP_STT_SHARE_XAI_KEY_WITH_CLIENTS",
     group: "Speech & transcription",
     secret: false,
     description:
@@ -489,6 +507,18 @@ export const ENV_VAR_REGISTRY: EnvVarDescriptor[] = [
     name: "CODEX_CORRELATION_DEBUG",
     group: "Diagnostics & development",
     description: "Verbose logging for Codex event correlation.",
+  },
+  {
+    name: "YEP_CODEX_DISABLE_LIVE_DELTAS",
+    group: "Diagnostics & development",
+    description:
+      "Drop Codex live delta notifications before raw logging and client delivery.",
+  },
+  {
+    name: "YEP_ALLOW_SUSPICIOUS_HOME",
+    group: "Diagnostics & development",
+    description:
+      "Allow development commands to run when HOME points inside the repository.",
   },
   {
     name: "SESSION_INDEX_LOG_PERF",

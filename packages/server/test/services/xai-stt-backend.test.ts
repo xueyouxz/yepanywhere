@@ -65,24 +65,25 @@ describe("XaiSttBackend", () => {
   });
 });
 
-describe("YA_<module>__ env harvest", () => {
-  it("strips harvested vars from env, splits on the first __, keeps others", () => {
+describe("private YEP_STT_ env harvest", () => {
+  it("strips registered module vars from env and keeps others", () => {
     const env: NodeJS.ProcessEnv = {
-      YA_harvesttest__XAI_API_KEY: "secret-xai",
-      YA_harvesttest__SECTION__KEY: "nested",
+      YEP_STT_XAI_API_KEY: "secret-xai",
+      YEP_STT_SECTION_KEY: "nested",
+      YEP_VOICE_BACKENDS: "ya-whisper",
       PATH: "/usr/bin",
     };
     harvestYaModuleEnv(env);
 
     // Harvested vars are removed from the env so children cannot inherit them.
-    expect(env.YA_harvesttest__XAI_API_KEY).toBeUndefined();
-    expect(env.YA_harvesttest__SECTION__KEY).toBeUndefined();
+    expect(env.YEP_STT_XAI_API_KEY).toBeUndefined();
+    expect(env.YEP_STT_SECTION_KEY).toBeUndefined();
     // Unrelated vars are untouched.
     expect(env.PATH).toBe("/usr/bin");
-    // Module/name split is on the first __, so the name half may contain __.
-    expect(getModuleEnv("harvesttest")).toEqual({
+    expect(env.YEP_VOICE_BACKENDS).toBe("ya-whisper");
+    expect(getModuleEnv("stt")).toMatchObject({
       XAI_API_KEY: "secret-xai",
-      SECTION__KEY: "nested",
+      SECTION_KEY: "nested",
     });
   });
 });
@@ -92,7 +93,7 @@ describe("initSpeechBackendRegistry cloud auto-enable", () => {
     vi.restoreAllMocks();
   });
 
-  it("auto-enables ya-grok when the key is present, without YA_VOICE_BACKENDS", async () => {
+  it("auto-enables ya-grok when the key is present, without YEP_VOICE_BACKENDS", async () => {
     const registry = await initSpeechBackendRegistry({
       voiceInputEnabled: true,
       xaiSttApiKey: "xai-key",
@@ -104,7 +105,7 @@ describe("initSpeechBackendRegistry cloud auto-enable", () => {
     });
   });
 
-  it("auto-enables ya-deepgram when the key is present, without YA_VOICE_BACKENDS", async () => {
+  it("auto-enables ya-deepgram when the key is present, without YEP_VOICE_BACKENDS", async () => {
     // Deepgram's validate() probes the network; stub it so the key is accepted.
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("{}", { status: 200 }),

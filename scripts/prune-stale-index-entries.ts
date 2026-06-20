@@ -7,7 +7,7 @@
  * Usage:
  *   pnpm tsx scripts/prune-stale-index-entries.ts --dry-run
  *   pnpm tsx scripts/prune-stale-index-entries.ts
- *   YEP_ANYWHERE_DATA_DIR=~/.yep-anywhere-dev pnpm tsx scripts/prune-stale-index-entries.ts --dry-run
+ *   YEP_DATA_DIR=~/.yep-anywhere-dev pnpm tsx scripts/prune-stale-index-entries.ts --dry-run
  *   pnpm tsx scripts/prune-stale-index-entries.ts --providers=grok,codex --dry-run
  *   pnpm tsx scripts/prune-stale-index-entries.ts --archive-pattern="resume last-session" --dry-run
  */
@@ -460,7 +460,7 @@ async function main(): Promise<void> {
     (arg) => arg.startsWith("--archive-pattern=") || arg.startsWith("--archive-if-title="),
   );
   const dataDir =
-    argValue(dataDirArg) ?? process.env.YEP_ANYWHERE_DATA_DIR ?? DEFAULT_DATA_DIR;
+    argValue(dataDirArg) ?? process.env.YEP_DATA_DIR ?? DEFAULT_DATA_DIR;
   const indexesDir = path.join(dataDir, "indexes");
   const providers = parseProviderSet(argValue(providerArg));
   const providerLabel =

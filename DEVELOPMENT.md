@@ -139,12 +139,12 @@ Use profiles to run dev and production instances simultaneously:
 PORT=3400 pnpm start
 
 # Development (dev profile, port 4000)
-PORT=4000 YEP_ANYWHERE_PROFILE=dev pnpm dev
+PORT=4000 YEP_PROFILE=dev pnpm dev
 ```
 
 Environment variables:
-- `YEP_ANYWHERE_PROFILE` — Profile name suffix (creates `~/.yep-anywhere-{profile}/`)
-- `YEP_ANYWHERE_DATA_DIR` — Full path override for data directory
+- `YEP_PROFILE` — Profile name suffix (creates `~/.yep-anywhere-{profile}/`)
+- `YEP_DATA_DIR` — Full path override for data directory
 
 ## Server Logs
 

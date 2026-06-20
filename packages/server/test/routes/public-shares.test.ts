@@ -14,6 +14,7 @@ import {
   createPublicShareRoutes,
 } from "../../src/routes/public-shares.js";
 import { PublicShareService } from "../../src/services/PublicShareService.js";
+import { normalizeStartupEnv } from "../../src/startupEnv.js";
 
 const projectId = "cHJvamVjdA" as UrlProjectId;
 
@@ -54,6 +55,7 @@ describe("public share public routes", () => {
 
   afterEach(async () => {
     vi.unstubAllEnvs();
+    delete process.env.YEP_CLIENT_BASE_URL;
     await fs.rm(testDir, { recursive: true, force: true });
   });
 
@@ -322,6 +324,7 @@ describe("public share owner routes", () => {
 
   afterEach(async () => {
     vi.unstubAllEnvs();
+    delete process.env.YEP_CLIENT_BASE_URL;
     await fs.rm(testDir, { recursive: true, force: true });
   });
 
@@ -481,6 +484,9 @@ describe("public share owner routes", () => {
 
   it("keeps legacy public share origin env compatibility", async () => {
     vi.stubEnv("YEP_PUBLIC_SHARE_ORIGIN", "https://ya.graehl.org");
+    normalizeStartupEnv();
+    expect(process.env.YEP_PUBLIC_SHARE_ORIGIN).toBeUndefined();
+    expect(process.env.YEP_CLIENT_BASE_URL).toBe("https://ya.graehl.org");
     const app = createPublicShareRoutes({
       publicShareService: service,
       loadSession: vi.fn(async () => makeSession()),

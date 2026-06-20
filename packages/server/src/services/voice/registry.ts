@@ -118,15 +118,15 @@ export class SpeechBackendRegistry {
 export interface SpeechRegistryInitOptions {
   /** Master switch — when false, no backends are registered. */
   voiceInputEnabled?: boolean;
-  /** Explicit backend ids from YA_VOICE_BACKENDS (cloud keys auto-enable separately). */
+  /** Explicit backend ids from YEP_VOICE_BACKENDS (cloud keys auto-enable separately). */
   voiceBackends?: string[];
   /**
-   * Deepgram API key (from YA_stt__DEEPGRAM_API_KEY) for ya-deepgram. When set,
+   * Deepgram API key (from YEP_STT_DEEPGRAM_API_KEY) for ya-deepgram. When set,
    * the backend is auto-enabled — presence of the key is the opt-in signal.
    */
   deepgramApiKey?: string;
   /**
-   * xAI key (from YA_stt__XAI_API_KEY) for ya-grok. When set, the backend is
+   * xAI key (from YEP_STT_XAI_API_KEY) for ya-grok. When set, the backend is
    * auto-enabled even if not listed in voiceBackends — presence of the key is
    * the opt-in signal.
    */
@@ -164,7 +164,7 @@ export function getRequestedSpeechBackendIds(
 
   // Cloud STT backends auto-enable when their key is present — a provisioned
   // key is the opt-in signal. Local/test backends stay explicit via
-  // YA_VOICE_BACKENDS. Set keeps insertion order and de-dupes when a key is
+  // YEP_VOICE_BACKENDS. Set keeps insertion order and de-dupes when a key is
   // also listed explicitly.
   const requested = new Set(options.voiceBackends ?? []);
   if (options.deepgramApiKey) {
@@ -191,7 +191,7 @@ export async function registerSpeechBackends(
         const key = options.deepgramApiKey ?? "";
         if (!key) {
           logger.warn(
-            "[Voice] ya-deepgram requested but YA_stt__DEEPGRAM_API_KEY is not set",
+            "[Voice] ya-deepgram requested but YEP_STT_DEEPGRAM_API_KEY is not set",
           );
         } else {
           registry.register(new DeepgramBackend(key));
@@ -203,7 +203,7 @@ export async function registerSpeechBackends(
         const key = options.xaiSttApiKey ?? "";
         if (!key) {
           logger.warn(
-            "[Voice] ya-grok requested but YA_stt__XAI_API_KEY is not set",
+            "[Voice] ya-grok requested but YEP_STT_XAI_API_KEY is not set",
           );
         } else {
           registry.register(new XaiSttBackend(key));

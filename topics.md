@@ -9,7 +9,10 @@
 - session-liveness - Provider/session cache state, stale entries, and recovery.
 - pluggable-speech-recognition - YA server-routed speech backends and browser-native fallback.
 - cost-efficiency - Preferring subscription/local over metered APIs; billing footgun masking.
-- ya-env-vars - Catalog of YA env vars and the YA_/YA_module__ naming conventions.
+- ya-env-vars - Catalog of YA env vars and the canonical YEP_/YEP_MODULE_
+  naming conventions.
+- source-name-prefixes - Distinguish TypeScript module symbols from YEP_
+  process environment variables and runtime globals.
 - env-vars-config - Settings UI for process-start env visibility and future
   child-process override defaults.
 - kzahel-disabled - Upstream-disabled feature decisions to revisit as configurable defaults.

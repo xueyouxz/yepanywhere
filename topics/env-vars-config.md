@@ -32,8 +32,10 @@ Add a Settings subpage for environment variables:
   the inherited value should render in a lighter/neutral treatment; overrides
   that change the effective child environment should be highlighted.
 - Keep secret handling aligned with [ya-env-vars.md](ya-env-vars.md):
-  YA-private `YA_<module>__<NAME>` secrets are consumed and stripped, and
+  YA-private `YEP_<MODULE>_<NAME>` secrets are consumed and stripped, and
   sensitive values must not be exposed in full by default.
+- Show canonical `YEP_*` names after startup alias normalization. Legacy
+  `YA_*` and `YEP_ANYWHERE_*` aliases must not remain as duplicate rows.
 
 ## Process Boundary
 

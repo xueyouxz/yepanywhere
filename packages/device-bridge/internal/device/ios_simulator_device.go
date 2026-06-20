@@ -19,7 +19,7 @@ import (
 
 const (
 	iosSimServerEnvVar      = "IOS_SIM_SERVER"
-	iosSimDataDirEnvVar     = "YEP_ANYWHERE_DATA_DIR"
+	iosSimDataDirEnvVar     = "YEP_DATA_DIR"
 	defaultIOSSimServerName = "ios-sim-server"
 )
 

@@ -25,7 +25,7 @@ const (
 	defaultAndroidServerRemoteAPK = "/data/local/tmp/yep-device-server.apk"
 	defaultAndroidServerMainClass = "com.yepanywhere.DeviceServer"
 	androidServerAPKEnvVar        = "ANDROID_DEVICE_SERVER_APK"
-	bridgeDataDirEnvVar           = "YEP_ANYWHERE_DATA_DIR"
+	bridgeDataDirEnvVar           = "YEP_DATA_DIR"
 	androidConnectTimeout         = 12 * time.Second
 	androidDialAttemptTimeout     = 1500 * time.Millisecond
 	androidHandshakeTimeout       = 2 * time.Second

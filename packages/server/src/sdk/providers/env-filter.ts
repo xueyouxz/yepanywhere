@@ -12,7 +12,7 @@
 /** Prefixes to exclude from child process environment */
 const EXCLUDED_PREFIXES = [
   "npm_", // npm/pnpm lifecycle variables
-  "YEP_ANYWHERE_", // Our internal variables
+  "YEP_", // Yep Anywhere internal variables
   "VITE_", // Vite dev server variables
   "VITEST", // Vitest test runner
   "LOG_", // Our logging configuration

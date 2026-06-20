@@ -73,7 +73,7 @@ describe("loadConfig codex paths", () => {
   });
 
   it("always allows the managed uploads directory for local-image", async () => {
-    vi.stubEnv("YEP_ANYWHERE_DATA_DIR", "/tmp/yep-data");
+    vi.stubEnv("YEP_DATA_DIR", "/tmp/yep-data");
     vi.stubEnv("ALLOWED_IMAGE_PATHS", "");
 
     const { loadConfig } = await import("../src/config.js");
@@ -85,7 +85,7 @@ describe("loadConfig codex paths", () => {
   });
 
   it("merges managed uploads with configured local-image paths", async () => {
-    vi.stubEnv("YEP_ANYWHERE_DATA_DIR", "/tmp/yep-data");
+    vi.stubEnv("YEP_DATA_DIR", "/tmp/yep-data");
     vi.stubEnv("ALLOWED_IMAGE_PATHS", "/tmp, /var/tmp, /tmp");
 
     const { loadConfig } = await import("../src/config.js");
@@ -99,7 +99,7 @@ describe("loadConfig codex paths", () => {
   });
 
   it("defaults server-routed voice backends off", async () => {
-    vi.stubEnv("YA_VOICE_BACKENDS", "");
+    vi.stubEnv("YEP_VOICE_BACKENDS", "");
 
     const { loadConfig } = await import("../src/config.js");
     const config = loadConfig();
@@ -109,7 +109,7 @@ describe("loadConfig codex paths", () => {
 
   it("parses explicitly enabled server-routed voice backends", async () => {
     vi.stubEnv(
-      "YA_VOICE_BACKENDS",
+      "YEP_VOICE_BACKENDS",
       "ya-dummy, local-whisper,ya-parakeet,ya-nemo,ya-dummy",
     );
 
@@ -166,7 +166,7 @@ describe("loadConfig codex paths", () => {
   });
 
   it("reads the xAI STT key from YA-private module env", async () => {
-    vi.stubEnv("YA_stt__XAI_API_KEY", "xai-key");
+    vi.stubEnv("YEP_STT_XAI_API_KEY", "xai-key");
     vi.stubEnv("XAI_API_KEY", "ambient-xai-key");
 
     const { loadConfig } = await import("../src/config.js");
@@ -174,7 +174,7 @@ describe("loadConfig codex paths", () => {
 
     expect(config.xaiSttApiKey).toBe("xai-key");
     expect(config.ambientXaiApiKey).toBe("ambient-xai-key");
-    expect(process.env.YA_stt__XAI_API_KEY).toBeUndefined();
+    expect(process.env.YEP_STT_XAI_API_KEY).toBeUndefined();
     expect(process.env.XAI_API_KEY).toBeUndefined();
   });
 
@@ -190,7 +190,7 @@ describe("loadConfig codex paths", () => {
   });
 
   it("requires explicit opt-in before sharing xAI STT keys with clients", async () => {
-    vi.stubEnv("YA_stt__XAI_API_KEY", "xai-key");
+    vi.stubEnv("YEP_STT_XAI_API_KEY", "xai-key");
 
     const { loadConfig } = await import("../src/config.js");
     const config = loadConfig();
@@ -200,7 +200,7 @@ describe("loadConfig codex paths", () => {
   });
 
   it("parses the xAI STT client key sharing opt-in", async () => {
-    vi.stubEnv("YA_stt__SHARE_XAI_KEY_WITH_CLIENTS", "1");
+    vi.stubEnv("YEP_STT_SHARE_XAI_KEY_WITH_CLIENTS", "1");
 
     const { loadConfig } = await import("../src/config.js");
     const config = loadConfig();

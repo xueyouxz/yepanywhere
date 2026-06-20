@@ -75,12 +75,12 @@ describe("filterEnvForChildProcess", () => {
   it("keeps filtering YA-internal launch variables", () => {
     const env = filterEnvForChildProcess({
       HOME: "/home/test",
-      YEP_ANYWHERE_DATA_DIR: "/tmp/ya",
+      YEP_DATA_DIR: "/tmp/ya",
       npm_execpath: "/usr/bin/pnpm",
     });
 
     expect(env.HOME).toBe("/home/test");
-    expect(env.YEP_ANYWHERE_DATA_DIR).toBeUndefined();
+    expect(env.YEP_DATA_DIR).toBeUndefined();
     expect(env.npm_execpath).toBeUndefined();
   });
 });

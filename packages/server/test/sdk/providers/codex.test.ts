@@ -3,7 +3,7 @@
  *
  * Tests provider detection, authentication checking, and message normalization
  * without requiring actual Codex CLI installation. The real app-server
- * contract check is opt-in via YA_CODEX_REAL_CONTRACT_TEST.
+ * contract check is opt-in via YEP_CODEX_REAL_CONTRACT_TEST.
  */
 
 import { execFileSync, spawn } from "node:child_process";
@@ -472,7 +472,7 @@ describe("CodexProvider app-server lifecycle", () => {
       "fake-codex-live-deltas",
       buildFakeCodexAppServerWithLiveDelta(logPath),
     );
-    vi.stubEnv("YA_CODEX_DISABLE_LIVE_DELTAS", "true");
+    vi.stubEnv("YEP_CODEX_DISABLE_LIVE_DELTAS", "true");
 
     let session: Awaited<ReturnType<CodexProvider["startSession"]>> | undefined;
     let consume: Promise<void> | undefined;
@@ -790,7 +790,9 @@ describe("CodexProvider app-server lifecycle", () => {
 });
 
 const describeRealCodexContract =
-  process.env.YA_CODEX_REAL_CONTRACT_TEST === "true" ? describe : describe.skip;
+  process.env.YEP_CODEX_REAL_CONTRACT_TEST === "true"
+    ? describe
+    : describe.skip;
 
 describeRealCodexContract("Codex app-server real contract", () => {
   it("verifies steer and interrupt against the installed Codex app-server", async () => {
@@ -1738,7 +1740,7 @@ describe("CodexProvider Event Normalization", () => {
     ];
 
     try {
-      vi.stubEnv("YA_CODEX_DISABLE_LIVE_DELTAS", "false");
+      vi.stubEnv("YEP_CODEX_DISABLE_LIVE_DELTAS", "false");
 
       for (const method of liveDeltaMethods) {
         expect(
@@ -1760,7 +1762,7 @@ describe("CodexProvider Event Normalization", () => {
         ).toBe(true);
       }
 
-      vi.stubEnv("YA_CODEX_DISABLE_LIVE_DELTAS", "true");
+      vi.stubEnv("YEP_CODEX_DISABLE_LIVE_DELTAS", "true");
 
       for (const method of liveDeltaMethods) {
         expect(

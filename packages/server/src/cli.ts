@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import "./startupEnv.js";
+
 /**
  * CLI entry point for yepanywhere
  *
@@ -10,8 +12,8 @@
  *
  * Environment variables:
  *   PORT                          # Server port (default: 3400)
- *   YEP_ANYWHERE_DATA_DIR         # Data directory override
- *   YEP_ANYWHERE_PROFILE          # Profile name (creates ~/.yep-anywhere-{profile}/)
+ *   YEP_DATA_DIR                  # Data directory override
+ *   YEP_PROFILE                   # Profile name (creates ~/.yep-anywhere-{profile}/)
  *   AUTH_ENABLED                  # Enable cookie auth (default: false)
  *   LOG_LEVEL                     # Log level: fatal, error, warn, info, debug, trace
  *   ... (see CLAUDE.md for full list)
@@ -105,14 +107,14 @@ SETUP OPTIONS (for headless installation):
 ENVIRONMENT VARIABLES:
   PORT                          Server port (default: 3400)
   HOST                          Host/interface to bind (default: localhost)
-  YEP_ANYWHERE_DATA_DIR         Data directory override
-  YEP_ANYWHERE_PROFILE          Profile name (creates ~/.yep-anywhere-{profile}/)
+  YEP_DATA_DIR                  Data directory override
+  YEP_PROFILE                   Profile name (creates ~/.yep-anywhere-{profile}/)
   AUTH_DISABLED                 Disable auth (bypass even if enabled in settings)
   HTTPS_SELF_SIGNED             Enable HTTPS with a self-signed certificate
   LOG_LEVEL                     Log level: fatal, error, warn, info, debug, trace
   LOG_PRETTY                    Pretty-print console logs (default: true)
   MAINTENANCE_PORT              Maintenance server port (default: disabled)
-  YA_CODEX_DISABLE_LIVE_DELTAS
+  YEP_CODEX_DISABLE_LIVE_DELTAS
                                 Drop Codex live delta notifications before raw logging and client emit
   CODEX_WATCH_PERIODIC_RESCAN_MS
                                 Codex watcher fallback rescan interval in ms (default: 5000 on macOS, 0 elsewhere)
@@ -144,7 +146,7 @@ EXAMPLES:
   yepanywhere --port 8000 --host 0.0.0.0
 
   # Use development profile (separate data directory)
-  YEP_ANYWHERE_PROFILE=dev yepanywhere
+  YEP_PROFILE=dev yepanywhere
 
   # Reset local auth password (headless recovery)
   yepanywhere --setup-auth "mypassword123"

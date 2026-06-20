@@ -29,7 +29,7 @@ function bridgeTestEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   const env = { ...process.env, ...overrides };
   delete env.AGENTCTL_SESSION_ID;
   delete env.YA_ORIGINAL_BASH_ENV_MARKER;
-  delete env.YEP_ANYWHERE_ORIGINAL_BASH_ENV;
+  delete env.YEP_ORIGINAL_BASH_ENV;
   return env;
 }
 

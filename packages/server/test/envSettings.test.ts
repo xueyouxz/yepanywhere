@@ -22,12 +22,12 @@ describe("isSecretName", () => {
   });
 
   it("honors the explicit declared flag even without a matching name", () => {
-    expect(isSecretName("YA_stt__OPAQUE", true)).toBe(true);
+    expect(isSecretName("YEP_STT_OPAQUE", true)).toBe(true);
     expect(isSecretName("PORT")).toBe(false);
   });
 
   it("lets an explicit false opt a KEY-named var out of redaction", () => {
-    expect(isSecretName("YA_stt__SHARE_XAI_KEY_WITH_CLIENTS", false)).toBe(
+    expect(isSecretName("YEP_STT_SHARE_XAI_KEY_WITH_CLIENTS", false)).toBe(
       false,
     );
   });
@@ -36,8 +36,8 @@ describe("isSecretName", () => {
 describe("registry", () => {
   it("shows SHARE_XAI_KEY_WITH_CLIENTS as a non-secret boolean", () => {
     const e = entry(
-      { YA_stt__SHARE_XAI_KEY_WITH_CLIENTS: "true" },
-      "YA_stt__SHARE_XAI_KEY_WITH_CLIENTS",
+      { YEP_STT_SHARE_XAI_KEY_WITH_CLIENTS: "true" },
+      "YEP_STT_SHARE_XAI_KEY_WITH_CLIENTS",
     );
     expect(e.secret).toBe(false);
     expect(e.value).toBe("true");

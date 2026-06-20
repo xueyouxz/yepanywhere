@@ -4,7 +4,7 @@
  * ServerSettingsService publishes the operator's UI-configurable values here
  * so Process can consult them at each delivery boundary without plumbing the
  * service through Supervisor. Unset fields fall back to env config
- * (`YA_DEFERRED_JOIN_WINDOW_S`, `YA_COMPOSE_ANCHORS`); both default off —
+ * (`YEP_DEFERRED_JOIN_WINDOW_S`, `YEP_COMPOSE_ANCHORS`); both default off —
  * vanilla delivery is one verbatim queued turn per delivery boundary
  * (topics/vanilla-defaults.md, topics/compose-time-context-anchors.md).
  */

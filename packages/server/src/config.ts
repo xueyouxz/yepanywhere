@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { Level as LogLevel } from "pino";
 import { ALL_PERMISSION_MODES } from "@yep-anywhere/shared";
+import "./startupEnv.js";
 import { DEFAULT_IDLE_TIMEOUT_SECONDS } from "./defaults.js";
 import { captureStartupEnvSettings } from "./envSettings.js";
 import { getDefaultCodexSessionsDir } from "./projects/codex-scanner.js";
@@ -14,15 +15,15 @@ import { getModuleEnv, harvestYaModuleEnv } from "./yaModuleEnv.js";
  * Supports profiles for running multiple instances (like Chrome profiles).
  *
  * Priority:
- * 1. YEP_ANYWHERE_DATA_DIR - Full path override
- * 2. YEP_ANYWHERE_PROFILE - Appends suffix: ~/.yep-anywhere-{profile}
+ * 1. YEP_DATA_DIR - Full path override
+ * 2. YEP_PROFILE - Appends suffix: ~/.yep-anywhere-{profile}
  * 3. Default: ~/.yep-anywhere
  */
 export function getDataDir(): string {
-  if (process.env.YEP_ANYWHERE_DATA_DIR) {
-    return process.env.YEP_ANYWHERE_DATA_DIR;
+  if (process.env.YEP_DATA_DIR) {
+    return process.env.YEP_DATA_DIR;
   }
-  const profile = process.env.YEP_ANYWHERE_PROFILE;
+  const profile = process.env.YEP_PROFILE;
   if (profile) {
     return path.join(os.homedir(), `.yep-anywhere-${profile}`);
   }
@@ -115,7 +116,7 @@ export interface Config {
    * Max seconds between consecutive compose times for deferred
    * (queued-while-busy) turns to join into one provider turn joined with
    * `--------` separators at a delivery boundary
-   * (YA_DEFERRED_JOIN_WINDOW_S). Default 0: never join — one verbatim
+   * (YEP_DEFERRED_JOIN_WINDOW_S). Default 0: never join — one verbatim
    * deferred turn is promoted per boundary, matching first-party queue
    * behavior (topics/vanilla-defaults.md). The UI-configurable server
    * setting `deferredJoinWindowSeconds` overrides this when set.
@@ -123,7 +124,7 @@ export interface Config {
   deferredJoinWindowSeconds: number;
   /**
    * Prepend `(Ns ago)` / `(Ms later)` compose-time staleness anchors to
-   * delivered deferred turns (YA_COMPOSE_ANCHORS=1). Default false: queued
+   * delivered deferred turns (YEP_COMPOSE_ANCHORS=1). Default false: queued
    * text reaches the provider verbatim
    * (topics/compose-time-context-anchors.md).
    */
@@ -132,9 +133,9 @@ export interface Config {
   voiceInputEnabled: boolean;
   /** Explicitly enabled server-routed voice backend ids. Empty = none. */
   voiceBackends: string[];
-  /** Deepgram API key for the ya-deepgram backend (from YA_stt__DEEPGRAM_API_KEY). */
+  /** Deepgram API key for the ya-deepgram backend (from YEP_STT_DEEPGRAM_API_KEY). */
   deepgramApiKey?: string;
-  /** xAI key for the ya-grok backend (from YA_stt__XAI_API_KEY, or scrubbed XAI_API_KEY fallback). */
+  /** xAI key for the ya-grok backend (from YEP_STT_XAI_API_KEY, or scrubbed XAI_API_KEY fallback). */
   xaiSttApiKey?: string;
   /** General xAI API key from XAI_API_KEY, scrubbed from process.env after load. */
   ambientXaiApiKey?: string;
@@ -188,7 +189,7 @@ export function loadConfig(): Config {
   // Snapshot the documented env for the Environment settings panel before any
   // secrets are harvested/stripped below, redacting secrets at capture time.
   captureStartupEnvSettings();
-  // Harvest YA_<module>__* secrets into the private store and strip them from
+  // Harvest private YEP_STT_* values into the private store and strip them from
   // process.env before anything can spawn a child that would inherit them.
   harvestYaModuleEnv();
   const sttEnv = getModuleEnv("stt");
@@ -343,14 +344,14 @@ export function loadConfig(): Config {
     // queued turns reach the provider verbatim, one per delivery boundary.
     deferredJoinWindowSeconds: Math.max(
       0,
-      Number(process.env.YA_DEFERRED_JOIN_WINDOW_S) || 0,
+      Number(process.env.YEP_DEFERRED_JOIN_WINDOW_S) || 0,
     ),
-    composeAnchors: process.env.YA_COMPOSE_ANCHORS === "1",
+    composeAnchors: process.env.YEP_COMPOSE_ANCHORS === "1",
     // Voice input (default: true, set VOICE_INPUT=false to disable)
     voiceInputEnabled: process.env.VOICE_INPUT !== "false",
     // Explicit local/test voice backends (cloud backends auto-enable on key
-    // presence). Example: YA_VOICE_BACKENDS=ya-whisper
-    voiceBackends: parseCommaSeparatedList(process.env.YA_VOICE_BACKENDS),
+    // presence). Example: YEP_VOICE_BACKENDS=ya-whisper
+    voiceBackends: parseCommaSeparatedList(process.env.YEP_VOICE_BACKENDS),
     deepgramApiKey: sttEnv.DEEPGRAM_API_KEY || undefined,
     xaiSttApiKey: sttEnv.XAI_API_KEY || ambientXaiApiKey,
     ambientXaiApiKey,

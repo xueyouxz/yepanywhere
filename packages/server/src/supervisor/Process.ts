@@ -1822,7 +1822,7 @@ export class Process {
    * `(45s ago)`). Applied after slash-command expansion so a queued `/command`
    * is still detected; the anchor rides ahead of the expanded provider text and
    * the matching echo. No-op when `anchor` is absent — including always, by
-   * default, since anchors are opt-in (YA_COMPOSE_ANCHORS=1).
+   * default, since anchors are opt-in (YEP_COMPOSE_ANCHORS=1).
    */
   private applyComposeAnchor(
     message: UserMessage,
@@ -2993,7 +2993,7 @@ export class Process {
    * Compose-time anchor string per deferred entry, computed at delivery (now).
    * Parallel to `entries`; each element is the `(Ns ago)` / `(Ms later)` prefix
    * or null when below threshold — or always null when anchors are off
-   * (the default; YA_COMPOSE_ANCHORS=1 opts in). See
+   * (the default; YEP_COMPOSE_ANCHORS=1 opts in). See
    * topics/compose-time-context-anchors.md.
    */
   private deferredComposeAnchors(

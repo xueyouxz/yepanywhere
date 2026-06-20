@@ -63,7 +63,7 @@ Use profiles to run dev and production instances simultaneously (like Chrome pro
 PORT=3400 pnpm start
 
 # Development (dev profile, port 4000)
-PORT=4000 YEP_ANYWHERE_PROFILE=dev pnpm dev
+PORT=4000 YEP_PROFILE=dev pnpm dev
 ```
 
 This creates separate data directories:
@@ -71,8 +71,8 @@ This creates separate data directories:
 - Development: `~/.yep-anywhere-dev/`
 
 Environment variables:
-- `YEP_ANYWHERE_PROFILE` - Profile name suffix (creates `~/.yep-anywhere-{profile}/`)
-- `YEP_ANYWHERE_DATA_DIR` - Full path override for data directory
+- `YEP_PROFILE` - Profile name suffix (creates `~/.yep-anywhere-{profile}/`)
+- `YEP_DATA_DIR` - Full path override for data directory
 - `CLAUDE_CONFIG_DIR` - Claude Code config directory (default: `~/.claude`). Use this to point at a Claude Code profile (e.g., `~/.claude-work`). Sessions are scanned from `{CLAUDE_CONFIG_DIR}/projects/`.
 
 Note: By default, all instances share `~/.claude/projects/` (SDK-managed sessions). Set `CLAUDE_CONFIG_DIR` to use a different Claude Code profile per instance.
@@ -89,7 +89,7 @@ ENABLED_PROVIDERS=claude pnpm dev
 VOICE_INPUT=false pnpm dev
 
 # Combined example: Claude-only, no voice, dev profile
-ENABLED_PROVIDERS=claude VOICE_INPUT=false PORT=4000 YEP_ANYWHERE_PROFILE=dev pnpm dev
+ENABLED_PROVIDERS=claude VOICE_INPUT=false PORT=4000 YEP_PROFILE=dev pnpm dev
 ```
 
 Environment variables:

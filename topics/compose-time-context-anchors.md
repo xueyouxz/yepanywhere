@@ -32,8 +32,8 @@ set, else env var, else off.
 
 | knob | server setting | env var | default |
 |---|---|---|---|
-| join window (seconds) | `deferredJoinWindowSeconds` | `YA_DEFERRED_JOIN_WINDOW_S` | `0` = never join |
-| compose anchors | `composeAnchorsEnabled` | `YA_COMPOSE_ANCHORS=1` | off |
+| join window (seconds) | `deferredJoinWindowSeconds` | `YEP_DEFERRED_JOIN_WINDOW_S` | `0` = never join |
+| compose anchors | `composeAnchorsEnabled` | `YEP_COMPOSE_ANCHORS=1` | off |
 
 The server settings are stored by `ServerSettingsService` (PUT
 `/api/settings`), which publishes them to a live bridge
@@ -69,7 +69,7 @@ go-aheads" intent (a slice/duration budget rather than N queued nudges)
 would be a better long-term home for the never-join use case; nothing
 ships for that yet.
 
-## Opt-in: staleness anchors (`YA_COMPOSE_ANCHORS=1`)
+## Opt-in: staleness anchors (`YEP_COMPOSE_ANCHORS=1`)
 
 When a session is busy, the YA composer queues user turns into the
 per-process deferred queue. Those turns are held server-side and promoted at
@@ -131,7 +131,7 @@ turns produced with the opt-ins enabled.
 ## Implementation
 
 - `packages/server/src/config.ts` — `deferredJoinWindowSeconds` /
-  `composeAnchors` from `YA_DEFERRED_JOIN_WINDOW_S` / `YA_COMPOSE_ANCHORS`
+  `composeAnchors` from `YEP_DEFERRED_JOIN_WINDOW_S` / `YEP_COMPOSE_ANCHORS`
   (see [ya-env-vars](ya-env-vars.md)).
 - `packages/server/src/supervisor/deferredDeliverySettings.ts` — live
   bridge: `publishDeferredDeliverySettings` (called by
