@@ -1257,7 +1257,9 @@ function convertOpenCodeEntries(entries: OpenCodeSessionEntry[]): Message[] {
   return messages;
 }
 
-function convertOpenCodeParts(parts: OpenCodeStoredPart[]): ContentBlock[] {
+export function convertOpenCodeParts(
+  parts: OpenCodeStoredPart[],
+): ContentBlock[] {
   const blocks: ContentBlock[] = [];
 
   for (const part of parts) {
@@ -1267,6 +1269,18 @@ function convertOpenCodeParts(parts: OpenCodeStoredPart[]): ContentBlock[] {
           blocks.push({
             type: "text",
             text: part.text,
+          });
+        }
+        break;
+
+      case "reasoning":
+        // Durable thinking — the live path already maps reasoning to a thinking
+        // block; without this, reloaded OpenCode history dropped all thought
+        // text. Some reasoning parts carry empty text (timing-only); skip those.
+        if (part.text) {
+          blocks.push({
+            type: "thinking",
+            thinking: part.text,
           });
         }
         break;
@@ -1304,9 +1318,16 @@ function convertOpenCodeParts(parts: OpenCodeStoredPart[]): ContentBlock[] {
         }
         break;
 
-      // Skip step-start and step-finish (metadata, not content)
+      // Metadata / markers with no rich content of their own:
+      // - step-start/step-finish: turn-step boundaries (token usage is carried
+      //   at the message level in convertOpenCodeEntries).
+      // - patch: a snapshot {hash, files} of a file change; the actual edit is
+      //   already rendered by its edit/write tool block, so this is redundant.
+      // - compaction: a context-compaction marker (opencode 1.16+).
       case "step-start":
       case "step-finish":
+      case "patch":
+      case "compaction":
         break;
 
       default:
