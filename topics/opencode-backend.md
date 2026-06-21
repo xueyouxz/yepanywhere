@@ -110,35 +110,60 @@ test should record fixture exports and SSE events, count OpenCode part/event
 types, and report both raw coverage and coverage after excluding deliberate
 metadata-only parts.
 
+## 1.17.9 implementation status (2026-06-21)
+
+A provider review against opencode 1.17.9 (the prior tables were sampled vs
+1.15.13) closed most rendering/interaction gaps. See
+[`opencode-copilot.md`](opencode-copilot.md) and the gitignored
+`tasks/030-opencode-provider-element-review.md` for the full element list;
+key shape correction and closures:
+
+- **Unified tool part.** 1.16+ streams a tool as a single `type:"tool"` part
+  (`callID` + nested `state.{status,input,output,error}`), confirmed via a live
+  `/event` capture — *not* the split `tool-use`/`tool-result` parts the live
+  tables below describe. The live path had no case for it, so live tool calls
+  were invisible; now handled (emit tool_use when underway, tool_result when
+  settled, deduped by callID). New part types seen: `patch` (snapshot) and
+  `compaction` (marker), both treated as metadata.
+- **Tool name + field normalization** (`opencode-tools.ts`): lower-case names →
+  YA canonical (`bash`→`Bash`, …) and fields → Claude shape
+  (`filePath`→`file_path`, `oldString`→`old_string`, grep `include`→`glob`, …),
+  applied live + durable. Unknown tools stay explicit.
+- **Durable reasoning** → thinking (was dropped on reload). Failed tools now also
+  emit a tool_result (error text was dropped).
+- **Interactive bridge**: `permission.asked` → YA approval → `POST
+  /permission/{id}/reply` (capture-verified the gated tool resumes);
+  `question.asked` (interview) → YA AskUserQuestion → `POST /question/{id}/reply`.
+  opencode decides whether to ask per its own config; YA answers when asked.
+- **Background bash**: opencode's bash tool is foreground-only (`command`,
+  `description`, `timeout`); background is a separate `/pty/shells` feature the
+  agent doesn't use as a tool — nothing to map.
+
 ## Gaps To Close
 
-1. Durable reasoning: map stored/export `reasoning` parts to YA `thinking`
-   blocks, with a fixture that proves historical OpenCode sessions preserve
-   thought blocks after reload.
-2. Durable event-shape parity: accept both old stored `tool` parts and newer
-   live-style `tool-use` / `tool-result` parts in the durable normalizer.
-3. Tool name aliases: map OpenCode names such as `bash` and `task` to YA's rich
-   `Bash` and `Task` renderers where the input/result schema is close enough.
-   Keep unknown OpenCode tools explicit rather than forcing misleading aliases.
-4. Tool result pairing: verify whether OpenCode `tool-result.id` is always the
-   correct YA `tool_use_id`. If not, preserve call IDs or nearby tool-use state
-   in the adapter.
-5. Permission bridge: wire `permission.asked` and `GET /permission` /
-   `POST /permission/:id/reply` into YA's normal approval panel if OpenCode's
-   semantics match the existing allow/deny model.
-6. Native command inventory: investigate whether OpenCode exposes slash or agent
-   commands that can populate `supportedCommands`, especially compact-like
-   maintenance commands.
-7. Thinking/effort options: decide whether OpenCode model options can represent
-   YA thinking and effort settings. Until then, keep the UI capability flag off.
-8. Attachments and multimodal input: keep text `.attachments` references, but do
-   not imply image content is sent until OpenCode POST parts can carry it
-   structurally.
-9. Graceful control: add interrupt/steer only if OpenCode exposes a provider
-   operation that does not require killing the per-session server.
-10. Session ID split: preserve a provider-native `ses_*` ID separately from the
-    YA session ID when OpenCode can be resumed through YA-owned IDs without
-    breaking existing links.
+Status tags added 2026-06-21 (DONE = landed this review). The live-path table
+above predates the unified `tool` part; treat the 1.17.9 status section as
+current where they disagree.
+
+1. **DONE.** Durable reasoning: stored `reasoning` parts now map to YA `thinking`
+   blocks (with a unit test); empty timing-only parts are skipped.
+2. **DONE.** Durable + live event-shape parity: the unified `type:"tool"` part
+   (with `state`) is handled in both the live provider and the durable
+   normalizer; legacy split `tool-use`/`tool-result` kept for older servers.
+3. **DONE.** Tool name aliases: `opencode-tools.ts` maps names + input fields to
+   YA's rich renderers; unknown tools stay explicit.
+4. **DONE.** Tool result pairing: both paths pair by `callID`.
+5. **DONE.** Permission bridge: `permission.asked` → YA approval →
+   `POST /permission/:id/reply` (capture-verified). Plus `question.asked` →
+   AskUserQuestion → `POST /question/:id/reply`.
+6. **Open.** Native command inventory: OpenCode exposes `GET /command`;
+   `supportedCommands` is still unpopulated.
+7. **Open.** Thinking/effort options: not mapped; UI capability flag still off.
+8. **Open.** Attachments and multimodal input: text `.attachments` only.
+9. **Open.** Graceful control: abort still kills the per-session server, though
+   `POST /session/:id/abort` exists and could be adopted; no steer.
+10. **Open.** Session ID split: YA still exposes the native `ses_*` as the YA
+    session id.
 
 ## Verification Shape
 
