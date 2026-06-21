@@ -208,7 +208,64 @@ pre-1.16: fall back to CLI export (captured via a **file fd**, not a pipe), then
 to the legacy file tree. Do not delete the file-tree path — older installs and
 already-migrated transcripts still use it.
 
-### Implementation plan: direct SQLite reader (Gap #11)
+### Direct SQLite reader (Gap #11) — LANDED 2026-06-21
+
+`OpenCodeDbReader` (`packages/server/src/sessions/opencode-db-reader.ts`) reads
+transcripts straight from `opencode.db` and is wired as the **first** durable
+source in `OpenCodeSessionReader` (`getSession`, `getSessionSummary`,
+`getSessionSummaryIfChanged`, `listSessions`, `listSessionFiles`). The plan
+below is the as-built contract; a few choices deviate from the original draft
+and are flagged inline.
+
+**Mechanism chosen: `node:sqlite`, not `better-sqlite3`** (the draft's primary).
+The published `yepanywhere` package copies `packages/server` dependencies
+verbatim (`scripts/build-bundle.ts`) and advertises zero external deps, so
+`better-sqlite3` would force a native build on every install plus the host's
+GLIBCXX friction. The DB reader is an *optimization with a working fallback*, so
+a dependency-free builtin fits better. It is loaded via `createRequire("node:sqlite")`
+(not a static/dynamic `import`): that degrades to null on Node < 22.5 (engines is
+`>=20`) instead of crashing at module load, and sidesteps vitest's module runner,
+which can't transform this newer-than-vite builtin. On old runtimes the reader
+returns null and the export/file-tree fallbacks run exactly as before. One-time
+`ExperimentalWarning` on first use is left intact (reliable suppression needs a
+global `emitWarning` override that risks swallowing other warnings).
+
+**Fallback order: DB → file tree → export** (draft said DB → export → file tree).
+Putting the subprocess *last* keeps even pre-1.16 file-storage installs from
+spawning `opencode export` when a local read suffices; the DB still covers all
+1.16+ sessions first, so the "no child process on reload" acceptance holds.
+
+**Enumeration gates the CLI on DB absence.** `listSessions` / `listSessionFiles`
+enumerate from the `session` table when the DB has this worktree's project, and
+only fall back to `opencode session list` when it does not (pre-1.16 / no DB) —
+the CLI reads the same store in 1.16+, so unioning it would just re-spawn the
+subprocess for rows the DB already returned.
+
+**Evaluation (live `opencode.db`, this repo's project, 2026-06-21).** Reading the
+430 KB `/harsh-review` session (`ses_11777a2c…`, 23 messages) via the DB reader:
+**3.8 ms, no subprocess**; the 145-message `ses_117763878…`: 7.3 ms. The
+equivalent `opencode export` subprocess for the 430 KB session: **1.19 s wall,
+259 MB RSS** (Bun-binary startup) — ~300× slower and the path that needed the
+file-fd capture fix to avoid mid-string truncation. Model prefix, context-usage
+%, and full tool transcripts all matched the export path. The DB is the
+correct durable source of truth.
+
+**Tail-type watch — verdict.** Keeping an open mind on "is there a use case for
+tailing opencode instead": for *durable/historical* content, no — the DB is
+strictly safer (canonical committed state, read-only WAL snapshot, no subprocess,
+no truncation) than tailing `opencode export`/stdout, which inherits every cost
+the DB removes. The live SSE `/event` stream is **not** replaced: it remains the
+source for a YA-*owned*, actively-streaming session because it carries sub-part
+text deltas and interactive permission/question prompts that the DB only sees at
+per-part commit granularity, after the fact. The one genuinely new use the DB
+unlocks is a **DB poll/watch for externally- or TUI-owned sessions YA is not
+streaming** — `getSessionSummaryIfChanged` (row `time_updated` + message count)
+plus a paged `getSession(afterMessageId)` already make near-live "monitoring" of
+an unowned session cheap (single-digit ms per poll), where there is no SSE to
+tail at all. That is a poll over the DB, not a tail of opencode; it is a
+worthwhile follow-up, not part of this reader.
+
+#### Original implementation plan (as-built unless flagged above)
 
 Goal: make `OpenCodeSessionReader` read transcripts straight from `opencode.db`
 so reload/attach no longer spawns an `opencode export` subprocess per call.
@@ -324,11 +381,11 @@ current where they disagree.
    turn, keep the server) alongside the SIGTERM `abort()`. Steer still absent.
 10. **Open.** Session ID split: YA still exposes the native `ses_*` as the YA
     session id.
-11. **Open (correctness, P0).** Durable storage moved to SQLite
-    (`opencode.db`); the file-tree reader path is dead for 1.16+ sessions, so
-    reload/attach renders empty. Read the DB directly — design and steps in
-    *Implementation plan: direct SQLite reader*. The CLI-export fallback
-    (now file-fd capture, DONE) covers old installs in the meantime.
+11. **DONE.** Durable storage moved to SQLite (`opencode.db`); `OpenCodeDbReader`
+    reads it directly as the first durable source, so reload/attach to a 1.16+
+    (incl. TUI/externally-owned) session renders the full transcript with no
+    subprocess. Export (file-fd) + file-tree remain fallbacks for old installs /
+    Node < 22.5. See *Direct SQLite reader (Gap #11)*.
 
 ## Verification Shape
 

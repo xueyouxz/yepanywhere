@@ -22,6 +22,10 @@ import type {
   Message,
   SessionSummary,
 } from "../supervisor/types.js";
+import {
+  OpenCodeDbReader,
+  type OpenCodeDbSessionRow,
+} from "./opencode-db-reader.js";
 import type {
   GetSessionOptions,
   ISessionReader,
@@ -186,12 +190,14 @@ export class OpenCodeSessionReader implements ISessionReader {
   private opencodePath: string;
   private projectPath: string;
   private openCodeProjectIdCache: string | null | undefined = undefined;
+  private dbReader: OpenCodeDbReader;
 
   constructor(options: OpenCodeSessionReaderOptions) {
     this.storageDir = options.storageDir ?? OPENCODE_STORAGE_DIR;
     this.databasePath = options.databasePath ?? OPENCODE_DB_PATH;
     this.opencodePath = options.opencodePath ?? "opencode";
     this.projectPath = options.projectPath;
+    this.dbReader = new OpenCodeDbReader(this.databasePath);
   }
 
   /**
@@ -213,15 +219,30 @@ export class OpenCodeSessionReader implements ISessionReader {
     const summaries: SessionSummary[] = [];
     const seen = new Set<string>();
 
+    // OpenCode 1.16+: the DB is authoritative and the CLI `session list` reads
+    // the same store, so when the DB has this project we enumerate from it and
+    // skip the subprocess. The CLI stays a legacy fallback for pre-1.16 / no-DB.
+    const dbProjectId = await this.dbReader.getProjectId(this.projectPath);
+
+    if (dbProjectId) {
+      for (const summary of await this.listDbSessions(projectId)) {
+        summaries.push(summary);
+        seen.add(summary.id);
+      }
+    }
+
     for (const summary of await this.listFileSessions(projectId)) {
+      if (seen.has(summary.id)) continue;
       summaries.push(summary);
       seen.add(summary.id);
     }
 
-    for (const summary of await this.listCliSessions(projectId)) {
-      if (seen.has(summary.id)) continue;
-      summaries.push(summary);
-      seen.add(summary.id);
+    if (!dbProjectId) {
+      for (const summary of await this.listCliSessions(projectId)) {
+        if (seen.has(summary.id)) continue;
+        summaries.push(summary);
+        seen.add(summary.id);
+      }
     }
 
     // Sort by updatedAt descending
@@ -238,6 +259,7 @@ export class OpenCodeSessionReader implements ISessionReader {
     projectId: UrlProjectId,
   ): Promise<SessionSummary | null> {
     return (
+      (await this.getDbSessionSummary(sessionId, projectId)) ??
       (await this.getFileSessionSummary(sessionId, projectId)) ??
       (await this.getCliSessionSummary(sessionId, projectId))
     );
@@ -249,6 +271,9 @@ export class OpenCodeSessionReader implements ISessionReader {
     afterMessageId?: string,
     _options?: GetSessionOptions,
   ): Promise<LoadedSession | null> {
+    const fromDb = await this.loadDbSession(sessionId, projectId, afterMessageId);
+    if (fromDb) return fromDb;
+
     const fileSummary = await this.getFileSessionSummary(sessionId, projectId);
     if (fileSummary) {
       const messages = await this.loadSessionMessages(sessionId, afterMessageId);
@@ -287,6 +312,16 @@ export class OpenCodeSessionReader implements ISessionReader {
     cachedMtime: number,
     cachedSize: number,
   ): Promise<{ summary: SessionSummary; mtime: number; size: number } | null> {
+    const dbChanged = await this.getDbSessionSummaryIfChanged(
+      sessionId,
+      projectId,
+      cachedMtime,
+      cachedSize,
+    );
+    if (dbChanged) {
+      return dbChanged;
+    }
+
     const fileChanged = await this.getFileSessionSummaryIfChanged(
       sessionId,
       projectId,
@@ -320,6 +355,28 @@ export class OpenCodeSessionReader implements ISessionReader {
     const out: { sessionId: string; filePath: string }[] = [];
     const seen = new Set<string>();
 
+    // DB sessions (OpenCode 1.16+) are the primary durable source. Enumerate
+    // them straight from the `session` table rather than the CLI `session list`,
+    // using the db path as the index anchor (the index then stats nothing
+    // per-session; change detection runs through getSessionSummaryIfChanged,
+    // which compares the row's time_updated + message count).
+    const dbProjectId = await this.dbReader.getProjectId(this.projectPath);
+    if (dbProjectId) {
+      for (const { id, timeUpdated } of await this.dbReader.listSessionRows(
+        dbProjectId,
+      )) {
+        if (seen.has(id)) continue;
+        if (
+          options?.activeAfterMs !== undefined &&
+          timeUpdated < options.activeAfterMs
+        ) {
+          continue;
+        }
+        out.push({ sessionId: id, filePath: this.databasePath });
+        seen.add(id);
+      }
+    }
+
     // File-storage sessions: storage/session/{openCodeProjectId}/*.json.
     // These are the bulk of OpenCode sessions. The session index enumerates via
     // this method (not listSessions), so omitting file sessions here meant they
@@ -340,20 +397,25 @@ export class OpenCodeSessionReader implements ISessionReader {
       }
     }
 
-    // CLI-listed sessions (e.g. other stores), deduped against file sessions.
-    const cliSessions = await this.loadCliSessionList();
-    for (const session of cliSessions) {
-      if (!this.cliListSessionBelongsToProject(session)) continue;
-      const sessionId = String(session.id);
-      if (seen.has(sessionId)) continue;
-      if (options?.activeAfterMs !== undefined) {
-        const updatedAt = this.numberField(session.updated);
-        if (updatedAt !== undefined && updatedAt < options.activeAfterMs) {
-          continue;
+    // CLI-listed sessions: legacy fallback only. With a 1.16+ DB present the
+    // CLI `session list` reads the same store, so enumerating it would just
+    // re-spawn the subprocess for rows the DB already returned. Run it only when
+    // the DB has no project for this worktree (pre-1.16 / no DB).
+    if (!dbProjectId) {
+      const cliSessions = await this.loadCliSessionList();
+      for (const session of cliSessions) {
+        if (!this.cliListSessionBelongsToProject(session)) continue;
+        const sessionId = String(session.id);
+        if (seen.has(sessionId)) continue;
+        if (options?.activeAfterMs !== undefined) {
+          const updatedAt = this.numberField(session.updated);
+          if (updatedAt !== undefined && updatedAt < options.activeAfterMs) {
+            continue;
+          }
         }
+        out.push({ sessionId, filePath: this.databasePath });
+        seen.add(sessionId);
       }
-      out.push({ sessionId, filePath: this.databasePath });
-      seen.add(sessionId);
     }
 
     return out;
@@ -535,6 +597,138 @@ export class OpenCodeSessionReader implements ISessionReader {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Load a session straight from `opencode.db` — the authoritative durable
+   * source for OpenCode 1.16+ and the only one that does not spawn a subprocess
+   * or depend on the (frozen) JSON file tree. Returns null when the DB is
+   * absent, the session is not in this project, or sqlite is unavailable
+   * (Node < 22.5), so callers fall through to the file-tree and CLI-export
+   * readers. The summary always reflects the whole session even when
+   * `afterMessageId` pages the returned messages.
+   */
+  private async loadDbSession(
+    sessionId: string,
+    projectId: UrlProjectId,
+    afterMessageId?: string,
+  ): Promise<LoadedSession | null> {
+    const projectIdHash = await this.dbReader.getProjectId(this.projectPath);
+    if (!projectIdHash) return null;
+
+    const row = await this.dbReader.getSessionRow(sessionId, projectIdHash);
+    // Skip empty sessions (0 messages) so an unstarted session falls through to
+    // the same null the file path returns, rather than rendering blank.
+    if (!row || row.messageCount === 0) return null;
+
+    const entries = await this.dbReader.loadEntries(sessionId, afterMessageId);
+    if (entries === null) return null;
+
+    const summary = await this.buildDbSummary(row, projectId);
+
+    return {
+      summary,
+      data: {
+        provider: "opencode",
+        session: { messages: entries },
+      },
+    };
+  }
+
+  private async getDbSessionSummary(
+    sessionId: string,
+    projectId: UrlProjectId,
+  ): Promise<SessionSummary | null> {
+    const projectIdHash = await this.dbReader.getProjectId(this.projectPath);
+    if (!projectIdHash) return null;
+    const row = await this.dbReader.getSessionRow(sessionId, projectIdHash);
+    if (!row || row.messageCount === 0) return null;
+    return this.buildDbSummary(row, projectId);
+  }
+
+  /**
+   * Change detection for DB sessions. Unlike the file path (which stats one
+   * per-session JSON file), every DB session shares a single `opencode.db`, so
+   * the db-file mtime over-triggers. Compare the session row's `time_updated`
+   * and message count instead — carried as the index's (mtime, size) pair, the
+   * same convention the CLI fallback uses.
+   */
+  private async getDbSessionSummaryIfChanged(
+    sessionId: string,
+    projectId: UrlProjectId,
+    cachedMtime: number,
+    cachedSize: number,
+  ): Promise<{ summary: SessionSummary; mtime: number; size: number } | null> {
+    const projectIdHash = await this.dbReader.getProjectId(this.projectPath);
+    if (!projectIdHash) return null;
+
+    const meta = await this.dbReader.getSessionMeta(sessionId, projectIdHash);
+    if (!meta || meta.messageCount === 0) return null;
+
+    if (meta.timeUpdated === cachedMtime && meta.messageCount === cachedSize) {
+      return null;
+    }
+
+    const summary = await this.getDbSessionSummary(sessionId, projectId);
+    if (!summary) return null;
+
+    return { summary, mtime: meta.timeUpdated, size: meta.messageCount };
+  }
+
+  /**
+   * Build a SessionSummary from a DB session row plus cheap targeted lookups
+   * (first user text for the title fallback; last assistant tokens for context
+   * usage), so a summary never loads the full part list.
+   */
+  private async buildDbSummary(
+    row: OpenCodeDbSessionRow,
+    projectId: UrlProjectId,
+  ): Promise<SessionSummary> {
+    const model = this.canonicalModelId(
+      row.model?.providerID,
+      row.model?.id ?? row.model?.modelID,
+    );
+
+    const dbTitle = row.title?.trim() || null;
+    const firstUserText =
+      !dbTitle || dbTitle === "Yep Anywhere Session"
+        ? await this.dbReader.loadFirstUserText(row.id)
+        : null;
+    const fullTitle =
+      dbTitle && dbTitle !== "Yep Anywhere Session"
+        ? dbTitle
+        : (firstUserText ?? dbTitle);
+
+    const tokens = await this.dbReader.loadLastAssistantTokens(row.id);
+
+    return {
+      id: row.id,
+      projectId,
+      title: this.truncateTitle(fullTitle),
+      fullTitle,
+      createdAt: this.dateFromMillis(row.timeCreated ?? undefined),
+      updatedAt: this.dateFromMillis(row.timeUpdated ?? undefined),
+      messageCount: row.messageCount,
+      ownership: { owner: "none" },
+      contextUsage: this.contextUsageFromTokens(tokens ?? undefined, model),
+      provider: "opencode",
+      model,
+    };
+  }
+
+  private async listDbSessions(
+    projectId: UrlProjectId,
+  ): Promise<SessionSummary[]> {
+    const projectIdHash = await this.dbReader.getProjectId(this.projectPath);
+    if (!projectIdHash) return [];
+
+    const rows = await this.dbReader.listSessionRows(projectIdHash);
+    const summaries: SessionSummary[] = [];
+    for (const { id } of rows) {
+      const summary = await this.getDbSessionSummary(id, projectId);
+      if (summary) summaries.push(summary);
+    }
+    return summaries;
   }
 
   private async listCliSessions(
@@ -888,30 +1082,42 @@ export class OpenCodeSessionReader implements ISessionReader {
     entries: OpenCodeSessionEntry[],
     model: string | undefined,
   ): ContextUsage | undefined {
-    const contextWindowSize = getModelContextWindow(model);
-
     for (const entry of [...entries].reverse()) {
       const msg = entry.message;
-      if (msg.role !== "assistant" || !msg.tokens) continue;
-      const inputTokens =
-        (msg.tokens.input ?? 0) + (msg.tokens.cache?.read ?? 0);
-      if (inputTokens === 0) continue;
-
-      const result: ContextUsage = {
-        inputTokens,
-        percentage: Math.round((inputTokens / contextWindowSize) * 100),
-        contextWindow: contextWindowSize,
-      };
-      if (msg.tokens.output !== undefined && msg.tokens.output > 0) {
-        result.outputTokens = msg.tokens.output;
-      }
-      if (msg.tokens.cache?.read !== undefined && msg.tokens.cache.read > 0) {
-        result.cacheReadTokens = msg.tokens.cache.read;
-      }
-      return result;
+      if (msg.role !== "assistant") continue;
+      const usage = this.contextUsageFromTokens(msg.tokens, model);
+      if (usage) return usage;
     }
 
     return undefined;
+  }
+
+  /**
+   * Context-window fill from an assistant message's token counts — input plus
+   * cache-read represents the prompt size carried into the next turn. Shared by
+   * the entries scan (file/export paths) and the DB path's last-assistant probe.
+   */
+  private contextUsageFromTokens(
+    tokens: OpenCodeMessage["tokens"] | undefined,
+    model: string | undefined,
+  ): ContextUsage | undefined {
+    if (!tokens) return undefined;
+    const inputTokens = (tokens.input ?? 0) + (tokens.cache?.read ?? 0);
+    if (inputTokens === 0) return undefined;
+
+    const contextWindowSize = getModelContextWindow(model);
+    const result: ContextUsage = {
+      inputTokens,
+      percentage: Math.round((inputTokens / contextWindowSize) * 100),
+      contextWindow: contextWindowSize,
+    };
+    if (tokens.output !== undefined && tokens.output > 0) {
+      result.outputTokens = tokens.output;
+    }
+    if (tokens.cache?.read !== undefined && tokens.cache.read > 0) {
+      result.cacheReadTokens = tokens.cache.read;
+    }
+    return result;
   }
 
   private stringField(value: unknown): string | undefined {

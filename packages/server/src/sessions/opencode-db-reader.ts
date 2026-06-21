@@ -1,0 +1,395 @@
+import { statSync } from "node:fs";
+import { createRequire } from "node:module";
+import type {
+  OpenCodeMessage,
+  OpenCodeSessionEntry,
+  OpenCodeStoredPart,
+} from "@yep-anywhere/shared";
+
+/**
+ * Direct reader for OpenCode's SQLite transcript store (`opencode.db`, 1.16+).
+ *
+ * OpenCode 1.16+ persists every session in a single SQLite database; the legacy
+ * JSON file tree (`storage/{session,message,part}/…`) is frozen and the
+ * `opencode export` CLI is truncation-prone for large sessions (a Bun-binary
+ * piped-stdout cap). Reading the DB directly is the authoritative, subprocess-free
+ * durable source. See `topics/opencode-backend.md` § "Durable Storage Format".
+ *
+ * Contract: open **read-only**, never write/checkpoint/PRAGMA-mutate; tolerate a
+ * concurrent `opencode serve` writer (WAL readers see the latest committed
+ * snapshot per statement); and **never throw** out of a public method — any
+ * absence/lock/old-schema returns null so callers fall through to the export and
+ * file-tree readers.
+ *
+ * Mechanism: Node's built-in `node:sqlite` (Node >= 22.5), loaded via a guarded
+ * dynamic import so older runtimes (the package targets node >= 20) degrade to
+ * the fallbacks rather than crashing — and so the published package keeps its
+ * zero-native-dependency property (no `better-sqlite3` build per install).
+ */
+
+/** Minimal structural view of the `node:sqlite` API we use (read-only). */
+interface SqliteStatement {
+  get(...params: unknown[]): unknown;
+  all(...params: unknown[]): unknown[];
+}
+interface SqliteDatabase {
+  prepare(sql: string): SqliteStatement;
+  close(): void;
+}
+type SqliteCtor = new (
+  path: string,
+  options?: { readOnly?: boolean },
+) => SqliteDatabase;
+
+const nodeRequire = createRequire(import.meta.url);
+let sqliteCtor: SqliteCtor | null | undefined;
+
+/**
+ * Resolve the `node:sqlite` `DatabaseSync` constructor once, or null when the
+ * runtime lacks it (Node < 22.5). Loaded via `createRequire` rather than a
+ * static/dynamic `import` for two reasons: it degrades to null on old runtimes
+ * (the package targets node >= 20) instead of crashing at module load, and it
+ * sidesteps vite/vitest's module runner, which tries (and fails) to transform
+ * this builtin since it postdates vite's bundled builtin list. The module is
+ * built into Node, so this adds no dependency; the one-time experimental-API
+ * warning it prints is left intact (suppressing it reliably needs a global
+ * `emitWarning` override that would risk swallowing unrelated warnings).
+ */
+function loadSqliteCtor(): SqliteCtor | null {
+  if (sqliteCtor === undefined) {
+    try {
+      sqliteCtor =
+        (nodeRequire("node:sqlite") as { DatabaseSync?: SqliteCtor })
+          .DatabaseSync ?? null;
+    } catch {
+      sqliteCtor = null;
+    }
+  }
+  return sqliteCtor;
+}
+
+/** Session-level metadata read straight from the `session` table row. */
+export interface OpenCodeDbSessionRow {
+  id: string;
+  title: string | null;
+  /** Parsed `session.model` JSON; carries both providerID and the model id. */
+  model: { id?: string; providerID?: string; modelID?: string } | null;
+  timeCreated: number | null;
+  timeUpdated: number | null;
+  /** Number of `message` rows for the session (full count, not a page). */
+  messageCount: number;
+}
+
+interface DbRow {
+  [column: string]: unknown;
+}
+
+export class OpenCodeDbReader {
+  private db: SqliteDatabase | null | undefined = undefined;
+  /** inode+mtime of the db file at open, to reopen if the file is replaced. */
+  private dbStamp: string | undefined;
+  /** worktree -> project.id (or null when this worktree has no DB project). */
+  private projectIdCache = new Map<string, string | null>();
+
+  constructor(private databasePath: string) {}
+
+  /**
+   * Lazily open (and cache) a read-only handle. Re-stats the db file so a
+   * replaced database (different inode/mtime) reopens rather than reading a
+   * stale handle. Returns null when the file is absent or sqlite is unavailable.
+   */
+  private ensureDb(): SqliteDatabase | null {
+    let stamp: string;
+    try {
+      const st = statSync(this.databasePath);
+      stamp = `${st.ino}:${st.mtimeMs}:${st.size}`;
+    } catch {
+      // File absent/unreadable: drop any cached handle and report unavailable.
+      this.closeHandle();
+      return null;
+    }
+
+    if (this.db && this.dbStamp === stamp) return this.db;
+    if (this.db && this.dbStamp !== stamp) this.closeHandle();
+
+    const Ctor = loadSqliteCtor();
+    if (!Ctor) {
+      this.db = null;
+      return null;
+    }
+    try {
+      this.db = new Ctor(this.databasePath, { readOnly: true });
+      this.dbStamp = stamp;
+      return this.db;
+    } catch {
+      this.db = null;
+      this.dbStamp = undefined;
+      return null;
+    }
+  }
+
+  private closeHandle(): void {
+    if (this.db) {
+      try {
+        this.db.close();
+      } catch {
+        // ignore
+      }
+    }
+    this.db = undefined;
+    this.dbStamp = undefined;
+  }
+
+  /** project.id for a worktree path, cached. Null when no DB / no such project. */
+  async getProjectId(worktree: string): Promise<string | null> {
+    const cached = this.projectIdCache.get(worktree);
+    if (cached !== undefined) return cached;
+
+    const resolved = await this.run((db) => {
+      const row = db
+        .prepare("SELECT id FROM project WHERE worktree = ?")
+        .get(worktree) as DbRow | undefined;
+      const id = row?.id;
+      return typeof id === "string" ? id : null;
+    });
+    const value = resolved ?? null;
+    this.projectIdCache.set(worktree, value);
+    return value;
+  }
+
+  /**
+   * Session row scoped to its project (mirrors the export path's
+   * project-belonging check). Null when the session isn't in this project, the
+   * DB is unusable, or the schema predates the SQLite store.
+   */
+  async getSessionRow(
+    sessionId: string,
+    projectId: string,
+  ): Promise<OpenCodeDbSessionRow | null> {
+    return this.run((db) => {
+      const row = db
+        .prepare(
+          "SELECT id, title, model, time_created, time_updated FROM session WHERE id = ? AND project_id = ?",
+        )
+        .get(sessionId, projectId) as DbRow | undefined;
+      if (!row || typeof row.id !== "string") return null;
+
+      const count = db
+        .prepare("SELECT count(*) AS c FROM message WHERE session_id = ?")
+        .get(sessionId) as DbRow | undefined;
+
+      return {
+        id: row.id,
+        title: typeof row.title === "string" ? row.title : null,
+        model: parseModel(row.model),
+        timeCreated: numberOrNull(row.time_created),
+        timeUpdated: numberOrNull(row.time_updated),
+        messageCount: numberOrNull(count?.c) ?? 0,
+      };
+    });
+  }
+
+  /** Lightweight freshness probe: latest `time_updated` + message count. */
+  async getSessionMeta(
+    sessionId: string,
+    projectId: string,
+  ): Promise<{ timeUpdated: number; messageCount: number } | null> {
+    const row = await this.getSessionRow(sessionId, projectId);
+    if (!row) return null;
+    return {
+      timeUpdated: row.timeUpdated ?? 0,
+      messageCount: row.messageCount,
+    };
+  }
+
+  /** All sessions for a project (id + updated time), for enumeration. */
+  async listSessionRows(
+    projectId: string,
+  ): Promise<{ id: string; timeUpdated: number }[]> {
+    return (
+      (await this.run((db) => {
+        const rows = db
+          .prepare(
+            "SELECT id, time_updated FROM session WHERE project_id = ? ORDER BY time_updated DESC",
+          )
+          .all(projectId) as DbRow[];
+        const out: { id: string; timeUpdated: number }[] = [];
+        for (const row of rows) {
+          if (typeof row.id === "string") {
+            out.push({ id: row.id, timeUpdated: numberOrNull(row.time_updated) ?? 0 });
+          }
+        }
+        return out;
+      })) ?? []
+    );
+  }
+
+  /** First user message's first text part — the title fallback. */
+  async loadFirstUserText(sessionId: string): Promise<string | null> {
+    return this.run((db) => {
+      const messages = db
+        .prepare(
+          "SELECT id, data FROM message WHERE session_id = ? ORDER BY id LIMIT 10",
+        )
+        .all(sessionId) as DbRow[];
+      for (const m of messages) {
+        const info = parseJson(m.data);
+        if (info?.role !== "user") continue;
+        const messageId = m.id;
+        if (typeof messageId !== "string") continue;
+        const parts = db
+          .prepare("SELECT data FROM part WHERE message_id = ? ORDER BY id")
+          .all(messageId) as DbRow[];
+        for (const p of parts) {
+          const part = parseJson(p.data);
+          if (part?.type === "text" && typeof part.text === "string" && part.text.trim()) {
+            return part.text.trim();
+          }
+        }
+        return null; // first user message had no text part
+      }
+      return null;
+    });
+  }
+
+  /** Tokens from the most recent assistant message (current context fill). */
+  async loadLastAssistantTokens(
+    sessionId: string,
+  ): Promise<OpenCodeMessage["tokens"] | null> {
+    return this.run((db) => {
+      const messages = db
+        .prepare(
+          "SELECT data FROM message WHERE session_id = ? ORDER BY id DESC LIMIT 30",
+        )
+        .all(sessionId) as DbRow[];
+      for (const m of messages) {
+        const info = parseJson(m.data);
+        if (info?.role !== "assistant") continue;
+        const tokens = info.tokens;
+        if (tokens && typeof tokens === "object") {
+          return tokens as OpenCodeMessage["tokens"];
+        }
+      }
+      return null;
+    });
+  }
+
+  /**
+   * Full `{ message, parts }` entries for a session in chronological order, with
+   * column ids injected (the JSON `data` blobs omit id/sessionID/messageID —
+   * those live only as columns). `afterMessageId` pages: only messages strictly
+   * after that id are returned (empty array = no new messages). Null = session
+   * unreadable / DB unavailable.
+   */
+  async loadEntries(
+    sessionId: string,
+    afterMessageId?: string,
+  ): Promise<OpenCodeSessionEntry[] | null> {
+    return this.run((db) => {
+      const messageRows = db
+        .prepare("SELECT id, data FROM message WHERE session_id = ? ORDER BY id")
+        .all(sessionId) as DbRow[];
+
+      // Parts grouped by message. part.id is a chronological ULID, so a single
+      // session-scoped query ordered by id keeps per-message part order without
+      // an N+1 query per message.
+      const partRows = db
+        .prepare("SELECT id, message_id, data FROM part WHERE session_id = ? ORDER BY id")
+        .all(sessionId) as DbRow[];
+      const partsByMessage = new Map<string, OpenCodeStoredPart[]>();
+      for (const row of partRows) {
+        const messageId = row.message_id;
+        const partId = row.id;
+        if (typeof messageId !== "string" || typeof partId !== "string") continue;
+        const part = asStoredPart(row.data, partId, sessionId, messageId);
+        if (!part) continue;
+        const list = partsByMessage.get(messageId);
+        if (list) list.push(part);
+        else partsByMessage.set(messageId, [part]);
+      }
+
+      const entries: OpenCodeSessionEntry[] = [];
+      let found = !afterMessageId;
+      for (const row of messageRows) {
+        const messageId = row.id;
+        if (typeof messageId !== "string") continue;
+        if (!found) {
+          if (messageId === afterMessageId) found = true;
+          continue;
+        }
+        const message = asMessage(row.data, messageId, sessionId);
+        if (!message) continue;
+        entries.push({ message, parts: partsByMessage.get(messageId) ?? [] });
+      }
+      return entries;
+    });
+  }
+
+  /** Run a query callback against the handle, mapping any failure to null. */
+  private async run<T>(fn: (db: SqliteDatabase) => T): Promise<T | null> {
+    const db = this.ensureDb();
+    if (!db) return null;
+    try {
+      return fn(db);
+    } catch {
+      // A locked/old-schema/corrupt read must fall through, never throw.
+      return null;
+    }
+  }
+
+  close(): void {
+    this.closeHandle();
+  }
+}
+
+function parseJson(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseModel(value: unknown): OpenCodeDbSessionRow["model"] {
+  const parsed = parseJson(value);
+  if (!parsed) return null;
+  return parsed as OpenCodeDbSessionRow["model"];
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/** Parse `message.data` and inject the column-only id/sessionID. */
+function asMessage(
+  data: unknown,
+  id: string,
+  sessionId: string,
+): OpenCodeMessage | null {
+  const raw = parseJson(data);
+  if (!raw) return null;
+  const role = raw.role;
+  if (role !== "user" && role !== "assistant") return null;
+  return { ...raw, id, sessionID: sessionId, role } as OpenCodeMessage;
+}
+
+/** Parse `part.data` and inject the column-only id/sessionID/messageID. */
+function asStoredPart(
+  data: unknown,
+  id: string,
+  sessionId: string,
+  messageId: string,
+): OpenCodeStoredPart | null {
+  const raw = parseJson(data);
+  if (!raw || typeof raw.type !== "string") return null;
+  return {
+    ...raw,
+    id,
+    sessionID: sessionId,
+    messageID: messageId,
+  } as OpenCodeStoredPart;
+}
