@@ -109,6 +109,7 @@
   --provider-gemini: #4285f4;
   --provider-grok: #111827;
   --provider-opencode: #9333ea;
+  --provider-pi: #0d9488;
 
   /* Semantic Colors */
   --thinking-color: var(--app-claude-orange);
@@ -10741,6 +10742,10 @@ a.sidebar-nav-item {
   background: var(--provider-opencode);
 }
 
+.provider-option-dot.provider-pi {
+  background: var(--provider-pi);
+}
+
 .provider-option-dot.provider-local {
   background: #8b5cf6; /* Purple for local */
 }
@@ -11811,6 +11816,11 @@ a.sidebar-nav-item {
 
 .agent-provider-opencode {
   background: linear-gradient(135deg, #7c3aed 0%, #9333ea 100%);
+  color: white;
+}
+
+.agent-provider-pi {
+  background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
   color: white;
 }
 

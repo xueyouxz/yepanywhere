@@ -7,9 +7,11 @@
  * - "gemini-acp": Gemini via CLI with --experimental-acp (preferred)
  * - "grok": Grok Build via ACP (`grok agent stdio`) - Phase 1 isolated prototype
  * - "opencode": OpenCode via HTTP server (multi-provider agent)
+ * - "pi": pi via `pi --mode rpc` (provider-agnostic agent; see topics/pi-provider.md)
  *
  * "grok" added (additive only) for Phase 1 Grok Build provider per topics/grok.md.
  * Gated behind ENABLED_PROVIDERS=grok; no impact on other providers or core paths.
+ * "pi" added (additive, Plan A live RPC) per topics/pi-provider.md.
  */
 export type ProviderName =
   | "claude"
@@ -19,7 +21,8 @@ export type ProviderName =
   | "gemini"
   | "gemini-acp"
   | "grok"
-  | "opencode";
+  | "opencode"
+  | "pi";
 
 /**
  * All provider names in display order.
@@ -37,6 +40,7 @@ export const ALL_PROVIDERS: readonly ProviderName[] = [
   "gemini-acp",
   "grok",
   "opencode",
+  "pi",
 ] as const;
 
 /**

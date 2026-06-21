@@ -105,6 +105,7 @@ import type { SpeechBackendRegistry } from "./services/voice/registry.js";
 import { CodexSessionReader } from "./sessions/codex-reader.js";
 import { GeminiSessionReader } from "./sessions/gemini-reader.js";
 import { GrokSessionReader } from "./sessions/grok-reader.js";
+import { NullSessionReader } from "./sessions/null-reader.js";
 import { OpenCodeSessionReader } from "./sessions/opencode-reader.js";
 import { findSessionSummaryAcrossProviders } from "./sessions/provider-resolution.js";
 import { normalizeSession } from "./sessions/normalization.js";
@@ -414,6 +415,14 @@ export function createApp(options: AppOptions): AppResult {
               sessionsDir: GROK_SESSIONS_DIR,
               projectPath: project.path,
             }),
+        );
+      case "pi":
+        // PiSessionReader (durable JSONL tree) is a documented follow-up; until
+        // then report no on-disk history rather than mis-parse pi's format.
+        // Live YA-owned pi sessions still stream via the Supervisor.
+        return getOrCreateReader(
+          `pi::${project.path}`,
+          () => new NullSessionReader(),
         );
     }
   };

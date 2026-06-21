@@ -39,6 +39,7 @@ const PROVIDER_COLORS: Record<ProviderName, string> = {
   "gemini-acp": "#4285f4", // Same as gemini
   grok: "#111827",
   opencode: "#9333ea", // Purple for OpenCode
+  pi: "#0d9488", // Teal for pi
 };
 
 function isStatusFilter(value: string): value is StatusFilter {

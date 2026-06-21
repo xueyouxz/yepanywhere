@@ -31,7 +31,8 @@ export type ProviderName =
   | "gemini"
   | "gemini-acp"
   | "grok"
-  | "opencode";
+  | "opencode"
+  | "pi";
 
 /**
  * Authentication status for a provider.

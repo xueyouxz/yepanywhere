@@ -8,6 +8,7 @@ import { GeminiACPProvider } from "./implementations/GeminiACPProvider";
 import { GeminiProvider } from "./implementations/GeminiProvider";
 import { GrokProvider } from "./implementations/GrokProvider";
 import { OpenCodeProvider } from "./implementations/OpenCodeProvider";
+import { PiProvider } from "./implementations/PiProvider";
 import type { Provider, ProviderMetadata } from "./types";
 
 const providers: Record<string, Provider> = {
@@ -19,6 +20,7 @@ const providers: Record<string, Provider> = {
   codex: new CodexProvider(),
   "codex-oss": new CodexOssProvider(),
   opencode: new OpenCodeProvider(),
+  pi: new PiProvider(),
 };
 
 /**

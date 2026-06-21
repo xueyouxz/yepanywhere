@@ -74,6 +74,10 @@ export {
   type OpenCodeProviderConfig,
 } from "./opencode.js";
 
+// pi provider (uses `pi --mode rpc`; see topics/pi-provider.md, Plan A)
+import { piProvider } from "./pi.js";
+export { PiProvider, piProvider, type PiProviderConfig } from "./pi.js";
+
 export interface ProviderRuntimeConfig {
   /** Explicit Codex CLI path supplied by an embedding runtime such as desktop. */
   codexCliPath?: string;
@@ -98,6 +102,7 @@ export function getAllProviders(): AgentProvider[] {
     geminiACPProvider,
     grokACPProvider, // Phase 1: additive only (see grok-acp.ts header + topics/grok.md)
     opencodeProvider,
+    piProvider,
   ];
 }
 
@@ -129,6 +134,8 @@ export function getProvider(name: ProviderName): AgentProvider | null {
       return grokACPProvider; // Phase 1 Grok Build (ACP)
     case "opencode":
       return opencodeProvider;
+    case "pi":
+      return piProvider;
     default:
       return null;
   }

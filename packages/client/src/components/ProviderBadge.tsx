@@ -16,6 +16,7 @@ const PROVIDER_COLORS: Record<ProviderName, string> = {
   "gemini-acp": "var(--provider-gemini)", // Google blue (same as gemini)
   grok: "var(--provider-grok)", // xAI Grok
   opencode: "var(--provider-opencode)", // OpenCode purple
+  pi: "var(--provider-pi)", // pi teal
 };
 
 const PROVIDER_LABELS: Record<ProviderName, string> = {
@@ -27,6 +28,7 @@ const PROVIDER_LABELS: Record<ProviderName, string> = {
   "gemini-acp": "Gemini ACP",
   grok: "Grok",
   opencode: "OpenCode",
+  pi: "pi",
 };
 
 interface ProviderBadgeProps {
