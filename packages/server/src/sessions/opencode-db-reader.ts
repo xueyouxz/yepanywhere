@@ -68,6 +68,20 @@ function loadSqliteCtor(): SqliteCtor | null {
   return sqliteCtor;
 }
 
+/**
+ * Global opt-out for the direct opencode.db reader (default **on**). Set
+ * `OPENCODE_DB_READER=0` (or `false`/`off`/`no`) to disable it: the reader then
+ * never opens the DB and never imports `node:sqlite`, and the OpenCode session
+ * paths fall back to the CLI export / legacy file tree exactly as before. This
+ * keeps the whole sqlite dependency conditional and switchable — CI, or any
+ * environment that prefers not to exercise the builtin, simply leaves it off.
+ * Checked at the single `ensureDb` choke point, so one guard covers every query.
+ */
+function openCodeDbReaderEnabled(): boolean {
+  const v = process.env.OPENCODE_DB_READER?.trim().toLowerCase();
+  return v !== "0" && v !== "false" && v !== "off" && v !== "no";
+}
+
 /** Session-level metadata read straight from the `session` table row. */
 export interface OpenCodeDbSessionRow {
   id: string;
@@ -99,6 +113,10 @@ export class OpenCodeDbReader {
    * stale handle. Returns null when the file is absent or sqlite is unavailable.
    */
   private ensureDb(): SqliteDatabase | null {
+    // Global opt-out (default on). When off, never touch the file or
+    // node:sqlite — every query returns null and callers fall back.
+    if (!openCodeDbReaderEnabled()) return null;
+
     let stamp: string;
     try {
       const st = statSync(this.databasePath);

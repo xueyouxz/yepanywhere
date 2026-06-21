@@ -313,6 +313,12 @@ export const ENV_VAR_REGISTRY: EnvVarDescriptor[] = [
       "Show the voice input (microphone) button. Set false to disable. Default true.",
   },
   {
+    name: "OPENCODE_DB_READER",
+    group: "Providers & features",
+    description:
+      "Read OpenCode 1.16+ transcripts directly from opencode.db (needs Node >=22.5). Default on; set 0/false to fall back to CLI export / file tree and never load node:sqlite.",
+  },
+  {
     name: "YEP_DEFERRED_JOIN_WINDOW_S",
     group: "Providers & features",
     description:

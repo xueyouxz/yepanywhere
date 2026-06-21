@@ -348,5 +348,31 @@ describe.skipIf(!DatabaseSync)(
       // null and the call falls through (export yields nothing here).
       await expect(reader.getSession("ses_db", projectId)).resolves.toBeNull();
     });
+
+    it("does not read the DB when OPENCODE_DB_READER is disabled", async () => {
+      buildDb(databasePath, {
+        worktree: projectPath,
+        sessionId: "ses_db",
+        title: "Yep Anywhere Session",
+        model: { id: "claude-opus-4.8", providerID: "github-copilot" },
+        messages: richMessages,
+      });
+
+      const prev = process.env.OPENCODE_DB_READER;
+      process.env.OPENCODE_DB_READER = "0";
+      try {
+        const reader = await makeReader();
+        // With the reader disabled, the DB is never opened; the session (which
+        // exists only in the DB) falls through to the CLI export path — proven by
+        // the export subprocess being spawned and the overall null result.
+        await expect(
+          reader.getSession("ses_db", projectId),
+        ).resolves.toBeNull();
+        expect(spawnMock).toHaveBeenCalled();
+      } finally {
+        if (prev === undefined) delete process.env.OPENCODE_DB_READER;
+        else process.env.OPENCODE_DB_READER = prev;
+      }
+    });
   },
 );

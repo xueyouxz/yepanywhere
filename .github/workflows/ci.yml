@@ -1,6 +1,13 @@
 name: CI
 on: [push, pull_request]
 
+# CI pins Node 20 (the package's engines floor). Do NOT bump to 24+ just to run
+# the opencode.db reader test: that reader uses node:sqlite (Node >=22.5) and is
+# an opt-in feature (OPENCODE_DB_READER, default on locally but unexercised by
+# CI). On Node 20 node:sqlite is absent, so opencode-db-reader.test.ts cleanly
+# skips. A Node-24 CI run made the server suite hang for >1h in this environment;
+# the reader is verified locally on Node 24 instead. See topics/opencode-backend.md.
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
@@ -12,7 +19,7 @@ jobs:
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 20
           cache: "pnpm"
       - run: pnpm install
       - run: pnpm lint
@@ -24,7 +31,7 @@ jobs:
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 20
           cache: "pnpm"
       - run: pnpm install
       - run: pnpm typecheck
@@ -36,7 +43,7 @@ jobs:
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 20
           cache: "pnpm"
       - run: pnpm install
       - run: pnpm --filter @yep-anywhere/shared build
@@ -50,7 +57,7 @@ jobs:
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 20
           cache: "pnpm"
       - run: pnpm install
       - run: pnpm -F @yep-anywhere/client exec playwright install chromium

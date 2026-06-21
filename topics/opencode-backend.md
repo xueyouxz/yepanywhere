@@ -241,6 +241,35 @@ only fall back to `opencode session list` when it does not (pre-1.16 / no DB) �
 the CLI reads the same store in 1.16+, so unioning it would just re-spawn the
 subprocess for rows the DB already returned.
 
+**Global opt-out: `OPENCODE_DB_READER` (default on).** Set it to `0`/`false`/
+`off`/`no` and the reader never opens the DB and never imports `node:sqlite` —
+every OpenCode session path falls back to CLI export / file tree, exactly as
+before the reader existed. The check sits at the single `ensureDb` choke point,
+so the whole sqlite dependency is conditional and switchable per environment.
+This keeps the builtin off any path that doesn't want it (and is what lets CI
+run on Node 20 without exercising it).
+
+**Detail route had to be taught the `ses_*` shape, not just metadata.** The
+reader is necessary but not sufficient: the session-detail route
+(`GET …/sessions/:sessionId` in `routes/sessions.ts`) hand-rolls its own
+provider cascade (separate from `findSessionSummaryAcrossProviders`) and
+originally consulted the OpenCode reader only when YA's *own* session metadata
+already labeled the session `opencode`. A TUI-/externally-owned 1.16+ session
+has no such metadata, so it 404'd even though the reader could load it. Fixed by
+also consulting the OpenCode reader whenever the id has OpenCode's native `ses_*`
+shape; the shape gate keeps non-opencode UUIDs from triggering a wasted
+`opencode export`. (Latent follow-up: the detail route still diverges from the
+summary/list path's `getSessionSources` resolution and could gap again for other
+providers.)
+
+**CI runs Node 20; the reader is exercised locally on Node 24.** node:sqlite
+needs Node >=22.5, so a Node-24 CI run was tried to execute the reader's test —
+but the server suite then hung for >1h in CI's environment (a channel/handle
+that resolves locally in ~30s but not on the runner). Since the reader is opt-in
+with a working fallback, CI stays on the Node-20 engines floor (where
+`opencode-db-reader.test.ts` cleanly skips), and the reader is verified locally
+on Node 24. `.github/workflows/ci.yml` carries a do-not-rebump note.
+
 **Evaluation (live `opencode.db`, this repo's project, 2026-06-21).** Reading the
 430 KB `/harsh-review` session (`ses_11777a2c…`, 23 messages) via the DB reader:
 **3.8 ms, no subprocess**; the 145-message `ses_117763878…`: 7.3 ms. The
