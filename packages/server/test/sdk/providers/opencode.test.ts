@@ -199,10 +199,10 @@ describe("OpenCodeProvider.startSession — blocking session ID", () => {
     const { OpenCodeProvider } = await import(
       "../../../src/sdk/providers/opencode.js"
     );
-    // Short timeout so the test doesn't actually wait 10 seconds
+    // waitForServer is overridden below with a short timeout so the test
+    // doesn't actually wait 10 seconds.
     const provider = new OpenCodeProvider({
       opencodePath: "/fake/opencode",
-      timeout: 100,
     });
 
     // Override waitForServer by giving a minimal timeout via a subclass

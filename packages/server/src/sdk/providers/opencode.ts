@@ -67,8 +67,6 @@ function execFileUtf8(
 export interface OpenCodeProviderConfig {
   /** Path to opencode binary (auto-detected if not specified) */
   opencodePath?: string;
-  /** Request timeout in ms (default: 300000 = 5 minutes) */
-  timeout?: number;
   /** Base port to start from (auto-selects if not specified) */
   basePort?: number;
 }
@@ -229,11 +227,9 @@ export class OpenCodeProvider implements AgentProvider {
   readonly supportsSteering = false;
 
   private readonly opencodePath?: string;
-  private readonly timeout: number;
 
   constructor(config: OpenCodeProviderConfig = {}) {
     this.opencodePath = config.opencodePath;
-    this.timeout = config.timeout ?? 300000; // 5 minutes default
   }
 
   /**
@@ -1236,8 +1232,11 @@ export class OpenCodeProvider implements AgentProvider {
       return this.opencodePath;
     }
 
-    // Check common locations
+    // Check common locations. `~/.opencode/bin` is the official installer
+    // location (curl opencode.ai/install); it is on PATH for login shells but
+    // a server not launched through one may miss it, so check it explicitly.
     const commonPaths = [
+      join(homedir(), ".opencode", "bin", "opencode"),
       join(homedir(), ".local", "bin", "opencode"),
       "/usr/local/bin/opencode",
       join(homedir(), "bin", "opencode"),
