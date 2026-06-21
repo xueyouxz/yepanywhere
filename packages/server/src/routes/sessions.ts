@@ -2183,9 +2183,17 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       }
     }
 
-    // For mixed-provider projects, a restarted YA process may need session
-    // metadata to rediscover an OpenCode-native ses_* transcript.
-    if (!loadedSession && metadataProvider === "opencode") {
+    // For mixed-provider projects, consult the OpenCode reader for any
+    // OpenCode-native id (ses_*), not just sessions YA itself recorded as
+    // opencode. A TUI- or externally-owned 1.16+ session has no YA metadata, so
+    // gating on metadataProvider alone 404'd it even though the reader can load
+    // it from opencode.db. The ses_* shape gate keeps non-opencode ids (UUIDs)
+    // from triggering a wasted `opencode export` fallback. (The summary/list
+    // path already resolves opencode unconditionally via getSessionSources.)
+    if (
+      !loadedSession &&
+      (metadataProvider === "opencode" || sessionId.startsWith("ses_"))
+    ) {
       const opencodeReader = deps.readerFactory({
         ...project,
         provider: "opencode",
