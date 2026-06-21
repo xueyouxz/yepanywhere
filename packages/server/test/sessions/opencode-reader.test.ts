@@ -1,5 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
+import { writeSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,11 +11,47 @@ import { normalizeSession } from "../../src/sessions/normalization.js";
 
 const projectId = "test-project" as UrlProjectId;
 
+/**
+ * Build a fake `spawn` that writes the given stdout to the file fd the reader
+ * passes in `options.stdio[1]`, then emits `close`. This mirrors the real
+ * file-fd capture path (opencode is a Bun binary whose large piped stdout is
+ * truncated on exit, so the reader redirects child stdout to a real file).
+ */
+function makeSpawnMock(resolveStdout: (args: string[]) => string | null) {
+  return vi.fn(
+    (
+      _file: string,
+      args: string[],
+      options: { stdio?: unknown[] } | undefined,
+    ) => {
+      const child = new EventEmitter() as EventEmitter & {
+        kill: ReturnType<typeof vi.fn>;
+      };
+      child.kill = vi.fn();
+      const fd = options?.stdio?.[1];
+      const stdout = resolveStdout(args);
+      queueMicrotask(() => {
+        if (stdout !== null && typeof fd === "number") {
+          try {
+            writeSync(fd, stdout);
+          } catch {
+            // fall through to non-zero exit below if the fd is gone
+          }
+          child.emit("close", 0);
+        } else {
+          child.emit("close", 1);
+        }
+      });
+      return child as unknown as ChildProcess;
+    },
+  );
+}
+
 describe("OpenCodeSessionReader", () => {
   let testDir: string;
   let projectPath: string;
   let databasePath: string;
-  let execFileMock: ReturnType<typeof vi.fn>;
+  let spawnMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     testDir = join(tmpdir(), `opencode-reader-test-${randomUUID()}`);
@@ -22,50 +60,32 @@ describe("OpenCodeSessionReader", () => {
     await mkdir(projectPath, { recursive: true });
     await writeFile(databasePath, "sqlite placeholder");
 
-    execFileMock = vi.fn(
-      (
-        _file: string,
-        args: string[],
-        _options: unknown,
-        callback: (error: Error | null, stdout?: string, stderr?: string) => void,
-      ) => {
-        if (args[0] === "export") {
-          callback(
-            null,
-            `Exporting session: ${args[1]}\n${JSON.stringify(
-              makeExport(args[1] ?? "ses_cli", projectPath),
-            )}`,
-            "",
-          );
-          return {} as ChildProcess;
-        }
-        if (args.join(" ") === "session list --format json --max-count 200") {
-          callback(
-            null,
-            JSON.stringify([
-              {
-                id: "ses_cli",
-                title: "Yep Anywhere Session",
-                directory: projectPath,
-                created: 1000,
-                updated: 4000,
-              },
-            ]),
-            "",
-          );
-          return {} as ChildProcess;
-        }
-        callback(new Error(`unexpected opencode args: ${args.join(" ")}`));
-        return {} as ChildProcess;
-      },
-    );
+    spawnMock = makeSpawnMock((args) => {
+      if (args[0] === "export") {
+        // Real opencode prints "Exporting session:" to stderr; the reader only
+        // captures stdout, so write JSON only here.
+        return JSON.stringify(makeExport(args[1] ?? "ses_cli", projectPath));
+      }
+      if (args.join(" ") === "session list --format json --max-count 200") {
+        return JSON.stringify([
+          {
+            id: "ses_cli",
+            title: "Yep Anywhere Session",
+            directory: projectPath,
+            created: 1000,
+            updated: 4000,
+          },
+        ]);
+      }
+      return null;
+    });
 
     vi.doMock("node:child_process", async (importOriginal) => {
       const actual =
         await importOriginal<typeof import("node:child_process")>();
       return {
         ...actual,
-        execFile: execFileMock,
+        spawn: spawnMock,
       };
     });
   });
@@ -110,12 +130,47 @@ describe("OpenCodeSessionReader", () => {
       },
     });
 
-    expect(execFileMock).toHaveBeenCalledWith(
+    expect(spawnMock).toHaveBeenCalledWith(
       "/fake/opencode",
       ["export", "ses_cli"],
-      expect.objectContaining({ cwd: projectPath, timeout: 10_000 }),
-      expect.any(Function),
+      expect.objectContaining({ cwd: projectPath }),
     );
+  });
+
+  it("reads a large export in full (no pipe truncation / buffer cap)", async () => {
+    // Guards the file-fd capture: a >256KB export must come back whole. A pipe
+    // capture (old execFile path) truncated opencode's Bun stdout mid-string.
+    const bigText = "x".repeat(600_000);
+    spawnMock = makeSpawnMock((args) => {
+      if (args[0] !== "export") return null;
+      const exported = makeExport(args[1] ?? "ses_cli", projectPath);
+      exported.messages[1].parts[0].text = bigText;
+      return JSON.stringify(exported);
+    });
+    vi.doMock("node:child_process", async (importOriginal) => {
+      const actual =
+        await importOriginal<typeof import("node:child_process")>();
+      return { ...actual, spawn: spawnMock };
+    });
+    vi.resetModules();
+
+    const { OpenCodeSessionReader } = await import(
+      "../../src/sessions/opencode-reader.js"
+    );
+    const reader = new OpenCodeSessionReader({
+      storageDir: join(testDir, "missing-storage"),
+      databasePath,
+      opencodePath: "/fake/opencode",
+      projectPath,
+    });
+
+    const loaded = await reader.getSession("ses_cli", projectId);
+    const normalized = normalizeSession(loaded!);
+    expect(normalized.messages).toHaveLength(2);
+    expect(normalized.messages[1]).toMatchObject({
+      type: "assistant",
+      message: { role: "assistant", content: [{ type: "text", text: bigText }] },
+    });
   });
 
   it("enumerates CLI sessions with the OpenCode database as index anchor", async () => {
@@ -135,21 +190,15 @@ describe("OpenCodeSessionReader", () => {
   });
 
   it("does not load an exported session from a different project", async () => {
-    execFileMock.mockImplementation(
-      (
-        _file: string,
-        args: string[],
-        _options: unknown,
-        callback: (error: Error | null, stdout?: string, stderr?: string) => void,
-      ) => {
-        callback(
-          null,
-          JSON.stringify(makeExport(args[1] ?? "ses_cli", join(testDir, "other"))),
-          "",
-        );
-        return {} as ChildProcess;
-      },
+    spawnMock = makeSpawnMock((args) =>
+      JSON.stringify(makeExport(args[1] ?? "ses_cli", join(testDir, "other"))),
     );
+    vi.doMock("node:child_process", async (importOriginal) => {
+      const actual =
+        await importOriginal<typeof import("node:child_process")>();
+      return { ...actual, spawn: spawnMock };
+    });
+    vi.resetModules();
 
     const { OpenCodeSessionReader } = await import(
       "../../src/sessions/opencode-reader.js"

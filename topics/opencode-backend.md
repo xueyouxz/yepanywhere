@@ -139,6 +139,98 @@ key shape correction and closures:
   `description`, `timeout`); background is a separate `/pty/shells` feature the
   agent doesn't use as a tool — nothing to map.
 
+## Durable Storage Format: SQLite (1.16+), legacy JSON tree dead
+
+**The break.** OpenCode 1.16+ (confirmed on 1.17.9) persists sessions in a
+SQLite database at `~/.local/share/opencode/opencode.db` (WAL mode: also
+`-wal`/`-shm` sidecars). The legacy JSON file tree
+`~/.local/share/opencode/storage/{session,message,part}/…` that
+`opencode-reader.ts` was built against is **frozen** — on this machine the
+newest `storage/message/<ses>/` dir is from Feb 26, while live sessions only
+exist in the DB. So the reader's primary path (`getFileSessionSummary`,
+`loadSessionMessages`, `loadMessageParts`) finds nothing for any current
+session: `messageCount: 0`, and **reload / attach-to-unowned shows no content,
+not even the user turn.** For a TUI- or externally-owned session the reader is
+the only source, so it renders empty — distinct from a YA-owned live session,
+which still streams via SSE while the process runs.
+
+**Why the `opencode export` fallback also fails.** `loadCliExport` shells
+`opencode export <id>` through `execFile`, which captures stdout via a **pipe**.
+`opencode` is a Bun binary, and Bun drops buffered piped stdout on
+`process.exit()` once it exceeds the kernel pipe buffer — the document is
+truncated mid-string and `JSON.parse` throws, so the reader returns null.
+Redirecting the child's stdout to a regular **file** fd returns the whole
+document. Measured on a ~430 KB session (`ses_11777a2c…`, a `/harsh-review` with
+large tool outputs):
+
+| Capture | Bytes | Valid JSON |
+|---|---:|---|
+| `execFile` → pipe (current YA path) | 146,093 | no (unterminated string) |
+| `spawn` → file fd / shell `>file` | 429,953 | yes (23 messages) |
+
+This is the same failure the 2026-06-01 sample above recorded as "one older
+export was malformed or truncated"; it is size-dependent, so small sessions
+reload fine and large ones blank out — matching the intermittent behavior.
+
+**Correct durable source: read the DB directly.** Schema (relevant columns):
+
+```
+project(id TEXT pk, worktree TEXT, …)
+session(id TEXT pk, project_id TEXT, directory, title, model, metadata,
+        time_created, time_updated, cost, tokens_input/output/reasoning/
+        cache_read/cache_write)
+message(id TEXT pk, session_id TEXT, time_created, time_updated, data TEXT)
+part(id TEXT pk, message_id TEXT, session_id TEXT, time_created, data TEXT)
+  -- INDEX part_session_idx(session_id), session_project_idx(project_id)
+```
+
+`message.data` is the JSON message `info` object (role, time, model, tokens,
+variant); `part.data` is the JSON part (`type` ∈ {text, reasoning, tool,
+step-start, step-finish, patch, compaction}, with the unified `tool` shape
+`{callID, state:{status,input,output,error}}`). Mapping is mechanical:
+
+- worktree path → `project.id` (the same opaque hash YA already derives, e.g.
+  `8e8fab…` for this repo) → `session` rows by `project_id`.
+- per session, `message` rows ordered by `id` (ULID, chronological) or
+  `time_created`; per message, `part` rows likewise. `part.id`/`message.id` are
+  the same ULIDs used as the old tree's filenames, so ordering is preserved.
+
+Critically, the rows deserialize into exactly the `{ message, parts }`
+(`OpenCodeSessionEntry`) shape the file path already produces, so
+`normalization.ts` and the renderer path need **no change** — only the source
+of the entries moves from files to SQLite.
+
+**Invariants for a DB reader.** Open **read-only** (`mode=ro` / `PRAGMA
+query_only=ON`), never write; tolerate the concurrent `opencode serve` writer
+(WAL allows concurrent readers); the YA session id stays the native `ses_*`
+(Provider Session Identity). Degrade gracefully when the DB is absent or
+pre-1.16: fall back to CLI export (captured via a **file fd**, not a pipe), then
+to the legacy file tree. Do not delete the file-tree path — older installs and
+already-migrated transcripts still use it.
+
+## Thinking text is provider-dependent (empty for Copilot-proxied Claude)
+
+"No thinking shown" is often not a YA defect. opencode stores a `reasoning`
+part per step, but its `text` can be empty when the upstream API does not expose
+chain-of-thought. Measured on `ses_11777a2c…` (github-copilot/claude-opus-4.8):
+all 19 `reasoning` parts have zero-length text in the SQLite source, the CLI
+export, and the live API — GitHub Copilot's Claude proxy returns reasoning
+timing markers without thought text. YA correctly skips empty reasoning parts
+rather than rendering blank thinking blocks, so the transcript shows tool calls
+and final text but no thinking — unlike claude.ai for the same model. Before
+treating missing thinking as a normalization bug, check `part.data.$.text`
+length at the source.
+
+Independently, the client gate matters: `effectiveShowThinking` resolves the
+"default" Show-thinking preference to **off** for every provider except Codex
+(`packages/client/src/lib/showThinking.ts`), so opencode thinking is hidden
+unless the user sets the toggle to "on". That preference is server-scoped and
+was **not surviving reload** — a provider-agnostic race: `useModelSettings`
+reads it synchronously at mount, before the async `/api/server-info` install-id
+fetch resolves, and `showThinking` has no legacy-key fallback, so it defaulted
+every reload. Fixed by re-reading once the install-id lands (unless changed
+in-session).
+
 ## Gaps To Close
 
 Status tags added 2026-06-21 (DONE = landed this review). The live-path table
@@ -158,12 +250,21 @@ current where they disagree.
    AskUserQuestion → `POST /question/:id/reply`.
 6. **Open.** Native command inventory: OpenCode exposes `GET /command`;
    `supportedCommands` is still unpopulated.
-7. **Open.** Thinking/effort options: not mapped; UI capability flag still off.
-8. **Open.** Attachments and multimodal input: text `.attachments` only.
-9. **Open.** Graceful control: abort still kills the per-session server, though
-   `POST /session/:id/abort` exists and could be adopted; no steer.
+7. **DONE.** Thinking/effort options: opencode exposes per-model reasoning effort
+   via model `variants` (low/medium/high/xhigh/max) + the message `variant` field;
+   `getAvailableModels` advertises `supportsEffort`/`supportedEffortLevels` and
+   dispatch sends `variant=effort`. (Earlier "no surface" assessment was wrong.)
+8. **Partly DONE.** Multimodal input: base64 image content blocks are now sent as
+   OpenCode `FilePartInput` (data-URL); `.attachments` text references remain.
+9. **DONE.** Graceful control: `interrupt()` POSTs `/session/:id/abort` (stop the
+   turn, keep the server) alongside the SIGTERM `abort()`. Steer still absent.
 10. **Open.** Session ID split: YA still exposes the native `ses_*` as the YA
     session id.
+11. **Open (correctness, P0).** Durable storage moved to SQLite
+    (`opencode.db`); the file-tree reader path is dead for 1.16+ sessions, so
+    reload/attach renders empty. Read the DB directly (see *Durable Storage
+    Format*). Until then, the CLI-export fallback must capture stdout via a
+    **file fd**, not an `execFile` pipe — Bun truncates large piped exports.
 
 ## Verification Shape
 

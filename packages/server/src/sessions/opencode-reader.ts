@@ -1,6 +1,13 @@
-import { execFile } from "node:child_process";
-import { readFile, readdir, stat } from "node:fs/promises";
-import { homedir } from "node:os";
+import { spawn } from "node:child_process";
+import {
+  type FileHandle,
+  open,
+  readFile,
+  readdir,
+  stat,
+  unlink,
+} from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type OpenCodeMessage,
@@ -589,26 +596,60 @@ export class OpenCodeSessionReader implements ISessionReader {
   }
 
   private async runOpenCodeCli(args: string[]): Promise<string | null> {
-    return new Promise<string | null>((resolve) => {
-      execFile(
-        this.opencodePath,
-        args,
-        {
+    // Capture stdout into a real file fd, not a pipe. `opencode` is a Bun
+    // binary that drops buffered piped stdout on process.exit() once it
+    // exceeds the kernel pipe buffer, so large `export` JSON was truncated
+    // mid-string (execFile) and failed to parse — blanking session reload.
+    // A regular file fd is lossless. See topics/opencode-backend.md
+    // "Durable Storage Format".
+    const tmpFile = join(
+      tmpdir(),
+      `ya-opencode-${process.pid}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}.json`,
+    );
+    let handle: FileHandle | undefined;
+    try {
+      handle = await open(tmpFile, "w");
+    } catch {
+      return null;
+    }
+
+    try {
+      const fd = handle.fd;
+      const exitedOk = await new Promise<boolean>((resolve) => {
+        const child = spawn(this.opencodePath, args, {
           cwd: this.projectPath,
-          encoding: "utf8",
-          maxBuffer: 16 * 1024 * 1024,
-          timeout: OPENCODE_CLI_TIMEOUT_MS,
+          stdio: ["ignore", fd, "ignore"],
           windowsHide: true,
-        },
-        (error, stdout) => {
-          if (error) {
-            resolve(null);
-            return;
-          }
-          resolve(String(stdout));
-        },
-      );
-    }).catch(() => null);
+        });
+        const timer = setTimeout(() => {
+          child.kill("SIGKILL");
+          resolve(false);
+        }, OPENCODE_CLI_TIMEOUT_MS);
+        child.on("error", () => {
+          clearTimeout(timer);
+          resolve(false);
+        });
+        child.on("close", (code) => {
+          clearTimeout(timer);
+          resolve(code === 0);
+        });
+      });
+
+      await handle.close();
+      handle = undefined;
+
+      if (!exitedOk) return null;
+      return await readFile(tmpFile, "utf8");
+    } catch {
+      return null;
+    } finally {
+      if (handle) {
+        await handle.close().catch(() => {});
+      }
+      await unlink(tmpFile).catch(() => {});
+    }
   }
 
   private parseJsonOutput(output: string): unknown {
