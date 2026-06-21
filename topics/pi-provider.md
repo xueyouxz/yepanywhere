@@ -106,6 +106,19 @@ vs `upstream/main` before relying on a change.
 
 ## Plan A — subprocess RPC mode (likely first version)
 
+**Status: LANDED (live path) 2026-06-21.** `PiProvider`
+(`packages/server/src/sdk/providers/pi.ts`) + `PiRpcClient`
+(`pi-rpc-client.ts`) spawn `pi --mode rpc` per session, learn the session id
+via `get_state`, and stream each `prompt` turn's agent events until `agent_end`,
+normalizing `message_*` / `tool_execution_*` / usage into YA SDKMessages.
+Registered in `providers/index.ts`; `pi` added to `ProviderName` /
+`ALL_PROVIDERS` (additive). Verified by the `pi-rpc-client` framing/correlation
+test and a transport smoke against the real binary (39 `provider/id` models).
+Deferred follow-ups: durable `PiSessionReader` (until then a `NullSessionReader`
+backs reload/list, so on-disk history is empty), true steering wiring
+(`supportsSteering=false` for now), the `tool_execution_start` permission bridge
+(tools run autonomously), and tool-argument field normalization.
+
 Add a `pi` provider that spawns `pi --mode rpc --provider <p> --model <m>
 --session-dir <dir>` per session and speaks the JSONL protocol. RPC maps onto
 YA's `AgentProvider` / `AgentSession` (`packages/server/src/sdk/providers/types.ts`)
