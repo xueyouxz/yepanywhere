@@ -132,6 +132,25 @@ describe("getModelIndicatorModelLabel", () => {
         getModelIndicatorModelLabel("opencode", "github-copilot/whatever-1"),
       ).toBe("OC copilot whatever-1");
     });
+    it("huggingface renders as HF and drops the org/dirname", () => {
+      expect(
+        getModelIndicatorModelLabel("pi", "huggingface/minimaxai/minimax-m2.1"),
+      ).toBe("pi HF minimax-m2.1");
+    });
+    it("huggingface org-namespaced model keeps a verbatim basename (no glyph, no stray slash)", () => {
+      expect(
+        getModelIndicatorModelLabel(
+          "pi",
+          "huggingface/qwen/qwen3-coder-next",
+        ),
+      ).toBe("pi HF qwen3-coder-next");
+      expect(
+        getModelIndicatorModelLabel(
+          "pi",
+          "huggingface/qwen/qwen3-235b-a22b-thinking-2507",
+        ),
+      ).toBe("pi HF qwen3-235b-a22b-thinking-2507");
+    });
   });
 
   describe("fallbacks", () => {

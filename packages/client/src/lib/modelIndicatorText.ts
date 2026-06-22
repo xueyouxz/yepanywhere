@@ -209,6 +209,7 @@ function deriveModelGlyphMatch(
 const subProviderAbbrevMap: Record<string, string> = {
   "github-copilot": "copilot",
   "github-models": "copilot",
+  huggingface: "HF",
 };
 
 /**
@@ -289,13 +290,31 @@ export function getModelIndicatorModelParts(
   const slashIndex = normalizedModel.indexOf("/");
   if (slashIndex > 0) {
     const pathPart = normalizedModel.slice(0, slashIndex);
-    const modelPart = normalizedModel.slice(slashIndex + 1);
+    const innerModel = normalizedModel.slice(slashIndex + 1);
     const subProvider = getSubProviderAbbrev(pathPart);
-    const familyKey = inferModelFamilyProviderKey(modelPart) ?? providerKey;
+    // A model that is itself org-namespaced under the sub-provider
+    // (huggingface ids: "minimaxai/minimax-m2.1", "qwen/qwen3-coder-next")
+    // reads best as its bare basename: drop the org/dirname and render it
+    // verbatim. Skip glyph substitution here, which mangles community names
+    // (e.g. "qwen3-coder-next" -> "◌ 3-coder-next") and, when the org segment
+    // matched a glyph rule, left a stray leading slash ("◌ /qwen3-...").
+    // Family inference is kept for color cues only.
+    const orgSlash = innerModel.lastIndexOf("/");
+    if (orgSlash >= 0) {
+      const modelPart = innerModel.slice(orgSlash + 1);
+      const familyKey = inferModelFamilyProviderKey(modelPart) ?? providerKey;
+      return {
+        providerGlyph,
+        subProvider,
+        modelLabel: modelPart,
+        modelFamilyKey: familyKey,
+      };
+    }
+    const familyKey = inferModelFamilyProviderKey(innerModel) ?? providerKey;
     return {
       providerGlyph,
       subProvider,
-      modelLabel: formatModelGlyphOnly(familyKey, modelPart),
+      modelLabel: formatModelGlyphOnly(familyKey, innerModel),
       modelFamilyKey: familyKey,
     };
   }
