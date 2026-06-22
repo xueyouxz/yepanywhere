@@ -10,6 +10,8 @@ describe("normalizePiTool", () => {
     expect(normalizePiTool("read", {}).name).toBe("Read");
     expect(normalizePiTool("write", {}).name).toBe("Write");
     expect(normalizePiTool("edit", {}).name).toBe("Edit");
+    expect(normalizePiTool("apply_patch", {}).name).toBe("Edit");
+    expect(normalizePiTool("Apply_Patch", {}).name).toBe("Edit");
     expect(normalizePiTool("bash", {}).name).toBe("Bash");
     expect(normalizePiTool("grep", {}).name).toBe("Grep");
     expect(normalizePiTool("ls", {}).name).toBe("LS");
@@ -48,7 +50,29 @@ describe("normalizePiTool", () => {
     });
   });
 
-  it("keeps a multi-edit array as-is (no MultiEdit renderer)", () => {
+  it("maps pi apply_patch inputs to Edit raw patches", () => {
+    const patch = [
+      "*** Begin Patch",
+      "*** Update File: src/a.ts",
+      "@@",
+      "-old",
+      "+new",
+      "*** End Patch",
+    ].join("\n");
+
+    expect(normalizePiTool("apply_patch", patch)).toEqual({
+      name: "Edit",
+      input: { rawPatch: patch, _rawPatch: patch },
+    });
+
+    expect(normalizePiTool("apply_patch", { patch }).input).toEqual({
+      patch,
+      rawPatch: patch,
+      _rawPatch: patch,
+    });
+  });
+
+  it("keeps a multi-edit array as-is while preserving pi patch detail", () => {
     const input = normalizePiTool("edit", {
       path: "a.ts",
       edits: [

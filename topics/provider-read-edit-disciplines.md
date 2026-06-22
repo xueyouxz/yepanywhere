@@ -124,7 +124,9 @@ reloaded history agree:
   `normalizePiToolResult` maps pi text results into YA's structured `Bash`,
   `Read`, `Write`, and `Edit` result contracts where safe, and pi edit
   `details.patch` is preserved as a raw patch so multi-edit rows can render a
-  diff after reload.
+  diff after reload. Non-vanilla pi sessions that emit an `apply_patch` tool
+  also map to canonical `Edit` with the same raw-patch interpretation Codex
+  uses; vanilla pi is unaffected because it does not emit that tool.
 - **Gemini-CLI server map** — `packages/server/src/sdk/providers/gemini-tools.ts`
   `normalizeGeminiTool` maps the non-ACP `gemini` CLI's `read_file`→`Read`,
   `replace`→`Edit` (`old_content`/`new_content`→`old_string`/`new_string`),

@@ -1,3 +1,5 @@
+import { extractRawPatchFromEditInput } from "../../augments/edit-raw-patch.js";
+
 /**
  * Normalize pi tool calls to YA's canonical tool renderer contract.
  *
@@ -13,8 +15,10 @@
  * `path` and so does Claude's Grep, so `path` must NOT be renamed there — only
  * Read/Write/Edit map `path` → `file_path`. pi `edit` is an array of disjoint
  * `{oldText,newText}` replacements; a single-element array is expanded to
- * `old_string`/`new_string` so the common case gets the diff augment (there is
- * no MultiEdit renderer, so multi-edit keeps the array and renders by name).
+ * `old_string`/`new_string` so the common case gets the diff augment. A
+ * non-vanilla pi `apply_patch` tool is treated like Codex `apply_patch`: its
+ * patch payload maps to canonical `Edit` raw-patch fields, with no effect on
+ * vanilla pi sessions that never emit that tool.
  */
 
 export interface NormalizedPiTool {
@@ -47,6 +51,7 @@ const PI_TOOL_NAME_MAP: Record<string, string> = {
   read: "Read",
   write: "Write",
   edit: "Edit",
+  apply_patch: "Edit",
   bash: "Bash",
   grep: "Grep",
   ls: "LS",
@@ -134,6 +139,20 @@ function expandSinglePiEdit(
   return out;
 }
 
+function attachRawPatchToInput(
+  input: Record<string, unknown>,
+  rawInput: unknown,
+): Record<string, unknown> {
+  const rawPatch =
+    extractRawPatchFromEditInput(rawInput) ??
+    extractRawPatchFromEditInput(input);
+  if (!rawPatch) return input;
+  const out = { ...input };
+  if (!out.rawPatch) out.rawPatch = rawPatch;
+  if (!out._rawPatch) out._rawPatch = rawPatch;
+  return out;
+}
+
 function numberField(
   input: Record<string, unknown>,
   key: string,
@@ -209,13 +228,17 @@ export function normalizePiTool(
   rawInput: unknown,
 ): NormalizedPiTool {
   const original = toolName ?? "unknown";
-  const name = PI_TOOL_NAME_MAP[original] ?? original;
+  const name =
+    PI_TOOL_NAME_MAP[original] ??
+    PI_TOOL_NAME_MAP[original.toLowerCase()] ??
+    original;
   let input = asRecord(rawInput);
   const renames = PI_TOOL_FIELD_RENAMES[name];
   if (renames) {
     input = renameFields(input, renames);
   }
   if (name === "Edit") {
+    input = attachRawPatchToInput(input, rawInput);
     input = expandSinglePiEdit(input);
   }
   return { name, input };
@@ -227,7 +250,10 @@ export function normalizePiToolResult(
   toolInput?: Record<string, unknown>,
   isError = false,
 ): unknown {
-  const canonicalName = PI_TOOL_NAME_MAP[toolName] ?? toolName;
+  const canonicalName =
+    PI_TOOL_NAME_MAP[toolName] ??
+    PI_TOOL_NAME_MAP[toolName.toLowerCase()] ??
+    toolName;
   const payload = resultPayload(rawResult);
   const text = stringifyPiToolResult(payload.content);
 

@@ -285,7 +285,10 @@ these pieces:
    - `Edit`: for single-element pi `edits[]`, keep the expanded
      `old_string`/`new_string` and let the existing edit augment compute the
      diff; for multi-edit, preserve pi `details.patch` as a raw patch so the
-     existing raw-patch augment computes the diff.
+     existing raw-patch augment computes the diff. A non-vanilla pi
+     `apply_patch` tool maps to the same canonical `Edit` raw-patch path as
+     Codex `apply_patch`; vanilla pi sessions are unchanged because they never
+     emit that tool.
    - `Grep`/`Glob`/`LS`: either parse into existing structured result shapes
      when trivial, or deliberately leave text with a useful summary; do not
      mislabel an unknown shape as a richer renderer contract.

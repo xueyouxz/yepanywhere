@@ -134,9 +134,42 @@ describe("PiSessionReader", () => {
       }),
       jsonLine({
         type: "message",
-        id: "a-edit",
+        id: "a-apply-patch",
         parentId: "r-bash",
         timestamp: "2026-06-22T00:00:06.000Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "apply-1",
+              name: "apply_patch",
+              arguments: {
+                patch:
+                  "*** Begin Patch\n*** Update File: src/b.ts\n@@\n-old\n+new\n*** End Patch",
+              },
+            },
+          ],
+        },
+      }),
+      jsonLine({
+        type: "message",
+        id: "r-apply-patch",
+        parentId: "a-apply-patch",
+        timestamp: "2026-06-22T00:00:07.000Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "apply-1",
+          toolName: "apply_patch",
+          content: textResult("Patch applied successfully."),
+          isError: false,
+        },
+      }),
+      jsonLine({
+        type: "message",
+        id: "a-edit",
+        parentId: "r-apply-patch",
+        timestamp: "2026-06-22T00:00:08.000Z",
         message: {
           role: "assistant",
           content: [
@@ -159,7 +192,7 @@ describe("PiSessionReader", () => {
         type: "message",
         id: "r-edit",
         parentId: "a-edit",
-        timestamp: "2026-06-22T00:00:07.000Z",
+        timestamp: "2026-06-22T00:00:09.000Z",
         message: {
           role: "toolResult",
           toolCallId: "edit-1",
@@ -176,7 +209,7 @@ describe("PiSessionReader", () => {
         type: "message",
         id: "a-edit-error",
         parentId: "r-edit",
-        timestamp: "2026-06-22T00:00:08.000Z",
+        timestamp: "2026-06-22T00:00:10.000Z",
         message: {
           role: "assistant",
           content: [
@@ -196,7 +229,7 @@ describe("PiSessionReader", () => {
         type: "message",
         id: "r-edit-error",
         parentId: "a-edit-error",
-        timestamp: "2026-06-22T00:00:09.000Z",
+        timestamp: "2026-06-22T00:00:11.000Z",
         message: {
           role: "toolResult",
           toolCallId: "edit-err",
@@ -222,7 +255,7 @@ describe("PiSessionReader", () => {
     expect(loaded?.summary).toMatchObject({
       id: sessionId,
       provider: "pi",
-      messageCount: 9,
+      messageCount: 11,
       title: "inspect files",
     });
 
@@ -238,6 +271,18 @@ describe("PiSessionReader", () => {
         input: { file_path: "src/a.ts", offset: 2, limit: 2 },
       },
       { name: "Bash", input: { command: "printf 'ok\\n'", timeout: 10 } },
+      {
+        name: "Edit",
+        input: expect.objectContaining({
+          patch:
+            "*** Begin Patch\n*** Update File: src/b.ts\n@@\n-old\n+new\n*** End Patch",
+          rawPatch:
+            "*** Begin Patch\n*** Update File: src/b.ts\n@@\n-old\n+new\n*** End Patch",
+          _rawPatch:
+            "*** Begin Patch\n*** Update File: src/b.ts\n@@\n-old\n+new\n*** End Patch",
+          _structuredPatch: expect.any(Array),
+        }),
+      },
       {
         name: "Edit",
         input: expect.objectContaining({
@@ -274,6 +319,11 @@ describe("PiSessionReader", () => {
         },
       },
       { stdout: "ok\n", stderr: "", interrupted: false, isImage: false },
+      expect.objectContaining({
+        filePath: "",
+        structuredPatch: [],
+        piText: "Patch applied successfully.",
+      }),
       expect.objectContaining({
         filePath: "src/a.ts",
         structuredPatch: [],
