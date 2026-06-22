@@ -70,6 +70,44 @@ provider relies on ambiently (e.g. a future non-provider use of
 strip — gate it: mask `X` from provider P's child **only when** YA has
 itself configured a competing value for `X` this run ("requested creds").
 
+### The `ant` CLI — metered API, never a subscription path
+
+`ant` is Anthropic's official CLI (`github.com/anthropics/anthropic-cli`;
+install via `brew install anthropics/tap/ant`, a GitHub release binary, or
+`go install github.com/anthropics/anthropic-cli/cmd/ant@latest`). It maps
+every Claude API resource to a subcommand (`ant messages create`, `ant
+models list`, `ant beta:agents …`), builds request bodies from typed flags
+or piped YAML, inlines files into any string field with `@path`, and pulls
+response fields out with `--transform` — a typed alternative to hand-written
+`curl` or an SDK.
+
+**YA does not use it, and as of this writing it is not installed here** (no
+references in the tree; `command -v ant` is empty). The live question was
+whether it *could* fit; the answer turns entirely on billing, and lands on
+the wrong side of the rule above.
+
+**It is a metered Claude API client with no subscription path.** Both auth
+options bill per-token API usage: an `ANTHROPIC_API_KEY`, or `ant auth
+login`, which runs a browser OAuth flow **against the Claude Console** (the
+API platform) and caches credentials locally — convenience over managing a
+raw key, not a different billing surface. The documented auth choices are
+API keys, workspaces, named profiles, and Workload Identity Federation: all
+Console/API constructs, none a claude.ai Pro/Max subscription. The Messages
+quickstart's own sample response carries `usage.input_tokens` /
+`output_tokens`. So `ant` sits squarely on the metered side of the
+subscription-vs-metered split this topic governs — unlike Claude Code, whose
+intended-default path is subscription auth.
+
+That is why we do not adopt it for the core coding flow: `ant` is precisely
+the "vendor CLI that honors an ambient `ANTHROPIC_API_KEY`" footgun named
+above, keyed on the same `ANTHROPIC_API_KEY` the forward-looking note (a
+non-provider consumer wanting a name Claude relies on ambiently) already
+anticipates. It would earn a place only for a *deliberately* metered,
+separate task — the way `ya-deepgram` / `ya-grok` STT are deliberate — and
+no such need exists today. If one ever arises, it takes the same guard:
+gate `ANTHROPIC_API_KEY` so wiring in `ant` for a YA-owned purpose never
+silently flips a subscription Claude Code child to metered billing.
+
 ## Speech transcription cost
 
 Server-routed speech backends (see
