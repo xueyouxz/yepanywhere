@@ -461,8 +461,24 @@ async function startServer() {
   markStartup("serverSettingsService initialized");
   await sharingService.initialize();
   markStartup("sharingService initialized");
-  await publicShareService.initialize();
-  markStartup("publicShareService initialized");
+  // Loading persisted public shares is not required to bind the listening
+  // socket or serve /health, but on a large data dir this file read parks the
+  // event loop for several seconds (it queues behind the FileWatcher's initial
+  // scan), which previously pushed onReady — and thus the health endpoint — out
+  // to ~6s. Start it in the background instead so the socket binds immediately;
+  // share routes default to EMPTY_STATE until it resolves (same tradeoff as the
+  // deferred speech-backend init).
+  void publicShareService
+    .initialize()
+    .then(() => {
+      console.log(
+        `[public-shares] Loaded (deferred) at +${Date.now() - startupStart}ms`,
+      );
+    })
+    .catch((error) => {
+      console.warn("[public-shares] Deferred initialization failed:", error);
+    });
+  markStartup("publicShareService initialization started (deferred)");
   await remoteSessionService.setDiskPersistenceEnabled(
     serverSettingsService.getSetting("persistRemoteSessionsToDisk"),
   );
