@@ -212,7 +212,7 @@ export function SessionListItem({
   const previewRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
-  const previewRefreshedId = useRef<string | null>(null);
+  const previewRefreshInFlight = useRef(false);
 
   // Computed values with optimistic fallback
   const isStarred = localIsStarred ?? isStarredProp;
@@ -419,13 +419,16 @@ export function SessionListItem({
   // the row in place. Owned/external sessions are tracked live, so skip them.
   const refreshIdlePreview = useCallback(() => {
     if (status?.owner === "self" || status?.owner === "external") return;
-    if (previewRefreshedId.current === sessionId) return;
-    previewRefreshedId.current = sessionId;
-    void api.refreshSessionPreview(projectId, sessionId).catch(() => {
-      // Allow a later hover to retry.
-      previewRefreshedId.current = null;
+    // Already have the excerpt — nothing to refresh. (Crucially this re-fires
+    // after a list refetch clears it, unlike a sticky once-per-session guard,
+    // which left re-hover blocked while only click repopulated.)
+    if (hoverLastAgent) return;
+    if (previewRefreshInFlight.current) return; // dedup concurrent hovers
+    previewRefreshInFlight.current = true;
+    void api.refreshSessionPreview(projectId, sessionId).finally(() => {
+      previewRefreshInFlight.current = false;
     });
-  }, [status?.owner, projectId, sessionId]);
+  }, [status?.owner, projectId, sessionId, hoverLastAgent]);
 
   const handlePreviewEnter = useCallback(
     (e: React.MouseEvent) => {
