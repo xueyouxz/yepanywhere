@@ -72,11 +72,21 @@ interface PiRuntimeState {
   lastRawProviderEventSource: string | null;
 }
 
-/** Per-turn streaming state: stable id for the in-flight assistant message. */
+/** Per-turn streaming state for the in-flight assistant message. */
 interface PiStreamState {
+  /** Stable base id; text uses it, thinking uses `${id}-thinking`. */
   currentAssistantId: string | null;
+  /** Cumulative assistant text so far (emitted whole each update). */
+  text: string;
+  /** Cumulative assistant thinking so far (emitted whole each update). */
+  thinking: string;
   lastUsage: SdkUsage | null;
   lastCostUsd: number | null;
+}
+
+/** Stable per-message id for streamed assistant content. */
+function mintAssistantId(): string {
+  return `pi-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 interface SdkUsage {
@@ -484,6 +494,8 @@ export class PiProvider implements AgentProvider {
 
     const stream: PiStreamState = {
       currentAssistantId: null,
+      text: "",
+      thinking: "",
       lastUsage: null,
       lastCostUsd: null,
     };
@@ -538,6 +550,8 @@ export class PiProvider implements AgentProvider {
         // `agent_end` for this run flips this true; the drain loop stops then.
         let turnComplete = false;
         stream.currentAssistantId = null;
+        stream.text = "";
+        stream.thinking = "";
         client.notify({
           type: "prompt",
           message: text,
@@ -593,12 +607,12 @@ export class PiProvider implements AgentProvider {
   ): SDKMessage[] {
     switch (event.type) {
       case "message_start": {
-        // A fresh assistant message: mint a stable id for its deltas.
+        // A fresh assistant message: mint a stable id and reset accumulators.
         const message = event.message as { role?: string } | undefined;
         if (message?.role === "assistant") {
-          stream.currentAssistantId = `pi-${Date.now()}-${Math.random()
-            .toString(36)
-            .slice(2, 8)}`;
+          stream.currentAssistantId = mintAssistantId();
+          stream.text = "";
+          stream.thinking = "";
         }
         return [];
       }
@@ -608,27 +622,38 @@ export class PiProvider implements AgentProvider {
           | { type?: string; delta?: string }
           | undefined;
         if (!ame?.delta) return [];
-        const uuid = stream.currentAssistantId ?? undefined;
+        // YA merges same-uuid assistant messages by replacement (mergeMessage:
+        // both-SDK -> keep newer), not by appending — so each emission must carry
+        // the *cumulative* content, like codex-oss/gemini/grok. Emitting bare
+        // deltas drops all but the final chunk (text appears truncated at the
+        // start). Text and thinking get distinct stable uuids so their string vs
+        // block-array content shapes don't clobber one another.
+        if (!stream.currentAssistantId) {
+          stream.currentAssistantId = mintAssistantId();
+        }
+        const baseId = stream.currentAssistantId;
         if (ame.type === "text_delta") {
+          stream.text += ame.delta;
           return [
             {
               type: "assistant",
               session_id: sessionId,
-              uuid,
-              message: { role: "assistant", content: ame.delta },
+              uuid: baseId,
+              message: { role: "assistant", content: stream.text },
             } as SDKMessage,
           ];
         }
         if (ame.type === "thinking_delta") {
+          stream.thinking += ame.delta;
           return [
             {
               type: "assistant",
               session_id: sessionId,
-              uuid,
+              uuid: `${baseId}-thinking`,
               message: {
                 role: "assistant",
                 content: [
-                  { type: "thinking", thinking: ame.delta },
+                  { type: "thinking", thinking: stream.thinking },
                 ] satisfies ContentBlock[],
               },
             } as SDKMessage,
@@ -639,6 +664,8 @@ export class PiProvider implements AgentProvider {
 
       case "message_end": {
         stream.currentAssistantId = null;
+        stream.text = "";
+        stream.thinking = "";
         return [];
       }
 
