@@ -187,6 +187,15 @@ function usesApproxMessageDedup(provider?: string): boolean {
   return getProvider(provider).capabilities.needsApproxMessageDedup;
 }
 
+// Options for the approx-dedup backstop. Codex tool messages dedup by call_id,
+// so they are excluded here; the backstop keeps covering non-tool messages.
+function approxDedupOptions(provider?: string): { excludeTools: boolean } {
+  return {
+    excludeTools:
+      getProvider(provider).capabilities.approxDedupExcludesTools === true,
+  };
+}
+
 /**
  * Find the id of the newest JSONL-sourced message.
  *
@@ -371,14 +380,23 @@ export function useSessionMessages(
           if (isEmptyAssistantContent(incoming)) {
             return prev;
           }
-          if (hasEquivalentJsonlMessage(prev, incoming)) {
+          if (
+            hasEquivalentJsonlMessage(
+              prev,
+              incoming,
+              approxDedupOptions(provider),
+            )
+          ) {
             return prev;
           }
         }
 
         const result = mergeStreamMessage(prev, incoming);
         return usesApproxMessageDedup(provider)
-          ? reconcileLinearMessages(result.messages)
+          ? reconcileLinearMessages(
+              result.messages,
+              approxDedupOptions(provider),
+            )
           : result.messages;
       });
     },
@@ -513,11 +531,17 @@ export function useSessionMessages(
                   .capabilities.supportsDag,
               });
               return usesApproxMessageDedup(data.session.provider)
-                ? reconcileLinearMessages(result.messages)
+                ? reconcileLinearMessages(
+                    result.messages,
+                    approxDedupOptions(data.session.provider),
+                  )
                 : result.messages;
             })()
           : usesApproxMessageDedup(data.session.provider)
-            ? reconcileLinearMessages(taggedMessages)
+            ? reconcileLinearMessages(
+                taggedMessages,
+                approxDedupOptions(data.session.provider),
+              )
             : taggedMessages;
         setMessages(loadedMessages);
         setPagination(data.pagination ?? warmLoad?.pagination);
@@ -699,7 +723,10 @@ export function useSessionMessages(
                 .supportsDag,
             });
             return usesApproxMessageDedup(data.session.provider)
-              ? reconcileLinearMessages(result.messages)
+              ? reconcileLinearMessages(
+                  result.messages,
+                  approxDedupOptions(data.session.provider),
+                )
               : result.messages;
           });
         }
@@ -748,7 +775,10 @@ export function useSessionMessages(
         updatePersistedTimestampWatermark(taggedOlder);
         const combined = [...taggedOlder, ...prev];
         return usesApproxMessageDedup(data.session.provider)
-          ? reconcileLinearMessages(combined)
+          ? reconcileLinearMessages(
+              combined,
+              approxDedupOptions(data.session.provider),
+            )
           : combined;
       });
       setPagination(data.pagination);

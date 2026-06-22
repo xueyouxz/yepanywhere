@@ -116,6 +116,59 @@ describe("reconcileLinearMessages", () => {
     expect(result[0]?.timestamp).toBe("2026-03-09T10:00:00.800Z");
   });
 
+  it("excludes tool messages from the backstop when excludeTools is set", () => {
+    const toolPair = (source: "sdk" | "jsonl", uuid: string, ms: string) => ({
+      uuid,
+      type: "assistant" as const,
+      timestamp: `2026-03-09T10:00:0${ms}Z`,
+      _source: source,
+      message: {
+        role: "assistant" as const,
+        content: [
+          {
+            type: "tool_use",
+            id: "call-x",
+            name: "Bash",
+            input: { command: "ls" },
+          },
+        ],
+      },
+    });
+    const messages: Message[] = [
+      toolPair("sdk", "sdk-tool", "0.000"),
+      toolPair("jsonl", "jsonl-tool", "0.300"),
+      {
+        uuid: "sdk-text",
+        type: "assistant",
+        timestamp: "2026-03-09T10:00:00.000Z",
+        _source: "sdk",
+        message: { role: "assistant", content: "Done." },
+      },
+      {
+        uuid: "jsonl-text",
+        type: "assistant",
+        timestamp: "2026-03-09T10:00:00.300Z",
+        _source: "jsonl",
+        message: { role: "assistant", content: "Done." },
+      },
+    ];
+
+    // Default: backstop merges both the tool and text duplicates.
+    expect(reconcileLinearMessages(messages)).toHaveLength(2);
+
+    // excludeTools: tool duplicates are kept (they dedup by id upstream),
+    // text duplicates still merge.
+    const excluded = reconcileLinearMessages(messages, { excludeTools: true });
+    const toolUses = excluded.filter((m) =>
+      Array.isArray((m.message as { content?: unknown })?.content),
+    );
+    const texts = excluded.filter(
+      (m) => typeof (m.message as { content?: unknown })?.content === "string",
+    );
+    expect(toolUses).toHaveLength(2);
+    expect(texts).toHaveLength(1);
+  });
+
   it("orders messages by timestamp for Codex's linear history", () => {
     const messages: Message[] = [
       {

@@ -89,6 +89,24 @@ function isReplayMessage(message: Message): boolean {
   return message.isReplay === true;
 }
 
+// A message that carries a tool_use or tool_result block. These dedup by a
+// deterministic id (Codex call_id) upstream in mergeMessages, so the
+// content+timestamp backstop is redundant for them; callers can opt to exclude
+// them so legitimately-recurring identical tool calls are never approx-merged.
+function isToolMessage(message: Message): boolean {
+  const content = getMessageContent(message);
+  if (!Array.isArray(content)) {
+    return false;
+  }
+  return content.some((block) => {
+    if (!block || typeof block !== "object") {
+      return false;
+    }
+    const type = (block as { type?: unknown }).type;
+    return type === "tool_use" || type === "tool_result";
+  });
+}
+
 function getAllowedTimestampDeltaMs(a: Message, b: Message): number {
   return isReplayMessage(a) || isReplayMessage(b)
     ? REPLAY_TIMESTAMP_WINDOW_MS
@@ -136,8 +154,15 @@ export function getMessageTimestampMs(message: Message): number | null {
 export function hasEquivalentJsonlMessage(
   existing: Message[],
   incoming: Message,
-  options?: { windowMs?: number; replayWindowMs?: number },
+  options?: {
+    windowMs?: number;
+    replayWindowMs?: number;
+    excludeTools?: boolean;
+  },
 ): boolean {
+  if (options?.excludeTools && isToolMessage(incoming)) {
+    return false;
+  }
   const incomingFingerprint = getSemanticFingerprint(incoming);
   const incomingTimestampMs = getMessageTimestampMs(incoming);
   if (!incomingFingerprint || incomingTimestampMs === null) {
@@ -183,11 +208,16 @@ interface IndexedMessage {
 
 export function reconcileLinearMessages(
   messages: Message[],
-  options?: { windowMs?: number; replayWindowMs?: number },
+  options?: {
+    windowMs?: number;
+    replayWindowMs?: number;
+    excludeTools?: boolean;
+  },
 ): Message[] {
   const windowMs = options?.windowMs ?? DEFAULT_TIMESTAMP_WINDOW_MS;
   const replayWindowMs = options?.replayWindowMs ?? REPLAY_TIMESTAMP_WINDOW_MS;
   const maxCandidateWindowMs = Math.max(windowMs, replayWindowMs);
+  const excludeTools = options?.excludeTools === true;
 
   const sorted = messages
     .map(
@@ -215,7 +245,11 @@ export function reconcileLinearMessages(
   for (const entry of sorted) {
     let merged = false;
 
-    if (entry.fingerprint && entry.timestampMs !== null) {
+    if (
+      entry.fingerprint &&
+      entry.timestampMs !== null &&
+      !(excludeTools && isToolMessage(entry.message))
+    ) {
       for (let i = kept.length - 1; i >= 0; i -= 1) {
         const candidate = kept[i];
         if (!candidate) {

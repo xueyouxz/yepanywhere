@@ -37,7 +37,13 @@ interrupted to deliver a queued steer is double-displayed."
    that fast, so this minimizes the real risk — silently merging two
    genuinely-distinct identical messages (the old 90s replay window made
    that risk large). Deterministic alignment carries the load; this only
-   catches the residue.
+   catches the residue. The optional capability `approxDedupExcludesTools`
+   (codex, codex-oss) removes tool_use/tool_result messages from this
+   backstop entirely: their uuids are deterministic (call_id), so the
+   backstop is redundant for them and would otherwise be the one place a
+   legitimately-repeated identical tool call could be wrongly merged. The
+   `excludeTools` option on both backstop functions implements this; OpenCode
+   leaves it off.
 
 ## OpenCode
 
@@ -117,7 +123,13 @@ is globally unique, so no turn scoping is needed:
   positional `codex-${index}-${ts}` uuid (the index still advances, so
   positional ids stay stable).
 - Contract test: `render-parity.test.ts` "aligns Codex tool-call uuids
-  across stream and durable sources" asserts uuid equality per `call_id`.
+  across stream and durable sources" asserts uuid equality per `call_id`,
+  and "dedups Codex tool messages by id … with the backstop off" proves the
+  ids carry tool dedup without `reconcileLinearMessages`.
+- Backstop excluded for tools: with the ids deterministic, the approx-dedup
+  backstop no longer runs over Codex tool messages
+  (`approxDedupExcludesTools`); it stays on only for the residual non-tool
+  messages. See the Two-layer remedy note above.
 
 ### Deferred: user-turn id alignment
 
