@@ -99,7 +99,6 @@ interface OpenCodeRuntimeState {
 }
 
 interface OpenCodeStreamState {
-  currentAssistantMessageId: string | null;
   messageRolesById: Map<string, "user" | "assistant">;
   partMessageIdsById: Map<string, string>;
   partTypesById: Map<string, string>;
@@ -866,7 +865,6 @@ export class OpenCodeProvider implements AgentProvider {
     const sseUrl = `${runtime.baseUrl}/event?directory=${encodeURIComponent(runtime.cwd)}`;
     const sseController = new AbortController();
     const streamState: OpenCodeStreamState = {
-      currentAssistantMessageId: null,
       messageRolesById: new Map(),
       partMessageIdsById: new Map(),
       partTypesById: new Map(),
@@ -980,10 +978,6 @@ export class OpenCodeProvider implements AgentProvider {
               if (sdkMessage.type === "assistant") {
                 if (streamState.usedPostBodyFallback) {
                   continue;
-                }
-                if ("uuid" in sdkMessage && sdkMessage.uuid) {
-                  streamState.currentAssistantMessageId =
-                    sdkMessage.uuid as string;
                 }
                 streamState.sawAssistantContent = true;
               }
@@ -1358,7 +1352,12 @@ export class OpenCodeProvider implements AgentProvider {
     return {
       type: "assistant",
       session_id: sessionId,
-      uuid: streamState.currentAssistantMessageId ?? part.messageId,
+      // Use the part's own OpenCode message id (== the durable message.id), so
+      // the streamed assistant uuid matches the persisted row and the client
+      // dedups by id instead of re-appending the backfilled copy. (Previously a
+      // carried-over "current" id could attribute a later message's parts to an
+      // earlier message, diverging from the durable id.)
+      uuid: part.messageId,
       message: {
         role: "assistant",
         content,
