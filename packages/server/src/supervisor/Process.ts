@@ -1593,7 +1593,14 @@ export class Process {
   async requestRecap(
     provider: AgentProvider,
     options?: { sinceMs?: number | null },
-  ): Promise<{ supported: boolean; emitted: boolean; reason?: string }> {
+  ): Promise<{
+    supported: boolean;
+    emitted: boolean;
+    reason?: string;
+    /** The recap text, when one was emitted — newer than any prior turn, so
+     *  callers may surface it as the session's current agent line. */
+    text?: string;
+  }> {
     if (this._recapMode === "off") {
       return {
         supported: true,
@@ -1645,7 +1652,12 @@ export class Process {
   private async generateAndEmitRecap(
     provider: AgentProvider,
     sinceMs: number | null,
-  ): Promise<{ supported: boolean; emitted: boolean; reason?: string }> {
+  ): Promise<{
+    supported: boolean;
+    emitted: boolean;
+    reason?: string;
+    text?: string;
+  }> {
     if (!provider.supportsRecaps || !provider.generateRecap) {
       return {
         supported: false,
@@ -1678,7 +1690,7 @@ export class Process {
         };
       }
       this.emitSyntheticSystemMessage("away_summary", text);
-      return { supported: true, emitted: true };
+      return { supported: true, emitted: true, text };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       const log = getLogger();

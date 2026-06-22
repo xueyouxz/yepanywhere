@@ -13368,6 +13368,35 @@ a.sidebar-nav-item {
   color: var(--text-muted);
 }
 
+/* Most recent agent turn, set off below the meta line (deliberate separation,
+   slightly unconventional). The server already trimmed it to its last lines
+   (the conclusion/question); the line-clamp only bounds visual rows when a long
+   line wraps. Shares the card's content width — the opening request drives the
+   width and this wraps within it. */
+.session-hovercard__reply {
+  display: flex;
+  gap: 0.375rem;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-color);
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.session-hovercard__reply-marker {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.session-hovercard__reply-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 
 /* Checkbox for multi-select */
 .session-list-item__checkbox {

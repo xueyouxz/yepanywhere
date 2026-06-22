@@ -48,6 +48,7 @@ import { cloneClaudeSession, cloneCodexSession } from "../sessions/fork.js";
 import { GeminiSessionReader } from "../sessions/gemini-reader.js";
 import { buildDag } from "../sessions/dag.js";
 import { GrokSessionReader } from "../sessions/grok-reader.js";
+import { extractLastAgentExcerpt } from "../sessions/agent-excerpt.js";
 import { normalizeSession } from "../sessions/normalization.js";
 import {
   type PaginationInfo,
@@ -2065,6 +2066,58 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
 
     return c.json(response);
   });
+
+  // POST /api/projects/:projectId/sessions/:sessionId/refresh-preview
+  // On-demand recompute of the hover-card recent-activity excerpt for a
+  // non-running session (its live state is otherwise only refreshed when the
+  // session is resumed). Fast reverse-scan of the JSONL, then push the result
+  // to lists/hovers via a session-updated event so the preview updates in
+  // place without flicker. See topics/session-hovercard-recent-activity.md.
+  routes.post(
+    "/projects/:projectId/sessions/:sessionId/refresh-preview",
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      const sessionId = c.req.param("sessionId");
+      if (!isUrlProjectId(projectId)) {
+        return c.json({ error: "Invalid project ID format" }, 400);
+      }
+      const project = await deps.scanner.getOrCreateProject(projectId);
+      if (!project) {
+        return c.json({ error: "Project not found" }, 404);
+      }
+      const metadataProvider = deps.sessionMetadataService?.getProvider(
+        sessionId,
+      ) as ProviderName | undefined;
+      // Claude uses the fast reverse-scan; every other provider goes through
+      // the cross-provider load + normalize, then a shared extractor on the
+      // uniform message form — so the preview is provider-independent.
+      const reader = deps.readerFactory(project);
+      let lastAgentText = reader.getLastAgentExcerpt
+        ? await reader.getLastAgentExcerpt(sessionId)
+        : undefined;
+      if (lastAgentText === undefined) {
+        const normalized = await loadRestartSourceSession(
+          project,
+          sessionId,
+          projectId as UrlProjectId,
+          metadataProvider,
+        );
+        if (normalized) {
+          lastAgentText = extractLastAgentExcerpt(normalized.messages);
+        }
+      }
+      if (lastAgentText !== undefined) {
+        deps.eventBus?.emit({
+          type: "session-updated",
+          sessionId,
+          projectId: projectId as UrlProjectId,
+          lastAgentText,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      return c.json({ lastAgentText: lastAgentText ?? null });
+    },
+  );
 
   // GET /api/projects/:projectId/sessions/:sessionId - Get session detail
   // Optional query params:

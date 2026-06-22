@@ -93,6 +93,8 @@ export interface GlobalSessionItem {
   initialPrompt?: string;
   /** SSH host alias for remote execution (undefined = local) */
   executor?: string;
+  /** Capped excerpt of the most recent regular agent turn (hover card). */
+  lastAgentText?: string;
 }
 
 /** Stats about all sessions (computed during full scan) */
@@ -442,6 +444,7 @@ export function createGlobalSessionsRoutes(deps: GlobalSessionsDeps): Hono {
           parentSessionId,
           initialPrompt: initialPrompt ?? undefined,
           executor,
+          lastAgentText: session.lastAgentText,
         });
       }
     }

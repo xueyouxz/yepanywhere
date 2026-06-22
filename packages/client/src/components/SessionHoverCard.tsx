@@ -12,6 +12,11 @@ import { SessionStatusBadge } from "./StatusBadge";
 const LINE_HEIGHT_PX = 19;
 const META_RESERVE_PX = 48;
 const PADDING_RESERVE_PX = 24;
+// Room held back from the opening-request clamp for the reply block (its lines
+// + divider/padding) so the most recent agent turn stays visible instead of the
+// request greedily eating the card. Only reserved when a reply is present, so
+// the no-reply case renders exactly as before.
+const REPLY_RESERVE_PX = 84;
 const GAP_PX = 4;
 const MARGIN_PX = 8;
 const CURSOR_OFFSET_PX = 14;
@@ -21,6 +26,13 @@ interface SessionHoverCardProps {
   anchor: { rowTop: number; rowBottom: number; cursorX: number };
   /** The full first user turn, shown turn-styled and line-clamped to fit. */
   prompt: string;
+  /**
+   * Capped excerpt of the most recent regular agent turn (already trimmed to
+   * its last lines server-side; "⚙ <tool>" when the latest turns are
+   * tool-only). Rendered as a reply block below the meta row; omitted when
+   * absent.
+   */
+  lastAgentText?: string;
   provider: ProviderName;
   model?: string;
   projectName?: string;
@@ -51,6 +63,7 @@ interface Placement {
 export function SessionHoverCard({
   anchor,
   prompt,
+  lastAgentText,
   provider,
   model,
   projectName,
@@ -96,13 +109,16 @@ export function SessionHoverCard({
       window.innerWidth - width - MARGIN_PX,
     );
     setPlacement({ top: Math.max(MARGIN_PX, top), left, maxHeight, loosened });
-  }, [anchor, prompt, model, projectName, ageLabel, status]);
+  }, [anchor, prompt, lastAgentText, model, projectName, ageLabel, status]);
 
   const maxLines = placement
     ? Math.max(
         1,
         Math.floor(
-          (placement.maxHeight - META_RESERVE_PX - PADDING_RESERVE_PX) /
+          (placement.maxHeight -
+            META_RESERVE_PX -
+            PADDING_RESERVE_PX -
+            (lastAgentText ? REPLY_RESERVE_PX : 0)) /
             LINE_HEIGHT_PX,
         ),
       )
@@ -150,6 +166,14 @@ export function SessionHoverCard({
           />
         )}
       </div>
+      {lastAgentText && (
+        <div className="session-hovercard__reply">
+          <span className="session-hovercard__reply-marker" aria-hidden="true">
+            ↳
+          </span>
+          <span className="session-hovercard__reply-text">{lastAgentText}</span>
+        </div>
+      )}
     </div>,
     document.body,
   );

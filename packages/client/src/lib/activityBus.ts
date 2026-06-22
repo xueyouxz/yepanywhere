@@ -105,6 +105,8 @@ export interface SessionUpdatedEvent {
   contextUsage?: ContextUsage;
   /** Resolved model name (e.g., "claude-sonnet-4-5-20250929") */
   model?: string;
+  /** Capped excerpt of the most recent regular agent turn (hover card). */
+  lastAgentText?: string;
   timestamp: string;
 }
 

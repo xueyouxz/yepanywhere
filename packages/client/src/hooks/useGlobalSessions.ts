@@ -347,6 +347,7 @@ export function useGlobalSessions(options: UseGlobalSessionsOptions = {}) {
           isStarred: event.session.isStarred,
           parentSessionId: event.session.parentSessionId,
           initialPrompt: event.session.initialPrompt,
+          lastAgentText: event.session.lastAgentText,
         };
 
         return [globalSession, ...prev];
@@ -415,6 +416,9 @@ export function useGlobalSessions(options: UseGlobalSessionsOptions = {}) {
             contextUsage: event.contextUsage,
           }),
           ...(event.model !== undefined && { model: event.model }),
+          ...(event.lastAgentText !== undefined && {
+            lastAgentText: event.lastAgentText,
+          }),
         };
       }),
     );

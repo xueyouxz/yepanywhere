@@ -748,8 +748,16 @@ export function useSession(
       // The SSE init message that normally carries these is discarded after
       // ~30s; stopped providers with static commands also rely on this payload.
       setSlashCommands(result.slashCommands?.map((c) => c.name) ?? []);
+
+      // Focusing a non-running session: its list/hover preview gets no live
+      // session-updated events, so recompute it once (the server pushes the
+      // result). Owned/external sessions are tracked live. See
+      // topics/session-hovercard-recent-activity.md.
+      if (result.status.owner === "none") {
+        void api.refreshSessionPreview(projectId, sessionId).catch(() => {});
+      }
     },
-    [applyServerModeUpdate],
+    [applyServerModeUpdate, projectId, sessionId],
   );
 
   // Handle initial load error

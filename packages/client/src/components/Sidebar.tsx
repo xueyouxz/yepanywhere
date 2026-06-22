@@ -550,7 +550,8 @@ export function Sidebar({
 
   // Single source of truth for a compact sidebar session row, so the six
   // section render sites (starred / recent / older, each with a hidden-dups
-  // sublist) stay identical. `createdAt` + `model` feed the hover card.
+  // sublist) stay identical. `createdAt` + `model` + `lastAgentText` feed the
+  // hover card.
   const renderCompactSession = (session: GlobalSessionItem) => (
     <SessionListItem
       key={session.id}
@@ -559,6 +560,7 @@ export function Sidebar({
       title={getSessionDisplayTitle(session)}
       fullTitle={session.fullTitle ?? getSessionDisplayTitle(session)}
       initialPrompt={session.initialPrompt}
+      lastAgentText={session.lastAgentText}
       provider={session.provider}
       model={session.model}
       createdAt={session.createdAt}

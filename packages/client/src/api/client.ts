@@ -108,6 +108,8 @@ export interface GlobalSessionItem {
   initialPrompt?: string;
   /** SSH host alias for remote execution (undefined = local) */
   executor?: string;
+  /** Capped excerpt of the most recent regular agent turn (hover card). */
+  lastAgentText?: string;
 }
 
 /** Stats about all sessions (computed during full scan on server) */
@@ -512,6 +514,17 @@ export const api = {
   getSessionMetadata: (projectId: string, sessionId: string) =>
     fetchJSON<SessionMetadataResponse>(
       `/projects/${projectId}/sessions/${sessionId}/metadata`,
+    ),
+
+  /**
+   * Recompute the hover-card recent-activity excerpt for a non-running session
+   * and push it to lists/hovers via a session-updated event. Fire-and-update:
+   * the refreshed value arrives through the activity stream, not this response.
+   */
+  refreshSessionPreview: (projectId: string, sessionId: string) =>
+    fetchJSON<{ lastAgentText: string | null }>(
+      `/projects/${projectId}/sessions/${sessionId}/refresh-preview`,
+      { method: "POST" },
     ),
 
   /**

@@ -2781,7 +2781,12 @@ export class Supervisor {
   async requestRecap(
     processId: string,
     options?: { sinceMs?: number | null },
-  ): Promise<{ supported: boolean; emitted: boolean; reason?: string }> {
+  ): Promise<{
+    supported: boolean;
+    emitted: boolean;
+    reason?: string;
+    text?: string;
+  }> {
     const process = this.processes.get(processId);
     if (!process) {
       return {
@@ -2800,7 +2805,22 @@ export class Supervisor {
       };
     }
 
-    return process.requestRecap(provider, options);
+    const result = await process.requestRecap(provider, options);
+    // A fresh recap is newer than any prior turn, so surface it as the
+    // session's current agent line in lists/hovers via the live update path
+    // (it is intentionally not persisted; the next real turn overwrites it
+    // from the JSONL). See topics/session-hovercard-recent-activity.md.
+    if (result.emitted && result.text && this.eventBus) {
+      const event: SessionUpdatedEvent = {
+        type: "session-updated",
+        sessionId: process.sessionId,
+        projectId: process.projectId,
+        lastAgentText: result.text,
+        timestamp: new Date().toISOString(),
+      };
+      this.eventBus.emit(event);
+    }
+    return result;
   }
 
   private async interruptProcessWithTimeout(
@@ -3343,6 +3363,7 @@ export class Supervisor {
       updatedAt: summary.updatedAt,
       contextUsage: summary.contextUsage,
       model: summary.model,
+      lastAgentText: summary.lastAgentText,
       timestamp: new Date().toISOString(),
     };
     this.eventBus.emit(event);

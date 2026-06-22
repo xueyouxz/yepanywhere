@@ -362,6 +362,8 @@ export interface AppSessionSummary {
   parentSessionId?: string;
   /** Initial prompt text accepted by YA for new-session recovery/copy. */
   initialPrompt?: string;
+  /** Capped excerpt of the most recent regular agent turn (hover card). */
+  lastAgentText?: string;
   contextUsage?: ContextUsage;
   /** SSH host alias for remote execution (undefined = local) */
   executor?: string;

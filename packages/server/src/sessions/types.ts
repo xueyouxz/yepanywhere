@@ -35,6 +35,14 @@ export interface ISessionReader {
   listSessions(projectId: UrlProjectId): Promise<SessionSummary[]>;
 
   /**
+   * Fast, on-demand recompute of the hover-card recent-activity excerpt
+   * (last regular agent turn) for one session, without a full parse. Optional:
+   * providers that do not populate `SessionSummary.lastAgentText` omit it.
+   * See topics/session-hovercard-recent-activity.md.
+   */
+  getLastAgentExcerpt?(sessionId: string): Promise<string | undefined>;
+
+  /**
    * Get summary metadata for a single session.
    */
   getSessionSummary(

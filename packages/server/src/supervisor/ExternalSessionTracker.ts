@@ -151,6 +151,7 @@ export class ExternalSessionTracker {
                 updatedAt: summary.updatedAt,
                 contextUsage: summary.contextUsage,
                 model: summary.model,
+                lastAgentText: summary.lastAgentText,
                 timestamp: now,
               };
               this.eventBus.emit(event);
@@ -203,6 +204,7 @@ export class ExternalSessionTracker {
               updatedAt: summary.updatedAt,
               contextUsage: summary.contextUsage,
               model: summary.model,
+              lastAgentText: summary.lastAgentText,
               timestamp: now,
             };
             this.eventBus.emit(event);

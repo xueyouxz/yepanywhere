@@ -105,6 +105,15 @@ export interface SessionSummary {
   provider: ProviderName;
   /** Model used for this session (extracted from JSONL, e.g. "claude-opus-4-5-20251101") */
   model?: string;
+  /**
+   * Excerpt of the most recent regular agent turn (last assistant message with
+   * prose), capped to the last few lines. Shown in the row hover card so a
+   * glance answers "where did this land?". A "⚙ <tool>" label when the latest
+   * turns are tool-only. Undefined when the provider's reader does not populate
+   * it yet, or there is no agent text. See
+   * topics/session-hovercard-recent-activity.md.
+   */
+  lastAgentText?: string;
   /** Launcher identifier from session metadata (e.g. "Codex Desktop", "yep-anywhere") */
   originator?: string;
   /** CLI version from session metadata (e.g. "0.101.0") */

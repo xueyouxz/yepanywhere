@@ -48,6 +48,8 @@ export interface CachedSessionSummary {
   provider: ProviderName;
   /** Model used for this session (e.g. "gemini-2.5-pro") */
   model?: string;
+  /** Capped excerpt of the most recent regular agent turn (hover card). */
+  lastAgentText?: string;
 }
 
 export interface SessionIndexState {
@@ -487,6 +489,7 @@ export class SessionIndexService implements ISessionIndexService {
         contextUsage: cached.contextUsage,
         provider: cached.provider ?? DEFAULT_PROVIDER,
         model: cached.model,
+        lastAgentText: cached.lastAgentText,
       });
     }
 
@@ -514,6 +517,7 @@ export class SessionIndexService implements ISessionIndexService {
       fileMtime: mtime,
       provider: summary.provider,
       model: summary.model,
+      lastAgentText: summary.lastAgentText,
     };
   }
 
@@ -775,6 +779,7 @@ export class SessionIndexService implements ISessionIndexService {
             contextUsage: cached.contextUsage,
             provider: cached.provider ?? DEFAULT_PROVIDER,
             model: cached.model,
+            lastAgentText: cached.lastAgentText,
           });
         } else {
           cacheMisses.push({ sessionId, mtime, size });

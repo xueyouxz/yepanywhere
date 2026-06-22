@@ -1197,6 +1197,10 @@ describe("Process", () => {
       );
 
       expect(result).toMatchObject({ supported: true, emitted: true });
+      // The emitted recap text is returned so the Supervisor can surface it as
+      // the session's current agent line (hover card). See
+      // topics/session-hovercard-recent-activity.md.
+      expect(result.text).toBe("after");
       expect(generateRecap).toHaveBeenCalledWith(["after"], {
         model: "cheapest",
       });

@@ -33,6 +33,8 @@ interface SessionListItemProps {
   // Optional display data
   fullTitle?: string | null;
   initialPrompt?: string | null;
+  /** Capped excerpt of the most recent regular agent turn, for the hover card. */
+  lastAgentText?: string | null;
   projectName?: string;
   updatedAt?: string;
   hasUnread?: boolean;
@@ -130,6 +132,7 @@ export function SessionListItem({
   // Optional display data
   fullTitle,
   initialPrompt,
+  lastAgentText,
   projectName,
   updatedAt,
   hasUnread: hasUnreadProp,
@@ -191,16 +194,25 @@ export function SessionListItem({
   const renameInputRef = useRef<HTMLInputElement>(null);
   const isSavingRef = useRef(false);
 
-  // Compact-mode replacement tooltip: a rich hover panel (full first user turn
-  // + status line). The panel (SessionHoverCard) self-positions from this row
-  // geometry + cursor x — below the row and right of the cursor, flipping above
-  // when it would not fit below.
+  // Replacement tooltip for every list surface (sidebar compact + all-sessions
+  // / search cards): a rich hover panel (full first user turn, status line, and
+  // the most recent agent turn). The panel (SessionHoverCard) self-positions
+  // from this row geometry + cursor x — below the row and right of the cursor,
+  // flipping above when it would not fit below.
   const liRef = useRef<HTMLLIElement>(null);
   const [previewPos, setPreviewPos] = useState<{
     rowTop: number;
     rowBottom: number;
     cursorX: number;
   } | null>(null);
+  // Idle (non-running) sessions get no live session-updated events, so their
+  // recent-activity preview can be stale. On hover we recompute it once on the
+  // server (debounced), which pushes a session-updated that refreshes the row
+  // in place — no flicker. Owned/external sessions already update live.
+  const previewRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const previewRefreshedId = useRef<string | null>(null);
 
   // Computed values with optimistic fallback
   const isStarred = localIsStarred ?? isStarredProp;
@@ -393,16 +405,31 @@ export function SessionListItem({
       ? `est. ${briefAge}`
       : null;
 
-  // Hover card only makes sense in the compact (sidebar) row, and only when we
-  // have a provider to badge.
-  const showCompactPreview = mode === "compact" && !!provider;
+  // Hover card fires on every list surface (sidebar compact + all-sessions /
+  // search cards); it only needs a provider to badge.
+  const showHoverCard = !!provider;
 
-  // The full first user turn shown in the replacement tooltip.
+  // The full first user turn (body) and the most recent agent turn (reply)
+  // shown in the replacement tooltip.
   const hoverPrompt = (initialPrompt || fullTitle || displayTitle || "").trim();
+  const hoverLastAgent = lastAgentText?.trim() || undefined;
+
+  // Recompute an idle session's stale preview once on the server; the result
+  // arrives via the session-updated activity event (not this call), updating
+  // the row in place. Owned/external sessions are tracked live, so skip them.
+  const refreshIdlePreview = useCallback(() => {
+    if (status?.owner === "self" || status?.owner === "external") return;
+    if (previewRefreshedId.current === sessionId) return;
+    previewRefreshedId.current = sessionId;
+    void api.refreshSessionPreview(projectId, sessionId).catch(() => {
+      // Allow a later hover to retry.
+      previewRefreshedId.current = null;
+    });
+  }, [status?.owner, projectId, sessionId]);
 
   const handlePreviewEnter = useCallback(
     (e: React.MouseEvent) => {
-      if (!showCompactPreview) return;
+      if (!showHoverCard) return;
       const rect = liRef.current?.getBoundingClientRect();
       if (!rect) return;
       setPreviewPos({
@@ -410,12 +437,28 @@ export function SessionListItem({
         rowBottom: rect.bottom,
         cursorX: e.clientX,
       });
+      // Debounced so a quick sweep across rows does not fire a refresh per row.
+      if (previewRefreshTimer.current) clearTimeout(previewRefreshTimer.current);
+      previewRefreshTimer.current = setTimeout(refreshIdlePreview, 200);
     },
-    [showCompactPreview],
+    [showHoverCard, refreshIdlePreview],
   );
 
   const handlePreviewLeave = useCallback(() => {
     setPreviewPos(null);
+    if (previewRefreshTimer.current) {
+      clearTimeout(previewRefreshTimer.current);
+      previewRefreshTimer.current = null;
+    }
+  }, []);
+
+  // Clear the debounce timer if the row unmounts mid-hover.
+  useEffect(() => {
+    return () => {
+      if (previewRefreshTimer.current) {
+        clearTimeout(previewRefreshTimer.current);
+      }
+    };
   }, []);
 
   // A fixed card would drift if the sidebar scrolls under it; clear on any
@@ -545,8 +588,8 @@ export function SessionListItem({
     <li
       ref={liRef}
       className={liClasses}
-      onMouseEnter={showCompactPreview ? handlePreviewEnter : undefined}
-      onMouseLeave={showCompactPreview ? handlePreviewLeave : undefined}
+      onMouseEnter={showHoverCard ? handlePreviewEnter : undefined}
+      onMouseLeave={showHoverCard ? handlePreviewLeave : undefined}
     >
       {/* Checkbox for multi-select (only shown when onSelect is provided) */}
       {onSelect && (
@@ -578,7 +621,7 @@ export function SessionListItem({
           onMouseDown={handleSessionMouseDown}
           onAuxClick={handleSessionAuxClick}
           title={
-            showCompactPreview ? undefined : fullTitle || displayTitle
+            showHoverCard ? undefined : fullTitle || displayTitle
           }
           className="session-list-item__link"
         >
@@ -749,10 +792,11 @@ export function SessionListItem({
         />
       )}
 
-      {showCompactPreview && provider && previewPos && (
+      {showHoverCard && provider && previewPos && (
         <SessionHoverCard
           anchor={previewPos}
           prompt={hoverPrompt}
+          lastAgentText={hoverLastAgent}
           provider={provider}
           model={model}
           projectName={projectName}
