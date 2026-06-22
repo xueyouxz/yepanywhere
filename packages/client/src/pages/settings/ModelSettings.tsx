@@ -42,6 +42,7 @@ import {
   FilterDropdown,
   type FilterOption,
 } from "../../components/FilterDropdown";
+import { ProviderBadge } from "../../components/ProviderBadge";
 import { ThinkingControlsPanel } from "../../components/ThinkingControls";
 
 const RECAP_MODE_ORDER: RecapMode[] = ["off", "native", "side-session"];
@@ -449,6 +450,11 @@ export function ModelSettings() {
       value: option.id,
       label,
       description: option.description ?? descriptionParts.join(" · "),
+      // Same provider → route → model badge as the session header/tooltip, so
+      // the route (e.g. pi's "copilot") is visible alongside the model name.
+      icon: selectedProvider ? (
+        <ProviderBadge provider={selectedProvider.name} model={option.id} />
+      ) : undefined,
     };
   });
   const helperSideModelOptions: FilterOption<string>[] = [

@@ -9,6 +9,7 @@ const providerGlyphMap: Record<string, string> = {
   "gemini-acp": "✦",
   grok: "Gk",
   opencode: "OC",
+  pi: "pi",
 };
 
 type ModelGlyphMatch = {
@@ -332,4 +333,3 @@ export function getModelIndicatorModelLabel(
     .filter((part): part is string => !!part && part.length > 0)
     .join(" ");
 }
-

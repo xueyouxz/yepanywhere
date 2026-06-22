@@ -106,6 +106,7 @@ import { shortenPath } from "../lib/text";
 import { getPermissionModeOptions } from "../lib/permissionModes";
 import type { PermissionMode, Project } from "../types";
 import { FilterDropdown, type FilterOption } from "./FilterDropdown";
+import { ProviderBadge } from "./ProviderBadge";
 import { SpeechControlMenu } from "./SpeechControlMenu";
 import { ThinkingControlsPanel } from "./ThinkingControls";
 import {
@@ -414,8 +415,7 @@ export function NewSessionForm({
     useRef<PendingTextareaSelectionRestore | null>(null);
   const hasInitializedDefaultsRef = useRef(false);
   const hasUserCustomizedDefaultsRef = useRef(false);
-  const preferredPromptSuggestionModeRef =
-    useRef<PromptSuggestionMode>("off");
+  const preferredPromptSuggestionModeRef = useRef<PromptSuggestionMode>("off");
   const lastSyncedProjectIdRef = useRef<string | null>(null);
 
   // Thinking toggle state
@@ -892,9 +892,19 @@ export function NewSessionForm({
         if (parts.length > 0) description = parts.join(" · ");
       }
 
-      return { value: model.id, label, description };
+      return {
+        value: model.id,
+        label,
+        description,
+        // Reuse the session-header/tooltip badge so the model's route (e.g.
+        // pi's "copilot") is visible in the picker, in the same provider →
+        // route → model order the badge already establishes.
+        icon: selectedProvider ? (
+          <ProviderBadge provider={selectedProvider} model={model.id} />
+        ) : undefined,
+      };
     });
-  }, [availableModels]);
+  }, [availableModels, selectedProvider]);
 
   // Handle model selection from FilterDropdown
   const handleModelSelect = useCallback((selected: string[]) => {
@@ -1116,7 +1126,10 @@ export function NewSessionForm({
       const uploadedFiles: UploadedFile[] = [];
 
       // Get model and thinking settings
-      const thinking = toThinkingOption(effectiveThinkingMode, effectiveEffortLevel);
+      const thinking = toThinkingOption(
+        effectiveThinkingMode,
+        effectiveEffortLevel,
+      );
       // Display preference for thinking rows; sent for compatibility while the
       // server requests provider summaries independently.
       const showThinking = getShowThinkingSetting();
@@ -1607,7 +1620,8 @@ export function NewSessionForm({
   const handleVoiceTranscript = useCallback(
     (transcript: string, metadata?: SpeechTranscriptionResultMetadata) => {
       const speechRange = metadata?.speechTargetId
-        ? (speechInsertionRangesRef.current.get(metadata.speechTargetId) ?? null)
+        ? (speechInsertionRangesRef.current.get(metadata.speechTargetId) ??
+          null)
         : speechInsertionRangeRef.current;
       const delayMs = metadata?.smartTurnCommand
         ? 0
@@ -1847,8 +1861,10 @@ export function NewSessionForm({
               clearPendingSpeechFinal();
               if (speechInsertionRangesRef.current.size > 0) {
                 const nextRanges = new Map<string, SpeechInsertionRange>();
-                for (const [targetId, range] of speechInsertionRangesRef
-                  .current) {
+                for (const [
+                  targetId,
+                  range,
+                ] of speechInsertionRangesRef.current) {
                   nextRanges.set(
                     targetId,
                     clearSpeechInsertionRangeReplacement(

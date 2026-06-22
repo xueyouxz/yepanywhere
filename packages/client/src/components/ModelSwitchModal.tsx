@@ -23,6 +23,7 @@ import {
   getThinkingModeFromProcess,
   normalizeEffortLevel,
 } from "../lib/modelConfigIndicator";
+import { ProviderBadge } from "./ProviderBadge";
 import { Modal } from "./ui/Modal";
 
 interface ModelSwitchModalProps {
@@ -544,8 +545,16 @@ export function ModelSwitchModal({
                           disabled={switching}
                         >
                           <span className="model-switch-item-main">
-                            <span className="model-switch-name">
-                              {model.name}
+                            <span className="model-switch-name-row">
+                              <span className="model-switch-name">
+                                {model.name}
+                              </span>
+                              {provider && (
+                                <ProviderBadge
+                                  provider={provider}
+                                  model={model.id}
+                                />
+                              )}
                             </span>
                             {model.description && (
                               <span className="model-switch-description">
