@@ -35,6 +35,7 @@ import {
   normalizeCodexToolOutputWithContext,
   parseCodexToolArguments,
 } from "../codex/normalization.js";
+import { normalizeGeminiTool } from "../sdk/providers/gemini-tools.js";
 import { normalizeOpenCodeTool } from "../sdk/providers/opencode-tools.js";
 import type { ContentBlock, Message, Session } from "../supervisor/types.js";
 import { collectVisibleClaudeEntries } from "./claude-messages.js";
@@ -1202,11 +1203,15 @@ function convertGeminiMessages(
 
       if (assistantMsg.toolCalls) {
         for (const toolCall of assistantMsg.toolCalls) {
+          const { name, input } = normalizeGeminiTool(
+            toolCall.name,
+            toolCall.args,
+          );
           content.push({
             type: "tool_use",
             id: toolCall.id,
-            name: toolCall.name,
-            input: toolCall.args,
+            name,
+            input,
           });
         }
       }

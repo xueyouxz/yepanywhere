@@ -30,6 +30,7 @@ import type {
   SDKMessage,
 } from "../types.js";
 import { PiRpcClient } from "./pi-rpc-client.js";
+import { normalizePiTool } from "./pi-tools.js";
 import type {
   AgentProvider,
   AgentSession,
@@ -88,25 +89,6 @@ interface SdkUsage {
 export interface PiProviderConfig {
   /** Path to the pi binary (auto-detected if not specified). */
   piPath?: string;
-}
-
-/**
- * pi built-in lower-case tool names → YA canonical names so YA's rich tool
- * renderers engage. Unknown tools pass through unchanged (generic rendering).
- * Tool-argument field normalization (e.g. pi `path` → Claude `file_path`) is a
- * documented follow-up; names alone get most of the renderer benefit.
- */
-const PI_TOOL_NAME_MAP: Record<string, string> = {
-  read: "Read",
-  write: "Write",
-  edit: "Edit",
-  bash: "Bash",
-  grep: "Grep",
-  ls: "LS",
-};
-
-function normalizePiToolName(name: string): string {
-  return PI_TOOL_NAME_MAP[name] ?? name;
 }
 
 /** YA EffortLevel → pi ThinkingLevel (pi has no "max"; map it to "xhigh"). */
@@ -673,6 +655,7 @@ export class PiProvider implements AgentProvider {
       case "tool_execution_start": {
         const toolName = String(event.toolName ?? "tool");
         const id = String(event.toolCallId ?? "");
+        const { name, input } = normalizePiTool(toolName, event.args ?? {});
         return [
           {
             type: "assistant",
@@ -683,8 +666,8 @@ export class PiProvider implements AgentProvider {
                 {
                   type: "tool_use",
                   id,
-                  name: normalizePiToolName(toolName),
-                  input: event.args ?? {},
+                  name,
+                  input,
                 },
               ],
             },

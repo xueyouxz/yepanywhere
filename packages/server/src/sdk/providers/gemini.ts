@@ -23,6 +23,7 @@ import type {
   ModelInfo,
 } from "@yep-anywhere/shared";
 import { whichCommand } from "../cli-detection.js";
+import { normalizeGeminiTool } from "./gemini-tools.js";
 const execAsync = promisify(exec);
 
 /** Standard Gemini models (always available) */
@@ -488,6 +489,10 @@ export class GeminiProvider implements AgentProvider {
 
       case "tool_use": {
         const toolUse = event as GeminiToolUseEvent;
+        const { name, input } = normalizeGeminiTool(
+          toolUse.tool_name,
+          toolUse.parameters ?? {},
+        );
         return {
           type: "assistant",
           session_id: sessionId,
@@ -498,8 +503,8 @@ export class GeminiProvider implements AgentProvider {
               {
                 type: "tool_use",
                 id: toolUse.tool_id,
-                name: toolUse.tool_name,
-                input: toolUse.parameters ?? {},
+                name,
+                input,
               },
             ],
           },
