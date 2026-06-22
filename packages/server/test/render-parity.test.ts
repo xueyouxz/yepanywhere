@@ -797,6 +797,62 @@ describe("Render Parity Harness", () => {
     }
   });
 
+  it("dedups Codex tool messages by id across interrupt/steer reconnect with the backstop off", () => {
+    // Reproduce the reported defect's trigger: a live turn streams, then an
+    // interrupt/steer forces a durable backfill merge of the now-persisted
+    // rows. We merge WITHOUT reconcileLinearMessages (the approx-dedup
+    // backstop) to prove the deterministic call_id uuids carry tool dedup on
+    // their own. Codex messages have no parentUuid, so pruneSupersededSdkSiblings
+    // is inert here — uuid match is the only thing that can dedup tools.
+    const durable = normalizeSession(
+      buildLoadedCodexSession(codexPersistedEntries()),
+    ).messages as unknown as ClientMessage[];
+    const stream = codexStreamMessages() as unknown as ClientMessage[];
+
+    let state: ClientMessage[] = [];
+    for (const message of stream) {
+      state = mergeStreamMessage(state, message).messages;
+    }
+    state = mergeJSONLMessages(state, durable).messages;
+
+    const toolUseCount = new Map<string, number>();
+    const toolResultCount = new Map<string, number>();
+    let summaryTextCount = 0;
+    for (const msg of state) {
+      const message = (msg as { message?: { content?: unknown } }).message;
+      const content = message?.content ?? (msg as { content?: unknown }).content;
+      if (typeof content === "string") {
+        if (content.includes("const x = 1;")) summaryTextCount += 1;
+        continue;
+      }
+      if (!Array.isArray(content)) continue;
+      for (const block of content as Array<Record<string, unknown>>) {
+        if (block?.type === "tool_use") {
+          const id = block.id as string;
+          toolUseCount.set(id, (toolUseCount.get(id) ?? 0) + 1);
+        } else if (block?.type === "tool_result") {
+          const id = block.tool_use_id as string;
+          toolResultCount.set(id, (toolResultCount.get(id) ?? 0) + 1);
+        } else if (block?.type === "text") {
+          if ((block.text as string)?.includes("const x = 1;"))
+            summaryTextCount += 1;
+        }
+      }
+    }
+
+    // Tool calls/results: deterministic call_id uuids dedup them to one each,
+    // no backstop required.
+    for (const callId of ["call-read", "call-grep", "call-bash", "call-edit"]) {
+      expect(toolUseCount.get(callId)).toBe(1);
+      expect(toolResultCount.get(callId)).toBe(1);
+    }
+
+    // Assistant text has no shared id (live counter vs durable positional), so
+    // it still double-displays without the backstop — confirming the backstop
+    // must remain for non-tool messages.
+    expect(summaryTextCount).toBe(2);
+  });
+
   it("keeps Claude stream and persisted rendering equivalent", async () => {
     const persisted = await runPersistedPipeline(
       buildLoadedClaudeSession(CLAUDE_FIXTURE),
