@@ -3,8 +3,8 @@ import { type PaginationInfo, api } from "../api/client";
 import {
   getMessageTimestampMs,
   hasEquivalentJsonlMessage,
-  reconcileCodexLinearMessages,
-} from "../lib/codexLinearMessages";
+  reconcileLinearMessages,
+} from "../lib/linearMessageDedup";
 import {
   findMessageIndexById,
   getMessageId,
@@ -183,8 +183,8 @@ function writeSessionLoadCache(
   );
 }
 
-function isCodexProvider(provider?: string): boolean {
-  return provider === "codex" || provider === "codex-oss";
+function usesApproxMessageDedup(provider?: string): boolean {
+  return getProvider(provider).capabilities.needsApproxMessageDedup;
 }
 
 /**
@@ -348,7 +348,7 @@ export function useSessionMessages(
       const provider = providerRef.current;
       const isReplay = incoming.isReplay === true;
       const shouldApplyReplayDedupe =
-        (fromBufferedReplay || isReplay) && isCodexProvider(provider);
+        (fromBufferedReplay || isReplay) && usesApproxMessageDedup(provider);
       const incomingTimestampMs = getMessageTimestampMs(incoming);
       const isPersistedReplay =
         isReplay &&
@@ -377,8 +377,8 @@ export function useSessionMessages(
         }
 
         const result = mergeStreamMessage(prev, incoming);
-        return isCodexProvider(provider)
-          ? reconcileCodexLinearMessages(result.messages)
+        return usesApproxMessageDedup(provider)
+          ? reconcileLinearMessages(result.messages)
           : result.messages;
       });
     },
@@ -512,12 +512,12 @@ export function useSessionMessages(
                 skipDagOrdering: !getProvider(data.session.provider)
                   .capabilities.supportsDag,
               });
-              return isCodexProvider(data.session.provider)
-                ? reconcileCodexLinearMessages(result.messages)
+              return usesApproxMessageDedup(data.session.provider)
+                ? reconcileLinearMessages(result.messages)
                 : result.messages;
             })()
-          : isCodexProvider(data.session.provider)
-            ? reconcileCodexLinearMessages(taggedMessages)
+          : usesApproxMessageDedup(data.session.provider)
+            ? reconcileLinearMessages(taggedMessages)
             : taggedMessages;
         setMessages(loadedMessages);
         setPagination(data.pagination ?? warmLoad?.pagination);
@@ -698,8 +698,8 @@ export function useSessionMessages(
               skipDagOrdering: !getProvider(data.session.provider).capabilities
                 .supportsDag,
             });
-            return isCodexProvider(data.session.provider)
-              ? reconcileCodexLinearMessages(result.messages)
+            return usesApproxMessageDedup(data.session.provider)
+              ? reconcileLinearMessages(result.messages)
               : result.messages;
           });
         }
@@ -747,8 +747,8 @@ export function useSessionMessages(
         }));
         updatePersistedTimestampWatermark(taggedOlder);
         const combined = [...taggedOlder, ...prev];
-        return isCodexProvider(data.session.provider)
-          ? reconcileCodexLinearMessages(combined)
+        return usesApproxMessageDedup(data.session.provider)
+          ? reconcileLinearMessages(combined)
           : combined;
       });
       setPagination(data.pagination);

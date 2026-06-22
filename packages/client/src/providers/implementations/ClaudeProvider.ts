@@ -11,6 +11,7 @@ export class ClaudeProvider implements Provider {
   readonly capabilities: ProviderCapabilities = {
     supportsDag: true,
     supportsCloning: true,
+    needsApproxMessageDedup: false,
   };
 
   readonly metadata: ProviderMetadata = {

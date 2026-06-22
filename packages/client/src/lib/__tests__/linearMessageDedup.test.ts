@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { Message } from "../../types";
 import {
   hasEquivalentJsonlMessage,
-  reconcileCodexLinearMessages,
-} from "../codexLinearMessages";
+  reconcileLinearMessages,
+} from "../linearMessageDedup";
 
 describe("hasEquivalentJsonlMessage", () => {
   it("requires matching content and close timestamps", () => {
@@ -38,12 +38,12 @@ describe("hasEquivalentJsonlMessage", () => {
     ).toBe(false);
   });
 
-  it("allows replay messages to match persisted jsonl within a wider overlap window", () => {
+  it("uses the same tightened window for replay (no wide reconnect window)", () => {
     const existing: Message[] = [
       {
         uuid: "jsonl-1",
         type: "assistant",
-        timestamp: "2026-03-09T10:00:45.000Z",
+        timestamp: "2026-03-09T10:00:00.000Z",
         _source: "jsonl",
         message: {
           role: "assistant",
@@ -53,11 +53,12 @@ describe("hasEquivalentJsonlMessage", () => {
       },
     ];
 
+    // Within the tight window: a replay copy still matches its persisted row.
     expect(
       hasEquivalentJsonlMessage(existing, {
-        uuid: "sdk-replay-1",
+        uuid: "sdk-replay-near",
         type: "assistant",
-        timestamp: "2026-03-09T10:00:00.000Z",
+        timestamp: "2026-03-09T10:00:01.500Z",
         _source: "sdk",
         isReplay: true,
         message: {
@@ -67,10 +68,28 @@ describe("hasEquivalentJsonlMessage", () => {
         },
       }),
     ).toBe(true);
+
+    // Beyond it: no longer matched on content alone. The old 90s window risked
+    // false-merging two genuinely distinct identical messages; deterministic id
+    // matching now covers wide reconnect gaps instead.
+    expect(
+      hasEquivalentJsonlMessage(existing, {
+        uuid: "sdk-replay-far",
+        type: "assistant",
+        timestamp: "2026-03-09T10:00:45.000Z",
+        _source: "sdk",
+        isReplay: true,
+        message: {
+          role: "assistant",
+          content:
+            "There's one small TypeScript widening issue in the new helper.",
+        },
+      }),
+    ).toBe(false);
   });
 });
 
-describe("reconcileCodexLinearMessages", () => {
+describe("reconcileLinearMessages", () => {
   it("merges sdk/jsonl duplicates and prefers jsonl", () => {
     const messages: Message[] = [
       {
@@ -89,7 +108,7 @@ describe("reconcileCodexLinearMessages", () => {
       },
     ];
 
-    const result = reconcileCodexLinearMessages(messages);
+    const result = reconcileLinearMessages(messages);
 
     expect(result).toHaveLength(1);
     expect(result[0]?._source).toBe("jsonl");
@@ -122,7 +141,7 @@ describe("reconcileCodexLinearMessages", () => {
       },
     ];
 
-    const result = reconcileCodexLinearMessages(messages);
+    const result = reconcileLinearMessages(messages);
 
     expect(result.map((message) => message.uuid)).toEqual([
       "early",
@@ -149,7 +168,7 @@ describe("reconcileCodexLinearMessages", () => {
       },
     ];
 
-    const result = reconcileCodexLinearMessages(messages);
+    const result = reconcileLinearMessages(messages);
 
     expect(result).toHaveLength(2);
   });
@@ -172,7 +191,7 @@ describe("reconcileCodexLinearMessages", () => {
       },
     ];
 
-    const result = reconcileCodexLinearMessages(messages);
+    const result = reconcileLinearMessages(messages);
 
     expect(result).toHaveLength(1);
     expect(result[0]?.uuid).toBe("sdk-2");
@@ -196,12 +215,46 @@ describe("reconcileCodexLinearMessages", () => {
       },
     ];
 
-    const result = reconcileCodexLinearMessages(messages);
+    const result = reconcileLinearMessages(messages);
 
     expect(result).toHaveLength(2);
   });
 
-  it("merges replay/jsonl duplicates across a larger reconnect overlap window", () => {
+  it("merges replay/jsonl duplicates within the tightened window", () => {
+    const messages: Message[] = [
+      {
+        uuid: "sdk-replay-1",
+        type: "assistant",
+        timestamp: "2026-03-09T10:00:00.000Z",
+        _source: "sdk",
+        isReplay: true,
+        message: {
+          role: "assistant",
+          content:
+            "There's one small TypeScript widening issue in the new helper.",
+        },
+      },
+      {
+        uuid: "jsonl-1",
+        type: "assistant",
+        timestamp: "2026-03-09T10:00:01.000Z",
+        _source: "jsonl",
+        message: {
+          role: "assistant",
+          content:
+            "There's one small TypeScript widening issue in the new helper.",
+        },
+      },
+    ];
+
+    const result = reconcileLinearMessages(messages);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?._source).toBe("jsonl");
+    expect(result[0]?.uuid).toBe("jsonl-1");
+  });
+
+  it("does not merge content-identical messages beyond the tightened window", () => {
     const messages: Message[] = [
       {
         uuid: "sdk-replay-1",
@@ -228,10 +281,8 @@ describe("reconcileCodexLinearMessages", () => {
       },
     ];
 
-    const result = reconcileCodexLinearMessages(messages);
+    const result = reconcileLinearMessages(messages);
 
-    expect(result).toHaveLength(1);
-    expect(result[0]?._source).toBe("jsonl");
-    expect(result[0]?.uuid).toBe("jsonl-1");
+    expect(result).toHaveLength(2);
   });
 });

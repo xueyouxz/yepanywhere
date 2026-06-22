@@ -1,8 +1,13 @@
 import type { Message } from "../types";
 import { getMessageContent, mergeMessage } from "./mergeMessages";
 
-const DEFAULT_TIMESTAMP_WINDOW_MS = 3000;
-const REPLAY_TIMESTAMP_WINDOW_MS = 90_000;
+// A human does not send two semantically identical turns within this window,
+// so it is safe to treat same-fingerprint messages this close in time as the
+// same message (a stream copy and its durable copy). Deliberately tight to
+// minimize false merges; deterministic id matching (where available) carries
+// the real load, this is only the backstop.
+const DEFAULT_TIMESTAMP_WINDOW_MS = 2000;
+const REPLAY_TIMESTAMP_WINDOW_MS = 2000;
 const MAX_SCAN_MESSAGES = 400;
 
 const semanticFingerprintCache = new WeakMap<Message, string | null>();
@@ -176,7 +181,7 @@ interface IndexedMessage {
   fingerprint: string | null;
 }
 
-export function reconcileCodexLinearMessages(
+export function reconcileLinearMessages(
   messages: Message[],
   options?: { windowMs?: number; replayWindowMs?: number },
 ): Message[] {

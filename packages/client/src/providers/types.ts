@@ -14,6 +14,14 @@ export interface ProviderCapabilities {
    * Whether the provider supports cloning sessions.
    */
   supportsCloning: boolean;
+
+  /**
+   * Whether the provider's live-stream message ids can diverge from its durable
+   * (JSONL/DB) ids, so a backfill merge can append duplicates. When true, the
+   * client reconciles stream-vs-durable copies by content+timestamp as a
+   * backstop. Providers whose ids match deterministically leave this false.
+   */
+  needsApproxMessageDedup: boolean;
 }
 
 /**

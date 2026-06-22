@@ -42,3 +42,4 @@
 - mic-button-speech-ui - Mic button speech insertion, spoken commands, and streaming/batch composer behavior.
 - prompt-cache-keepalive - Open-client-only provider prompt-cache warming and cost/activity bounds.
 - session-list-display - Session list/sidebar badges, model glyph mapping, and the hover tooltip card.
+- stream-durable-id-dedup - Stream-vs-durable message id alignment and the approx-dedup backstop (codex/opencode steer double-render).

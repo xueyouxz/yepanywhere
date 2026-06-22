@@ -38,6 +38,7 @@ class GenericProvider implements Provider {
   readonly capabilities = {
     supportsDag: false,
     supportsCloning: false,
+    needsApproxMessageDedup: false,
   };
 
   readonly metadata: ProviderMetadata;
