@@ -11,7 +11,12 @@ export class PiProvider implements Provider {
   readonly capabilities: ProviderCapabilities = {
     supportsDag: false,
     supportsCloning: false,
-    needsApproxMessageDedup: false,
+    // pi's live stream echoes the user turn under YA's queue message.uuid, while
+    // the durable PiSessionReader copy carries pi's own JSONL node id — they
+    // never match, so by-id dedup leaves the initial turn double-rendered. Same
+    // shape as OpenCode's user echo; rely on the content+timestamp backstop
+    // until deterministic id alignment lands. See topics/stream-durable-id-dedup.md.
+    needsApproxMessageDedup: true,
   };
 
   readonly metadata: ProviderMetadata = {

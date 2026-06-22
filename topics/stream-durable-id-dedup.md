@@ -159,8 +159,80 @@ user-turn step doesn't re-investigate them:
   practice); only `user_message.client_id` is worth parsing, and only once
   the user-turn renderer is changed to consume it.
 
+## pi
+
+Same shape as OpenCode's user echo, and the durable copy only began to exist
+when `PiSessionReader` landed (`e7428b09`) — before that pi routed to
+`NullSessionReader`, so there was no second copy to collide with. The divergence:
+
+| Source | User-turn uuid | Where |
+|---|---|---|
+| Live stream echo | YA queue `message.uuid` | `pi.ts` (`yield {type:"user", uuid: message.uuid}`) |
+| Durable backfill | pi JSONL node `id` | `pi-reader.ts` `mapNode` (`uuid = node.id`) |
+
+They never match, and pi originally shipped `needsApproxMessageDedup: false`, so
+by-id dedup left the **first turn double-rendered** — visible only on that turn
+because it is the one actively-streaming turn whose user node is already
+persisted+loaded while the assistant is still single-sourced from the live
+stream; later owned turns don't merge durable rows mid-stream (`handleFileChange`
+early-return). The server-side uuid duplicate-guard (`Process.ts` ~2663) only
+catches same-uuid optimistic+echo collisions; the durable copy arrives via the
+REST path and never enters that bucket.
+
+- **User echo: on the backstop (landed).** `PiProvider.needsApproxMessageDedup =
+  true`. Both copies carry timestamps — the live echo is stamped at emit time by
+  `Process.withTimestamp` (`Process.ts:2650`) and stored for replay, the durable
+  copy carries pi's node timestamp — and they are co-temporal (same moment pi
+  persists the user node), identical content, so the 2s reconcile merges them.
+  Residual gap: two identical prompts <2s apart, plus the long-turn assistant
+  case below.
+
+### Deferred: deterministic alignment needs a `graehl/pi` fork
+
+Unlike OpenCode (whose send API accepts a client `messageID`), **pi exposes no id
+hook over RPC**, verified against `~/pi` (`@earendil-works/pi`):
+
+- pi mints node ids itself: `appendMessage` → `createEntryId()` →
+  `uuidv7().slice(0,8)` with collision retry (`harness/session/jsonl-storage.ts`,
+  `session.ts`). Random and unpredictable, so YA cannot pre-compute them.
+- The `prompt`/`steer`/`follow_up` RPC commands' `id?` field is the **request
+  correlation id**, not a node id (`modes/rpc/rpc-types.ts`); there is no
+  message-id parameter pi would adopt.
+- pi never *surfaces* the persisted node id either: `message_start` is emitted
+  for user messages but carries only the logical `AgentMessage` (no entry id;
+  `agent-loop.ts:112`), and `get_messages`/`get_state` return
+  `AgentMessage[]` / session meta — also no entry ids (`agent-session.ts:839`,
+  `modes/rpc/rpc-mode.ts`). The entry id lives **only** in the durable JSONL,
+  which is exactly what `PiSessionReader` reads.
+
+So a YA-only deterministic fix is impossible. The clean fix is a fork change to
+`graehl/pi` (the designated integration target): add an optional `id` to
+`appendMessage` and thread a client-supplied id from the `prompt` RPC down to the
+user-message append, then YA passes its queue `message.uuid`. Note this is
+*simpler* than OpenCode's deferred option A — YA's queue uuid path is unchanged
+(pi adopts YA's existing uuid; YA's `tempId` reconciliation is untouched). A
+complete version surfaces session entry ids in the message-lifecycle events
+(harness injects the id at append time) so assistant/tool uuids align too,
+retiring the backstop dependence entirely. Deferred while we stay on upstream
+pi (no fork); the backstop covers the reported symptom in the meantime.
+
+### Resume uuid is already pi's id (not gated on the first turn)
+
+A tangent that came up: pi writes its session **header file at startup**
+(`jsonl-storage.ts` `create`), so the resumable id (= filename uuid = header
+`id`) exists before any turn. pi's `get_state` returns it (`pi.ts` resolves it
+synchronously), the init message carries it, and the generic
+`waitForSessionId()` + init remap (`Supervisor.ts:898`, `Process.ts:2710`)
+already adopt it as the canonical/URL id — pi is not special-cased out. So the
+URL uuid is already `pi --session <uuid>` resume-capable; no first-turn block is
+needed for it, and a first-turn block would *not* hand YA the user node id
+anyway (pi doesn't emit it; see above).
+
 ## Key files
 
+- `packages/client/src/providers/implementations/PiProvider.ts` — pi capability.
+- `packages/server/src/sessions/pi-reader.ts` — durable pi node-id mapping.
+- `packages/server/src/sdk/providers/pi.ts` — pi live stream user-echo uuid.
 - `packages/client/src/lib/linearMessageDedup.ts` — the shared backstop.
 - `packages/client/src/providers/types.ts` — `needsApproxMessageDedup`.
 - `packages/client/src/hooks/useSessionMessages.ts` — merge + dedup gates.
