@@ -38,7 +38,7 @@ import {
   GEMINI_TMP_DIR,
   GeminiSessionScanner,
 } from "./projects/gemini-scanner.js";
-import { GROK_SESSIONS_DIR } from "./projects/paths.js";
+import { GROK_SESSIONS_DIR, PI_SESSIONS_DIR } from "./projects/paths.js";
 import { ProjectScanner } from "./projects/scanner.js";
 import { PushNotifier, type PushService } from "./push/index.js";
 import { createPushRoutes } from "./push/routes.js";
@@ -86,7 +86,10 @@ import { type UploadDeps, createUploadRoutes } from "./routes/upload.js";
 import { createSpeechRoutes } from "./routes/speech.js";
 import { createVersionRoutes } from "./routes/version.js";
 import { WS_INTERNAL_AUTHENTICATED } from "./middleware/internal-auth.js";
-import { configureProviderRuntime, getProvider } from "./sdk/providers/index.js";
+import {
+  configureProviderRuntime,
+  getProvider,
+} from "./sdk/providers/index.js";
 import type {
   ClaudeSDK,
   PermissionMode,
@@ -105,8 +108,8 @@ import type { SpeechBackendRegistry } from "./services/voice/registry.js";
 import { CodexSessionReader } from "./sessions/codex-reader.js";
 import { GeminiSessionReader } from "./sessions/gemini-reader.js";
 import { GrokSessionReader } from "./sessions/grok-reader.js";
-import { NullSessionReader } from "./sessions/null-reader.js";
 import { OpenCodeSessionReader } from "./sessions/opencode-reader.js";
+import { PiSessionReader } from "./sessions/pi-reader.js";
 import { findSessionSummaryAcrossProviders } from "./sessions/provider-resolution.js";
 import { normalizeSession } from "./sessions/normalization.js";
 import { ClaudeSessionReader } from "./sessions/reader.js";
@@ -417,12 +420,13 @@ export function createApp(options: AppOptions): AppResult {
             }),
         );
       case "pi":
-        // PiSessionReader (durable JSONL tree) is a documented follow-up; until
-        // then report no on-disk history rather than mis-parse pi's format.
-        // Live YA-owned pi sessions still stream via the Supervisor.
         return getOrCreateReader(
-          `pi::${project.path}`,
-          () => new NullSessionReader(),
+          `pi::${PI_SESSIONS_DIR}::${project.path}`,
+          () =>
+            new PiSessionReader({
+              sessionsDir: PI_SESSIONS_DIR,
+              projectPath: project.path,
+            }),
         );
     }
   };
@@ -454,6 +458,15 @@ export function createApp(options: AppOptions): AppResult {
           projectPath,
         }),
     );
+  const piReaderFactory = (projectPath: string): PiSessionReader =>
+    getOrCreateReader(
+      `pi-extra::${PI_SESSIONS_DIR}::${projectPath}`,
+      () =>
+        new PiSessionReader({
+          sessionsDir: PI_SESSIONS_DIR,
+          projectPath,
+        }),
+    );
   const getSessionSummary = async (sessionId: string, projectId: string) => {
     const project = await scanner.getProject(projectId);
     if (!project) return null;
@@ -470,6 +483,8 @@ export function createApp(options: AppOptions): AppResult {
         geminiHashToCwd: geminiScanner.getHashToCwd(),
         grokSessionsDir: GROK_SESSIONS_DIR,
         grokReaderFactory,
+        piSessionsDir: PI_SESSIONS_DIR,
+        piReaderFactory,
       },
       options.sessionMetadataService?.getProvider(sessionId),
     );
@@ -502,6 +517,8 @@ export function createApp(options: AppOptions): AppResult {
       geminiHashToCwd: geminiScanner.getHashToCwd(),
       grokSessionsDir: GROK_SESSIONS_DIR,
       grokReaderFactory,
+      piSessionsDir: PI_SESSIONS_DIR,
+      piReaderFactory,
     };
 
     for (const [sessionId, metadata] of heartbeatSessionIds) {
@@ -612,9 +629,9 @@ export function createApp(options: AppOptions): AppResult {
         };
       }
 
-      const saved =
-        options.serverSettingsService?.getSetting("promptCacheKeepalive")
-          ?.providers?.[providerName];
+      const saved = options.serverSettingsService?.getSetting(
+        "promptCacheKeepalive",
+      )?.providers?.[providerName];
       const mode = saved?.mode ?? capability.defaultMode;
       const inactivityMinutes =
         saved?.inactivityMinutes ??
@@ -796,6 +813,8 @@ export function createApp(options: AppOptions): AppResult {
       geminiReaderFactory,
       grokSessionsDir: GROK_SESSIONS_DIR,
       grokReaderFactory,
+      piSessionsDir: PI_SESSIONS_DIR,
+      piReaderFactory,
       sessionAutoArchiveDays: options.sessionAutoArchiveDays,
     }),
   );
@@ -817,6 +836,8 @@ export function createApp(options: AppOptions): AppResult {
       geminiReaderFactory,
       grokSessionsDir: GROK_SESSIONS_DIR,
       grokReaderFactory,
+      piSessionsDir: PI_SESSIONS_DIR,
+      piReaderFactory,
       serverSettingsService: options.serverSettingsService,
       modelInfoService: options.modelInfoService,
       dataDir: options.dataDir,
@@ -881,6 +902,8 @@ export function createApp(options: AppOptions): AppResult {
       geminiReaderFactory,
       grokSessionsDir: GROK_SESSIONS_DIR,
       grokReaderFactory,
+      piSessionsDir: PI_SESSIONS_DIR,
+      piReaderFactory,
       sessionAutoArchiveDays: options.sessionAutoArchiveDays,
     }),
   );
@@ -904,6 +927,8 @@ export function createApp(options: AppOptions): AppResult {
       geminiReaderFactory,
       grokSessionsDir: GROK_SESSIONS_DIR,
       grokReaderFactory,
+      piSessionsDir: PI_SESSIONS_DIR,
+      piReaderFactory,
       eventBus: options.eventBus,
       sessionAutoArchiveDays: options.sessionAutoArchiveDays,
     }),
@@ -940,6 +965,8 @@ export function createApp(options: AppOptions): AppResult {
         geminiReaderFactory,
         grokSessionsDir: GROK_SESSIONS_DIR,
         grokReaderFactory,
+        piSessionsDir: PI_SESSIONS_DIR,
+        piReaderFactory,
       }),
     );
   }

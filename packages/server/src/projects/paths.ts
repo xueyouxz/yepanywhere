@@ -88,6 +88,13 @@ export const GROK_DIR =
 export const GROK_SESSIONS_DIR =
   process.env.GROK_SESSIONS_DIR ?? join(GROK_DIR, "sessions");
 
+/** Root for pi sessions (append-only JSONL, persistent across restarts) */
+export const PI_DIR =
+  process.env.PI_SESSIONS_DIR?.replace(new RegExp(`\\${sep}sessions$`), "") ??
+  join(homedir(), ".pi", "agent");
+export const PI_SESSIONS_DIR =
+  process.env.PI_SESSIONS_DIR ?? join(PI_DIR, "sessions");
+
 /**
  * Encode an absolute project path to a projectId (base64url).
  * This is reversible via `decodeProjectId()`.

@@ -19,6 +19,7 @@ import type { CodexSessionReader } from "../sessions/codex-reader.js";
 import type { GeminiSessionReader } from "../sessions/gemini-reader.js";
 import { listSessionsAcrossProviders } from "../sessions/provider-resolution.js";
 import type { GrokSessionReader } from "../sessions/grok-reader.js";
+import type { PiSessionReader } from "../sessions/pi-reader.js";
 import type { ISessionReader } from "../sessions/types.js";
 import type { ExternalSessionTracker } from "../supervisor/ExternalSessionTracker.js";
 import type { Supervisor } from "../supervisor/Supervisor.js";
@@ -56,6 +57,9 @@ export interface ProjectsDeps {
   /** Grok sessions directory (defaults to ~/.grok/sessions) */
   grokSessionsDir?: string;
   grokReaderFactory?: (projectPath: string) => GrokSessionReader;
+  /** pi sessions directory (defaults to ~/.pi/agent/sessions) */
+  piSessionsDir?: string;
+  piReaderFactory?: (projectPath: string) => PiSessionReader;
   /** Sessions older than this many days are hidden from default scans. 0 disables. */
   sessionAutoArchiveDays?: number;
 }
@@ -399,6 +403,8 @@ export function createProjectsRoutes(deps: ProjectsDeps): Hono {
         geminiHashToCwd: providerCatalog.geminiHashToCwd,
         grokSessionsDir: deps.grokSessionsDir,
         grokReaderFactory: deps.grokReaderFactory,
+        piSessionsDir: deps.piSessionsDir,
+        piReaderFactory: deps.piReaderFactory,
       },
       providerCatalog,
       includeArchived

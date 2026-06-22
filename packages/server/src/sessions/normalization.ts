@@ -50,7 +50,11 @@ interface CodexToolUseConversion {
 const CODEX_CONTEXT_COMPACTED_DEDUPE_WINDOW_MS = 5000;
 const codexMessageCache = new WeakMap<
   CodexSessionEntry[],
-  { length: number; lastEntry: CodexSessionEntry | undefined; messages: Message[] }
+  {
+    length: number;
+    lastEntry: CodexSessionEntry | undefined;
+    messages: Message[];
+  }
 >();
 
 function normalizeClaudeQueueOperationContent(content: unknown): string {
@@ -123,6 +127,13 @@ export function normalizeSession(loaded: LoadedSession): Session {
         messages: convertGeminiMessages(data.session.messages),
       };
     case "grok":
+      return {
+        ...summary,
+        messages: data.session.messages as Message[],
+      };
+    case "pi":
+      // pi messages are already normalized YA messages (PiSessionReader maps
+      // the v3 JSONL tree), like grok — pass through.
       return {
         ...summary,
         messages: data.session.messages as Message[],
@@ -640,7 +651,9 @@ function convertCodexResponseItem(
   }
 }
 
-function isCodexStartupInstructionMessage(payload: CodexMessagePayload): boolean {
+function isCodexStartupInstructionMessage(
+  payload: CodexMessagePayload,
+): boolean {
   if (payload.role !== "user") {
     return false;
   }
@@ -1003,9 +1016,10 @@ function getNumberField(
     : undefined;
 }
 
-function isCodexExecCommandEndPayload(
-  payload: unknown,
-): payload is Record<string, unknown> & {
+function isCodexExecCommandEndPayload(payload: unknown): payload is Record<
+  string,
+  unknown
+> & {
   type: "exec_command_end";
   call_id: string;
 } {
@@ -1320,7 +1334,10 @@ export function convertOpenCodeParts(
       case "tool":
         if (part.tool && part.callID) {
           // Tool use block, with name/fields normalized to YA's rich renderers.
-          const normalized = normalizeOpenCodeTool(part.tool, part.state?.input);
+          const normalized = normalizeOpenCodeTool(
+            part.tool,
+            part.state?.input,
+          );
           blocks.push({
             type: "tool_use",
             id: part.callID,

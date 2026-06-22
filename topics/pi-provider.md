@@ -114,10 +114,10 @@ normalizing `message_*` / `tool_execution_*` / usage into YA SDKMessages.
 Registered in `providers/index.ts`; `pi` added to `ProviderName` /
 `ALL_PROVIDERS` (additive). Verified by the `pi-rpc-client` framing/correlation
 test and a transport smoke against the real binary (39 `provider/id` models).
-Deferred follow-ups: durable `PiSessionReader` (until then a `NullSessionReader`
-backs reload/list, so on-disk history is empty), true steering wiring
-(`supportsSteering=false` for now), and the `tool_execution_start` permission
-bridge (tools run autonomously). Tool name **and argument-field** normalization
+Durable `PiSessionReader` **LANDED 2026-06-22** (see § "Durable transcripts" —
+pi sessions now survive a YA server restart). Remaining deferred follow-ups:
+true steering wiring (`supportsSteering=false` for now), and the
+`tool_execution_start` permission bridge (tools run autonomously). Tool name **and argument-field** normalization
 is **done** (`pi-tools.ts` `normalizePiTool`; see
 [`provider-read-edit-disciplines.md`](provider-read-edit-disciplines.md)).
 
@@ -195,6 +195,17 @@ clearest single justification for pinning the fork (ship the extension with pi
 rather than depend on upstream adding a permission protocol).
 
 ## Durable transcripts — `PiSessionReader` (opencode-DB-reader analogue)
+
+**LANDED 2026-06-22.** `packages/server/src/sessions/pi-reader.ts` reads
+`~/.pi/agent/sessions/--<cwd>--/<ts>_<uuid>.jsonl`, resolves the v3 tree's
+active-leaf→root path, and maps nodes to normalized YA messages (assistant
+thinking/text/toolCall, `toolResult`→`tool_result`). Wired as a cross-provider
+source in `provider-resolution.ts` (cwd filter is the membership test, like
+Grok), in `app.ts` `readerFactory` `case "pi"`, and as a fallback in the
+sessions route's transcript-load chain. `UnifiedSession` gained a `pi` variant;
+`normalizeSession` passes pi messages through. Verified against a real session
+(reload of a restart-orphaned pi session now returns its full transcript, not
+404). The original design notes below stand as the rationale.
 
 Add `PiSessionReader` over `~/.pi/agent/sessions/--<cwd>--/<ts>_<uuid>.jsonl`,
 returning the same normalized `{ message, parts }` shape the renderer already

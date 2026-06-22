@@ -22,6 +22,7 @@ import type { CodexSessionReader } from "../sessions/codex-reader.js";
 import type { GeminiSessionReader } from "../sessions/gemini-reader.js";
 import { listSessionsAcrossProviders } from "../sessions/provider-resolution.js";
 import type { GrokSessionReader } from "../sessions/grok-reader.js";
+import type { PiSessionReader } from "../sessions/pi-reader.js";
 import type { ISessionReader } from "../sessions/types.js";
 import type { Supervisor } from "../supervisor/Supervisor.js";
 import type {
@@ -48,6 +49,8 @@ export interface InboxDeps {
   geminiReaderFactory?: (projectPath: string) => GeminiSessionReader;
   grokSessionsDir?: string;
   grokReaderFactory?: (projectPath: string) => GrokSessionReader;
+  piSessionsDir?: string;
+  piReaderFactory?: (projectPath: string) => PiSessionReader;
   sessionAutoArchiveDays?: number;
 }
 
@@ -128,6 +131,8 @@ export function createInboxRoutes(deps: InboxDeps): Hono {
               geminiHashToCwd: providerCatalog.geminiHashToCwd,
               grokSessionsDir: deps.grokSessionsDir,
               grokReaderFactory: deps.grokReaderFactory,
+              piSessionsDir: deps.piSessionsDir,
+              piReaderFactory: deps.piReaderFactory,
             },
             providerCatalog,
             listOptions,

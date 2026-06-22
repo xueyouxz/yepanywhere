@@ -33,6 +33,14 @@ export interface GrokSessionContent {
   messages: GrokSessionMessage[];
 }
 
+/**
+ * pi durable transcript: the normalized YA-message shape (same structural
+ * message form as Grok), produced by PiSessionReader from pi's v3 JSONL tree.
+ */
+export interface PiSessionContent {
+  messages: GrokSessionMessage[];
+}
+
 // Codex sessions are a series of entries (lines)
 export interface CodexSessionContent {
   entries: CodexSessionEntry[];
@@ -45,4 +53,5 @@ export type UnifiedSession =
   | { provider: "codex-oss"; session: CodexSessionContent }
   | { provider: "gemini"; session: GeminiSessionFile }
   | { provider: "grok"; session: GrokSessionContent }
+  | { provider: "pi"; session: PiSessionContent }
   | { provider: "opencode"; session: OpenCodeSessionContent };

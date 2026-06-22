@@ -48,6 +48,7 @@ import { cloneClaudeSession, cloneCodexSession } from "../sessions/fork.js";
 import { GeminiSessionReader } from "../sessions/gemini-reader.js";
 import { buildDag } from "../sessions/dag.js";
 import { GrokSessionReader } from "../sessions/grok-reader.js";
+import { PiSessionReader } from "../sessions/pi-reader.js";
 import { extractLastAgentExcerpt } from "../sessions/agent-excerpt.js";
 import { normalizeSession } from "../sessions/normalization.js";
 import {
@@ -508,6 +509,10 @@ export interface SessionsDeps {
   grokSessionsDir?: string;
   /** Optional shared Grok reader factory for cross-provider session lookups */
   grokReaderFactory?: (projectPath: string) => GrokSessionReader;
+  /** pi sessions directory (defaults to ~/.pi/agent/sessions) */
+  piSessionsDir?: string;
+  /** Optional shared pi reader factory for cross-provider session lookups */
+  piReaderFactory?: (projectPath: string) => PiSessionReader;
   /** ServerSettingsService for reading global instructions */
   serverSettingsService?: ServerSettingsService;
   /** ModelInfoService for context window lookups */
@@ -1648,6 +1653,15 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         })
       : null);
 
+  const getPiReader = (projectPath: string): PiSessionReader | null =>
+    deps.piReaderFactory?.(projectPath) ??
+    (deps.piSessionsDir
+      ? new PiSessionReader({
+          sessionsDir: deps.piSessionsDir,
+          projectPath,
+        })
+      : null);
+
   let unscopedGrokReader: GrokSessionReader | null | undefined;
   const getUnscopedGrokReader = (): GrokSessionReader | null => {
     if (unscopedGrokReader !== undefined) {
@@ -1756,6 +1770,8 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         geminiHashToCwd: deps.geminiScanner?.getHashToCwd(),
         grokSessionsDir: deps.grokSessionsDir,
         grokReaderFactory: deps.grokReaderFactory,
+        piSessionsDir: deps.piSessionsDir,
+        piReaderFactory: deps.piReaderFactory,
       },
       preferredProvider,
     );
@@ -1988,6 +2004,8 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         geminiHashToCwd: deps.geminiScanner?.getHashToCwd(),
         grokSessionsDir: deps.grokSessionsDir,
         grokReaderFactory: deps.grokReaderFactory,
+        piSessionsDir: deps.piSessionsDir,
+        piReaderFactory: deps.piReaderFactory,
       },
       metadataProvider ?? process?.provider,
     );
@@ -2263,6 +2281,18 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       const grokReader = getGrokReader(project.path);
       if (grokReader) {
         loadedSession = await grokReader.getSession(
+          sessionId,
+          project.id,
+          afterMessageId,
+          { includeOrphans: wasEverOwned && !process },
+        );
+      }
+    }
+
+    if (!loadedSession) {
+      const piReader = getPiReader(project.path);
+      if (piReader) {
+        loadedSession = await piReader.getSession(
           sessionId,
           project.id,
           afterMessageId,
@@ -3037,6 +3067,8 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
           geminiHashToCwd: deps.geminiScanner?.getHashToCwd(),
           grokSessionsDir: deps.grokSessionsDir,
           grokReaderFactory: deps.grokReaderFactory,
+          piSessionsDir: deps.piSessionsDir,
+          piReaderFactory: deps.piReaderFactory,
         },
         metadataProvider ?? body.provider,
       );

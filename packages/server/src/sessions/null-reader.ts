@@ -3,10 +3,9 @@
  * transcript reader is not implemented yet.
  *
  * It reports no sessions and no content rather than mis-parsing another
- * provider's on-disk format. Used by the `pi` provider until `PiSessionReader`
- * lands (see topics/pi-provider.md § "Durable transcripts"): live YA-owned pi
- * sessions still stream via the Supervisor, but reload/attach/listing of
- * on-disk pi sessions is intentionally empty for now.
+ * provider's on-disk format — the safe placeholder for a provider whose durable
+ * reader has not been written. No provider currently uses it (pi moved to
+ * `PiSessionReader`); kept as the null-object default for the next such case.
  */
 
 import type { UrlProjectId } from "@yep-anywhere/shared";
