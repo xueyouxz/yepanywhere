@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   extractMarkdownSnippetsFromSelection,
   getMarkdownForVisibleSelection,
+  getMarkdownSnippetForSubElement,
   registerMarkdownCopySource,
 } from "../markdownSelectionCopy";
 
@@ -76,5 +77,39 @@ describe("extractMarkdownSnippetsFromSelection", () => {
     selection?.removeAllRanges();
     unregister();
     root.remove();
+  });
+});
+
+describe("getMarkdownSnippetForSubElement", () => {
+  it("recovers markdown for one paragraph of a multi-paragraph source", () => {
+    const root = document.createElement("div");
+    const content = document.createElement("div");
+    const p1 = document.createElement("p");
+    p1.textContent = "First paragraph.";
+    const p2 = document.createElement("p");
+    p2.textContent = "Second paragraph.";
+    content.append(p1, p2);
+    root.append(content);
+    document.body.append(root);
+    const unregister = registerMarkdownCopySource(
+      content,
+      "First paragraph.\n\nSecond paragraph.",
+    );
+
+    const snippet = getMarkdownSnippetForSubElement(content, p2);
+    expect(snippet?.markdown).toBe("Second paragraph.");
+    expect(snippet?.selectedText).toContain("Second paragraph.");
+    expect(snippet?.sourceElement).toBe(content);
+
+    unregister();
+    root.remove();
+  });
+
+  it("returns null for an unregistered source element", () => {
+    const content = document.createElement("div");
+    const p = document.createElement("p");
+    p.textContent = "Orphan paragraph.";
+    content.append(p);
+    expect(getMarkdownSnippetForSubElement(content, p)).toBeNull();
   });
 });

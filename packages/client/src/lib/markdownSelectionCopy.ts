@@ -166,6 +166,48 @@ export function getMarkdownSnippetForElement(
   };
 }
 
+/**
+ * Recover the markdown for one rendered block (paragraph/list/heading) nested
+ * inside a registered copy-source element, so a per-paragraph quote circle can
+ * quote just that block. Maps the block's visible text back to its source span
+ * via the same visible-source map the copy/selection path uses.
+ */
+export function getMarkdownSnippetForSubElement(
+  sourceElement: HTMLElement,
+  blockElement: HTMLElement,
+): MarkdownSelectionSnippet | null {
+  const source = markdownCopySources.get(sourceElement);
+  if (!source?.trim()) {
+    return null;
+  }
+  const selectedText = blockElement.innerText || blockElement.textContent || "";
+  if (!selectedText.trim()) {
+    return null;
+  }
+  const doc = blockElement.ownerDocument;
+  const range = doc.createRange();
+  range.selectNodeContents(blockElement);
+
+  const beforeRange = doc.createRange();
+  beforeRange.selectNodeContents(sourceElement);
+  beforeRange.setEnd(range.startContainer, range.startOffset);
+  const textBefore = beforeRange.toString();
+
+  const markdown =
+    getMarkdownForVisibleSelection(source, selectedText, { textBefore }) ??
+    selectedText;
+  const normalized = trimBoundaryNewlines(markdown);
+  if (!normalized.trim()) {
+    return null;
+  }
+  return {
+    markdown: normalized,
+    selectedText,
+    sourceElement,
+    range,
+  };
+}
+
 export function getMarkdownForVisibleSelection(
   source: string,
   selectedText: string,

@@ -572,6 +572,23 @@
   background: var(--bg-tertiary, #444);
 }
 
+/* Per-paragraph quote circles: an overlay rail over the whole text block, with
+   one circle parked at the end (bottom-right) of each rendered paragraph. The
+   rail itself never intercepts pointer events; each circle re-enables them only
+   while revealed (hover/focus/always-visible), so text selection is unaffected. */
+.text-block-quote-rail {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.text-block-quote-paragraph {
+  position: absolute;
+  right: 2px;
+  transform: translateY(-100%);
+}
+
 .text-block-copy:focus,
 .text-block-toggle:focus,
 .text-block-quote:focus {
@@ -586,6 +603,14 @@
 ::highlight(comment-tint) {
   background: color-mix(in srgb, var(--app-yep-green) 24%, transparent);
   color: inherit;
+}
+
+/* The floating quote button is positioned (top/left) relative to the
+   .message-list rect in JS, so .message-list must be its containing block.
+   Without this it resolves against a farther positioned ancestor and lands in
+   the centering margin — invisible next to short selections. */
+.message-list {
+  position: relative;
 }
 
 .selection-quote-button {
