@@ -9522,11 +9522,15 @@ a.sidebar-nav-item {
   gap: var(--space-2);
 }
 
+.settings-category-list-shell {
+  padding-inline: 0.5rem;
+}
+
 .settings-category-item {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-1);
+  padding: var(--space-2);
   background: var(--bg-code);
   border: 1px solid transparent;
   border-radius: var(--radius-md);

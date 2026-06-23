@@ -222,7 +222,7 @@ export function SettingsLayout() {
             isSidebarCollapsed={isSidebarCollapsed}
           />
           <main className="page-scroll-container">
-            <div className="page-content-inner">
+            <div className="page-content-inner settings-category-list-shell">
               <div className="settings-category-list">
                 {categories.map((cat) => (
                   <SettingsCategoryItem
