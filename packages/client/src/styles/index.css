@@ -3733,6 +3733,120 @@ a.sidebar-nav-item {
   outline: none;
 }
 
+/* Backgrounded fork-after-summary progress/follow indicator (persists while
+   the 30+ s generation runs detached from the composer). */
+.fork-summary-indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 35%, var(--border-color));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-primary) 10%, var(--bg-code));
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.fork-summary-indicator-error {
+  border-color: color-mix(in srgb, var(--accent-danger, #d33) 45%, var(--border-color));
+  background: color-mix(in srgb, var(--accent-danger, #d33) 10%, var(--bg-code));
+}
+
+.fork-summary-indicator-label {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.fork-summary-indicator-elapsed {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.fork-summary-indicator-spinner {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border: 2px solid color-mix(in srgb, var(--accent-primary) 30%, transparent);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: fork-summary-spin 0.7s linear infinite;
+}
+
+@keyframes fork-summary-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fork-summary-indicator-spinner {
+    animation-duration: 2s;
+  }
+}
+
+.fork-summary-indicator-link {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.fork-summary-indicator-link:hover,
+.fork-summary-indicator-link:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+
+.fork-summary-indicator-cancel {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 0 var(--space-2);
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+}
+
+.fork-summary-indicator-cancel:hover,
+.fork-summary-indicator-cancel:focus-visible {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.fork-summary-indicator-dismiss {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--font-size-base);
+  line-height: 1;
+}
+
+.fork-summary-indicator-dismiss:hover,
+.fork-summary-indicator-dismiss:focus-visible {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  outline: none;
+}
+
 .prompt-suggestion {
   display: flex;
   align-items: center;

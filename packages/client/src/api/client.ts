@@ -815,6 +815,7 @@ export const api = {
       afterTurnMessageId: string;
       instructions?: string;
       mode?: PermissionMode;
+      signal?: AbortSignal;
     },
   ) =>
     fetchJSON<{
@@ -837,6 +838,7 @@ export const api = {
         instructions: options.instructions,
         mode: options.mode,
       }),
+      signal: options.signal,
     }),
 
   queueMessage: (

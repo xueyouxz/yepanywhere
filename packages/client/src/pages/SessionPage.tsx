@@ -24,6 +24,10 @@ import {
 } from "../components/BtwAsidePane";
 import { ClientLogRecordingBadge } from "../components/ClientLogRecordingBadge";
 import { ExternalSessionWarning } from "../components/ExternalSessionWarning";
+import {
+  ForkSummaryIndicator,
+  type ForkSummaryJob,
+} from "../components/ForkSummaryIndicator";
 import { PendingToolWarning } from "../components/PendingToolWarning";
 import {
   MessageInput,
@@ -594,6 +598,22 @@ function isSameLiveModelConfig(
   );
 }
 
+// Follow-link label / forked-session title: the summary's first non-empty line
+// (the enhanced-summary plan makes the model lead with a title line), falling
+// back to the server-provided title. Truncated for display.
+function forkSummaryDisplayTitle(
+  summary: string | undefined,
+  serverTitle: string | undefined,
+): string | undefined {
+  const firstLine = summary
+    ?.split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  const raw = (firstLine ?? serverTitle ?? "").trim();
+  if (!raw) return undefined;
+  return raw.length > 80 ? `${raw.slice(0, 79)}…` : raw;
+}
+
 export function SessionPage() {
   const { projectId, sessionId } = useParams<{
     projectId: string;
@@ -817,7 +837,12 @@ function SessionPageContent({
     sourceMessageId: string;
     afterTurnMessageId: string;
   } | null>(null);
-  const [forkSummarySubmitting, setForkSummarySubmitting] = useState(false);
+  // Backgrounded fork-after-summary job (replaces a blocking submit that only
+  // grayed the send button for the 30+ s generation). See ForkSummaryIndicator.
+  const [forkSummaryJob, setForkSummaryJob] = useState<ForkSummaryJob | null>(
+    null,
+  );
+  const forkSummaryAbortRef = useRef<AbortController | null>(null);
   // File attachment state
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress[]>([]);
@@ -943,8 +968,15 @@ function SessionPageContent({
   );
   const submitForkAfterSummary = useCallback(
     async (afterTurnMessageId: string, instructions: string) => {
-      if (forkSummarySubmitting) return;
-      setForkSummarySubmitting(true);
+      if (forkSummaryJob?.status === "generating") return;
+      const abort = new AbortController();
+      forkSummaryAbortRef.current = abort;
+      // Free the composer immediately and background the 30+ s generation
+      // behind the persistent indicator instead of graying out send.
+      draftControlsRef.current?.clearDraft();
+      setForkSummaryDraft(null);
+      setForkSummaryJob({ status: "generating", startedAt: Date.now() });
+      showToast(t("forkSummaryStarted"), "info");
       try {
         const result = await api.forkSessionWithSummary(
           projectId,
@@ -953,34 +985,75 @@ function SessionPageContent({
             afterTurnMessageId,
             instructions,
             mode: permissionMode,
+            signal: abort.signal,
           },
         );
-        draftControlsRef.current?.clearDraft();
-        setForkSummaryDraft(null);
-        showToast(t("forkSummaryStarted"), "success");
-        navigate(
-          `${basePath}/projects/${projectId}/sessions/${result.sessionId}`,
-        );
+        const title = forkSummaryDisplayTitle(result.summary, result.title);
+        const targetUrl = `${basePath}/projects/${projectId}/sessions/${result.sessionId}`;
+        const targetHref = `${window.location.origin}${targetUrl}`;
+        // Best-effort auto-open in a new tab. Firing after the long await is
+        // outside a user gesture, so browsers usually popup-block it; the
+        // indicator link is then the follow path.
+        let autoOpened = false;
+        try {
+          // Open without the "noopener" feature: with it set, window.open
+          // returns null by spec and we lose popup-block detection. Sever the
+          // opener link manually instead (same-origin session tab).
+          const opened = window.open(targetHref, "_blank");
+          if (opened) {
+            opened.opener = null;
+            autoOpened = true;
+          }
+        } catch {
+          autoOpened = false;
+        }
+        setForkSummaryJob({
+          status: "ready",
+          startedAt: Date.now(),
+          targetSessionId: result.sessionId,
+          targetUrl,
+          targetHref,
+          title,
+          autoOpened,
+        });
       } catch (err) {
+        if (abort.signal.aborted) {
+          setForkSummaryJob(null);
+          return;
+        }
+        setForkSummaryJob({
+          status: "error",
+          startedAt: Date.now(),
+          error: err instanceof Error ? err.message : undefined,
+        });
         showToast(
           err instanceof Error ? err.message : t("forkSummaryFailed"),
           "error",
         );
       } finally {
-        setForkSummarySubmitting(false);
+        if (forkSummaryAbortRef.current === abort) {
+          forkSummaryAbortRef.current = null;
+        }
       }
     },
     [
       actualSessionId,
       basePath,
-      forkSummarySubmitting,
-      navigate,
+      forkSummaryJob?.status,
       permissionMode,
       projectId,
       showToast,
       t,
     ],
   );
+  const cancelForkSummaryJob = useCallback(() => {
+    forkSummaryAbortRef.current?.abort();
+    forkSummaryAbortRef.current = null;
+    setForkSummaryJob(null);
+  }, []);
+  const dismissForkSummaryJob = useCallback(() => {
+    setForkSummaryJob(null);
+  }, []);
   const beginForkAfterSummary = useCallback(
     (messageId: string) => {
       if (attachments.length > 0 || uploadProgress.length > 0) {
@@ -4076,6 +4149,14 @@ function SessionPageContent({
                 </>
               )}
 
+            {!mainComposerForAside && forkSummaryJob && (
+              <ForkSummaryIndicator
+                job={forkSummaryJob}
+                onCancel={cancelForkSummaryJob}
+                onDismiss={dismissForkSummaryJob}
+              />
+            )}
+
             {/* No pending approval: show full message input */}
             {!(
               pendingInputRequest &&
@@ -4187,7 +4268,10 @@ function SessionPageContent({
                         submitLabel: t("forkSummarySubmit"),
                         tooltip: t("forkSummaryTooltip"),
                         icon: "⑂",
-                        submitting: forkSummarySubmitting,
+                        // The composer fork mode is dismissed the moment we
+                        // submit (generation backgrounds into the indicator),
+                        // so it never sits in a submitting state.
+                        submitting: false,
                         onCancel: () => setForkSummaryDraft(null),
                         onSubmit: (instructions) => {
                           void submitForkAfterSummary(
