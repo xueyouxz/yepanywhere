@@ -8932,9 +8932,22 @@ a.sidebar-nav-item {
   line-height: 1;
 }
 
-/* Narrow numeric box: fits ~4 digits cleanly, no wider. */
+/* Match the slider thumb/track to the YA green used by the controls above. */
+.settings-item-actions input[type="range"] {
+  accent-color: var(--app-yep-green);
+}
+
+/* Narrow numeric field: ~4 digits plus a small gap, no spinner buttons. */
 .settings-input-unit .settings-input-small {
-  width: 4.5rem;
+  width: 4rem;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.settings-input-unit .settings-input-small::-webkit-inner-spin-button,
+.settings-input-unit .settings-input-small::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 /* Muted, lightweight line-count estimate beside the height box. */

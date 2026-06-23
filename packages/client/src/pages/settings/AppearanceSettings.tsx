@@ -1036,6 +1036,15 @@ export function AppearanceSettings() {
             <p>{t("appearanceContentWidthDescription")}</p>
           </div>
           <div className="settings-item-actions">
+            <input
+              type="range"
+              min={MIN_CONTENT_MAX_WIDTH_PX}
+              max={MAX_CONTENT_MAX_WIDTH_PX}
+              step={10}
+              value={contentMaxWidth}
+              onChange={(e) => setContentMaxWidth(Number(e.target.value))}
+              aria-label={t("appearanceContentWidthTitle")}
+            />
             <span className="settings-input-unit">
               <input
                 type="number"
