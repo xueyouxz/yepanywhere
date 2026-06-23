@@ -47,3 +47,4 @@
 - fork-from-turn - Turn-notch fork actions and server-owned fork-after-summary jobs.
 - transcript-display-objects - Persisted viewer-only objects anchored in transcript order.
 - backward-compat - Observable and persisted surface compatibility decisions.
+- session-retitle - Explicit title editing and user-confirmed generated retitle proposals.

@@ -1394,6 +1394,24 @@ function forkSummaryTitle(
   return truncateSessionTitle(candidate || fallback || "Forked session");
 }
 
+function generatedRetitleCandidate(title: string): string | undefined {
+  const firstLine = title
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine) {
+    return undefined;
+  }
+  const candidate = normalizeRestartTitleCandidate(
+    firstLine
+      .replace(/^title:\s*/iu, "")
+      .replace(/^["'“”‘’]+|["'“”‘’]+$/gu, "")
+      .replace(/[.!?]+$/u, "")
+      .trim(),
+  );
+  return candidate ? truncateSessionTitle(candidate) : undefined;
+}
+
 function messageTitleCandidate(message: Message): string | undefined {
   if (
     !isHumanUserMessage(message) ||
@@ -3955,6 +3973,150 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       forkedFrom: sessionId,
       upToMessageId,
     });
+  });
+
+  // POST /api/projects/:projectId/sessions/:sessionId/retitle
+  // Generate a proposed session title through an archived helper fork. This
+  // never updates the source session title; the client must explicitly accept
+  // the returned proposal through the ordinary metadata update route.
+  routes.post("/projects/:projectId/sessions/:sessionId/retitle", async (c) => {
+    const projectId = c.req.param("projectId");
+    const sessionId = c.req.param("sessionId");
+
+    if (!isUrlProjectId(projectId)) {
+      return c.json({ error: "Invalid project ID format" }, 400);
+    }
+    const project = await deps.scanner.getOrCreateProject(projectId);
+    if (!project) {
+      return c.json({ error: "Project not found or path does not exist" }, 404);
+    }
+    if (!deps.sessionMetadataService) {
+      return c.json({ error: "Session metadata service not available" }, 503);
+    }
+
+    let body: { currentTitle?: unknown; lengthTarget?: unknown } = {};
+    try {
+      body = await c.req.json();
+    } catch {
+      // Body is optional.
+    }
+
+    const currentTitle =
+      typeof body.currentTitle === "string"
+        ? body.currentTitle.trim().slice(0, 200)
+        : undefined;
+    let lengthTarget: number | undefined;
+    if (body.lengthTarget !== undefined) {
+      if (
+        typeof body.lengthTarget !== "number" ||
+        !Number.isInteger(body.lengthTarget) ||
+        body.lengthTarget < 20 ||
+        body.lengthTarget > 120
+      ) {
+        return c.json(
+          { error: "lengthTarget must be an integer between 20 and 120" },
+          400,
+        );
+      }
+      lengthTarget = body.lengthTarget;
+    }
+
+    const metadataProvider = deps.sessionMetadataService.getProvider(
+      sessionId,
+    ) as ProviderName | undefined;
+    const sourceProcess = deps.supervisor.getProcessForSession(sessionId);
+    const providerName =
+      metadataProvider ?? sourceProcess?.provider ?? project.provider;
+    if (!deps.supervisor.supportsForkSession(providerName)) {
+      return c.json(
+        { error: `${providerName} does not support transcript fork` },
+        400,
+      );
+    }
+
+    const savedExecutor = parseOptionalExecutor(
+      deps.sessionMetadataService.getExecutor(sessionId),
+    ).executor;
+    const requestedModel =
+      deps.sessionMetadataService.getRequestedModel(sessionId) ??
+      sourceProcess?.model;
+    const promptSuggestionMode =
+      deps.sessionMetadataService.getMetadata(sessionId)?.promptSuggestionMode;
+    const abortController = new AbortController();
+    const abortFromRequest = () => abortController.abort();
+    if (c.req.raw.signal.aborted) {
+      abortController.abort();
+    } else {
+      c.req.raw.signal.addEventListener("abort", abortFromRequest, {
+        once: true,
+      });
+    }
+
+    let generatorSessionId: string | undefined;
+    try {
+      const generator = await deps.supervisor.forkSession({
+        sessionId,
+        projectPath: project.path,
+        providerName,
+        title: "Retitle generator",
+      });
+      generatorSessionId = generator.sessionId;
+      await updateForkSummaryChildMetadata(
+        generator.sessionId,
+        sessionId,
+        "Retitle generator",
+        true,
+      );
+      await persistLaunchMetadata(
+        generator.sessionId,
+        providerName,
+        savedExecutor,
+        undefined,
+        requestedModel,
+        promptSuggestionMode,
+      );
+      if (abortController.signal.aborted) {
+        throw new DOMException("Retitle cancelled", "AbortError");
+      }
+
+      const generated = await deps.supervisor.generateSummary(providerName, {
+        purpose: "session-retitle",
+        strategy: "fork",
+        generatorSessionId: generator.sessionId,
+        cwd: project.path,
+        currentTitle,
+        lengthTarget,
+        signal: abortController.signal,
+      });
+      const title = generatedRetitleCandidate(generated.text);
+      if (!title) {
+        throw new Error("Retitle generation returned empty title");
+      }
+      return c.json({ title, generatorSessionId: generator.sessionId });
+    } catch (error) {
+      const cancelled =
+        abortController.signal.aborted ||
+        (error instanceof DOMException && error.name === "AbortError");
+      const message =
+        error instanceof Error ? error.message : "Retitle generation failed";
+      getLogger().warn(
+        {
+          event: cancelled
+            ? "session_retitle_cancelled"
+            : "session_retitle_failed",
+          sessionId,
+          projectId,
+          providerName,
+          generatorSessionId,
+          error: message,
+        },
+        cancelled ? "Session retitle cancelled" : "Session retitle failed",
+      );
+      return c.json({ error: message }, cancelled ? 400 : 500);
+    } finally {
+      c.req.raw.signal.removeEventListener("abort", abortFromRequest);
+      abortController.abort();
+    }
   });
 
   // POST /api/projects/:projectId/sessions/:sessionId/fork-summary

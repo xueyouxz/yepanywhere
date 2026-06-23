@@ -2296,7 +2296,7 @@ export class CodexProvider implements AgentProvider {
     request: SummaryGenerationRequest,
   ): Promise<SummaryGenerationResult> {
     if (request.strategy !== "side-session") {
-      throw new Error("Codex does not support fork summary generation");
+      throw new Error("Codex does not support fork-backed summary generation");
     }
     const text = await this.generateSideSessionRecap(
       request.recentAssistantText,

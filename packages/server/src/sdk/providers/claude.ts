@@ -991,7 +991,7 @@ export class ClaudeProvider implements AgentProvider {
           ),
         };
       case "fork":
-        return await this.generateForkAfterSummary(request);
+        return await this.generateForkBackedSummary(request);
     }
   }
 
@@ -1102,10 +1102,13 @@ export class ClaudeProvider implements AgentProvider {
     }
   }
 
-  private async generateForkAfterSummary(
+  private async generateForkBackedSummary(
     request: Extract<SummaryGenerationRequest, { strategy: "fork" }>,
   ): Promise<SummaryGenerationResult> {
-    const userPrompt = this.createForkAfterSummaryPrompt(request);
+    const userPrompt =
+      request.purpose === "session-retitle"
+        ? this.createSessionRetitlePrompt(request)
+        : this.createForkAfterSummaryPrompt(request);
     const abortController = new AbortController();
     const abortFromJob = () => abortController.abort();
     if (request.signal?.aborted) {
@@ -1146,7 +1149,9 @@ export class ClaudeProvider implements AgentProvider {
           resume: request.generatorSessionId,
           maxTurns: 1,
           systemPrompt:
-            "You are a handoff summary helper. Reply with the summary text only, no preamble.",
+            request.purpose === "session-retitle"
+              ? "You are a title helper. Reply with the session title only, no preamble."
+              : "You are a handoff summary helper. Reply with the summary text only, no preamble.",
         },
       });
 
@@ -1175,7 +1180,10 @@ export class ClaudeProvider implements AgentProvider {
   }
 
   private createForkAfterSummaryPrompt(
-    request: Extract<SummaryGenerationRequest, { strategy: "fork" }>,
+    request: Extract<
+      SummaryGenerationRequest,
+      { purpose: "fork-after-summary" }
+    >,
   ): string {
     const instructions = request.instructions?.trim();
     const boundaryContext = request.afterTurnContext?.trim();
@@ -1196,6 +1204,23 @@ export class ClaudeProvider implements AgentProvider {
       instructions ? "" : undefined,
       instructions ? "Additional user instructions:" : undefined,
       instructions || undefined,
+    ]
+      .filter((part): part is string => part !== undefined)
+      .join("\n");
+  }
+
+  private createSessionRetitlePrompt(
+    request: Extract<SummaryGenerationRequest, { purpose: "session-retitle" }>,
+  ): string {
+    const lengthTarget = request.lengthTarget ?? 80;
+    const currentTitle = request.currentTitle?.trim();
+    return [
+      "What is a good new title for this session?",
+      "",
+      `Target length: under ${lengthTarget} characters.`,
+      currentTitle ? `Current title: ${currentTitle}` : undefined,
+      "Prefer a concrete task/result phrase over a generic chat title.",
+      "Return only the title. Do not quote it. Do not add a trailing period.",
     ]
       .filter((part): part is string => part !== undefined)
       .join("\n");

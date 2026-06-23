@@ -596,6 +596,21 @@ function isSameLiveModelConfig(
   );
 }
 
+type TitleEditMode = "manual" | "retitle";
+
+interface GeneratedRetitleInsertion {
+  prefix: string;
+  suffix: string;
+}
+
+interface GeneratedRetitleState {
+  requestId: number;
+  status: "generating" | "ready" | "error";
+  title?: string;
+  error?: string;
+  deferredInsertion?: GeneratedRetitleInsertion;
+}
+
 export function SessionPage() {
   const { projectId, sessionId } = useParams<{
     projectId: string;
@@ -1003,12 +1018,10 @@ function SessionPageContent({
           result.displayObject.id,
           autoOpenDefault,
         );
-        updateTranscriptDisplayObjectsForSession(
-          requestSessionId,
-          (objects) =>
-            objects.some((object) => object.id === result.displayObject.id)
-              ? [...objects]
-              : [...objects, result.displayObject],
+        updateTranscriptDisplayObjectsForSession(requestSessionId, (objects) =>
+          objects.some((object) => object.id === result.displayObject.id)
+            ? [...objects]
+            : [...objects, result.displayObject],
         );
       } catch (err) {
         showToast(
@@ -1115,14 +1128,12 @@ function SessionPageContent({
     async (objectId: string, next: boolean) => {
       const requestSessionId = actualSessionId;
       initiatedForkSummaryAutoOpenRef.current.set(objectId, next);
-      updateTranscriptDisplayObjectsForSession(
-        requestSessionId,
-        (objects) =>
-          objects.map((object) =>
-            object.id === objectId
-              ? { ...object, autoOpenWhenReady: next || undefined }
-              : object,
-          ),
+      updateTranscriptDisplayObjectsForSession(requestSessionId, (objects) =>
+        objects.map((object) =>
+          object.id === objectId
+            ? { ...object, autoOpenWhenReady: next || undefined }
+            : object,
+        ),
       );
       try {
         const result = await api.updateForkSummaryDisplayObject(
@@ -1480,10 +1491,16 @@ function SessionPageContent({
 
   // Inline title editing state
   const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleEditMode, setTitleEditMode] = useState<TitleEditMode>("manual");
   const [renameValue, setRenameValue] = useState("");
   const [isRenaming, setIsRenaming] = useState(false);
+  const [generatedRetitle, setGeneratedRetitle] =
+    useState<GeneratedRetitleState | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const titleEditControlsRef = useRef<HTMLDivElement>(null);
   const isSavingTitleRef = useRef(false);
+  const retitleRequestIdRef = useRef(0);
+  const generatedRetitleRef = useRef<GeneratedRetitleState | null>(null);
 
   // Recent sessions dropdown state
   const [showRecentSessions, setShowRecentSessions] = useState(false);
@@ -1516,6 +1533,10 @@ function SessionPageContent({
   const [localHasUnread, setLocalHasUnread] = useState<boolean | undefined>(
     undefined,
   );
+
+  useEffect(() => {
+    generatedRetitleRef.current = generatedRetitle;
+  }, [generatedRetitle]);
 
   // Reset local metadata state when sessionId changes
   useEffect(() => {
@@ -3370,44 +3391,56 @@ function SessionPageContent({
   // Update browser tab title
   useDocumentTitle(project?.name, displayTitle);
 
-  const handleStartEditingTitle = () => {
-    setRenameValue(displayTitle);
-    setIsEditingTitle(true);
-    // Focus the input and select all text after it renders
+  const setRetitleState = (state: GeneratedRetitleState | null) => {
+    generatedRetitleRef.current = state;
+    setGeneratedRetitle(state);
+  };
+
+  const invalidateGeneratedRetitle = () => {
+    retitleRequestIdRef.current += 1;
+    setRetitleState(null);
+  };
+
+  const focusAndSelectTitleInput = () => {
     setTimeout(() => {
       renameInputRef.current?.focus();
       renameInputRef.current?.select();
     }, 0);
   };
 
-  const handleCancelEditingTitle = () => {
-    // Don't cancel if we're in the middle of saving
-    if (isSavingTitleRef.current) return;
-    setIsEditingTitle(false);
-    setRenameValue("");
+  const captureGeneratedRetitleInsertion = (): GeneratedRetitleInsertion => {
+    const input = renameInputRef.current;
+    const value = input?.value ?? renameValue;
+    const start = input?.selectionStart ?? value.length;
+    const end = input?.selectionEnd ?? start;
+    return {
+      prefix: value.slice(0, start),
+      suffix: value.slice(end),
+    };
   };
 
-  // On blur, save if value changed (handles mobile keyboard dismiss on Enter)
-  const handleTitleBlur = () => {
-    // Don't interfere if we're already saving
-    if (isSavingTitleRef.current) return;
-    // If value is empty or unchanged, just cancel
-    if (!renameValue.trim() || renameValue.trim() === displayTitle) {
+  const composeGeneratedRetitle = (
+    title: string,
+    insertion: GeneratedRetitleInsertion,
+  ): string => `${insertion.prefix}${title}${insertion.suffix}`;
+
+  const saveTitleValue = async (nextTitle: string) => {
+    const trimmed = nextTitle.trim();
+    if (!trimmed || isRenaming) return;
+    if (trimmed === displayTitle) {
       handleCancelEditingTitle();
       return;
     }
-    // Otherwise save (handles mobile Enter which blurs before keydown fires)
-    handleSaveTitle();
-  };
 
-  const handleSaveTitle = async () => {
-    if (!renameValue.trim() || isRenaming) return;
+    invalidateGeneratedRetitle();
     isSavingTitleRef.current = true;
     setIsRenaming(true);
     try {
-      await api.updateSessionMetadata(sessionId, { title: renameValue.trim() });
-      setLocalCustomTitle(renameValue.trim());
+      await api.updateSessionMetadata(sessionId, { title: trimmed });
+      setLocalCustomTitle(trimmed);
       setIsEditingTitle(false);
+      setTitleEditMode("manual");
+      setRenameValue("");
       showToast(t("sessionRenamed"), "success");
     } catch (err) {
       console.error("Failed to rename session:", err);
@@ -3418,15 +3451,145 @@ function SessionPageContent({
     }
   };
 
+  const handleStartEditingTitle = () => {
+    invalidateGeneratedRetitle();
+    setTitleEditMode("manual");
+    setRenameValue(displayTitle);
+    setIsEditingTitle(true);
+    focusAndSelectTitleInput();
+  };
+
+  const handleStartRetitleTitle = () => {
+    setShowRecentSessions(false);
+    setTitleEditMode("retitle");
+    setRenameValue(displayTitle);
+    setIsEditingTitle(true);
+    focusAndSelectTitleInput();
+
+    const requestId = retitleRequestIdRef.current + 1;
+    retitleRequestIdRef.current = requestId;
+    if (!supportsForkFromTurn) {
+      setRetitleState({
+        requestId,
+        status: "error",
+        error: t("sessionRetitleUnsupported"),
+      });
+      return;
+    }
+
+    setRetitleState({ requestId, status: "generating" });
+    void (async () => {
+      try {
+        const result = await api.proposeSessionRetitle(projectId, sessionId, {
+          currentTitle: displayTitle,
+          lengthTarget: 72,
+        });
+        if (retitleRequestIdRef.current !== requestId) return;
+        const current = generatedRetitleRef.current;
+        if (!current || current.requestId !== requestId) return;
+        if (current.deferredInsertion) {
+          await saveTitleValue(
+            composeGeneratedRetitle(result.title, current.deferredInsertion),
+          );
+          return;
+        }
+        setRetitleState({
+          requestId,
+          status: "ready",
+          title: result.title,
+        });
+      } catch (err) {
+        if (retitleRequestIdRef.current !== requestId) return;
+        const message = err instanceof Error ? err.message : String(err);
+        setRetitleState({
+          requestId,
+          status: "error",
+          error: message || t("sessionRetitleFailed"),
+        });
+      }
+    })();
+  };
+
+  const handleCancelEditingTitle = () => {
+    // Don't cancel if we're in the middle of saving
+    if (isSavingTitleRef.current) return;
+    invalidateGeneratedRetitle();
+    setIsEditingTitle(false);
+    setTitleEditMode("manual");
+    setRenameValue("");
+  };
+
+  // On blur, save if value changed (handles mobile keyboard dismiss on Enter)
+  const handleTitleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    const nextTarget = e.relatedTarget;
+    if (
+      nextTarget instanceof Node &&
+      titleEditControlsRef.current?.contains(nextTarget)
+    ) {
+      return;
+    }
+    // Don't interfere if we're already saving
+    if (isSavingTitleRef.current) return;
+    if (titleEditMode === "retitle") {
+      handleCancelEditingTitle();
+      return;
+    }
+    // If value is empty or unchanged, just cancel
+    if (!renameValue.trim() || renameValue.trim() === displayTitle) {
+      handleCancelEditingTitle();
+      return;
+    }
+    // Otherwise save (handles mobile Enter which blurs before keydown fires)
+    handleSaveTitle();
+  };
+
+  const handleSaveTitle = () => {
+    void saveTitleValue(renameValue);
+  };
+
+  const handleAcceptGeneratedRetitle = () => {
+    if (titleEditMode !== "retitle") {
+      handleSaveTitle();
+      return;
+    }
+    const current = generatedRetitleRef.current;
+    if (!current || current.status === "error") return;
+    const insertion = captureGeneratedRetitleInsertion();
+    if (current.status === "ready" && current.title) {
+      void saveTitleValue(composeGeneratedRetitle(current.title, insertion));
+      return;
+    }
+    if (current.status === "generating") {
+      const next = { ...current, deferredInsertion: insertion };
+      setRetitleState(next);
+    }
+  };
+
   const handleTitleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      handleSaveTitle();
+      if (titleEditMode === "retitle" && !e.ctrlKey) {
+        handleAcceptGeneratedRetitle();
+      } else {
+        handleSaveTitle();
+      }
     } else if (e.key === "Escape") {
       e.preventDefault();
+      e.stopPropagation();
       handleCancelEditingTitle();
     }
   };
+
+  useEffect(() => {
+    if (!isEditingTitle) return;
+    const handleWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      handleCancelEditingTitle();
+    };
+    window.addEventListener("keydown", handleWindowKeyDown);
+    return () => window.removeEventListener("keydown", handleWindowKeyDown);
+  }, [isEditingTitle, handleCancelEditingTitle]);
 
   const handleToggleArchive = async () => {
     const newArchived = !isArchived;
@@ -3740,26 +3903,157 @@ function SessionPageContent({
               {loading ? (
                 <span className="session-title-skeleton" />
               ) : isEditingTitle ? (
-                <input
-                  ref={renameInputRef}
-                  type="text"
-                  className="session-title-input"
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onKeyDown={handleTitleKeyDown}
-                  onBlur={handleTitleBlur}
-                  disabled={isRenaming}
-                />
+                <div ref={titleEditControlsRef} className="session-title-edit">
+                  <div className="session-title-edit-row">
+                    <input
+                      ref={renameInputRef}
+                      type="text"
+                      className="session-title-input"
+                      value={
+                        generatedRetitle?.deferredInsertion ? "" : renameValue
+                      }
+                      placeholder={
+                        generatedRetitle?.deferredInsertion
+                          ? t("sessionRetitleGenerating")
+                          : undefined
+                      }
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={handleTitleKeyDown}
+                      onBlur={handleTitleBlur}
+                      disabled={
+                        isRenaming || !!generatedRetitle?.deferredInsertion
+                      }
+                    />
+                    {titleEditMode === "retitle" && (
+                      <button
+                        type="button"
+                        className={`session-title-edit-button session-title-retitle-accept${
+                          generatedRetitle?.deferredInsertion ? " is-armed" : ""
+                        }`}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={handleAcceptGeneratedRetitle}
+                        disabled={
+                          isRenaming ||
+                          !generatedRetitle ||
+                          !!generatedRetitle.deferredInsertion ||
+                          generatedRetitle.status === "error"
+                        }
+                        title={
+                          generatedRetitle?.status === "generating"
+                            ? t("sessionRetitleUseGeneratedWhenReady")
+                            : t("sessionRetitleUseGenerated")
+                        }
+                        aria-label={
+                          generatedRetitle?.status === "generating"
+                            ? t("sessionRetitleUseGeneratedWhenReady")
+                            : t("sessionRetitleUseGenerated")
+                        }
+                      >
+                        <svg
+                          width="15"
+                          height="15"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5z" />
+                          <path d="m11 8 4 4-4 4" />
+                          <path d="M8 12h7" />
+                        </svg>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="session-title-edit-button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={handleSaveTitle}
+                      disabled={
+                        isRenaming || !!generatedRetitle?.deferredInsertion
+                      }
+                      title={t("sessionRetitleSaveAsTyped")}
+                      aria-label={t("sessionRetitleSaveAsTyped")}
+                    >
+                      <svg
+                        width="15"
+                        height="15"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                        <path d="M17 21v-8H7v8" />
+                        <path d="M7 3v5h8" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      className="session-title-edit-button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={handleCancelEditingTitle}
+                      disabled={isRenaming}
+                      title={t("sessionRetitleCancel")}
+                      aria-label={t("sessionRetitleCancel")}
+                    >
+                      <svg
+                        width="15"
+                        height="15"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M18 6 6 18" />
+                        <path d="m6 6 12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                  {titleEditMode === "retitle" && generatedRetitle && (
+                    <div
+                      className={`session-title-retitle-status is-${generatedRetitle.status}${
+                        generatedRetitle.deferredInsertion ? " is-armed" : ""
+                      }`}
+                    >
+                      {generatedRetitle.deferredInsertion
+                        ? t("sessionRetitleDeferred")
+                        : generatedRetitle.status === "generating"
+                          ? t("sessionRetitleGenerating")
+                          : generatedRetitle.status === "ready" &&
+                              generatedRetitle.title
+                            ? `${t("sessionRetitleProposalLabel")} ${generatedRetitle.title}`
+                            : (generatedRetitle.error ??
+                              t("sessionRetitleFailed"))}
+                    </div>
+                  )}
+                </div>
               ) : (
                 <>
                   <button
-                    ref={titleButtonRef}
                     type="button"
-                    className="session-title session-title-dropdown-trigger"
-                    onClick={() => setShowRecentSessions(!showRecentSessions)}
+                    className="session-title session-title-retitle-trigger"
+                    onClick={handleStartRetitleTitle}
                     title={session?.fullTitle ?? displayTitle}
                   >
                     <span className="session-title-text">{displayTitle}</span>
+                  </button>
+                  <button
+                    ref={titleButtonRef}
+                    type="button"
+                    className="session-title-chevron-trigger"
+                    onClick={() => setShowRecentSessions(!showRecentSessions)}
+                    title={t("sessionRecentSessions")}
+                    aria-label={t("sessionRecentSessions")}
+                  >
                     <svg
                       className="session-title-chevron"
                       width="12"
@@ -4432,9 +4726,7 @@ function SessionPageContent({
                         submitLabel: t("forkSummarySubmit"),
                         tooltip: t("forkSummaryTooltip"),
                         icon: "⑂",
-                        noSummarySubmitLabel: t(
-                          "forkSummaryNoSummarySubmit",
-                        ),
+                        noSummarySubmitLabel: t("forkSummaryNoSummarySubmit"),
                         noSummaryTooltip: t("forkSummaryNoSummaryTooltip"),
                         noSummaryIcon: "↱",
                         // The composer fork mode is dismissed the moment we

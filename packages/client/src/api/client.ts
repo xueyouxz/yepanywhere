@@ -831,6 +831,22 @@ export const api = {
       }),
     }),
 
+  proposeSessionRetitle: (
+    projectId: string,
+    sessionId: string,
+    options?: { currentTitle?: string; lengthTarget?: number },
+  ) =>
+    fetchJSON<{ title: string; generatorSessionId: string }>(
+      `/projects/${projectId}/sessions/${sessionId}/retitle`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          currentTitle: options?.currentTitle,
+          lengthTarget: options?.lengthTarget,
+        }),
+      },
+    ),
+
   cancelForkSessionWithSummary: (
     projectId: string,
     sessionId: string,

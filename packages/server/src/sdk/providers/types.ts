@@ -274,9 +274,10 @@ export interface AgentProvider {
   /**
    * Generate a YA-owned summary through one of the supported helper
    * strategies. Recaps use a cheap side-session strategy over recent
-   * assistant text; fork-after-summary uses a throwaway real fork so the
+   * assistant text; fork-backed helpers use a throwaway real fork so the
    * source transcript is not polluted and provider message structure/cache
-   * warmth are preserved. See topics/recaps.md and topics/fork-from-turn.md.
+   * warmth are preserved. See topics/recaps.md, topics/fork-from-turn.md,
+   * and topics/session-retitle.md.
    */
   generateSummary?: (
     request: SummaryGenerationRequest,
@@ -323,6 +324,20 @@ export type SummaryGenerationRequest =
       /** User-authored summary instructions from the composer. */
       instructions?: string;
       /** Cancels the helper query when the server-owned job is cancelled. */
+      signal?: AbortSignal;
+    }
+  | {
+      purpose: "session-retitle";
+      strategy: "fork";
+      /** Archived helper fork whose whole context should be titled. */
+      generatorSessionId: string;
+      /** Project working directory the session belongs to. */
+      cwd: string;
+      /** Current displayed title, if any, to avoid repeating a bad title. */
+      currentTitle?: string;
+      /** Target maximum title length in characters. */
+      lengthTarget?: number;
+      /** Cancels the helper query when the request is abandoned. */
       signal?: AbortSignal;
     };
 

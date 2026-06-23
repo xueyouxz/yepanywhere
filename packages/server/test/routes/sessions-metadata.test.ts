@@ -1530,6 +1530,97 @@ describe("Sessions metadata route", () => {
     });
   });
 
+  it("generates a retitle proposal without updating source metadata", async () => {
+    const project = createProject();
+    const forkSession = vi.fn(async () => ({
+      sessionId: "sess-retitle-generator",
+    }));
+    const generateSummary = vi.fn(async () => ({
+      text: 'Title: "Tight rename flow."',
+    }));
+    const updateMetadata = vi.fn();
+    const setProvider = vi.fn();
+    const setRequestedModel = vi.fn();
+
+    const routes = createSessionsRoutes({
+      supervisor: {
+        getProcessForSession: vi.fn(() => ({
+          id: "proc-source",
+          provider: "claude",
+          model: "sonnet",
+        })),
+        supportsForkSession: vi.fn(() => true),
+        forkSession,
+        generateSummary,
+      } as unknown as SessionsDeps["supervisor"],
+      scanner: {
+        getOrCreateProject: vi.fn(async () => project),
+      } as unknown as SessionsDeps["scanner"],
+      sessionMetadataService: {
+        getProvider: vi.fn(() => "claude"),
+        getRequestedModel: vi.fn(() => "sonnet"),
+        getExecutor: vi.fn(() => undefined),
+        getMetadata: vi.fn(() => ({ promptSuggestionMode: "native" })),
+        updateMetadata,
+        setProvider,
+        setRequestedModel,
+      } as unknown as NonNullable<SessionsDeps["sessionMetadataService"]>,
+      eventBus: { emit: vi.fn() } as unknown as SessionsDeps["eventBus"],
+    });
+
+    const response = await routes.request(
+      `/projects/${project.id}/sessions/sess-1/retitle`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          currentTitle: "old noisy title",
+          lengthTarget: 72,
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      title: "Tight rename flow",
+      generatorSessionId: "sess-retitle-generator",
+    });
+    expect(forkSession).toHaveBeenCalledWith({
+      sessionId: "sess-1",
+      projectPath: project.path,
+      providerName: "claude",
+      title: "Retitle generator",
+    });
+    expect(generateSummary).toHaveBeenCalledWith(
+      "claude",
+      expect.objectContaining({
+        purpose: "session-retitle",
+        strategy: "fork",
+        generatorSessionId: "sess-retitle-generator",
+        cwd: project.path,
+        currentTitle: "old noisy title",
+        lengthTarget: 72,
+      }),
+    );
+    expect(updateMetadata).toHaveBeenCalledWith("sess-retitle-generator", {
+      title: "Retitle generator",
+      archived: true,
+      parentSessionId: "sess-1",
+    });
+    expect(updateMetadata).not.toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ title: expect.any(String) }),
+    );
+    expect(setProvider).toHaveBeenCalledWith(
+      "sess-retitle-generator",
+      "claude",
+    );
+    expect(setRequestedModel).toHaveBeenCalledWith(
+      "sess-retitle-generator",
+      "sonnet",
+    );
+  });
+
   it("owns fork-summary generation after returning a durable display object", async () => {
     const project = createProject();
     const generateSummary = vi.fn(async () => ({
