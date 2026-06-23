@@ -695,7 +695,7 @@ function BashCollapsedPreview({
 export const bashRenderer: ToolRenderer<BashInput, BashResult> = {
   tool: "Bash",
   displayName: "Ran",
-  pendingDisplayName: "Running",
+  pendingDisplayName: "Run",
 
   renderToolUse(input, _context) {
     return <BashToolUse input={input as BashInput} />;

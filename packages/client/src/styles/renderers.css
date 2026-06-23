@@ -4523,6 +4523,22 @@ details[open] .collapsible__icon {
 
 .file-viewer-close {
   margin-left: 0.5rem;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-surface, #181818) 86%, transparent);
+  color: var(--text-primary);
+}
+
+.file-viewer-close svg {
+  width: 22px;
+  height: 22px;
+}
+
+.file-viewer-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--text-dimmed, #666);
 }
 
 .file-viewer-body {

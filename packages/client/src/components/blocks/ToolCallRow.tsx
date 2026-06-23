@@ -137,7 +137,7 @@ function formatHiddenCommandLabel({
     parts.push(`+${hiddenLines} ${hiddenLines === 1 ? "line" : "lines"}`);
   }
   if (hiddenChars > 0) {
-    parts.push(`+${hiddenChars} ${hiddenChars === 1 ? "char" : "chars"}`);
+    parts.push(`+${hiddenChars}`);
   }
   return parts.length > 0 ? parts.join(", ") : null;
 }
@@ -858,11 +858,6 @@ export const ToolCallRow = memo(function ToolCallRow({
             <span className="tool-summary-command-text">
               {bashCommandExpanded ? headerCommand : bashCommandPreview.text}
             </span>
-            {!bashCommandExpanded && bashCommandPreview.hiddenLabel && (
-              <span className="tool-summary-command-more">
-                {bashCommandPreview.hiddenLabel}
-              </span>
-            )}
           </button>
         ) : (
           <span className="tool-summary">
@@ -893,6 +888,13 @@ export const ToolCallRow = memo(function ToolCallRow({
             {dotExpanded ? "▾" : "▸"}
           </span>
         )}
+        {showBashCommandTarget &&
+          !bashCommandExpanded &&
+          bashCommandPreview.hiddenLabel && (
+            <span className="tool-summary-command-more">
+              {bashCommandPreview.hiddenLabel}
+            </span>
+          )}
       </div>
 
       {/* Collapsed preview - shown when tool supports it (non-expandable) */}

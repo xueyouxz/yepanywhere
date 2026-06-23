@@ -37,9 +37,9 @@ describe("ToolCallRow", () => {
       />,
     );
 
-    // Pending rows read in the present tense ("Running"), past tense ("Ran")
+    // Pending rows read in the present tense ("Run"), past tense ("Ran")
     // only once the command has finished.
-    expect(screen.getByText("Running")).toBeDefined();
+    expect(screen.getByText("Run")).toBeDefined();
     expect(screen.getByText("npm run test:e2e:pipeline-v2")).toBeDefined();
     expect(container.querySelector(".tool-row-collapsed-preview")).toBeNull();
     expect(container.querySelector(".tool-use-expanded")).toBeNull();
@@ -64,7 +64,7 @@ describe("ToolCallRow", () => {
       />,
     );
 
-    expect(screen.getByText("Running")).toBeDefined();
+    expect(screen.getByText("Run")).toBeDefined();
     const preview = container.querySelector(".tool-row-collapsed-preview");
     expect(preview).not.toBeNull();
     expect(preview?.textContent).toContain("partial");
@@ -242,7 +242,7 @@ describe("ToolCallRow", () => {
     const command = ["printf first", "printf second", "printf third"].join(
       "\n",
     );
-    render(
+    const { container } = render(
       <ToolCallRow
         id="tool-multiline-bash"
         toolName="Bash"
@@ -267,13 +267,18 @@ describe("ToolCallRow", () => {
     });
     expect(commandButton.textContent).toContain("printf first");
     expect(commandButton.textContent).toContain("printf second");
-    expect(commandButton.textContent).toContain("+1 line");
     expect(commandButton.textContent).not.toContain("printf third");
+
+    // The hidden-content badge sits on its own line under the Run/Ran
+    // label, not inside the command button.
+    const moreBadge = container.querySelector(".tool-summary-command-more");
+    expect(moreBadge?.textContent).toContain("+1 line");
+    expect(commandButton.textContent).not.toContain("+1 line");
 
     fireEvent.click(commandButton);
 
     expect(commandButton.textContent).toContain("printf third");
-    expect(commandButton.textContent).not.toContain("+1 line");
+    expect(container.querySelector(".tool-summary-command-more")).toBeNull();
   });
 
   it("uses the timeline dot to expand long Grep summaries", () => {

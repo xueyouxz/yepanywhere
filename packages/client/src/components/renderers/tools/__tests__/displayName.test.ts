@@ -5,7 +5,7 @@ import { toolRegistry } from "../index";
 
 describe("toolRegistry.getDisplayName tense", () => {
   it("reads present tense while pending and past tense once finished", () => {
-    expect(toolRegistry.getDisplayName("Bash", "pending")).toBe("Running");
+    expect(toolRegistry.getDisplayName("Bash", "pending")).toBe("Run");
     expect(toolRegistry.getDisplayName("Bash", "complete")).toBe("Ran");
     // No status argument keeps the past-tense default (e.g. non-header uses).
     expect(toolRegistry.getDisplayName("Bash")).toBe("Ran");

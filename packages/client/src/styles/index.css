@@ -3223,7 +3223,7 @@ a.sidebar-nav-item {
 /* Assistant turn container - wraps consecutive assistant items with timeline */
 .assistant-turn {
   position: relative;
-  padding-left: 24px;
+  padding-left: 14px; /* 60% of the former 24px — tighter mobile left indent */
 }
 
 .thinking-block .collapsible__summary {

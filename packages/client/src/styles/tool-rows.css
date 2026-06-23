@@ -163,7 +163,8 @@
 }
 
 .ran-tool-row .tool-row-header {
-  border: 1px solid color-mix(in srgb, var(--border-color, #333) 70%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--border-color, #333) 70%, transparent);
   background: color-mix(in srgb, var(--bg-code, #1f1f1f) 52%, transparent);
 }
 
@@ -173,6 +174,7 @@
 
 .tool-row-header.has-command-preview {
   align-items: baseline;
+  flex-wrap: wrap;
 }
 
 .tool-row-header:focus {
@@ -300,8 +302,12 @@ button.tool-summary {
 }
 
 .tool-summary-command-more {
+  /* Wraps onto its own line under the Run/Ran label: the flex:1 command
+     fills row 1, so this fixed-size badge has no room and breaks below. */
   display: inline-flex;
   flex: 0 0 auto;
+  align-self: flex-start;
+  margin-top: 3px;
   align-items: center;
   padding: 0.05rem 0.35rem;
   border: 1px solid var(--border-subtle, var(--border-color));
@@ -374,9 +380,11 @@ button.tool-summary {
 }
 
 /* Collapsed preview area - shown when tool has preview but not expanded */
+/* Nested left gutter: 10px (was 24px). Keep .tool-row-collapse-strip
+   geometry below aligned to this value. */
 .tool-row-collapsed-preview {
   position: relative;
-  margin-left: 24px;
+  margin-left: 10px;
   margin-top: 4px;
   cursor: pointer;
 }
@@ -405,20 +413,21 @@ button.tool-summary {
 /* Expanded content area */
 .tool-row-content {
   position: relative;
-  margin-left: 24px;
+  margin-left: 10px;
   padding: 8px;
   border-left: 1px solid var(--border-color, #333);
   transition: border-left-color 0.1s;
   animation: slideDown 0.15s ease-out;
 }
 
-/* Invisible wide strip over border-left — click anywhere along it to collapse */
+/* Invisible wide strip over border-left — click anywhere along it to collapse.
+   Spans the 10px gutter + 8px into content, matching the old gutter+8 reach. */
 .tool-row-collapse-strip {
   position: absolute;
-  left: -24px;
+  left: -10px;
   top: 0;
   bottom: 0;
-  width: 32px;
+  width: 18px;
   border: none;
   background: transparent;
   cursor: pointer;
@@ -487,7 +496,7 @@ button.tool-summary {
   flex-direction: column;
   gap: 2px;
   max-height: 8.5rem;
-  margin-left: 24px;
+  margin-left: 10px;
   margin-top: 2px;
   padding: 2px 0 2px 8px;
   border-left: 1px solid var(--border-color, #333);
