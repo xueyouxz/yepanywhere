@@ -366,9 +366,16 @@ Wiring: `SessionPage` → `MessageList` (`onForkBeforeUserMessage`,
 `onTrimAnchor`). Fork stays gated by `supportsForkSession` (`SessionPage` passes
 `undefined` otherwise, so the menu omits Fork).
 
-## Fork-send: backgrounded progress and follow (planned)
+## Fork-send: backgrounded progress and follow
 
-**Current symptom (usability bug).** The generation step is a full LLM turn over
+**Status: implemented, except the durable pseudo-turn.** Shipped: the
+backgrounded indicator (phase + elapsed), the auto-open attempt with a
+title-labeled hyperlink fallback, the two cancels, the per-fork auto-open toggle
+seeded from a persistent default, and the float's fade-out on a terminal event.
+**Remaining next step:** the durable pseudo-turn (§ Float vs durable pseudo-turn).
+The numbered design below is retained as the spec it was built to.
+
+**Original symptom (the bug this fixed).** The generation step is a full LLM turn over
 the *entire* forked context — 30+ s, worse with a cold prompt cache (per
 [provider-context-economics](provider-context-economics.md)) — but it is wired
 as a blocking composer submit. The only feedback is the **greyed-out send
@@ -390,7 +397,10 @@ indicator,** freeing the composer immediately.
    as a small float. It shows phase ("Generating summary…") and elapsed time.
 
 2. **On ready** (target fork created, summary submitted), **open the forked
-   session in a new tab by default.** Because generation typically takes 30+ s,
+   session in a new tab** when the auto-open preference is on — a server-scoped
+   per-install default (default-off per [vanilla-defaults](vanilla-defaults.md);
+   see [settings-ui-placement](settings-ui-placement.md)) with a per-fork
+   override toggle on the indicator. Because generation typically takes 30+ s,
    the open is deferred to completion, not attempted up front.
 
 3. **Auto-open fallback.** If the new tab cannot open (popup blocking, or a
@@ -417,7 +427,7 @@ indicator,** freeing the composer immediately.
   fork," visually distinct from the pre-send drop, and should note that the
   generation turn already partially billed.
 
-### Float vs durable pseudo-turn (planned)
+### Float vs durable pseudo-turn
 
 The follow indicator has two intended forms, and the preferred end state is the
 second:
@@ -439,11 +449,17 @@ second:
 The follow link's label is the **title line** (summary first line), shared by the
 float, the pseudo-turn, and the forked session title.
 
-**Current implementation diverges** (commit shipping the backgrounded indicator):
-it is a pinned float above the composer with a manual `×` dismiss and
-dismiss-on-click. To reach the design above it needs: fade-out on terminal events
-(not a manual ×), no removal on click (keep the link, add `(clicked)`), and the
-durable pseudo-turn hand-off. Tracked as follow-up, not done.
+**Implemented: the transient float.** It fades out on a terminal event
+(`(tab opened)` lingers briefly then fades; a link click fades), with the `×`
+kept only for the error state. The per-fork auto-open toggle and its persistent
+default ship alongside.
+
+**Remaining next step — the durable pseudo-turn.** The float currently just fades
+and is gone; it does **not** yet transition into a durable
+[transcript display object](transcript-display-objects.md) placed in the session
+outline. That object — scroll-with-content placement, in-place `(tab opened)` /
+`(clicked)` updates with the link staying, and server-side persistence surviving
+device migration and a YA restart — is the next phase and is not built.
 
 ## Open questions / follow-ups
 
