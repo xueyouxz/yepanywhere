@@ -438,7 +438,7 @@ describe("ToolCallRow", () => {
     ).toBeDefined();
   });
 
-  it("expands completed Edit rows inline from the timeline dot", () => {
+  it("collapses completed Edit previews from the row outline", () => {
     const { container } = render(
       <ToolCallRow
         id="tool-edit"
@@ -476,17 +476,32 @@ describe("ToolCallRow", () => {
     expect(container.querySelector(".edit-collapsed-preview")).not.toBeNull();
     expect(container.querySelector(".edit-result")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Expand inline view" }));
+    fireEvent.click(screen.getByRole("button", { name: "Collapse preview" }));
 
     expect(container.querySelector(".edit-collapsed-preview")).toBeNull();
-    expect(container.querySelector(".edit-result")).not.toBeNull();
+    expect(container.querySelector(".edit-result")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Expand preview" }),
+    ).toBeDefined();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Collapse expanded tool row" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Expand preview" }));
 
     expect(container.querySelector(".edit-collapsed-preview")).not.toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Collapse preview from left gutter" }),
+    );
+
+    expect(container.querySelector(".edit-collapsed-preview")).toBeNull();
     expect(container.querySelector(".edit-result")).toBeNull();
+
+    const header = container.querySelector<HTMLElement>(".tool-row-header");
+    expect(header).not.toBeNull();
+    if (header) {
+      fireEvent.click(header);
+    }
+
+    expect(container.querySelector(".edit-collapsed-preview")).not.toBeNull();
   });
 
   it("focuses the tool row top when expanding long inline content", () => {
