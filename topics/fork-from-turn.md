@@ -33,6 +33,8 @@ summary user turn could instead be a sequence of synthetic user+agent turns,
 per provider),
 [settings-ui-placement](settings-ui-placement.md) (where the auto-open default
 setting lives, and the default + live-override pattern it follows),
+[transcript-display-objects](transcript-display-objects.md) (the durable
+pseudo-turn the fork-send float should transition into — future work),
 [scrollback-view-stability](scrollback-view-stability.md) (the client transcript
 window the trim dot controls).
 
@@ -414,6 +416,34 @@ indicator,** freeing the composer immediately.
   and tears down the indicator. It must be clearly scoped to "stop this running
   fork," visually distinct from the pre-send drop, and should note that the
   generation turn already partially billed.
+
+### Float vs durable pseudo-turn (planned)
+
+The follow indicator has two intended forms, and the preferred end state is the
+second:
+
+- **Transient float** near the composer for immediate attention while
+  generating. On a terminal event (`(tab opened)` or `(clicked)`) it
+  **animates/fades out** — it must not linger as a permanent pinned float, which
+  would be annoying.
+- **Durable pseudo-turn** placed in the session outline at the end as of
+  creation time. The float should **transition into** this object rather than
+  just vanishing. It is a [transcript display object](transcript-display-objects.md)
+  — a saved display-only item with a placement, **not** a real turn (never in
+  model context). It **scrolls with content** (scrolls off with continued use,
+  by design), **updates in place** to `(tab opened)` when auto-open is detected,
+  and **marks `(clicked)`** when followed — but the object and its link **stay in
+  any case**. Persistence (ideally server-side, surviving device migration and a
+  YA restart) is future work; see the linked topic.
+
+The follow link's label is the **title line** (summary first line), shared by the
+float, the pseudo-turn, and the forked session title.
+
+**Current implementation diverges** (commit shipping the backgrounded indicator):
+it is a pinned float above the composer with a manual `×` dismiss and
+dismiss-on-click. To reach the design above it needs: fade-out on terminal events
+(not a manual ×), no removal on click (keep the link, add `(clicked)`), and the
+durable pseudo-turn hand-off. Tracked as follow-up, not done.
 
 ## Open questions / follow-ups
 
