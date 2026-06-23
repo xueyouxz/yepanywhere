@@ -226,6 +226,8 @@ export function SessionListItem({
   // recompute it once on the server; the pushed session-updated refreshes the
   // row in place. Owned/external sessions already update live.
   const previewRefreshInFlight = useRef(false);
+  // True while this row's ... menu is open; suppresses new card shows.
+  const menuOpenRef = useRef(false);
 
   // Computed values with optimistic fallback
   const isStarred = localIsStarred ?? isStarredProp;
@@ -456,8 +458,11 @@ export function SessionListItem({
   }, [clearPreviewTimers]);
 
   const schedulePreviewShow = useCallback(() => {
-    if (!showHoverCard) return;
+    if (!showHoverCard || menuOpenRef.current) return;
     clearPreviewTimers();
+    // Fetch the updated last-output immediately on hover; only the card's
+    // appearance waits for the show delay.
+    refreshIdlePreview();
     previewShowTimer.current = setTimeout(() => {
       const rect = liRef.current?.getBoundingClientRect();
       const hoverCardId = hoverCardIdRef.current;
@@ -468,7 +473,6 @@ export function SessionListItem({
         rowBottom: rect.bottom,
         cursorX: previewCursorX.current,
       });
-      refreshIdlePreview();
       previewShowTimer.current = null;
     }, hoverCardShowDelayMs);
   }, [
@@ -540,6 +544,17 @@ export function SessionListItem({
     }
     clearPreview();
   }, [clearPreview]);
+
+  // The ... menu opening dismisses the card and, while open, suppresses new
+  // shows so cursor moves over the row/menu do not pop cards. Hovering the
+  // trigger itself no longer cancels — the card sits under the menu anyway.
+  const handleMenuOpenChange = useCallback(
+    (open: boolean) => {
+      menuOpenRef.current = open;
+      if (open) clearPreview();
+    },
+    [clearPreview],
+  );
 
   // Build CSS classes
   const liClasses = [
@@ -840,7 +855,7 @@ export function SessionListItem({
           }
           useEllipsisIcon
           useFixedPositioning
-          onInteract={handlePreviewCancel}
+          onOpenChange={handleMenuOpenChange}
           className="session-list-item__menu"
         />
       )}

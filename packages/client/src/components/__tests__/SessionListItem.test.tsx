@@ -10,6 +10,7 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { api } from "../../api/client";
 import { DEFAULT_HOVERCARD_SHOW_DELAY_MS } from "../../hooks/useHoverCardAppearance";
 import { I18nProvider } from "../../i18n";
 import { SessionListItem } from "../SessionListItem";
@@ -369,5 +370,72 @@ describe("SessionListItem links", () => {
     expect(screen.getByLabelText("Session options").getAttribute("title")).toBe(
       null,
     );
+  });
+
+  it("does not show a hover card while the session menu is open", () => {
+    vi.useFakeTimers();
+
+    render(
+      <I18nProvider>
+        <MemoryRouter>
+          <ul>
+            <SessionListItem
+              sessionId="session-1"
+              projectId="project-1"
+              title="Menu open"
+              initialPrompt="Menu open prompt"
+              provider="claude"
+              status={{ owner: "self", processId: "pid-1" }}
+              mode="compact"
+            />
+          </ul>
+        </MemoryRouter>
+      </I18nProvider>,
+    );
+
+    const item = screen.getByRole("link", { name: /Menu open/ }).closest("li");
+    expect(item).toBeTruthy();
+
+    act(() => {
+      fireEvent.click(screen.getByLabelText("Session options"));
+    });
+    fireEvent.mouseEnter(item!, { clientX: 20 });
+    act(() => {
+      vi.advanceTimersByTime(DEFAULT_HOVERCARD_SHOW_DELAY_MS + 50);
+    });
+
+    expect(screen.queryByText("Menu open prompt")).toBeNull();
+  });
+
+  it("refreshes the preview on hover, before the show delay elapses", () => {
+    vi.useFakeTimers();
+    const refreshSpy = vi
+      .spyOn(api, "refreshSessionPreview")
+      .mockResolvedValue(undefined as never);
+
+    render(
+      <I18nProvider>
+        <MemoryRouter>
+          <ul>
+            <SessionListItem
+              sessionId="session-1"
+              projectId="project-1"
+              title="Idle row"
+              initialPrompt="Idle row prompt"
+              provider="claude"
+              mode="compact"
+            />
+          </ul>
+        </MemoryRouter>
+      </I18nProvider>,
+    );
+
+    const item = screen.getByRole("link", { name: /Idle row/ }).closest("li");
+    fireEvent.mouseEnter(item!, { clientX: 20 });
+
+    // Fires immediately on hover, not gated behind the show delay.
+    expect(refreshSpy).toHaveBeenCalledWith("project-1", "session-1");
+
+    refreshSpy.mockRestore();
   });
 });

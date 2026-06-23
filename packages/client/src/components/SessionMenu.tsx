@@ -54,8 +54,8 @@ export interface SessionMenuProps {
   className?: string;
   /** Use fixed positioning for dropdown (escapes overflow clipping) */
   useFixedPositioning?: boolean;
-  /** Called when the trigger/menu is interacted with, before menu UI appears. */
-  onInteract?: () => void;
+  /** Notified when the menu opens/closes so callers can react to open state. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 export function SessionMenu({
@@ -83,7 +83,7 @@ export function SessionMenu({
   useEllipsisIcon = false,
   className = "",
   useFixedPositioning = false,
-  onInteract,
+  onOpenChange,
 }: SessionMenuProps) {
   const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
@@ -134,8 +134,13 @@ export function SessionMenu({
     };
   }, [isOpen]);
 
+  // Notify the caller of every open/close (covers toggle, outside-click,
+  // scroll, and item-select close paths), not just the trigger click.
+  useEffect(() => {
+    onOpenChange?.(isOpen);
+  }, [isOpen, onOpenChange]);
+
   const handleToggleOpen = () => {
-    onInteract?.();
     if (isOpen) {
       setIsOpen(false);
       setDropdownPosition(null);
@@ -285,7 +290,10 @@ export function SessionMenu({
         </button>
       )}
       {onConfigureHeartbeat && (
-        <button type="button" onClick={() => handleAction(onConfigureHeartbeat)}>
+        <button
+          type="button"
+          onClick={() => handleAction(onConfigureHeartbeat)}
+        >
           <svg
             width="14"
             height="14"
@@ -505,7 +513,13 @@ export function SessionMenu({
         </button>
       )}
       {onReload && (
-        <button type="button" onClick={() => { setIsOpen(false); onReload(); }}>
+        <button
+          type="button"
+          onClick={() => {
+            setIsOpen(false);
+            onReload();
+          }}
+        >
           <svg
             width="14"
             height="14"
@@ -538,8 +552,6 @@ export function SessionMenu({
         ref={triggerRef}
         type="button"
         className="session-menu-trigger"
-        onPointerEnter={onInteract}
-        onFocus={onInteract}
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
