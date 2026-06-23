@@ -9,7 +9,7 @@ export const DEFAULT_HOVERCARD_SHOW_DELAY_MS = 150;
 
 // Max height of the preview card; taller shows more of the opening request.
 export const HOVERCARD_MAX_HEIGHT_MIN_PX = 80;
-export const HOVERCARD_MAX_HEIGHT_MAX_PX = 400;
+export const HOVERCARD_MAX_HEIGHT_MAX_PX = 600;
 export const HOVERCARD_MAX_HEIGHT_STEP_PX = 10;
 export const DEFAULT_HOVERCARD_MAX_HEIGHT_PX = 150;
 

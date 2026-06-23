@@ -141,13 +141,19 @@ export function AppearanceSettings() {
     setHoverCardMaxHeightPx,
   } = useHoverCardAppearance();
   // Estimated visible request lines at the chosen height. Uses the with-reply
-  // case — the one that actually varies with the slider (no-reply caps at 3).
+  // case — the conservative estimate shown when a recent reply is also present.
   const hoverCardHeightLines = estimateHoverCardPromptLines(
     hoverCardMaxHeightPx,
     true,
   );
   const [contentMaxWidthDraft, setContentMaxWidthDraft] = useState(() =>
     String(contentMaxWidth),
+  );
+  const [hoverCardDelayDraft, setHoverCardDelayDraft] = useState(() =>
+    String(hoverCardShowDelayMs),
+  );
+  const [hoverCardHeightDraft, setHoverCardHeightDraft] = useState(() =>
+    String(hoverCardMaxHeightPx),
   );
   const [outputFontSizeDraft, setOutputFontSizeDraft] = useState(() =>
     formatNumberSetting(outputFontSizePx),
@@ -275,6 +281,8 @@ export function AppearanceSettings() {
       setTabTitleActivityEnabled(snapshot.tabTitleActivityEnabled);
       setShowConnectionBars(snapshot.showConnectionBars);
       setContentMaxWidthDraft(String(snapshot.contentMaxWidth));
+      setHoverCardDelayDraft(String(snapshot.hoverCardShowDelayMs));
+      setHoverCardHeightDraft(String(snapshot.hoverCardMaxHeightPx));
       setOutputFontSizeDraft(formatNumberSetting(snapshot.outputFontSizePx));
       setOutputFixedFontSizeOffsetDraft(
         formatNumberSetting(snapshot.outputFixedFontSizeOffsetPx),
@@ -332,6 +340,14 @@ export function AppearanceSettings() {
   }, [contentMaxWidth]);
 
   useEffect(() => {
+    setHoverCardDelayDraft(String(hoverCardShowDelayMs));
+  }, [hoverCardShowDelayMs]);
+
+  useEffect(() => {
+    setHoverCardHeightDraft(String(hoverCardMaxHeightPx));
+  }, [hoverCardMaxHeightPx]);
+
+  useEffect(() => {
     setOutputFontSizeDraft(formatNumberSetting(outputFontSizePx));
   }, [outputFontSizePx]);
 
@@ -373,6 +389,20 @@ export function AppearanceSettings() {
     const parsed = Number.parseInt(contentMaxWidthDraft, 10);
     setContentMaxWidth(
       Number.isFinite(parsed) ? parsed : DEFAULT_CONTENT_MAX_WIDTH_PX,
+    );
+  };
+
+  const commitHoverCardDelay = () => {
+    const parsed = Number(hoverCardDelayDraft);
+    setHoverCardShowDelayMs(
+      Number.isFinite(parsed) ? parsed : DEFAULT_HOVERCARD_SHOW_DELAY_MS,
+    );
+  };
+
+  const commitHoverCardHeight = () => {
+    const parsed = Number(hoverCardHeightDraft);
+    setHoverCardMaxHeightPx(
+      Number.isFinite(parsed) ? parsed : DEFAULT_HOVERCARD_MAX_HEIGHT_PX,
     );
   };
 
@@ -1006,32 +1036,37 @@ export function AppearanceSettings() {
             <p>{t("appearanceContentWidthDescription")}</p>
           </div>
           <div className="settings-item-actions">
-            <input
-              type="number"
-              className="settings-input-small"
-              min={MIN_CONTENT_MAX_WIDTH_PX}
-              max={MAX_CONTENT_MAX_WIDTH_PX}
-              step={10}
-              value={contentMaxWidthDraft}
-              onChange={(e) => setContentMaxWidthDraft(e.target.value)}
-              onBlur={commitContentMaxWidth}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  commitContentMaxWidth();
-                  e.currentTarget.blur();
-                }
-              }}
-              aria-label={t("appearanceContentWidthTitle")}
-            />
+            <span className="settings-input-unit">
+              <input
+                type="number"
+                className="settings-input-small"
+                min={MIN_CONTENT_MAX_WIDTH_PX}
+                max={MAX_CONTENT_MAX_WIDTH_PX}
+                step={10}
+                value={contentMaxWidthDraft}
+                onChange={(e) => setContentMaxWidthDraft(e.target.value)}
+                onBlur={commitContentMaxWidth}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    commitContentMaxWidth();
+                    e.currentTarget.blur();
+                  }
+                }}
+                aria-label={t("appearanceContentWidthTitle")}
+              />
+              {t("appearanceContentWidthUnit")}
+            </span>
             <button
               type="button"
-              className="settings-button settings-button-secondary"
+              className="settings-inline-x"
               onClick={() => {
                 setContentMaxWidth(DEFAULT_CONTENT_MAX_WIDTH_PX);
                 setContentMaxWidthDraft(String(DEFAULT_CONTENT_MAX_WIDTH_PX));
               }}
+              aria-label={t("appearanceContentWidthReset")}
+              title={t("appearanceContentWidthReset")}
             >
-              {t("appearanceContentWidthReset")}
+              ×
             </button>
           </div>
         </div>
@@ -1050,17 +1085,37 @@ export function AppearanceSettings() {
               onChange={(e) => setHoverCardShowDelayMs(Number(e.target.value))}
               aria-label={t("appearanceHoverCardDelayTitle")}
             />
-            <span className="settings-input-small">
-              {hoverCardShowDelayMs} {t("appearanceHoverCardDelayUnit")}
+            <span className="settings-input-unit">
+              <input
+                type="number"
+                className="settings-input-small"
+                min={HOVERCARD_SHOW_DELAY_MIN_MS}
+                max={HOVERCARD_SHOW_DELAY_MAX_MS}
+                step={HOVERCARD_SHOW_DELAY_STEP_MS}
+                value={hoverCardDelayDraft}
+                onChange={(e) => setHoverCardDelayDraft(e.target.value)}
+                onBlur={commitHoverCardDelay}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    commitHoverCardDelay();
+                    e.currentTarget.blur();
+                  }
+                }}
+                aria-label={t("appearanceHoverCardDelayTitle")}
+              />
+              {t("appearanceHoverCardDelayUnit")}
             </span>
             <button
               type="button"
-              className="settings-button settings-button-secondary"
-              onClick={() =>
-                setHoverCardShowDelayMs(DEFAULT_HOVERCARD_SHOW_DELAY_MS)
-              }
+              className="settings-inline-x"
+              onClick={() => {
+                setHoverCardShowDelayMs(DEFAULT_HOVERCARD_SHOW_DELAY_MS);
+                setHoverCardDelayDraft(String(DEFAULT_HOVERCARD_SHOW_DELAY_MS));
+              }}
+              aria-label={t("appearanceHoverCardReset")}
+              title={t("appearanceHoverCardReset")}
             >
-              {t("appearanceHoverCardReset")}
+              ×
             </button>
           </div>
         </div>
@@ -1079,21 +1134,49 @@ export function AppearanceSettings() {
               onChange={(e) => setHoverCardMaxHeightPx(Number(e.target.value))}
               aria-label={t("appearanceHoverCardHeightTitle")}
             />
-            <span className="settings-input-small">
-              {hoverCardMaxHeightPx} {t("appearanceHoverCardHeightUnit")} · ≈
-              {hoverCardHeightLines}{" "}
+            <span className="settings-input-unit">
+              <input
+                type="number"
+                className="settings-input-small"
+                min={HOVERCARD_MAX_HEIGHT_MIN_PX}
+                max={HOVERCARD_MAX_HEIGHT_MAX_PX}
+                step={HOVERCARD_MAX_HEIGHT_STEP_PX}
+                value={hoverCardHeightDraft}
+                onChange={(e) => setHoverCardHeightDraft(e.target.value)}
+                onBlur={commitHoverCardHeight}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    commitHoverCardHeight();
+                    e.currentTarget.blur();
+                  }
+                }}
+                aria-label={t("appearanceHoverCardHeightTitle")}
+              />
+              {t("appearanceHoverCardHeightUnit")}
+            </span>
+            <span
+              className="settings-hovercard-lines"
+              style={{ whiteSpace: "nowrap" }}
+            >
+              ({hoverCardHeightLines}{" "}
               {hoverCardHeightLines === 1
                 ? t("appearanceHoverCardLineUnit")
                 : t("appearanceHoverCardLinesUnit")}
+              )
             </span>
             <button
               type="button"
-              className="settings-button settings-button-secondary"
-              onClick={() =>
-                setHoverCardMaxHeightPx(DEFAULT_HOVERCARD_MAX_HEIGHT_PX)
-              }
+              className="settings-inline-x"
+              onClick={() => {
+                setHoverCardMaxHeightPx(DEFAULT_HOVERCARD_MAX_HEIGHT_PX);
+                setHoverCardHeightDraft(
+                  String(DEFAULT_HOVERCARD_MAX_HEIGHT_PX),
+                );
+              }}
+              aria-label={t("appearanceHoverCardReset")}
+              title={t("appearanceHoverCardReset")}
             >
-              {t("appearanceHoverCardReset")}
+              ×
             </button>
           </div>
         </div>

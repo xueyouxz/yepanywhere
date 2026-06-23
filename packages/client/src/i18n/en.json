@@ -104,6 +104,7 @@
   "appearanceContentWidthTitle": "Max Content Width",
   "appearanceContentWidthDescription": "Maximum width for wide-screen messages and page content, in pixels.",
   "appearanceContentWidthReset": "Reset",
+  "appearanceContentWidthUnit": "px",
   "appearanceHoverCardDelayTitle": "Hover Card Delay",
   "appearanceHoverCardDelayDescription": "How long to hover a session row before its preview card appears (0 = instant).",
   "appearanceHoverCardDelayUnit": "ms",

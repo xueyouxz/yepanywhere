@@ -8,9 +8,9 @@ describe("estimateHoverCardPromptLines", () => {
     expect(estimateHoverCardPromptLines(150, true)).toBe(3);
   });
 
-  it("caps at 3 lines regardless of height or reply", () => {
-    expect(estimateHoverCardPromptLines(400, true)).toBe(3);
-    expect(estimateHoverCardPromptLines(400, false)).toBe(3);
+  it("is bounded only by height, with no fixed line cap", () => {
+    expect(estimateHoverCardPromptLines(400, true)).toBe(16);
+    expect(estimateHoverCardPromptLines(600, true)).toBe(26);
   });
 
   it("never returns fewer than 1 line", () => {

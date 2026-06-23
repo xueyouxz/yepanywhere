@@ -11,28 +11,25 @@ const PADDING_RESERVE_PX = 20;
 // Held back for the reply block (its line + divider/padding); only reserved when
 // a reply is present, so the no-reply case is unaffected.
 const REPLY_RESERVE_PX = 38;
-export const HOVERCARD_MAX_PROMPT_LINES = 3;
 
 /**
  * Estimate how many opening-request lines the card shows at availableHeightPx.
  * hasReply reserves room for the most-recent-agent-turn block below the
- * request. Always at least 1, capped at HOVERCARD_MAX_PROMPT_LINES.
+ * request. Bounded only by the available height (always at least 1) — there is
+ * no fixed line cap, so a taller card shows a proportionally longer request.
  */
 export function estimateHoverCardPromptLines(
   availableHeightPx: number,
   hasReply: boolean,
 ): number {
-  return Math.min(
-    HOVERCARD_MAX_PROMPT_LINES,
-    Math.max(
-      1,
-      Math.floor(
-        (availableHeightPx -
-          META_RESERVE_PX -
-          PADDING_RESERVE_PX -
-          (hasReply ? REPLY_RESERVE_PX : 0)) /
-          LINE_HEIGHT_PX,
-      ),
+  return Math.max(
+    1,
+    Math.floor(
+      (availableHeightPx -
+        META_RESERVE_PX -
+        PADDING_RESERVE_PX -
+        (hasReply ? REPLY_RESERVE_PX : 0)) /
+        LINE_HEIGHT_PX,
     ),
   );
 }

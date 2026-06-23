@@ -8919,6 +8919,38 @@ a.sidebar-nav-item {
   flex-wrap: wrap;
 }
 
+/* Keep a number input and its unit together as one wrap unit, so a narrow
+   actions row breaks after the unit rather than between value and unit. */
+.settings-input-unit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  white-space: nowrap;
+}
+
+/* Compact reset affordance (a small ×) in place of a full Reset button. */
+.settings-inline-x {
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.settings-inline-x:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
 .push-test-status {
   min-height: 2.6em;
 }
