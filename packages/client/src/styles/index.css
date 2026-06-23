@@ -9553,6 +9553,8 @@ a.sidebar-nav-item {
 
 .settings-category-icon {
   --settings-category-icon-accent: var(--app-yep-green);
+  --settings-category-icon-offset-x: 0px;
+  --settings-category-icon-offset-y: 0px;
   flex-shrink: 0;
   width: 30px;
   height: 32px;
@@ -9575,6 +9577,10 @@ a.sidebar-nav-item {
   height: 22px;
   color: inherit;
   flex-shrink: 0;
+  transform: translate(
+    var(--settings-category-icon-offset-x),
+    var(--settings-category-icon-offset-y)
+  );
 }
 
 .settings-category-icon-flat {
@@ -9596,33 +9602,67 @@ a.sidebar-nav-item {
     );
 }
 
-.settings-category-item.active .settings-category-icon-flat {
+.settings-category-item.active .settings-category-icon-flat,
+.settings-icon-style-option.active .settings-category-icon-flat {
+  color: #fff;
   background: color-mix(
     in srgb,
-    var(--settings-category-icon-accent) 24%,
-    transparent
+    var(--settings-category-icon-accent) 64%,
+    #111827
   );
-  box-shadow: inset 0 0 0 1px
-    color-mix(
-      in srgb,
-      var(--settings-category-icon-accent) 58%,
-      var(--border-color)
-    );
+  box-shadow:
+    inset 0 0 0 1px
+    color-mix(in srgb, #fff 24%, var(--settings-category-icon-accent)),
+    0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
 .settings-category-icon-flat-white {
+  --settings-category-icon-white-bg: #273449;
+  --settings-category-icon-white-active-bg: color-mix(
+    in srgb,
+    #111827 92%,
+    var(--bg-code)
+  );
+  --settings-category-icon-white-ring: rgba(255, 255, 255, 0.28);
+  --settings-category-icon-white-shadow: rgba(0, 0, 0, 0.26);
+
   color: #fff;
-  background: color-mix(in srgb, #0f172a 86%, var(--bg-primary));
+  background: var(--settings-category-icon-white-bg);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.24),
-    0 1px 2px rgba(0, 0, 0, 0.16);
+    inset 0 0 0 1px var(--settings-category-icon-white-ring),
+    0 1px 3px var(--settings-category-icon-white-shadow);
 }
 
-.settings-category-item.active .settings-category-icon-flat-white {
-  background: color-mix(in srgb, #0f172a 78%, var(--app-yep-green));
+.settings-category-item.active .settings-category-icon-flat-white,
+.settings-icon-style-option.active .settings-category-icon-flat-white {
+  background: var(--settings-category-icon-white-active-bg);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.34),
-    0 1px 2px rgba(0, 0, 0, 0.2);
+    inset 0 0 0 1px var(--settings-category-icon-white-ring),
+    0 1px 3px var(--settings-category-icon-white-shadow);
+}
+
+[data-theme="light"] .settings-category-icon-flat-white {
+  --settings-category-icon-white-bg: #475569;
+  --settings-category-icon-white-active-bg: color-mix(
+    in srgb,
+    #334155 92%,
+    var(--bg-code)
+  );
+  --settings-category-icon-white-ring: rgba(255, 255, 255, 0.36);
+  --settings-category-icon-white-shadow: rgba(0, 0, 0, 0.34);
+}
+
+@media (prefers-color-scheme: light) {
+  [data-theme="auto"] .settings-category-icon-flat-white {
+    --settings-category-icon-white-bg: #475569;
+    --settings-category-icon-white-active-bg: color-mix(
+      in srgb,
+      #334155 92%,
+      var(--bg-code)
+    );
+    --settings-category-icon-white-ring: rgba(255, 255, 255, 0.36);
+    --settings-category-icon-white-shadow: rgba(0, 0, 0, 0.34);
+  }
 }
 
 .settings-category-icon-emoji {
@@ -9662,6 +9702,7 @@ a.sidebar-nav-item {
 
 .settings-category-icon-toolbar {
   --settings-category-icon-accent: #2563eb;
+  --settings-category-icon-offset-x: 0.5px;
 }
 
 .settings-category-icon-model {
@@ -9670,14 +9711,19 @@ a.sidebar-nav-item {
 
 .settings-category-icon-message-delivery {
   --settings-category-icon-accent: #0891b2;
+  --settings-category-icon-offset-x: -0.5px;
 }
 
 .settings-category-icon-agent-context {
   --settings-category-icon-accent: #d97706;
+  --settings-category-icon-offset-x: 0.5px;
+  --settings-category-icon-offset-y: -0.5px;
 }
 
 .settings-category-icon-notifications {
   --settings-category-icon-accent: #dc2626;
+  --settings-category-icon-offset-x: 0.25px;
+  --settings-category-icon-offset-y: 0.25px;
 }
 
 .settings-category-icon-webhooks {
@@ -9690,30 +9736,40 @@ a.sidebar-nav-item {
 
 .settings-category-icon-local-access {
   --settings-category-icon-accent: #ca8a04;
+  --settings-category-icon-offset-x: 0.2px;
+  --settings-category-icon-offset-y: -0.5px;
 }
 
 .settings-category-icon-remote {
   --settings-category-icon-accent: #0284c7;
+  --settings-category-icon-offset-x: 0.25px;
 }
 
 .settings-category-icon-providers {
   --settings-category-icon-accent: #9333ea;
+  --settings-category-icon-offset-x: 0.5px;
+  --settings-category-icon-offset-y: 0.5px;
 }
 
 .settings-category-icon-speech {
   --settings-category-icon-accent: #059669;
+  --settings-category-icon-offset-x: 0.2px;
 }
 
 .settings-category-icon-remote-executors {
   --settings-category-icon-accent: #4f46e5;
+  --settings-category-icon-offset-x: 0.5px;
+  --settings-category-icon-offset-y: 1px;
 }
 
 .settings-category-icon-environment {
   --settings-category-icon-accent: #65a30d;
+  --settings-category-icon-offset-x: 0.5px;
 }
 
 .settings-category-icon-about {
   --settings-category-icon-accent: #475569;
+  --settings-category-icon-offset-x: 0.5px;
 }
 
 .settings-category-icon-emulator {
