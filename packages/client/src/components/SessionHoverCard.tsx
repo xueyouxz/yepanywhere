@@ -6,9 +6,11 @@ import type { PendingInputType, SessionStatus } from "../types";
 import { ProviderBadge } from "./ProviderBadge";
 import { SessionStatusBadge } from "./StatusBadge";
 
-// Rough metrics for sizing the line clamp to available space without a second
-// measure pass: a font-size-sm line, plus the always-shown meta row (which may
-// wrap) and panel padding/gap.
+// Rough metrics for sizing the line clamp to available space in a single
+// measure pass (we read scrollHeight once; see useLayoutEffect below). These
+// are deliberately approximate sums of the CSS padding/gap/line-height, not
+// per-child DOM measurements: a second measure pass would add a reflow and
+// yields nothing under jsdom (no layout). Retune if the card's CSS changes.
 const LINE_HEIGHT_PX = 19;
 const META_RESERVE_PX = 34;
 const PADDING_RESERVE_PX = 20;
@@ -17,6 +19,9 @@ const PADDING_RESERVE_PX = 20;
 // request greedily eating the card. Only reserved when a reply is present, so
 // the no-reply case renders exactly as before.
 const REPLY_RESERVE_PX = 38;
+// Single source of truth for the card's max height: applied via the inline
+// `maxHeight` style below, so CSS must not also set max-height (it would
+// duplicate this). This is the value the Appearance "max height" control drives.
 const MAX_CARD_HEIGHT_PX = 112;
 const MAX_PROMPT_LINES = 3;
 const GAP_PX = 4;
@@ -55,8 +60,8 @@ interface Placement {
 }
 
 /**
- * Replacement tooltip for compact sidebar rows: the full first user turn at
- * tooltip size, line-clamped to the room in whichever direction fits, plus a
+ * Hover card for compact sidebar rows: the full first user turn at hover-card
+ * size, line-clamped to the room in whichever direction fits, plus a
  * status line (provider+model badge, project, age, status). Portaled + fixed
  * and pointer-events:none so it never clips in the scrolling sidebar nor blocks
  * the row's menu trigger. Prefers below the row + right of the cursor, flipping
@@ -168,9 +173,7 @@ export function SessionHoverCard({
         {projectName && (
           <span className="session-hovercard__project">{projectName}</span>
         )}
-        {ageLabel && (
-          <span className="session-hovercard__age">{ageLabel}</span>
-        )}
+        {ageLabel && <span className="session-hovercard__age">{ageLabel}</span>}
         {status && (
           <SessionStatusBadge
             status={status}

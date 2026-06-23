@@ -2944,7 +2944,8 @@ a.sidebar-nav-item {
 .user-prompt-container {
   --user-prompt-action-size: 34px;
   --user-prompt-actions-space: calc(
-    (var(--user-prompt-action-size) * 4) + (var(--space-1) * 4)
+    (var(--user-prompt-action-size) * 4) +
+    (var(--space-1) * 4)
   );
 
   position: relative;
@@ -2958,7 +2959,8 @@ a.sidebar-nav-item {
 
 .user-prompt-container.has-stacked-actions {
   --user-prompt-actions-space: calc(
-    var(--user-prompt-action-size) + var(--space-1)
+    var(--user-prompt-action-size) +
+    var(--space-1)
   );
 }
 
@@ -3055,7 +3057,8 @@ a.sidebar-nav-item {
   .user-prompt-container {
     --user-prompt-action-size: 30px;
     --user-prompt-actions-space: calc(
-      (var(--user-prompt-action-size) * 4) + (var(--space-1) * 4)
+      (var(--user-prompt-action-size) * 4) +
+      (var(--space-1) * 4)
     );
   }
 
@@ -13789,10 +13792,10 @@ a.sidebar-nav-item {
   flex-shrink: 0;
 }
 
-/* Compact-row replacement tooltip: a delayed, bounded preview of the opening
-   request plus session status. Portaled to <body> and fixed so it never clips
-   in the scrolling sidebar; pointer-events:none so it can never block the
-   row's menu trigger. */
+/* Compact-row hover card: a delayed, bounded preview of the opening request
+   plus session status. Portaled to <body> and fixed so it never clips in the
+   scrolling sidebar; pointer-events:none so it can never block the row's menu
+   trigger. */
 .session-hovercard {
   position: fixed;
   z-index: 9998; /* above sidebar (101) and modals; below the menu dropdown (10000) */
@@ -13805,7 +13808,8 @@ a.sidebar-nav-item {
      Longer lines wrap via pre-wrap; .--wide loosens this when vertically tight. */
   width: max-content;
   max-width: min(700px, 92vw);
-  max-height: 112px;
+  /* max-height is applied inline from MAX_CARD_HEIGHT_PX (SessionHoverCard.tsx);
+     do not set it here too. */
   padding: var(--space-2) var(--space-3);
   background: var(--bg-surface);
   border: 1px solid var(--border-color);
