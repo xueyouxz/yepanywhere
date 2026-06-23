@@ -31,6 +31,8 @@ consumer),
 [synthetic-turn-injection](synthetic-turn-injection.md) (whether the single
 summary user turn could instead be a sequence of synthetic user+agent turns,
 per provider),
+[settings-ui-placement](settings-ui-placement.md) (where the auto-open default
+setting lives, and the default + live-override pattern it follows),
 [scrollback-view-stability](scrollback-view-stability.md) (the client transcript
 window the trim dot controls).
 
