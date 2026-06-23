@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useColorfulSettingsIcons } from "../../hooks/useColorfulSettingsIcons";
 
 /**
  * Settings category icons.
@@ -225,10 +226,18 @@ export const settingsCategoryIcons: Record<string, ReactNode> = {
 };
 
 export function SettingsCategoryIcon({ id }: { id: string }) {
+  const { colorfulSettingsIcons } = useColorfulSettingsIcons();
   const icon = settingsCategoryIcons[id];
   if (!icon) return null;
+  const className = [
+    "settings-category-icon",
+    `settings-category-icon-${id}`,
+    colorfulSettingsIcons
+      ? "settings-category-icon-colorful"
+      : "settings-category-icon-monochrome",
+  ].join(" ");
   return (
-    <span className="settings-category-icon" aria-hidden="true">
+    <span className={className} aria-hidden="true">
       {icon}
     </span>
   );

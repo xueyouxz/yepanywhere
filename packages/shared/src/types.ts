@@ -326,9 +326,26 @@ export interface SessionToolbarVisibilityClientDefaults {
   sessionStatus?: boolean;
 }
 
+export type BusyComposerDefaultAction = "steer" | "queue";
+
+export type CollapsedComposerButtonPreference =
+  | "primary"
+  | "alternate"
+  | "microphone";
+
 export interface ClientDefaults {
   /** Defaults used by browser clients when local storage has no explicit value. */
   speech?: SpeechClientDefaults;
+  /**
+   * Default primary action for busy sessions that can both steer the active turn
+   * and queue a later message. Existing session-local overrides still win.
+   */
+  busyComposerDefaultAction?: BusyComposerDefaultAction;
+  /**
+   * Trailing action shown by collapsed composers on tight layouts. Desktop may
+   * show additional side affordances when there is room.
+   */
+  collapsedComposerButton?: CollapsedComposerButtonPreference;
   /**
    * Initial state of the per-turn "now" steering toggle for providers with a
    * "now" lane (currently Claude). The toggle itself stays per-turn.

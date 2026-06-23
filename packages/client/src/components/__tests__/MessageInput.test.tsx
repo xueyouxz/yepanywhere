@@ -8,6 +8,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import type { ClientDefaults } from "@yep-anywhere/shared";
 import {
   type ComponentProps,
   useCallback,
@@ -54,9 +55,7 @@ const {
         string,
         { streaming?: boolean; smartTurn?: boolean }
       >,
-      clientDefaults: undefined as
-        | { steerNowDefault?: boolean; patientQueueDefault?: boolean }
-        | undefined,
+      clientDefaults: undefined as ClientDefaults | undefined,
     },
   },
   modelSettingsState: {
@@ -279,6 +278,7 @@ vi.mock("../../i18n", () => ({
           speechTranscribingPlaceholder: "Transcribing...",
           speechFinalizingPlaceholder: "Finalizing...",
           speechTranscribingCancel: "Cancel transcription",
+          messageInputCollapsedLineCount: `${params?.count ?? ""} lines`,
           forkSummaryComposerTitle: "Fork after selected turn",
           forkSummaryComposerDescription:
             "Keep this request and the agent response to it; replace later turns with a generated summary.",
@@ -328,7 +328,14 @@ vi.mock("../VoiceInputButton", async () => {
         }));
 
         return (
-          <button type="button" data-speech-method={props.speechMethod}>
+          <button
+            type="button"
+            data-speech-method={props.speechMethod}
+            onClick={() => {
+              props.onListeningStart?.();
+              mockVoiceToggle();
+            }}
+          >
             voice
           </button>
         );
@@ -359,6 +366,23 @@ function installDesktopMatchMedia() {
       Object.defineProperty(window, "matchMedia", previous);
     } else {
       Reflect.deleteProperty(window, "matchMedia");
+    }
+  };
+}
+
+function installWindowNumberProperty(key: "innerHeight", value: number) {
+  const previous = Object.getOwnPropertyDescriptor(window, key);
+
+  Object.defineProperty(window, key, {
+    configurable: true,
+    value,
+  });
+
+  return () => {
+    if (previous) {
+      Object.defineProperty(window, key, previous);
+    } else {
+      Reflect.deleteProperty(window, key);
     }
   };
 }
@@ -520,6 +544,35 @@ describe("MessageInput", () => {
     cleanup();
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it("grows the expanded composer until the draft reaches half the viewport", () => {
+    const restoreInnerHeight = installWindowNumberProperty("innerHeight", 400);
+    const textarea = renderMessageInput() as HTMLTextAreaElement;
+    let scrollHeight = 160;
+    Object.defineProperty(textarea, "scrollHeight", {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+
+    try {
+      fireEvent.change(textarea, {
+        target: { value: "one\ntwo\nthree\nfour" },
+      });
+
+      expect(textarea.style.height).toBe("160px");
+      expect(textarea.style.overflowY).toBe("hidden");
+
+      scrollHeight = 260;
+      fireEvent.change(textarea, {
+        target: { value: "one\ntwo\nthree\nfour\nfive\nsix\nseven" },
+      });
+
+      expect(textarea.style.height).toBe("200px");
+      expect(textarea.style.overflowY).toBe("auto");
+    } finally {
+      restoreInnerHeight();
+    }
   });
 
   it("uses fork summary mode with empty instructions as a valid submit", () => {
@@ -860,7 +913,9 @@ describe("MessageInput", () => {
       expect(el).not.toBeNull();
       return el as HTMLElement;
     });
-    fireEvent.click(badge.querySelector(".speech-tag-cancel") as HTMLButtonElement);
+    fireEvent.click(
+      badge.querySelector(".speech-tag-cancel") as HTMLButtonElement,
+    );
     expect(mockVoiceCancelProcessing).toHaveBeenCalledTimes(1);
     await waitFor(() => {
       expect(document.querySelector(".speech-processing-inline")).toBeNull();
@@ -880,9 +935,9 @@ describe("MessageInput", () => {
     });
 
     await waitFor(() => {
-      expect(document.querySelectorAll(".speech-processing-inline").length).toBe(
-        2,
-      );
+      expect(
+        document.querySelectorAll(".speech-processing-inline").length,
+      ).toBe(2);
     });
     // Only the 2nd (later) tag carries a "(N)" ordinal.
     const ordinals = document.querySelectorAll(".speech-tag-ordinal");
@@ -905,9 +960,9 @@ describe("MessageInput", () => {
     });
 
     await waitFor(() => {
-      expect(document.querySelectorAll(".speech-processing-inline")).toHaveLength(
-        2,
-      );
+      expect(
+        document.querySelectorAll(".speech-processing-inline"),
+      ).toHaveLength(2);
     });
 
     act(() => {
@@ -918,9 +973,9 @@ describe("MessageInput", () => {
     });
 
     await waitFor(() => {
-      expect(document.querySelectorAll(".speech-processing-inline")).toHaveLength(
-        1,
-      );
+      expect(
+        document.querySelectorAll(".speech-processing-inline"),
+      ).toHaveLength(1);
     });
     expect(document.querySelector(".speech-tag-ordinal")).toBeNull();
     expect(document.querySelector(".speech-tag-cancel")).not.toBeNull();
@@ -1069,9 +1124,9 @@ describe("MessageInput", () => {
     });
 
     await waitFor(() => {
-      expect(
-        document.querySelector(".speech-draft-mirror")?.textContent,
-      ).toBe("hello there world");
+      expect(document.querySelector(".speech-draft-mirror")?.textContent).toBe(
+        "hello there world",
+      );
       expect(textarea.value).toBe("hello world");
       expect(textarea.selectionStart).toBe(5);
     });
@@ -1093,18 +1148,18 @@ describe("MessageInput", () => {
     });
 
     await waitFor(() => {
-      expect(
-        document.querySelector(".speech-draft-mirror")?.textContent,
-      ).toBe("alpha beta gamma draft");
+      expect(document.querySelector(".speech-draft-mirror")?.textContent).toBe(
+        "alpha beta gamma draft",
+      );
     });
 
     textarea.setSelectionRange("alpha ".length, "alpha beta".length);
     fireEvent.select(textarea);
 
     await waitFor(() => {
-      expect(
-        document.querySelector(".speech-draft-mirror")?.textContent,
-      ).toBe("alpha draft gamma");
+      expect(document.querySelector(".speech-draft-mirror")?.textContent).toBe(
+        "alpha draft gamma",
+      );
       expect(textarea.value).toBe("alpha beta gamma");
     });
   });
@@ -1257,7 +1312,9 @@ describe("MessageInput", () => {
 
   it("keeps active streaming final chunks in the composer", async () => {
     const onSend = vi.fn();
-    const textarea = renderMessageInput(vi.fn(), { onSend }) as HTMLTextAreaElement;
+    const textarea = renderMessageInput(vi.fn(), {
+      onSend,
+    }) as HTMLTextAreaElement;
 
     act(() => {
       voicePropsState.current?.onListeningStart?.();
@@ -1282,7 +1339,9 @@ describe("MessageInput", () => {
 
   it("submits committed speech when Smart Turn send follows immediately", async () => {
     const onSend = vi.fn();
-    const textarea = renderMessageInput(vi.fn(), { onSend }) as HTMLTextAreaElement;
+    const textarea = renderMessageInput(vi.fn(), {
+      onSend,
+    }) as HTMLTextAreaElement;
 
     act(() => {
       voicePropsState.current?.onListeningStart?.();
@@ -1418,9 +1477,11 @@ describe("MessageInput", () => {
       }),
     ).toBeNull();
     expect(
-      screen.getByRole("radio", {
-        name: /^Grok STT direct Browser streams PCM audio directly to xAI\.$/,
-      }).getAttribute("aria-checked"),
+      screen
+        .getByRole("radio", {
+          name: /^Grok STT direct Browser streams PCM audio directly to xAI\.$/,
+        })
+        .getAttribute("aria-checked"),
     ).toBe("true");
     expect(screen.getByText("Smart Turn")).toBeDefined();
 
@@ -1499,10 +1560,13 @@ describe("MessageInput", () => {
   });
 
   it("shows slash suggestions from a leading slash token", () => {
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      slashCommands: ["compact", "goal"],
-      onCustomCommand: vi.fn(() => false),
-    });
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        slashCommands: ["compact", "goal"],
+        onCustomCommand: vi.fn(() => false),
+      },
+    );
 
     fireEvent.change(textarea, { target: { value: "/co" } });
 
@@ -1511,10 +1575,13 @@ describe("MessageInput", () => {
   });
 
   it("accepts a typed slash suggestion into the composer", () => {
-    const textarea = renderMessageInput(vi.fn(() => true), {
-      slashCommands: ["compact", "goal"],
-      onCustomCommand: vi.fn(() => false),
-    }) as HTMLTextAreaElement;
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        slashCommands: ["compact", "goal"],
+        onCustomCommand: vi.fn(() => false),
+      },
+    ) as HTMLTextAreaElement;
 
     fireEvent.change(textarea, { target: { value: "/co" } });
     fireEvent.keyDown(textarea, { key: "Enter" });
@@ -1966,6 +2033,143 @@ describe("MessageInput", () => {
     expectSubmission(onQueue, "collapsed queue", "deferred");
   });
 
+  it("keeps the collapsed composer scrolled to the cursor", async () => {
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        collapsed: true,
+      },
+    ) as HTMLTextAreaElement;
+    Object.defineProperty(textarea, "scrollHeight", {
+      configurable: true,
+      value: 180,
+    });
+    Object.defineProperty(textarea, "clientHeight", {
+      configurable: true,
+      value: 28,
+    });
+
+    fireEvent.change(textarea, {
+      target: { value: "one\ntwo\nthree\nfour\nfive" },
+    });
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    fireEvent.keyUp(textarea, { key: "End" });
+
+    await waitFor(() => expect(textarea.scrollTop).toBe(152));
+  });
+
+  it("uses the server default busy composer action", () => {
+    const restoreMatchMedia = installDesktopMatchMedia();
+    versionState.version = {
+      ...versionState.version,
+      clientDefaults: { busyComposerDefaultAction: "queue" },
+    };
+    const onSend = vi.fn();
+    const onQueue = vi.fn();
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        onSend,
+        onQueue,
+        supportsSteering: true,
+      },
+    );
+
+    try {
+      fireEvent.change(textarea, { target: { value: "default queue" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      expect(onSend).not.toHaveBeenCalled();
+      expectSubmission(onQueue, "default queue", "deferred");
+    } finally {
+      restoreMatchMedia();
+    }
+  });
+
+  it("keeps session-local Enter swaps ahead of the server default", () => {
+    const restoreMatchMedia = installDesktopMatchMedia();
+    versionState.version = {
+      ...versionState.version,
+      clientDefaults: { busyComposerDefaultAction: "queue" },
+    };
+    window.localStorage.setItem("test-draft:enter-action-kind", "steer");
+    const onSend = vi.fn();
+    const onQueue = vi.fn();
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        onSend,
+        onQueue,
+        supportsSteering: true,
+      },
+    );
+
+    try {
+      fireEvent.change(textarea, { target: { value: "local steer" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      expectSubmission(onSend, "local steer", "steer");
+      expect(onQueue).not.toHaveBeenCalled();
+    } finally {
+      restoreMatchMedia();
+    }
+  });
+
+  it("can show the alternate collapsed action", () => {
+    versionState.version = {
+      ...versionState.version,
+      clientDefaults: { collapsedComposerButton: "alternate" },
+    };
+    const onQueue = vi.fn();
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        onQueue,
+        supportsSteering: true,
+        collapsed: true,
+      },
+    );
+
+    fireEvent.change(textarea, { target: { value: "alternate queue" } });
+    fireEvent.click(screen.getByLabelText("toolbarQueueLabel"));
+
+    expectSubmission(onQueue, "alternate queue", "deferred");
+  });
+
+  it("can use the microphone as the collapsed action", () => {
+    versionState.version = {
+      ...versionState.version,
+      voiceBackends: ["ya-grok"],
+      clientDefaults: { collapsedComposerButton: "microphone" },
+    };
+
+    renderMessageInput(
+      vi.fn(() => true),
+      { collapsed: true },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "voice" }));
+
+    expect(mockVoiceToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses desktop collapsed side space for line count and server mic", () => {
+    versionState.version = {
+      ...versionState.version,
+      voiceBackends: ["ya-grok"],
+    };
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        collapsed: true,
+      },
+    );
+
+    fireEvent.change(textarea, { target: { value: "one\ntwo\nthree" } });
+
+    expect(screen.getByText("3 lines")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "voice" })).toBeTruthy();
+  });
+
   it("queues steering-capable messages without adding a mode prefix", () => {
     const onQueue = vi.fn();
     const textarea = renderMessageInput(
@@ -2230,9 +2434,9 @@ describe("MessageInput", () => {
     const toolbar = container.querySelector(".message-input-toolbar");
     const waveform = container.querySelector(".composer-speech-waveform");
     expect(waveform).toBeTruthy();
-    expect(waveform?.parentElement?.classList.contains("message-input-left")).toBe(
-      true,
-    );
+    expect(
+      waveform?.parentElement?.classList.contains("message-input-left"),
+    ).toBe(true);
     expect(toolbar?.contains(waveform)).toBe(true);
   });
 
@@ -2269,7 +2473,9 @@ describe("MessageInput", () => {
     );
 
     const button = screen.getByRole("button", { name: "Steer current turn" });
-    expect(button.getAttribute("data-tooltip")).toBe("Steer current turn\nEnter");
+    expect(button.getAttribute("data-tooltip")).toBe(
+      "Steer current turn\nEnter",
+    );
     expect(button.getAttribute("title")).toBe(null);
     expect(container.querySelector(".send-button-with-help")).toBe(button);
   });

@@ -6,7 +6,9 @@ import {
   ALL_PERMISSION_MODES,
   ALL_PROVIDERS,
   type AgentContextHints,
+  type BusyComposerDefaultAction,
   type ClientDefaults,
+  type CollapsedComposerButtonPreference,
   type GrokSpeechAudioClientDefault,
   HELPER_SIDE_MODEL_CHEAPEST,
   HELPER_SIDE_MODEL_SAME_AS_MAIN,
@@ -73,11 +75,22 @@ const SESSION_TOOLBAR_VISIBILITY_CLIENT_DEFAULT_KEYS = [
 ] as const satisfies readonly (keyof SessionToolbarVisibilityClientDefaults)[];
 const CLIENT_DEFAULT_KEYS = [
   "speech",
+  "busyComposerDefaultAction",
+  "collapsedComposerButton",
   "sessionToolbarVisibility",
   "steerNowDefault",
   "patientQueueDefault",
   "compactAtContextPercent",
 ] as const;
+const BUSY_COMPOSER_DEFAULT_ACTIONS = [
+  "steer",
+  "queue",
+] as const satisfies readonly BusyComposerDefaultAction[];
+const COLLAPSED_COMPOSER_BUTTON_PREFERENCES = [
+  "primary",
+  "alternate",
+  "microphone",
+] as const satisfies readonly CollapsedComposerButtonPreference[];
 const SPEECH_CLIENT_DEFAULT_KEYS = [
   "voiceInputEnabled",
   "speechMethod",
@@ -214,14 +227,18 @@ const MAX_FILE_ACCESS_CUSTOM_LENGTH = 1024;
  * - `undefined` when the setting should be cleared (reset to secure defaults)
  * - a normalized object when valid
  */
-function parseFileAccess(
-  raw: unknown,
-): FileAccessSettings | undefined | null {
+function parseFileAccess(raw: unknown): FileAccessSettings | undefined | null {
   if (raw === undefined) return null;
   if (raw === null || raw === "") return undefined;
   if (!isRecord(raw)) return null;
 
-  const allowedKeys = new Set(["projects", "uploads", "temp", "home", "custom"]);
+  const allowedKeys = new Set([
+    "projects",
+    "uploads",
+    "temp",
+    "home",
+    "custom",
+  ]);
   for (const key of Object.keys(raw)) {
     if (!allowedKeys.has(key)) return null;
   }
@@ -236,7 +253,10 @@ function parseFileAccess(
       return null;
     }
     for (const entry of raw.custom) {
-      if (typeof entry !== "string" || entry.length > MAX_FILE_ACCESS_CUSTOM_LENGTH) {
+      if (
+        typeof entry !== "string" ||
+        entry.length > MAX_FILE_ACCESS_CUSTOM_LENGTH
+      ) {
         return null;
       }
     }
@@ -574,6 +594,40 @@ function parseClientDefaults(raw: unknown): ClientDefaults | undefined | null {
       parsed.speech = speech;
     }
   }
+  if ("busyComposerDefaultAction" in raw) {
+    if (
+      raw.busyComposerDefaultAction === undefined ||
+      raw.busyComposerDefaultAction === null
+    ) {
+      parsed.busyComposerDefaultAction = undefined;
+    } else if (
+      !BUSY_COMPOSER_DEFAULT_ACTIONS.includes(
+        raw.busyComposerDefaultAction as BusyComposerDefaultAction,
+      )
+    ) {
+      return null;
+    } else {
+      parsed.busyComposerDefaultAction =
+        raw.busyComposerDefaultAction as BusyComposerDefaultAction;
+    }
+  }
+  if ("collapsedComposerButton" in raw) {
+    if (
+      raw.collapsedComposerButton === undefined ||
+      raw.collapsedComposerButton === null
+    ) {
+      parsed.collapsedComposerButton = undefined;
+    } else if (
+      !COLLAPSED_COMPOSER_BUTTON_PREFERENCES.includes(
+        raw.collapsedComposerButton as CollapsedComposerButtonPreference,
+      )
+    ) {
+      return null;
+    } else {
+      parsed.collapsedComposerButton =
+        raw.collapsedComposerButton as CollapsedComposerButtonPreference;
+    }
+  }
   if ("steerNowDefault" in raw) {
     if (raw.steerNowDefault === undefined || raw.steerNowDefault === null) {
       parsed.steerNowDefault = undefined;
@@ -627,6 +681,20 @@ function mergeClientDefaults(
         ...current?.speech,
         ...update.speech,
       };
+    }
+  }
+  if ("busyComposerDefaultAction" in update) {
+    if (update.busyComposerDefaultAction === undefined) {
+      delete merged.busyComposerDefaultAction;
+    } else {
+      merged.busyComposerDefaultAction = update.busyComposerDefaultAction;
+    }
+  }
+  if ("collapsedComposerButton" in update) {
+    if (update.collapsedComposerButton === undefined) {
+      delete merged.collapsedComposerButton;
+    } else {
+      merged.collapsedComposerButton = update.collapsedComposerButton;
     }
   }
   if ("steerNowDefault" in update) {

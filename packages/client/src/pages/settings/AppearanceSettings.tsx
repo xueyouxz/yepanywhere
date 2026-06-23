@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { ThinkingText } from "../../components/ThinkingText";
 import { renderFixedFontMath } from "../../components/ui/FixedFontMathToggle";
+import { useColorfulSettingsIcons } from "../../hooks/useColorfulSettingsIcons";
 import {
   DEFAULT_CONTENT_MAX_WIDTH_PX,
   MAX_CONTENT_MAX_WIDTH_PX,
@@ -48,6 +50,7 @@ import {
   useOutputAppearance,
 } from "../../hooks/useOutputAppearance";
 import { useSettingsUndoBaseline } from "./SettingsUndoContext";
+import { useRemoteBasePath } from "../../hooks/useRemoteBasePath";
 import { useStableToolPreviewRendering } from "../../hooks/useStableToolPreviewRendering";
 import { useStreamingEnabled } from "../../hooks/useStreamingEnabled";
 import { TAB_SIZES, useTabSize } from "../../hooks/useTabSize";
@@ -71,6 +74,8 @@ function formatNumberSetting(value: number): string {
 
 export function AppearanceSettings() {
   const { locale, setLocale, t } = useI18n();
+  const navigate = useNavigate();
+  const basePath = useRemoteBasePath();
   const { fontSize, setFontSize } = useFontSize();
   const {
     outputFont,
@@ -118,6 +123,8 @@ export function AppearanceSettings() {
   const [outputToolPreviewLineCountDraft, setOutputToolPreviewLineCountDraft] =
     useState(() => formatNumberSetting(outputToolPreviewLineCount));
   const { theme, setTheme } = useTheme();
+  const { colorfulSettingsIcons, setColorfulSettingsIcons } =
+    useColorfulSettingsIcons();
   const { streamingEnabled, setStreamingEnabled } = useStreamingEnabled();
   const { stableToolPreviewRendering, setStableToolPreviewRendering } =
     useStableToolPreviewRendering();
@@ -153,6 +160,7 @@ export function AppearanceSettings() {
       tabSize,
       contentMaxWidth,
       theme,
+      colorfulSettingsIcons,
       streamingEnabled,
       stableToolPreviewRendering,
       inlineMediaExpandedByDefault,
@@ -177,6 +185,7 @@ export function AppearanceSettings() {
       tabSize,
       contentMaxWidth,
       theme,
+      colorfulSettingsIcons,
       streamingEnabled,
       stableToolPreviewRendering,
       inlineMediaExpandedByDefault,
@@ -205,6 +214,7 @@ export function AppearanceSettings() {
       setTabSize(snapshot.tabSize);
       setContentMaxWidth(snapshot.contentMaxWidth);
       setTheme(snapshot.theme);
+      setColorfulSettingsIcons(snapshot.colorfulSettingsIcons);
       setStreamingEnabled(snapshot.streamingEnabled);
       setStableToolPreviewRendering(snapshot.stableToolPreviewRendering);
       setInlineMediaExpandedByDefault(snapshot.inlineMediaExpandedByDefault);
@@ -249,6 +259,7 @@ export function AppearanceSettings() {
       setTabSize,
       setContentMaxWidth,
       setTheme,
+      setColorfulSettingsIcons,
       setStreamingEnabled,
       setStableToolPreviewRendering,
       setInlineMediaExpandedByDefault,
@@ -425,6 +436,35 @@ export function AppearanceSettings() {
                 {getFontSizeLabel(size, translate)}
               </button>
             ))}
+          </div>
+        </div>
+        <div className="settings-item">
+          <div className="settings-item-info">
+            <strong>{t("appearanceColorfulSettingsIconsTitle")}</strong>
+            <p>{t("appearanceColorfulSettingsIconsDescription")}</p>
+          </div>
+          <label className="toggle-switch">
+            <input
+              type="checkbox"
+              checked={colorfulSettingsIcons}
+              onChange={(e) => setColorfulSettingsIcons(e.target.checked)}
+            />
+            <span className="toggle-slider" />
+          </label>
+        </div>
+        <div className="settings-item">
+          <div className="settings-item-info">
+            <strong>{t("appearanceToolbarSettingsShortcutTitle")}</strong>
+            <p>{t("appearanceToolbarSettingsShortcutDescription")}</p>
+          </div>
+          <div className="settings-item-actions">
+            <button
+              type="button"
+              className="settings-button"
+              onClick={() => navigate(`${basePath}/settings/toolbar`)}
+            >
+              {t("appearanceToolbarSettingsShortcutAction")}
+            </button>
           </div>
         </div>
         <div className="settings-item output-appearance-settings">

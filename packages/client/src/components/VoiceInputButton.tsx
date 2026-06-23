@@ -120,6 +120,7 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
     voiceInputEnabled,
     speechMethod: storedSpeechMethod,
     hasStoredSpeechMethod,
+    speechSmartTurnSettings,
     parakeetSpeechModel,
   } = useModelSettings();
   const { version: versionInfo } = useVersion();
@@ -203,7 +204,9 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
     basePath,
     getTranscriptionContext,
     serverStreaming,
-    smartTurn: serverStreaming ? smartTurn : undefined,
+    smartTurn: serverStreaming
+      ? (smartTurn ?? speechSmartTurnSettings)
+      : undefined,
     keepMicWarm,
     micDeviceId,
     onAudioSamples: showWaveform ? publishSpeechWaveformSamples : undefined,

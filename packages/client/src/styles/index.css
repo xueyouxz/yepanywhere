@@ -3455,6 +3455,7 @@ a.sidebar-nav-item {
   width: 100%;
   min-width: 0;
   height: 100%;
+  box-sizing: border-box;
   padding: var(--speech-draft-padding);
   background: transparent;
   border: 0;
@@ -3463,6 +3464,7 @@ a.sidebar-nav-item {
   font-size: var(--speech-draft-font-size);
   line-height: var(--speech-draft-line-height);
   outline: none;
+  overflow-y: hidden;
 }
 
 .speech-draft-field.has-interim textarea {
@@ -3923,22 +3925,64 @@ a.sidebar-nav-item {
   font-size: var(--font-size-sm);
   min-height: 0;
   padding-right: calc(var(--composer-primary-control-size, 36px) + 0.75rem);
+  caret-color: var(--text-primary);
 }
 
+.message-input-collapsed-side-actions,
 .message-input-collapsed-actions {
   position: absolute;
-  right: 0.375rem;
   top: 50%;
   transform: translateY(-50%);
   display: flex;
   align-items: center;
+  gap: 0.25rem;
   z-index: 2;
+}
+
+.message-input-collapsed-side-actions {
+  left: 0.375rem;
+}
+
+.message-input-collapsed-actions {
+  right: 0.375rem;
+}
+
+.message-input-collapsed-line-count {
+  min-width: 1.7rem;
+  padding: 0 0.45rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-surface) 86%, transparent);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  line-height: 1.6;
+  text-align: center;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.16);
 }
 
 .message-input-collapsed-send {
   --composer-control-size: 30px;
   --composer-primary-control-size: 30px;
   box-shadow: 0 1px 5px rgba(0, 0, 0, 0.22);
+}
+
+.message-input-collapsed-mic.voice-input-button {
+  --composer-control-size: 30px;
+  background: color-mix(in srgb, var(--bg-surface) 76%, transparent);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.16);
+}
+
+@media (min-width: 601px) {
+  .message-input-collapsed.has-collapsed-side-actions textarea {
+    padding-left: 5.5rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .message-input-collapsed-side-actions {
+    display: none;
+  }
 }
 
 .message-input-toolbar {
@@ -9504,12 +9548,19 @@ a.sidebar-nav-item {
 }
 
 .settings-category-icon {
+  --settings-category-icon-accent: var(--app-yep-green);
   flex-shrink: 0;
   width: 30px;
   height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
+  border-radius: 8px;
+  box-sizing: border-box;
+  transition:
+    background 0.15s,
+    box-shadow 0.15s,
+    color 0.15s;
 }
 
 .settings-category-icon svg {
@@ -9517,6 +9568,113 @@ a.sidebar-nav-item {
   height: 22px;
   color: inherit;
   flex-shrink: 0;
+}
+
+.settings-category-icon-colorful {
+  color: color-mix(
+    in srgb,
+    var(--settings-category-icon-accent) 82%,
+    var(--text-primary)
+  );
+  background: color-mix(
+    in srgb,
+    var(--settings-category-icon-accent) 16%,
+    transparent
+  );
+  box-shadow: inset 0 0 0 1px
+    color-mix(
+      in srgb,
+      var(--settings-category-icon-accent) 34%,
+      var(--border-color)
+    );
+}
+
+.settings-category-item.active .settings-category-icon-colorful {
+  background: color-mix(
+    in srgb,
+    var(--settings-category-icon-accent) 24%,
+    transparent
+  );
+  box-shadow: inset 0 0 0 1px
+    color-mix(
+      in srgb,
+      var(--settings-category-icon-accent) 58%,
+      var(--border-color)
+    );
+}
+
+.settings-category-icon-monochrome {
+  color: var(--text-primary);
+  background: transparent;
+  box-shadow: none;
+}
+
+.settings-category-icon-appearance {
+  --settings-category-icon-accent: #16a34a;
+}
+
+.settings-category-icon-toolbar {
+  --settings-category-icon-accent: #2563eb;
+}
+
+.settings-category-icon-model {
+  --settings-category-icon-accent: #7c3aed;
+}
+
+.settings-category-icon-message-delivery {
+  --settings-category-icon-accent: #0891b2;
+}
+
+.settings-category-icon-agent-context {
+  --settings-category-icon-accent: #d97706;
+}
+
+.settings-category-icon-notifications {
+  --settings-category-icon-accent: #dc2626;
+}
+
+.settings-category-icon-webhooks {
+  --settings-category-icon-accent: #db2777;
+}
+
+.settings-category-icon-devices {
+  --settings-category-icon-accent: #0d9488;
+}
+
+.settings-category-icon-local-access {
+  --settings-category-icon-accent: #ca8a04;
+}
+
+.settings-category-icon-remote {
+  --settings-category-icon-accent: #0284c7;
+}
+
+.settings-category-icon-providers {
+  --settings-category-icon-accent: #9333ea;
+}
+
+.settings-category-icon-speech {
+  --settings-category-icon-accent: #059669;
+}
+
+.settings-category-icon-remote-executors {
+  --settings-category-icon-accent: #4f46e5;
+}
+
+.settings-category-icon-environment {
+  --settings-category-icon-accent: #65a30d;
+}
+
+.settings-category-icon-about {
+  --settings-category-icon-accent: #475569;
+}
+
+.settings-category-icon-emulator {
+  --settings-category-icon-accent: #ea580c;
+}
+
+.settings-category-icon-development {
+  --settings-category-icon-accent: #be123c;
 }
 
 .settings-category-text {

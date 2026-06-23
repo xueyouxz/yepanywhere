@@ -1,6 +1,8 @@
 import {
   DEFAULT_PATIENT_QUEUE_PATIENCE_SECONDS,
+  type BusyComposerDefaultAction,
   clampPatientPatienceSeconds,
+  type CollapsedComposerButtonPreference,
   type SessionLivenessSnapshot,
   type UploadedFile,
   type UserMessageCompositionMetadata,
@@ -54,9 +56,10 @@ import { isVoiceInputShortcut } from "../lib/voiceInputShortcut";
 import type { ContextUsage, PermissionMode } from "../types";
 import { AttachmentChip } from "./AttachmentChip";
 import { MessageInputToolbar } from "./MessageInputToolbar";
-import type {
-  SpeechPendingKind,
-  VoiceInputButtonRef,
+import {
+  VoiceInputButton,
+  type SpeechPendingKind,
+  type VoiceInputButtonRef,
 } from "./VoiceInputButton";
 
 /** Progress info for an in-flight upload */
@@ -81,6 +84,9 @@ interface PendingSpeechFinal {
   transcript: string;
   metadata?: SpeechTranscriptionResultMetadata;
 }
+
+const EXPANDED_COMPOSER_MAX_VIEWPORT_RATIO = 0.5;
+const FALLBACK_TEXTAREA_LINE_HEIGHT_PX = 20;
 
 /** Format file size in human-readable form */
 function formatSize(bytes: number): string {
@@ -123,6 +129,108 @@ function createSpeechTargetId(): string {
 function getLeadingSlashQuery(text: string): string | null {
   const match = text.match(/^\/([^\s/]*)$/);
   return match ? (match[1] ?? "").toLowerCase() : null;
+}
+
+function readPixelValue(value: string): number {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getTextareaMinimumHeight(textarea: HTMLTextAreaElement): number {
+  const computed = window.getComputedStyle(textarea);
+  const fontSize =
+    readPixelValue(computed.fontSize) || FALLBACK_TEXTAREA_LINE_HEIGHT_PX;
+  const lineHeight = readPixelValue(computed.lineHeight) || fontSize * 1.35;
+  const verticalPadding =
+    readPixelValue(computed.paddingTop) +
+    readPixelValue(computed.paddingBottom);
+  const verticalBorder =
+    readPixelValue(computed.borderTopWidth) +
+    readPixelValue(computed.borderBottomWidth);
+  return lineHeight * textarea.rows + verticalPadding + verticalBorder;
+}
+
+function getComposerChromeHeight(textarea: HTMLTextAreaElement): number {
+  const composer = textarea.closest(".message-input");
+  if (!(composer instanceof HTMLElement)) return 0;
+  return Math.max(
+    0,
+    composer.getBoundingClientRect().height -
+      textarea.getBoundingClientRect().height,
+  );
+}
+
+function getExpandedComposerMaxTextareaHeight(
+  textarea: HTMLTextAreaElement,
+  minimumHeight: number,
+): number {
+  const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+  if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const chromeHeight = getComposerChromeHeight(textarea);
+  return Math.max(
+    minimumHeight,
+    Math.floor(
+      viewportHeight * EXPANDED_COMPOSER_MAX_VIEWPORT_RATIO - chromeHeight,
+    ),
+  );
+}
+
+function resizeComposerTextarea(
+  textarea: HTMLTextAreaElement,
+  collapsed: boolean | undefined,
+): void {
+  if (collapsed) {
+    textarea.style.height = "";
+    textarea.style.overflowY = "";
+    return;
+  }
+
+  const minimumHeight = getTextareaMinimumHeight(textarea);
+  textarea.style.height = "auto";
+  const contentHeight = Math.max(textarea.scrollHeight, minimumHeight);
+  const maxHeight = getExpandedComposerMaxTextareaHeight(
+    textarea,
+    minimumHeight,
+  );
+  const nextHeight = Math.min(contentHeight, maxHeight);
+  textarea.style.height = `${nextHeight}px`;
+  textarea.style.overflowY = contentHeight > nextHeight + 1 ? "auto" : "hidden";
+}
+
+function countDraftLines(text: string): number {
+  return text.length === 0 ? 1 : text.split(/\r\n|\r|\n/).length;
+}
+
+function getTextareaLineHeightPx(textarea: HTMLTextAreaElement): number {
+  const computed = window.getComputedStyle(textarea);
+  const fontSize =
+    readPixelValue(computed.fontSize) || FALLBACK_TEXTAREA_LINE_HEIGHT_PX;
+  return readPixelValue(computed.lineHeight) || fontSize * 1.35;
+}
+
+function scrollCollapsedTextareaToCursor(textarea: HTMLTextAreaElement): void {
+  const value = textarea.value;
+  const caret = Math.max(
+    0,
+    Math.min(textarea.selectionStart ?? value.length, value.length),
+  );
+  const lineHeight = getTextareaLineHeightPx(textarea);
+  const maxScrollTop = Math.max(
+    0,
+    textarea.scrollHeight - textarea.clientHeight,
+  );
+  if (caret >= value.length) {
+    textarea.scrollTop = maxScrollTop;
+    return;
+  }
+
+  const hardLineIndex = countDraftLines(value.slice(0, caret)) - 1;
+  textarea.scrollTop = Math.min(
+    maxScrollTop,
+    Math.max(0, hardLineIndex * lineHeight),
+  );
 }
 
 interface Props {
@@ -412,22 +520,24 @@ export function MessageInput({
     (supportsSteering && onQueue ? "steer" : onQueue ? "queue" : "send");
   const hasActiveDualActions =
     supportsSteering && !!onQueue && basePrimaryActionKind === "steer";
+  const { version } = useVersion();
+  const busyComposerDefaultAction: BusyComposerDefaultAction =
+    version?.clientDefaults?.busyComposerDefaultAction ?? "steer";
+  const collapsedComposerButton: CollapsedComposerButtonPreference =
+    version?.clientDefaults?.collapsedComposerButton ?? "primary";
   const enterActionStorageKey = `${draftKey}:enter-action-kind`;
-  const [enterActionKind, setEnterActionKind] = useState<"steer" | "queue">(
-    () => {
+  const [enterActionOverride, setEnterActionOverride] =
+    useState<BusyComposerDefaultAction | null>(() => {
       try {
-        return localStorage.getItem(enterActionStorageKey) === "queue"
-          ? "queue"
-          : "steer";
+        const stored = localStorage.getItem(enterActionStorageKey);
+        return stored === "queue" || stored === "steer" ? stored : null;
       } catch {
-        return "steer";
+        return null;
       }
-    },
-  );
+    });
   // Per-turn "now" steering toggle. The server-learned client default sets
   // its initial state (Message Delivery settings); the toggle stays per-turn
   // and a user click overrides the default for this composer.
-  const { version } = useVersion();
   const steerNowDefault = version?.clientDefaults?.steerNowDefault ?? false;
   // Patient queue intent is a global preference (Message Delivery settings):
   // when on, a queued message waits for verified-idle before delivery instead
@@ -439,15 +549,14 @@ export function MessageInput({
   );
   const steerNowEnabled = steerNowOverride ?? steerNowDefault;
   const effectivePrimaryActionKind = hasActiveDualActions
-    ? enterActionKind
+    ? (enterActionOverride ?? busyComposerDefaultAction)
     : basePrimaryActionKind;
   const effectivePatientQueuePatienceSeconds =
     clampPatientPatienceSeconds(patientQueuePatienceSeconds) ??
     DEFAULT_PATIENT_QUEUE_PATIENCE_SECONDS;
-  const primaryActionLabel =
-    forkSummaryMode
-      ? forkSummaryMode.submitLabel
-      : effectivePrimaryActionKind === "steer"
+  const primaryActionLabel = forkSummaryMode
+    ? forkSummaryMode.submitLabel
+    : effectivePrimaryActionKind === "steer"
       ? t("toolbarSteerTooltip")
       : effectivePrimaryActionKind === "queue"
         ? t("toolbarQueueLabel")
@@ -457,19 +566,19 @@ export function MessageInput({
 
   useEffect(() => {
     try {
-      setEnterActionKind(
-        localStorage.getItem(enterActionStorageKey) === "queue"
-          ? "queue"
-          : "steer",
+      const stored = localStorage.getItem(enterActionStorageKey);
+      setEnterActionOverride(
+        stored === "queue" || stored === "steer" ? stored : null,
       );
     } catch {
-      setEnterActionKind("steer");
+      setEnterActionOverride(null);
     }
   }, [enterActionStorageKey]);
 
   const toggleEnterActionKind = useCallback(() => {
-    setEnterActionKind((previous) => {
-      const next = previous === "steer" ? "queue" : "steer";
+    setEnterActionOverride((previous) => {
+      const current = previous ?? busyComposerDefaultAction;
+      const next = current === "steer" ? "queue" : "steer";
       try {
         localStorage.setItem(enterActionStorageKey, next);
       } catch {
@@ -477,7 +586,7 @@ export function MessageInput({
       }
       return next;
     });
-  }, [enterActionStorageKey]);
+  }, [busyComposerDefaultAction, enterActionStorageKey]);
 
   const noteComposerEdit = useCallback((nextText: string) => {
     if (!nextText.trim()) {
@@ -588,6 +697,45 @@ export function MessageInput({
     pending.restore(textarea);
   }, [text]);
 
+  const revealCollapsedTextareaCursor = useCallback(() => {
+    if (!collapsed) return;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const schedule =
+      window.requestAnimationFrame ??
+      ((fn: FrameRequestCallback) => window.setTimeout(fn, 0));
+    schedule(() => {
+      if (textareaRef.current === textarea) {
+        scrollCollapsedTextareaToCursor(textarea);
+      }
+    });
+  }, [collapsed]);
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    resizeComposerTextarea(textarea, collapsed);
+
+    if (collapsed) {
+      revealCollapsedTextareaCursor();
+      return;
+    }
+
+    const handleViewportResize = () => {
+      resizeComposerTextarea(textarea, false);
+    };
+    window.addEventListener("resize", handleViewportResize);
+    window.visualViewport?.addEventListener("resize", handleViewportResize);
+    return () => {
+      window.removeEventListener("resize", handleViewportResize);
+      window.visualViewport?.removeEventListener(
+        "resize",
+        handleViewportResize,
+      );
+    };
+  }, [collapsed, revealCollapsedTextareaCursor, text]);
+
   const handleSubmit = useCallback(
     (
       messageOverride?: unknown,
@@ -608,7 +756,11 @@ export function MessageInput({
       }
 
       if (forkSummaryMode) {
-        if (!disabled && attachments.length === 0 && uploadProgress.length === 0) {
+        if (
+          !disabled &&
+          attachments.length === 0 &&
+          uploadProgress.length === 0
+        ) {
           controls.clearInput();
           resetCompositionMetadata();
           setInterimTranscript("");
@@ -711,6 +863,49 @@ export function MessageInput({
     : effectivePrimaryActionKind === "queue"
       ? handleQueue
       : handleSubmit;
+  const collapsedActionKind =
+    collapsedComposerButton === "alternate" && hasActiveDualActions
+      ? effectivePrimaryActionKind === "queue"
+        ? "steer"
+        : "queue"
+      : effectivePrimaryActionKind;
+  const collapsedSubmitAction =
+    forkSummaryMode || collapsedActionKind === effectivePrimaryActionKind
+      ? submitPrimaryAction
+      : collapsedActionKind === "queue"
+        ? handleQueue
+        : collapsedActionKind === "steer"
+          ? handleSteer
+          : handleSubmit;
+  const collapsedActionLabel = forkSummaryMode
+    ? primaryActionLabel
+    : collapsedActionKind === "steer"
+      ? t("toolbarSteerTooltip")
+      : collapsedActionKind === "queue"
+        ? t("toolbarQueueLabel")
+        : t("toolbarSend");
+  const collapsedActionIcon = forkSummaryMode
+    ? forkSummaryMode.icon
+    : collapsedActionKind === "steer"
+      ? "↗"
+      : collapsedActionKind === "queue"
+        ? "→"
+        : "↑";
+  const collapsedLineCount = countDraftLines(text);
+  const showCollapsedLineCount = collapsedLineCount > 1;
+  const hasYaServerSpeechBackend = (version?.voiceBackends?.length ?? 0) > 0;
+  const showCollapsedMicrophone =
+    collapsed && !forkSummaryMode && collapsedComposerButton === "microphone";
+  const showCollapsedDesktopMicrophone =
+    collapsed &&
+    !forkSummaryMode &&
+    collapsedComposerButton !== "microphone" &&
+    hasYaServerSpeechBackend;
+  const showCollapsedSendAction =
+    collapsed &&
+    (forkSummaryMode ||
+      collapsedComposerButton !== "microphone" ||
+      !hasYaServerSpeechBackend);
 
   const recallLastSubmission = useCallback(
     (allowExistingText = false) => {
@@ -1113,6 +1308,11 @@ export function MessageInput({
     setSpeechPreviewRevision((revision) => revision + 1);
   }, [clearPendingSpeechFinal]);
 
+  const handleTextareaSelectionTarget = useCallback(() => {
+    handleSpeechSelectionTarget();
+    revealCollapsedTextareaCursor();
+  }, [handleSpeechSelectionTarget, revealCollapsedTextareaCursor]);
+
   const clearSpeechSelectionTarget = useCallback(() => {
     clearPendingSpeechFinal();
     if (!speechInsertionRangeRef.current) return;
@@ -1323,7 +1523,12 @@ export function MessageInput({
         </button>
       )}
       <div
-        className={`message-input ${collapsed ? "message-input-collapsed" : ""} ${interimTranscript ? "voice-recording" : ""}`}
+        className={`message-input ${collapsed ? "message-input-collapsed" : ""} ${
+          collapsed &&
+          (showCollapsedLineCount || showCollapsedDesktopMicrophone)
+            ? "has-collapsed-side-actions"
+            : ""
+        } ${interimTranscript ? "voice-recording" : ""}`}
       >
         <div
           className={`speech-draft-field ${speechInlineTranscript ? "has-interim" : ""}${
@@ -1430,10 +1635,11 @@ export function MessageInput({
                 }
               }}
               onBlur={controls.flushDraft}
+              onFocus={revealCollapsedTextareaCursor}
               onKeyDown={handleKeyDown}
-              onSelect={handleSpeechSelectionTarget}
-              onPointerUp={handleSpeechSelectionTarget}
-              onKeyUp={handleSpeechSelectionTarget}
+              onSelect={handleTextareaSelectionTarget}
+              onPointerUp={handleTextareaSelectionTarget}
+              onKeyUp={handleTextareaSelectionTarget}
               onCut={clearSpeechSelectionTarget}
               onCopy={clearSpeechSelectionTarget}
               onPaste={(event) => {
@@ -1494,26 +1700,66 @@ export function MessageInput({
           </div>
         )}
 
+        {collapsed &&
+          (showCollapsedLineCount || showCollapsedDesktopMicrophone) && (
+            <div className="message-input-collapsed-side-actions">
+              {showCollapsedLineCount && (
+                <span
+                  className="message-input-collapsed-line-count"
+                  title={t("messageInputCollapsedLineCount", {
+                    count: String(collapsedLineCount),
+                  })}
+                >
+                  {t("messageInputCollapsedLineCount", {
+                    count: String(collapsedLineCount),
+                  })}
+                </span>
+              )}
+              {showCollapsedDesktopMicrophone && (
+                <VoiceInputButton
+                  ref={voiceButtonRef}
+                  onTranscript={handleVoiceTranscript}
+                  onInterimTranscript={handleInterimTranscript}
+                  onListeningStart={handleListeningStart}
+                  onListeningStop={handleListeningStop}
+                  onPendingSpeechChange={handlePendingSpeechChange}
+                  onTranscriptionSettled={handleTranscriptionSettled}
+                  disabled={disabled}
+                  getTranscriptionContext={getTranscriptionContext}
+                  className="message-input-collapsed-mic"
+                />
+              )}
+            </div>
+          )}
+
         {collapsed && (
           <div className="message-input-collapsed-actions">
-            <button
-              type="button"
-              onClick={submitPrimaryAction}
-              disabled={disabled || !canSubmit}
-              className={`send-button message-input-collapsed-send`}
-              aria-label={primaryActionLabel}
-              title={primaryActionLabel}
-            >
-              <span className="send-icon">
-                {forkSummaryMode
-                  ? forkSummaryMode.icon
-                  : effectivePrimaryActionKind === "steer"
-                  ? "↗"
-                  : effectivePrimaryActionKind === "queue"
-                    ? "→"
-                    : "↑"}
-              </span>
-            </button>
+            {showCollapsedMicrophone && (
+              <VoiceInputButton
+                ref={voiceButtonRef}
+                onTranscript={handleVoiceTranscript}
+                onInterimTranscript={handleInterimTranscript}
+                onListeningStart={handleListeningStart}
+                onListeningStop={handleListeningStop}
+                onPendingSpeechChange={handlePendingSpeechChange}
+                onTranscriptionSettled={handleTranscriptionSettled}
+                disabled={disabled}
+                getTranscriptionContext={getTranscriptionContext}
+                className="message-input-collapsed-mic"
+              />
+            )}
+            {showCollapsedSendAction && (
+              <button
+                type="button"
+                onClick={collapsedSubmitAction}
+                disabled={disabled || !canSubmit}
+                className={`send-button message-input-collapsed-send`}
+                aria-label={collapsedActionLabel}
+                title={collapsedActionLabel}
+              >
+                <span className="send-icon">{collapsedActionIcon}</span>
+              </button>
+            )}
           </div>
         )}
 
@@ -1679,8 +1925,8 @@ export function MessageInput({
               forkSummaryMode
                 ? handleSubmit
                 : effectivePrimaryActionKind === "queue"
-                ? handleQueue
-                : handleSubmit
+                  ? handleQueue
+                  : handleSubmit
             }
             onQueue={onQueue ? handleQueue : undefined}
             onSteer={hasActiveDualActions ? handleSteer : undefined}

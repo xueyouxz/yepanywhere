@@ -328,6 +328,8 @@ describe("Settings Routes", () => {
           speech: {
             voiceInputEnabled: false,
           },
+          busyComposerDefaultAction: "steer",
+          collapsedComposerButton: "primary",
           sessionToolbarVisibility: {
             microphone: false,
             queueControls: false,
@@ -355,6 +357,8 @@ describe("Settings Routes", () => {
               microphone: true,
               waveform: false,
             },
+            busyComposerDefaultAction: "queue",
+            collapsedComposerButton: "alternate",
           },
         }),
       });
@@ -371,6 +375,8 @@ describe("Settings Routes", () => {
               timeoutMs: 10000,
             },
           },
+          busyComposerDefaultAction: "queue",
+          collapsedComposerButton: "alternate",
           sessionToolbarVisibility: {
             microphone: true,
             waveform: false,
@@ -390,9 +396,7 @@ describe("Settings Routes", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           clientDefaults: {
-            sessionToolbarVisibility: {
-              microphone: "yes",
-            },
+            collapsedComposerButton: "floating-action-button",
           },
         }),
       });
