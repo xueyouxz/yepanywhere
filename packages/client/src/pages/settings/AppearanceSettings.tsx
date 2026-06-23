@@ -19,6 +19,7 @@ import {
   HOVERCARD_SHOW_DELAY_STEP_MS,
   useHoverCardAppearance,
 } from "../../hooks/useHoverCardAppearance";
+import { estimateHoverCardPromptLines } from "../../components/sessionHoverCardLines";
 import { useDeveloperMode } from "../../hooks/useDeveloperMode";
 import { useAlwaysShowQuoteCircles } from "../../hooks/useAlwaysShowQuoteCircles";
 import { useFloatingActionButtonEnabled } from "../../hooks/useFloatingActionButtonEnabled";
@@ -139,6 +140,12 @@ export function AppearanceSettings() {
     setHoverCardShowDelayMs,
     setHoverCardMaxHeightPx,
   } = useHoverCardAppearance();
+  // Estimated visible request lines at the chosen height. Uses the with-reply
+  // case — the one that actually varies with the slider (no-reply caps at 3).
+  const hoverCardHeightLines = estimateHoverCardPromptLines(
+    hoverCardMaxHeightPx,
+    true,
+  );
   const [contentMaxWidthDraft, setContentMaxWidthDraft] = useState(() =>
     String(contentMaxWidth),
   );
@@ -1073,7 +1080,11 @@ export function AppearanceSettings() {
               aria-label={t("appearanceHoverCardHeightTitle")}
             />
             <span className="settings-input-small">
-              {hoverCardMaxHeightPx} {t("appearanceHoverCardHeightUnit")}
+              {hoverCardMaxHeightPx} {t("appearanceHoverCardHeightUnit")} · ≈
+              {hoverCardHeightLines}{" "}
+              {hoverCardHeightLines === 1
+                ? t("appearanceHoverCardLineUnit")
+                : t("appearanceHoverCardLinesUnit")}
             </span>
             <button
               type="button"

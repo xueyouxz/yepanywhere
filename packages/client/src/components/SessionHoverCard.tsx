@@ -5,23 +5,10 @@ import type { AgentActivity } from "../hooks/useFileActivity";
 import type { PendingInputType, SessionStatus } from "../types";
 import { DEFAULT_HOVERCARD_MAX_HEIGHT_PX } from "../hooks/useHoverCardAppearance";
 import { parseCommandTurn } from "../lib/commandTurn";
+import { estimateHoverCardPromptLines } from "./sessionHoverCardLines";
 import { ProviderBadge } from "./ProviderBadge";
 import { SessionStatusBadge } from "./StatusBadge";
 
-// Rough metrics for sizing the line clamp to available space in a single
-// measure pass (we read scrollHeight once; see useLayoutEffect below). These
-// are deliberately approximate sums of the CSS padding/gap/line-height, not
-// per-child DOM measurements: a second measure pass would add a reflow and
-// yields nothing under jsdom (no layout). Retune if the card's CSS changes.
-const LINE_HEIGHT_PX = 19;
-const META_RESERVE_PX = 34;
-const PADDING_RESERVE_PX = 20;
-// Room held back from the opening-request clamp for the reply block (its lines
-// + divider/padding) so the most recent agent turn stays visible instead of the
-// request greedily eating the card. Only reserved when a reply is present, so
-// the no-reply case renders exactly as before.
-const REPLY_RESERVE_PX = 38;
-const MAX_PROMPT_LINES = 3;
 const GAP_PX = 4;
 const MARGIN_PX = 8;
 const CURSOR_OFFSET_PX = 14;
@@ -139,19 +126,7 @@ export function SessionHoverCard({
   ]);
 
   const maxLines = placement
-    ? Math.min(
-        MAX_PROMPT_LINES,
-        Math.max(
-          1,
-          Math.floor(
-            (placement.maxHeight -
-              META_RESERVE_PX -
-              PADDING_RESERVE_PX -
-              (lastAgentText ? REPLY_RESERVE_PX : 0)) /
-              LINE_HEIGHT_PX,
-          ),
-        ),
-      )
+    ? estimateHoverCardPromptLines(placement.maxHeight, !!lastAgentText)
     : undefined;
 
   // Slash-command turns arrive wrapped in <command-name>…</command-name> tags;

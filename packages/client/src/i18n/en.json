@@ -110,6 +110,8 @@
   "appearanceHoverCardHeightTitle": "Hover Card Max Height",
   "appearanceHoverCardHeightDescription": "Maximum height of the session row preview card; taller shows more of the opening request.",
   "appearanceHoverCardHeightUnit": "px",
+  "appearanceHoverCardLineUnit": "line",
+  "appearanceHoverCardLinesUnit": "lines",
   "appearanceHoverCardReset": "Reset",
   "appearanceStreamingTitle": "Response Streaming",
   "appearanceStreamingDescription": "Show responses as they are generated, token by token. Disable for better performance on slower devices.",
