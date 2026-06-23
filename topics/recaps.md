@@ -71,7 +71,9 @@ than a hard-coded model choice. The side model is shared for the parent
 session's silent helper features; recaps must not get a separate
 per-feature side model. A recap-specific setting may instead choose
 execution mode, such as using the shared helper side session or forking
-the main session/original model for higher fidelity.
+the main session/original model for higher fidelity. The latter strategy,
+extended with an after-turn pointer and free-text instructions, is what
+[fork-from-turn](fork-from-turn.md) uses for fork-after-summary.
 
 `Cheapest` is the default helper model token. Providers map it to the
 appropriate cheap side model for their backend, such as Haiku for Claude, so

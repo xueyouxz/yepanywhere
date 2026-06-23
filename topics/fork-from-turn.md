@@ -11,10 +11,22 @@ Status: partly built. The turn-notch context menu (jump / fork / copy /
 hide-previous) and fork compose-prefill are implemented. The next design step
 is to replace the single fork entry with explicit **Fork before…** and **Fork
 after…** actions, where **Fork after…** can use the composer as summary
-instructions and create a fork whose later history is replaced by a generated
-handoff summary.
+instructions and create a *fork-after-summary*: a fork whose later history is
+replaced by an LLM-generated summary. That summary is produced by the
+generalized recap/summary facility (see [recaps](recaps.md)), not pasted-together
+turns. This design is **decided** — committed to build, with the timing chosen
+later — not a speculative sketch.
 
 See also:
+[session-context-actions](session-context-actions.md) (fork-capability ground
+truth, the per-turn "fork from here" decision this elaborates, and the handoff
+decision revised by fork-after-summary),
+[recaps](recaps.md) (the LLM-summary facility this generalizes, and its
+shared-helper-vs-fork strategy split),
+[side-session-config](side-session-config.md) (the shared helper side session
+and its bounded lifecycle),
+[provider-context-economics](provider-context-economics.md) (the cost of the
+fork + generation step),
 [session-hovercard-recent-activity](session-hovercard-recent-activity.md) (the
 sibling mobile context-menu / dismiss discussion),
 [provider-agnostic-btw-asides](provider-agnostic-btw-asides.md) (the other fork
@@ -48,11 +60,15 @@ Jump
 Fork before…
 Fork after…
 Copy
-Hide prev
+Show from
 ```
 
 The ellipsis means the action enters a fork composer mode or uses existing
 composer text as instructions; it is not a wide modal opened from the notch.
+**Show from** renames the currently implemented **Hide previous** (`onTrimAnchor`):
+both load the client transcript from this turn, but "show from here" names the
+result rather than what is hidden, and avoids overloading "before" already used
+by **Fork before…**.
 
 ### Anchor meanings
 
@@ -64,6 +80,17 @@ composer text as instructions; it is not a wide modal opened from the notch.
   then replace later history. In transcript terms, the anchor is the last
   active-branch message before the next user turn. If there is no later user
   turn, the anchor is the completed current tail once the session is idle.
+
+Both map onto the inclusive `forkSession({ upToMessageId })` primitive — the
+slice keeps up to and including that UUID (`providers/types.ts`) — so **Fork
+before…** sets `upToMessageId` to the last message *before* the selected user
+turn, and **Fork after…** sets it to that last active-branch message *of* the
+turn.
+
+Canonical description, reused verbatim as the **Fork after…** menu tooltip and,
+when the composer is empty, the fork-mode instruction badge: "Keep this request
+and the agent's response to it, then replace everything after with an
+LLM-generated summary that follows your instructions."
 
 The default for summary replacement is **Fork after…**, not **Fork before…**.
 That preserves the original agent boot/orientation work: instruction-file load,
@@ -96,8 +123,8 @@ optional generated summary.
 - **Cancel** returns the composer to normal and preserves the user's text.
 - **No summary** creates a normal fork at the selected completed-turn anchor.
 - **Fork with summary** sends the composer text as instructions for generating
-  a handoff summary, creates the target fork at the selected completed-turn
-  anchor, and submits the generated summary as the next user turn in that fork.
+  the summary, creates the target fork at the selected completed-turn anchor, and
+  submits the generated summary as the next user turn in that fork.
 
 For **Fork before…**, the mode can share the same footer actions, but **No
 summary** is the ordinary retry fork. A summary option is allowed but is less
@@ -125,23 +152,35 @@ composer text to the current session.
 
 ### Summary generation flow
 
-The current source session must not be polluted by a "summarize yourself" turn.
-Generate the summary in a bounded helper path:
+The summary is produced by the **generalized recap/summary facility** (the
+refactored `generateRecap`; see [recaps](recaps.md)). Recaps already define two
+execution strategies — a shared helper side session for the cheap recent-text
+recap, and *forking the main session/original model for higher fidelity*
+(`recaps.md`). Fork-after-summary is exactly that high-fidelity fork strategy,
+extended with an after-turn pointer and free-text summary instructions applied to
+the **whole** retained-to-discarded context, not just recent assistant text.
 
-1. Create a temporary/full-context fork of the source session at the current
-   source tail, or otherwise use the shared side-session helper envelope if that
-   exists for this feature.
-2. Submit a YA template plus the composer instructions to that summary-generator
-   fork.
-3. Capture the assistant's generated handoff summary.
-4. Create the target fork at the selected **Fork after…** anchor.
+The current source session must not be polluted by a "summarize yourself" turn,
+and a fork (not a resume) is what makes that possible: the SDK `query()` exposes
+no `skipTranscript`, so a `resume:`-based one-turn summary would append a visible
+turn to the *source* transcript (`recaps.md`). Generation therefore runs on a
+throwaway fork — only that fork's jsonl receives the instruction turn:
+
+1. Fork the source session at the after-turn pointer into a generator fork (full
+   context, byte-identical prefix; inherits source prompt-cache warmth while it
+   lasts). This is the high-fidelity strategy's fork, run through the shared
+   helper side session ([side-session-config](side-session-config.md)).
+2. Submit the YA template plus the composer instructions to the generator fork.
+3. Capture the assistant's generated summary.
+4. Create the *target* fork at the selected **Fork after…** anchor.
 5. Submit the generated summary as the next user turn in the target fork and
    navigate there.
 
-The summary-generator fork is implementation scaffolding, not the user's target
-branch. It should be cancellable, bounded by the helper-session lifecycle rules,
-and either auto-archived or clearly marked so it does not clutter normal session
-lists.
+The generator fork is implementation scaffolding, not the user's target branch.
+Its lifecycle is required by the no-`skipTranscript` limitation above, not
+incidental: it must be cancellable, bounded by the helper-session lifecycle
+rules, and either auto-archived or clearly marked so it does not clutter normal
+session lists.
 
 ### Summary template contract
 
@@ -164,8 +203,8 @@ Additional user instructions:
 ```
 
 The submitted summary should be visibly distinguished from an ordinary
-user-authored request in YA, e.g. as a collapsed or labeled **Fork handoff
-summary** block, even if the provider receives it as a user-role message.
+user-authored request in YA, e.g. as a collapsed or labeled **fork-after-summary**
+block, even if the provider receives it as a user-role message.
 
 ### Capability and default posture
 
@@ -174,9 +213,39 @@ validated provider today. Do not emulate a button named fork with a template
 handoff on providers that cannot actually fork; that would hide a different cost
 and context shape behind the same label.
 
+Cost: fork-after-summary pays for one generation turn over the forked context
+plus the two forks; the generation reprocesses uncached input when the source
+prompt cache has gone cold. Per [provider-context-economics](provider-context-economics.md),
+surface that price rather than hide it behind the button.
+
 This is an advanced explicit action. Normal composer send behavior remains
 verbatim and unchanged; the feature is invoked only by the notch context menu or
 the documented shortcut.
+
+## Design decisions
+
+- **Generate through the generalized recap/summary facility's fork strategy**
+  (vs. a bespoke summary subsystem, and vs. a non-persisted query over a
+  serialized transcript): one LLM-summary facility serves recap,
+  fork-after-summary, and the planned handoff option. Full-context fidelity plus
+  prompt-cache warmth need a real fork — the SDK `query()` has no
+  `skipTranscript`, so a resume would pollute the source, and a serialized
+  one-shot query would drop native message structure and cache warmth.
+- **Two execution strategies under one facade** (vs. always-fork): recap stays
+  the cheap recent-text helper-side-session query; fork-after-summary uses the
+  fork strategy. Always-fork would make every on-return recap pay a fork +
+  process spawn. (The split already exists in [recaps](recaps.md).)
+- **Reintroduce agent LLM summarization as an explicit opt-in** (vs. the dropped
+  agent-summarization posture in [session-context-actions](session-context-actions.md)):
+  that posture held when no working LLM-summary path existed and template +
+  source-session-id sufficed. Now that fork-after-summary builds a working one,
+  the same summary-instruction control is offered as an option on standard
+  handoff too; default stays template + pointer, the LLM summary is opt-in.
+  This revises that doc's handoff decision.
+- **Rename `generateRecap` → `generateSummary`** (recommendation): the facility
+  now emits both ≤40-word recaps and longer fork-after-summary handoffs, so
+  "recap" (a GLOSSARY term) understates it; recap becomes a preset of the
+  summary facility.
 
 ## Implemented
 
