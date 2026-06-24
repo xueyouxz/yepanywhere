@@ -14,6 +14,7 @@ import {
   type SpeechTranscriptionSettlementStatus,
 } from "./SpeechProvider";
 import {
+  acquireSharedSpeechMicActiveLease,
   getSpeechMicStream,
   isSharedSpeechMicStream,
   SPEECH_CAPTURE_SAMPLE_RATE,
@@ -517,6 +518,7 @@ export class YaServerProvider implements SpeechProvider {
     number,
     SpeechTranscriptionContext | undefined
   >();
+  private releaseSharedMicActiveLease: (() => void) | null = null;
   private disposed = false;
 
   constructor(
@@ -554,11 +556,31 @@ export class YaServerProvider implements SpeechProvider {
     for (const sub of this.subscribers) sub(this.state);
   }
 
-  private getMicStream(): Promise<MediaStream> {
+  private getWarmMicStream(): Promise<MediaStream> {
     return getSpeechMicStream({
       keepWarm: this.options.keepMicWarm === true,
       micDeviceId: this.options.micDeviceId,
     });
+  }
+
+  private getActiveMicStream(): Promise<MediaStream> {
+    let acquiredActiveLease = false;
+    if (
+      this.options.keepMicWarm === true &&
+      this.releaseSharedMicActiveLease === null
+    ) {
+      this.releaseSharedMicActiveLease = acquireSharedSpeechMicActiveLease();
+      acquiredActiveLease = true;
+    }
+    return this.getWarmMicStream().catch((err: unknown) => {
+      if (acquiredActiveLease) this.releaseSharedMicActive();
+      throw err;
+    });
+  }
+
+  private releaseSharedMicActive(): void {
+    this.releaseSharedMicActiveLease?.();
+    this.releaseSharedMicActiveLease = null;
   }
 
   private async openStreamingSocket(): Promise<SpeechStreamingSocket> {
@@ -593,7 +615,7 @@ export class YaServerProvider implements SpeechProvider {
       .query({ name: "microphone" as PermissionName })
       .then((status) => {
         if (status.state !== "granted" || this.disposed) return;
-        void this.getMicStream().catch((err: unknown) => {
+        void this.getWarmMicStream().catch((err: unknown) => {
           console.warn(
             "[YaSTT] Warm microphone pre-open failed",
             err instanceof Error ? err.message : String(err),
@@ -657,11 +679,12 @@ export class YaServerProvider implements SpeechProvider {
   }
 
   private async doStartBatch(token: number): Promise<void> {
-    const stream = await this.getMicStream();
+    const stream = await this.getActiveMicStream();
     if (this.disposed || token !== this.startToken) {
       if (!isSharedSpeechMicStream(stream)) {
         stopSpeechStreamTracks(stream);
       }
+      this.releaseSharedMicActive();
       return;
     }
     this.stream = stream;
@@ -758,7 +781,7 @@ export class YaServerProvider implements SpeechProvider {
     mark("getUserMedia call");
     let stream: MediaStream;
     try {
-      stream = await this.getMicStream();
+      stream = await this.getActiveMicStream();
     } catch (err) {
       closePendingSocket();
       throw err;
@@ -767,6 +790,7 @@ export class YaServerProvider implements SpeechProvider {
       if (!isSharedSpeechMicStream(stream)) {
         stopSpeechStreamTracks(stream);
       }
+      this.releaseSharedMicActive();
       abandonContext();
       closePendingSocket();
       return;
@@ -1073,7 +1097,10 @@ export class YaServerProvider implements SpeechProvider {
         // An automatic endpoint send (no spoken command) is held by a composer
         // when the user has typed mid-dictation; mark it so the composer can
         // tell it apart from an explicit spoken `send`.
-        if (smartTurnCommand === "send" && !pendingSmartTurn?.recognizedCommand) {
+        if (
+          smartTurnCommand === "send" &&
+          !pendingSmartTurn?.recognizedCommand
+        ) {
           metadata.smartTurnAutoSend = true;
         }
       }
@@ -1663,6 +1690,7 @@ export class YaServerProvider implements SpeechProvider {
     this.recorder = null;
     this.batchRecording = null;
     this.stream = null;
+    this.releaseSharedMicActive();
     if (recorder?.state !== "inactive") {
       recorder?.stop();
     } else {
@@ -1720,6 +1748,7 @@ export class YaServerProvider implements SpeechProvider {
   private releaseActiveStream(): void {
     releaseSpeechStream(this.stream);
     this.stream = null;
+    this.releaseSharedMicActive();
   }
 
   private cleanupStreamingMedia(): void {

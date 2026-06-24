@@ -279,8 +279,13 @@ streaming/confidence surface exists.
   when Keep Mic Warm is enabled. The shared stream is keyed by the selected mic
   device, requests the same raw speech constraints for batch and streaming
   paths (mono / 16 kHz / 16-bit ideals, echo cancellation, noise suppression,
-  and auto gain off), survives provider disposal during STT backend switches,
-  and is released when Keep Mic Warm is disabled or the selected mic changes.
+  and auto gain off), and survives provider disposal during STT backend
+  switches. Idle warm ownership is gated by page visibility rather than focus:
+  a visible but unfocused YA page may keep the idle stream warm, a hidden page
+  releases only the idle warm stream, and active ASR capture/finalization is
+  never stopped merely because the page loses focus or becomes hidden. The idle
+  warm stream is released when Keep Mic Warm is disabled, the selected mic
+  changes, the provider is disposed, the tab closes, or the page becomes hidden.
 - Browser-native STT does not consume YA's shared mic stream: Chrome owns the
   Web Speech capture path. Its UI treats `SpeechRecognition.onstart` only as a
   start acknowledgement; red/listening state waits for Web Speech

@@ -1131,7 +1131,7 @@
   "speechSettingsSmartTurnDescription": "{backend} can send, cancel, or wait after a dictated pause when the selected STT backend supports it.",
   "speechSettingsSmartTurnUnavailable": "{backend} does not advertise Smart Turn controls.",
   "speechSettingsKeepMicWarmTitle": "Keep Mic Warm",
-  "speechSettingsKeepMicWarmDescription": "Keep this browser's microphone stream open between server-routed dictations so repeated starts skip the browser's device cold-open. The browser will show the mic indicator while this is on; no audio is sent between dictations.",
+  "speechSettingsKeepMicWarmDescription": "Keep this browser's microphone stream ready while this tab is visible between server-routed dictations so repeated starts skip the browser's device cold-open. The browser may show the mic indicator while the idle stream is held; no audio is sent between dictations.",
   "speechSmartTurnThresholdHint": "1 requires perfect confidence.",
   "speechSmartTurnCaption": "Timeout is the max wait. At turn end, say send, cancel, or wait; no command means send.",
   "providersSave": "Save",

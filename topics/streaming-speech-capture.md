@@ -118,20 +118,40 @@ settings surface):
   PCM/browser-compressed choice or Smart Turn controls merely because the app
   connection is reached through relay.
 - **Warm-mic option (implemented, opt-in, default off).** A **standalone**
-  browser-local setting that
-  applies to **all server-mediated speech recognition** (every backend, both
-  the PCM streaming and the compressed batch paths) - not nested under
-  `GrokSpeechAudioSettings`. It is **device-local** (a phone and a desktop want
-  different warm behavior), so it must **not** sync as a server-side client
-  default. When enabled, **keep the mic warm always**: acquire the `MediaStream`
-  once and never stop its tracks between dictations, so every dictation skips
-  the device cold-open. "Warm" means the **mic device / MediaStream only** - no
-  audio is sent and the streaming WebSocket is **not** held open or fed between
+  browser-local setting that applies to **all server-mediated speech
+  recognition** (every backend, both the PCM streaming and the compressed batch
+  paths) - not nested under `GrokSpeechAudioSettings`. It is **device-local** (a
+  phone and a desktop want different warm behavior), so it must **not** sync as
+  a server-side client default. When enabled, keep an idle mic stream warm while
+  the document is visible: acquire the `MediaStream` once and keep its tracks
+  open between dictations, so repeated visible-page dictations skip the device
+  cold-open. "Warm" means the **mic device / MediaStream only** - no audio is
+  sent and the streaming WebSocket is **not** held open or fed between
   dictations; the WS + frame sending stay strictly per-dictation. Privacy-
-  visible (Chrome shows the mic indicator continuously) - the explicit, accepted
-  tradeoff of enabling it. Do **not** use a short idle TTL that silently
-  re-incurs the cold-open. Release only on provider dispose, option-off,
-  backend/device change, or tab close. Default off keeps no speculative capture.
+  visible (Chrome shows the mic indicator while the idle stream is held) - the
+  explicit, accepted tradeoff of enabling it. Do **not** use a short idle TTL
+  that silently re-incurs the cold-open.
+
+  The warm-mic ownership gate is **page visibility, not focus**. A visible but
+  unfocused YA window/tab is still eligible for idle warm ownership because the
+  user may be deliberately dictating through Smart Turn while looking at that
+  visible window. When `document.visibilityState` becomes `hidden`, release only
+  the idle warm stream; active capture and streaming/batch finalization continue
+  until the user, Smart Turn, or the provider lifecycle stops them. When the
+  document returns to `visible`, reacquire the idle warm stream only if Keep Mic
+  Warm remains enabled and no active capture already owns the mic. Release the
+  idle warm stream on provider dispose, option-off, backend/device change,
+  hidden document, or tab close. Browser page visibility is the portable signal:
+  YA cannot reliably detect true pixel occlusion by another OS window.
+
+  Default off keeps no speculative capture.
+
+  Settings copy should name this visibility scope. Prefer wording like "Keep
+  this browser's microphone stream ready while this tab is visible between
+  server-routed dictations. The browser may show the mic indicator while the
+  idle stream is held; no audio is sent between dictations." Avoid an
+  unqualified "while this is on" caption, because hidden tabs intentionally
+  release the idle warm stream.
   Implementation detail: initial warm acquisition is triggered idempotently
   when a desktop mouse pointer nears the mic control (the clickable rect plus
   margin), using the currently selected mic device. If Chrome microphone

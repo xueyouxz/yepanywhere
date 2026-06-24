@@ -8,7 +8,13 @@ import {
   prewarmYaServerSpeechBackend,
 } from "../speechProviders/YaServerProvider";
 import { decideBatchSpeechCommand } from "../speechProviders/speechCommands";
-import { releaseSharedSpeechMicStream } from "../speechProviders/sharedMicCapture";
+import {
+  SHARED_SPEECH_MIC_LEASE_STORAGE_KEY,
+  acquireSharedSpeechMicActiveLease,
+  getSpeechMicStream,
+  releaseSharedSpeechMicStream,
+} from "../speechProviders/sharedMicCapture";
+import { UI_KEYS } from "../storageKeys";
 import {
   DEFAULT_SPEECH_METHOD,
   YA_GROK_BATCH_SPEECH_METHOD,
@@ -39,6 +45,10 @@ function deferred<T>(): {
 }
 
 afterEach(() => {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value: "visible",
+  });
   releaseSharedSpeechMicStream();
   localStorage.clear();
   vi.unstubAllGlobals();
@@ -290,13 +300,13 @@ describe("streaming smart-turn decision", () => {
   });
 
   it("still requires a pause before send so dictated send is not a command", () => {
-    expect(decideSmartTurn("ship it send", wordsEndingWith("send", 0.1))).toEqual(
-      {
-        command: "send",
-        recognizedCommand: false,
-        transcript: "ship it send",
-      },
-    );
+    expect(
+      decideSmartTurn("ship it send", wordsEndingWith("send", 0.1)),
+    ).toEqual({
+      command: "send",
+      recognizedCommand: false,
+      transcript: "ship it send",
+    });
     expect(
       decideSmartTurn("ship it send", wordsEndingWith("send", 1.0)),
     ).toEqual({
@@ -2356,6 +2366,136 @@ describe("YA server speech provider", () => {
     expect(stopTrack).not.toHaveBeenCalled();
     releaseSharedSpeechMicStream();
     expect(stopTrack).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases an idle warm mic while hidden and reacquires when visible", async () => {
+    localStorage.setItem(UI_KEYS.speechKeepMicWarm, "true");
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+
+    let firstStopped = false;
+    let secondStopped = false;
+    const firstTrack = {
+      get readyState() {
+        return firstStopped ? "ended" : "live";
+      },
+      stop: vi.fn(() => {
+        firstStopped = true;
+      }),
+    } as unknown as MediaStreamTrack;
+    const secondTrack = {
+      get readyState() {
+        return secondStopped ? "ended" : "live";
+      },
+      stop: vi.fn(() => {
+        secondStopped = true;
+      }),
+    } as unknown as MediaStreamTrack;
+    const firstStream = {
+      getTracks: () => [firstTrack],
+    } as unknown as MediaStream;
+    const secondStream = {
+      getTracks: () => [secondTrack],
+    } as unknown as MediaStream;
+    const getUserMedia = vi
+      .fn<() => Promise<MediaStream>>()
+      .mockResolvedValueOnce(firstStream)
+      .mockResolvedValueOnce(secondStream);
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia },
+    });
+
+    await expect(getSpeechMicStream({ keepWarm: true })).resolves.toBe(
+      firstStream,
+    );
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(firstTrack.stop).toHaveBeenCalledTimes(1);
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    expect(secondTrack.stop).not.toHaveBeenCalled();
+
+    releaseSharedSpeechMicStream();
+    expect(secondTrack.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not release active shared mic capture when the page is hidden", async () => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    let stopped = false;
+    const stopTrack = vi.fn(() => {
+      stopped = true;
+    });
+    const fakeTrack = {
+      get readyState() {
+        return stopped ? "ended" : "live";
+      },
+      stop: stopTrack,
+    } as unknown as MediaStreamTrack;
+    const fakeStream = {
+      getTracks: () => [fakeTrack],
+    } as unknown as MediaStream;
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: vi.fn(async () => fakeStream) },
+    });
+
+    const releaseActive = acquireSharedSpeechMicActiveLease();
+    await expect(getSpeechMicStream({ keepWarm: true })).resolves.toBe(
+      fakeStream,
+    );
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(stopTrack).not.toHaveBeenCalled();
+
+    releaseActive();
+    expect(stopTrack).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not open an idle warm mic when another visible tab has the lease", async () => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    localStorage.setItem(
+      SHARED_SPEECH_MIC_LEASE_STORAGE_KEY,
+      JSON.stringify({
+        ownerId: "other-tab",
+        expiresAt: Date.now() + 10_000,
+      }),
+    );
+    const getUserMedia = vi.fn();
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia },
+    });
+
+    await expect(getSpeechMicStream({ keepWarm: true })).rejects.toThrow(
+      "Another visible YA tab owns the idle warm microphone",
+    );
+    expect(getUserMedia).not.toHaveBeenCalled();
   });
 
   it("keeps a pending pointer-near warm mic pre-open across provider disposal", async () => {

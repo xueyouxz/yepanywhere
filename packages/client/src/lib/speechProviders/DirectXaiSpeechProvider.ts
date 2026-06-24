@@ -9,15 +9,13 @@ import {
   type SpeechTranscriptionSettlementStatus,
 } from "./SpeechProvider";
 import {
+  acquireSharedSpeechMicActiveLease,
   getSpeechMicStream,
   isSharedSpeechMicStream,
   startSpeechWaveformMonitor,
   stopSpeechStreamTracks,
 } from "./sharedMicCapture";
-import {
-  getXaiSttCredential,
-  type XaiSttCredential,
-} from "./xaiCredentials";
+import { getXaiSttCredential, type XaiSttCredential } from "./xaiCredentials";
 import { decideBatchSpeechCommand } from "./speechCommands";
 
 const XAI_STT_URL = "https://api.x.ai/v1/stt";
@@ -153,6 +151,7 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
     number,
     SpeechTranscriptionContext | undefined
   >();
+  private releaseSharedMicActiveLease: (() => void) | null = null;
   private disposed = false;
 
   constructor(options: SpeechProviderOptions = {}) {
@@ -183,13 +182,34 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
       stopSpeechStreamTracks(this.stream);
     }
     this.stream = null;
+    this.releaseSharedMicActive();
   }
 
-  private getMicStream(): Promise<MediaStream> {
+  private getWarmMicStream(): Promise<MediaStream> {
     return getSpeechMicStream({
       keepWarm: this.options.keepMicWarm === true,
       micDeviceId: this.options.micDeviceId,
     });
+  }
+
+  private getActiveMicStream(): Promise<MediaStream> {
+    let acquiredActiveLease = false;
+    if (
+      this.options.keepMicWarm === true &&
+      this.releaseSharedMicActiveLease === null
+    ) {
+      this.releaseSharedMicActiveLease = acquireSharedSpeechMicActiveLease();
+      acquiredActiveLease = true;
+    }
+    return this.getWarmMicStream().catch((err: unknown) => {
+      if (acquiredActiveLease) this.releaseSharedMicActive();
+      throw err;
+    });
+  }
+
+  private releaseSharedMicActive(): void {
+    this.releaseSharedMicActiveLease?.();
+    this.releaseSharedMicActiveLease = null;
   }
 
   prewarm(): void {
@@ -209,7 +229,7 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
       .query({ name: "microphone" as PermissionName })
       .then((status) => {
         if (status.state !== "granted" || this.disposed) return;
-        void this.getMicStream().catch((err: unknown) => {
+        void this.getWarmMicStream().catch((err: unknown) => {
           console.warn(
             "[DirectXaiSTT] Warm microphone pre-open failed",
             err instanceof Error ? err.message : String(err),
@@ -245,11 +265,12 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
   private async doStart(token: number): Promise<void> {
     const credential = await getXaiSttCredential();
     if (this.disposed || token !== this.startToken) return;
-    const stream = await this.getMicStream();
+    const stream = await this.getActiveMicStream();
     if (this.disposed || token !== this.startToken) {
       if (!isSharedSpeechMicStream(stream)) {
         stopSpeechStreamTracks(stream);
       }
+      this.releaseSharedMicActive();
       return;
     }
 
@@ -280,11 +301,7 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
     this.recorder = recorder;
 
     recorder.ondataavailable = (event: BlobEvent) => {
-      if (
-        !this.disposed &&
-        recording.submitOnStop &&
-        event.data.size > 0
-      ) {
+      if (!this.disposed && recording.submitOnStop && event.data.size > 0) {
         recording.chunks.push(event.data);
       }
     };
@@ -326,6 +343,7 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
     this.recorder = null;
     this.batchRecording = null;
     this.stream = null;
+    this.releaseSharedMicActive();
     if (recorder?.state !== "inactive") {
       recorder?.stop();
     } else {
@@ -383,7 +401,10 @@ export class DirectXaiSpeechProvider implements SpeechProvider {
           ),
         );
       } else {
-        const metadata = withSpeechContextMetadata(undefined, recording.context);
+        const metadata = withSpeechContextMetadata(
+          undefined,
+          recording.context,
+        );
         if (metadata) this.options.onResult?.("", metadata);
       }
       settlementStatus = "completed";

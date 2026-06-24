@@ -11,7 +11,8 @@ See also:
 - [pluggable-speech-recognition.md](pluggable-speech-recognition.md) for
   backend selection, server/direct STT routing, and provider capability rules.
 - [streaming-speech-capture.md](streaming-speech-capture.md) for the client
-  Web Audio PCM pipeline, warm mic, and readiness indicators.
+  Web Audio PCM pipeline, warm mic visibility lifecycle, and readiness
+  indicators.
 - [composer-bottom-bar-overflow.md](composer-bottom-bar-overflow.md) for the
   active-capture waveform's measured center-space and overflow contract.
 - [direct-xai-speech.md](direct-xai-speech.md) for direct browser-to-xAI STT.
