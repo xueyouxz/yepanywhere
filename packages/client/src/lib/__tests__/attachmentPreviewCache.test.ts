@@ -2,18 +2,8 @@ import "fake-indexeddb/auto";
 
 import type { UploadedFile } from "@yep-anywhere/shared";
 import { planThumbnail } from "@yep-anywhere/shared";
-import {
-  afterEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
-import {
-  getEntry,
-  openDatabase,
-  putEntryWithKey,
-} from "../diagnostics/idb";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { getEntry, openDatabase, putEntryWithKey } from "../diagnostics/idb";
 import {
   loadCachedAttachmentPreview,
   storeUploadedAttachmentPreview,
@@ -65,12 +55,14 @@ describe("image attachment resizing", () => {
       }),
     } as unknown as HTMLCanvasElement;
 
-    vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
-      if (tagName === "canvas") {
-        return canvas;
-      }
-      return originalCreateElement(tagName);
-    });
+    vi.spyOn(document, "createElement").mockImplementation(
+      (tagName: string) => {
+        if (tagName === "canvas") {
+          return canvas;
+        }
+        return originalCreateElement(tagName);
+      },
+    );
 
     const file = new File(["payload"], "disconnect-pull-plate-condition.jpeg", {
       type: "image/jpeg",
@@ -107,12 +99,14 @@ describe("attachment thumbnail generation", () => {
       }),
     } as unknown as HTMLCanvasElement;
 
-    vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
-      if (tagName === "canvas") {
-        return canvas;
-      }
-      return originalCreateElement(tagName);
-    });
+    vi.spyOn(document, "createElement").mockImplementation(
+      (tagName: string) => {
+        if (tagName === "canvas") {
+          return canvas;
+        }
+        return originalCreateElement(tagName);
+      },
+    );
 
     const sourceFile = new File(["wide"], "wide.png", { type: "image/png" });
     const uploadedFile: UploadedFile = {
@@ -173,26 +167,21 @@ describe("attachment preview cache", () => {
     const legacyPath = "/project/.attachments/session/legacy-path.jpg";
     const attachmentId = "attachment-id-2";
     const db = await openPreviewDatabase();
-    await putEntryWithKey(
-      db,
-      STORE_NAME,
-      legacyPath,
-      {
-        attachmentId: "legacy-path-key",
-        path: legacyPath,
-        originalName: "legacy-path.jpg",
-        mimeType: "image/png",
-        size: 4,
-        thumbnailVariant: "thumb:v1:96:image/png",
-        thumbnailWidth: 1,
-        thumbnailHeight: 1,
-        thumbnailBlob: new Blob(["thumb"], { type: "image/png" }),
-        fullBlob: new Blob(["full"], { type: "image/png" }),
-        totalBytes: 8,
-        createdAt: Date.now() - 1000,
-        lastAccessedAt: Date.now() - 1000,
-      },
-    );
+    await putEntryWithKey(db, STORE_NAME, legacyPath, {
+      attachmentId: "legacy-path-key",
+      path: legacyPath,
+      originalName: "legacy-path.jpg",
+      mimeType: "image/png",
+      size: 4,
+      thumbnailVariant: "thumb:v1:96:image/png",
+      thumbnailWidth: 1,
+      thumbnailHeight: 1,
+      thumbnailBlob: new Blob(["thumb"], { type: "image/png" }),
+      fullBlob: new Blob(["full"], { type: "image/png" }),
+      totalBytes: 8,
+      createdAt: Date.now() - 1000,
+      lastAccessedAt: Date.now() - 1000,
+    });
 
     const loaded = await loadCachedAttachmentPreview(attachmentId, legacyPath);
 

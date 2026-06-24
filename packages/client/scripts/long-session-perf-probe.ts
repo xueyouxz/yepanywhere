@@ -211,10 +211,9 @@ function getMessageId(value: unknown): string | undefined {
   return getString(record.uuid) ?? getString(record.id);
 }
 
-function summarizeMessages(messages: unknown): Pick<
-  ProbeEvent,
-  "firstMessageId" | "lastMessageId" | "messagesLength"
-> {
+function summarizeMessages(
+  messages: unknown,
+): Pick<ProbeEvent, "firstMessageId" | "lastMessageId" | "messagesLength"> {
   if (!Array.isArray(messages)) {
     return {};
   }
@@ -1048,10 +1047,9 @@ function summarizeEvents(events: ProbeEvent[]): Record<string, unknown> {
   };
 }
 
-function markDetail(mark: ReloadPerfProbeMark | undefined): Record<
-  string,
-  unknown
-> {
+function markDetail(
+  mark: ReloadPerfProbeMark | undefined,
+): Record<string, unknown> {
   return mark?.detail && typeof mark.detail === "object" ? mark.detail : {};
 }
 
@@ -1068,7 +1066,9 @@ function firstMark(
   name: string,
   predicate?: (mark: ReloadPerfProbeMark) => boolean,
 ): ReloadPerfProbeMark | undefined {
-  return marks.find((mark) => mark.name === name && (!predicate || predicate(mark)));
+  return marks.find(
+    (mark) => mark.name === name && (!predicate || predicate(mark)),
+  );
 }
 
 function firstMarkAfter(
@@ -1087,8 +1087,7 @@ function markForRequest(
   requestId: unknown,
 ): ReloadPerfProbeMark | undefined {
   return marks.find(
-    (mark) =>
-      mark.name === name && markDetail(mark).requestId === requestId,
+    (mark) => mark.name === name && markDetail(mark).requestId === requestId,
   );
 }
 
@@ -1099,10 +1098,9 @@ function durationBetween(
   return start && end ? end.elapsedMs - start.elapsedMs : null;
 }
 
-function milestone(mark: ReloadPerfProbeMark | undefined): Record<
-  string,
-  unknown
-> | null {
+function milestone(
+  mark: ReloadPerfProbeMark | undefined,
+): Record<string, unknown> | null {
   if (!mark) return null;
   return {
     elapsedMs: mark.elapsedMs,
@@ -1134,15 +1132,24 @@ function summarizeReloadPhases(samples: Sample[]): Record<string, unknown> {
   const dataReady = firstMark(marks, "session_initial_load_data_ready");
   const stateQueued = firstMark(marks, "session_initial_messages_state_queued");
   const loadComplete = firstMark(marks, "session_initial_load_complete");
-  const preprocessEnd = firstMark(marks, "message_list_preprocess_end", (mark) => {
-    const messages = detailNumber(mark, "messages");
-    return messages !== null && messages > 0;
-  });
+  const preprocessEnd = firstMark(
+    marks,
+    "message_list_preprocess_end",
+    (mark) => {
+      const messages = detailNumber(mark, "messages");
+      return messages !== null && messages > 0;
+    },
+  );
   const preprocessStart = preprocessEnd
     ? firstMarkAfter(
         marks,
         "message_list_preprocess_start",
-        Math.max(0, preprocessEnd.elapsedMs - (detailNumber(preprocessEnd, "durationMs") ?? 0) - 1),
+        Math.max(
+          0,
+          preprocessEnd.elapsedMs -
+            (detailNumber(preprocessEnd, "durationMs") ?? 0) -
+            1,
+        ),
       )
     : undefined;
   const groupEnd = firstMark(marks, "message_list_group_end", (mark) => {
@@ -1179,7 +1186,10 @@ function summarizeReloadPhases(samples: Sample[]): Record<string, unknown> {
       fetchToJsonComplete: durationBetween(initialFetch, jsonComplete),
       jsonCompleteToDataReady: durationBetween(jsonComplete, dataReady),
       dataReadyToStateQueued: durationBetween(dataReady, stateQueued),
-      stateQueuedToPreprocessStart: durationBetween(stateQueued, preprocessStart),
+      stateQueuedToPreprocessStart: durationBetween(
+        stateQueued,
+        preprocessStart,
+      ),
       stateQueuedToFirstRow: durationBetween(stateQueued, firstRow),
       stateQueuedToStableRows: durationBetween(stateQueued, stableRows),
       stateQueuedToCommitEffect: durationBetween(stateQueued, commit),
@@ -1195,11 +1205,16 @@ function summarizeReloadPhases(samples: Sample[]): Record<string, unknown> {
   };
 }
 
-function summarize(samples: Sample[], events: ProbeEvent[]): Record<string, unknown> {
+function summarize(
+  samples: Sample[],
+  events: ProbeEvent[],
+): Record<string, unknown> {
   const first = samples[0];
   const last = samples.at(-1);
   const elapsedHours =
-    first && last ? Math.max(1 / 3600, (last.elapsedMs - first.elapsedMs) / 3_600_000) : 0;
+    first && last
+      ? Math.max(1 / 3600, (last.elapsedMs - first.elapsedMs) / 3_600_000)
+      : 0;
   const delta = (getter: (sample: Sample) => number | undefined | null) => {
     if (!first || !last) return null;
     const firstValue = getter(first);
@@ -1226,9 +1241,7 @@ function summarize(samples: Sample[], events: ProbeEvent[]): Record<string, unkn
       domNodes: delta((sample) => sample.page.dom.nodes),
       messageRows: delta((sample) => sample.page.dom.messageRows),
       toolRows: delta((sample) => sample.page.dom.toolRows),
-      browserProcessRssBytes: delta(
-        (sample) => sample.browserProcess.rssBytes,
-      ),
+      browserProcessRssBytes: delta((sample) => sample.browserProcess.rssBytes),
       jsEventListeners: delta((sample) => {
         const counters = sample.cdp.domCounters as
           | { jsEventListeners?: number }
@@ -1257,7 +1270,11 @@ function topHeapSampleNodes(profile: unknown): Array<Record<string, unknown>> {
   const visit = (node: unknown, stack: string[]) => {
     const typed = node as
       | {
-          callFrame?: { functionName?: string; url?: string; lineNumber?: number };
+          callFrame?: {
+            functionName?: string;
+            url?: string;
+            lineNumber?: number;
+          };
           selfSize?: number;
           children?: unknown[];
         }
@@ -1282,13 +1299,12 @@ function topHeapSampleNodes(profile: unknown): Array<Record<string, unknown>> {
   };
 
   visit(root, []);
-  return nodes.sort((a, b) => Number(b.selfSize) - Number(a.selfSize)).slice(0, 40);
+  return nodes
+    .sort((a, b) => Number(b.selfSize) - Number(a.selfSize))
+    .slice(0, 40);
 }
 
-async function writeHeapSnapshot(
-  cdp: CDPSession,
-  path: string,
-): Promise<void> {
+async function writeHeapSnapshot(cdp: CDPSession, path: string): Promise<void> {
   const chunks: string[] = [];
   cdp.on("HeapProfiler.addHeapSnapshotChunk", ({ chunk }) => {
     chunks.push(chunk);
@@ -1457,7 +1473,8 @@ async function main(): Promise<void> {
     console.log(`summary=${summaryPath}`);
     console.log(`samples=${jsonlPath}`);
     console.log(`events=${eventsPath}`);
-    if (config.allocationSampling) console.log(`heapSampling=${heapSamplePath}`);
+    if (config.allocationSampling)
+      console.log(`heapSampling=${heapSamplePath}`);
     if (config.heapSnapshot) console.log(`heapSnapshot=${heapSnapshotPath}`);
   } finally {
     await eventTracing.flush();

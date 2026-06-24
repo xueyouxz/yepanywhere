@@ -50,7 +50,9 @@ export function RenderModeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const toggleGlobalMode = useCallback(() => {
-    setGlobalMode((current) => (current === "rendered" ? "source" : "rendered"));
+    setGlobalMode((current) =>
+      current === "rendered" ? "source" : "rendered",
+    );
     setOverrideIds(() => new Set());
     setResetVersion((current) => current + 1);
   }, []);
@@ -84,10 +86,20 @@ export function RenderModeProvider({ children }: { children: ReactNode }) {
       toggleGlobalMode,
       setOverrideActive,
     }),
-    [globalMode, overrideIds.size, resetVersion, setOverrideActive, toggleGlobalMode],
+    [
+      globalMode,
+      overrideIds.size,
+      resetVersion,
+      setOverrideActive,
+      toggleGlobalMode,
+    ],
   );
 
-  return <RenderModeContext.Provider value={value}>{children}</RenderModeContext.Provider>;
+  return (
+    <RenderModeContext.Provider value={value}>
+      {children}
+    </RenderModeContext.Provider>
+  );
 }
 
 export function useOptionalRenderModeContext() {
@@ -143,7 +155,8 @@ export function useRenderModeToggle(
 
     setOverrideMode((current) => {
       const effectiveMode = current ?? globalMode;
-      const nextMode: RenderMode = effectiveMode === "rendered" ? "source" : "rendered";
+      const nextMode: RenderMode =
+        effectiveMode === "rendered" ? "source" : "rendered";
       return nextMode === globalMode ? null : nextMode;
     });
   }, [canToggle, globalMode]);

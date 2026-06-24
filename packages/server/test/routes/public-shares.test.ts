@@ -203,7 +203,9 @@ describe("public share public routes", () => {
     );
     const app = createPublicSharePublicRoutes({
       publicShareService: service,
-      loadSession: vi.fn(async () => makeSession({ projectId: publicProjectId })),
+      loadSession: vi.fn(async () =>
+        makeSession({ projectId: publicProjectId }),
+      ),
       getPublicSharesEnabled: () => true,
       fetchProjectFile,
     });
@@ -263,7 +265,9 @@ describe("public share public routes", () => {
     );
     const app = createPublicSharePublicRoutes({
       publicShareService: service,
-      loadSession: vi.fn(async () => makeSession({ projectId: publicProjectId })),
+      loadSession: vi.fn(async () =>
+        makeSession({ projectId: publicProjectId }),
+      ),
       getPublicSharesEnabled: () => true,
       fetchProjectFile,
     });
@@ -298,7 +302,9 @@ describe("public share public routes", () => {
     const fetchProjectFile = vi.fn();
     const app = createPublicSharePublicRoutes({
       publicShareService: service,
-      loadSession: vi.fn(async () => makeSession({ projectId: publicProjectId })),
+      loadSession: vi.fn(async () =>
+        makeSession({ projectId: publicProjectId }),
+      ),
       getPublicSharesEnabled: () => true,
       fetchProjectFile,
     });

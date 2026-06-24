@@ -96,7 +96,7 @@ vi.mock("../../i18n", () => ({
   useI18n: () => ({
     t: (key: string) =>
       (
-        {
+        ({
           actionExpandSidebar: "Expand sidebar",
           actionCloseSidebar: "Close sidebar",
           sidebarNewSession: "New Session",
@@ -111,7 +111,7 @@ vi.mock("../../i18n", () => ({
           sidebarSectionExpand: "Expand",
           sidebarSectionCollapse: "Collapse",
           sidebarEmpty: "No sessions yet",
-        } as Record<string, string>
+        }) as Record<string, string>
       )[key] ?? key,
   }),
 }));

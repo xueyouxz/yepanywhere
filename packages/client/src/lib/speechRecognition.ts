@@ -180,13 +180,21 @@ export function getSpeechMirrorSegments<T extends SpeechMirrorTagPosition>(
   for (const tag of sorted) {
     const at = Math.max(cursor, Math.min(tag.position, base.length));
     if (at > cursor) {
-      segments.push({ type: "text", text: base.slice(cursor, at), key: `t${cursor}` });
+      segments.push({
+        type: "text",
+        text: base.slice(cursor, at),
+        key: `t${cursor}`,
+      });
     }
     segments.push({ type: "tag", tag });
     cursor = Math.max(at, Math.min(tag.replaceEnd, base.length));
   }
   if (cursor < base.length) {
-    segments.push({ type: "text", text: base.slice(cursor), key: `t${cursor}` });
+    segments.push({
+      type: "text",
+      text: base.slice(cursor),
+      key: `t${cursor}`,
+    });
   }
   return segments;
 }
@@ -194,7 +202,8 @@ export function getSpeechMirrorSegments<T extends SpeechMirrorTagPosition>(
 function lowercaseInitialTitleCaseWord(transcript: string): string {
   return transcript.replace(
     INITIAL_TITLE_CASE_WORD,
-    (_match, prefix: string, letter: string) => `${prefix}${letter.toLowerCase()}`,
+    (_match, prefix: string, letter: string) =>
+      `${prefix}${letter.toLowerCase()}`,
   );
 }
 
@@ -202,7 +211,9 @@ function isSentenceInitialReplacementContext(
   base: string,
   replacementStart: number,
 ): boolean {
-  return SENTENCE_INITIAL_CONTEXT.test(base.slice(0, replacementStart).trimEnd());
+  return SENTENCE_INITIAL_CONTEXT.test(
+    base.slice(0, replacementStart).trimEnd(),
+  );
 }
 
 function normalizeSpeechTranscriptForReplacementContext(
@@ -285,7 +296,8 @@ export function replaceSpeechTranscriptBefore(
     replacementStart,
     replacementEnd,
     insertedLength:
-      insertion.text.length - (base.length - (replacementEnd - replacementStart)),
+      insertion.text.length -
+      (base.length - (replacementEnd - replacementStart)),
   };
 }
 
@@ -450,10 +462,7 @@ export function replaceSpeechTranscriptInRange(
   range: SpeechInsertionRange,
   previousChars: number,
 ): SpeechRangeReplacement {
-  const replacementEnd = Math.max(
-    range.end,
-    range.replaceEnd ?? range.end,
-  );
+  const replacementEnd = Math.max(range.end, range.replaceEnd ?? range.end);
   const replacingExplicitRange =
     range.replaceEnd !== undefined && range.replaceEnd > range.end;
   const replacementStart = Math.max(
@@ -538,7 +547,10 @@ export function removeLatestSpeechChunkFromRange(
   };
 }
 
-export function appendSpeechTranscript(base: string, transcript: string): string {
+export function appendSpeechTranscript(
+  base: string,
+  transcript: string,
+): string {
   return insertSpeechTranscriptAt(base, transcript, base.length).text;
 }
 

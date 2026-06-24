@@ -18,7 +18,9 @@ describe("concatUserMessages", () => {
     expect(combined.tempIds).toEqual(["temp-1", "temp-2", "temp-3"]);
     // first.tempId is still the single-id field for backward compatibility.
     expect(combined.tempId).toBe("temp-1");
-    expect(combined.text).toBe("first\n\n--------\n\nsecond\n\n--------\n\nthird");
+    expect(combined.text).toBe(
+      "first\n\n--------\n\nsecond\n\n--------\n\nthird",
+    );
   });
 
   it("omits tempIds entirely when no chunk carried one", () => {

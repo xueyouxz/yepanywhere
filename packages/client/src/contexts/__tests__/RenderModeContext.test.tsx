@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   RenderModeProvider,
@@ -23,13 +29,7 @@ function GlobalControls() {
   );
 }
 
-function MathPane({
-  id,
-  sourceText,
-}: {
-  id: string;
-  sourceText: string;
-}) {
+function MathPane({ id, sourceText }: { id: string; sourceText: string }) {
   return (
     <div data-testid={id}>
       <FixedFontMathToggle

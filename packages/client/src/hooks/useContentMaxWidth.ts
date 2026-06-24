@@ -39,9 +39,8 @@ function saveContentMaxWidth(widthPx: number) {
 }
 
 export function useContentMaxWidth() {
-  const [contentMaxWidth, setContentMaxWidthState] = useState<number>(
-    loadContentMaxWidth,
-  );
+  const [contentMaxWidth, setContentMaxWidthState] =
+    useState<number>(loadContentMaxWidth);
 
   useEffect(() => {
     applyContentMaxWidth(contentMaxWidth);

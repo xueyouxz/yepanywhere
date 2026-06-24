@@ -2118,7 +2118,10 @@ export class Supervisor {
       return;
     }
     try {
-      await this.sessionMetadataService.addRecapMessage(process.sessionId, message);
+      await this.sessionMetadataService.addRecapMessage(
+        process.sessionId,
+        message,
+      );
     } catch (error) {
       getLogger().warn(
         {

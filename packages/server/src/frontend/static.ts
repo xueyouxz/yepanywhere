@@ -47,7 +47,9 @@ export function createStaticRoutes(options: StaticServeOptions): Hono {
     }
 
     // Try to serve the exact file
-    const requestFilePath = reqPath.startsWith("/") ? reqPath.slice(1) : reqPath;
+    const requestFilePath = reqPath.startsWith("/")
+      ? reqPath.slice(1)
+      : reqPath;
     const filePath = path.resolve(distPath, requestFilePath);
 
     // Security: ensure we're not escaping the dist directory

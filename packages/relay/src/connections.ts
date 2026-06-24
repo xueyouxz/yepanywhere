@@ -276,10 +276,7 @@ export class ConnectionManager {
     return false;
   }
 
-  private findWaitingKeyForWs(
-    ws: WebSocket,
-    username?: string,
-  ): string | null {
+  private findWaitingKeyForWs(ws: WebSocket, username?: string): string | null {
     if (username) {
       for (const [key, waitingWs] of this.waiting.entries()) {
         if (waitingWs === ws && key.startsWith(`${username}\0`)) {

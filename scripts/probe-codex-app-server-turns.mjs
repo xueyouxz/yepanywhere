@@ -274,7 +274,10 @@ try {
     error: completed.params?.turn?.error,
   });
 
-  log("notification-methods", notifications.map((message) => message.method));
+  log(
+    "notification-methods",
+    notifications.map((message) => message.method),
+  );
 } catch (error) {
   log("probe-error", {
     message: error instanceof Error ? error.message : String(error),

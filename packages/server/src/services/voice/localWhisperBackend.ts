@@ -37,7 +37,9 @@ export class LocalWhisperBackend implements SpeechBackend {
   // during a load or another transcription waits instead of failing as "busy".
   private readonly queue = new SerialQueue();
 
-  constructor(opts: { model?: string; device?: string; computeType?: string } = {}) {
+  constructor(
+    opts: { model?: string; device?: string; computeType?: string } = {},
+  ) {
     this.model = opts.model ?? "distil-large-v3";
     this.device = opts.device ?? "cpu";
     this.computeType = opts.computeType ?? "int8";
@@ -143,7 +145,10 @@ export class LocalWhisperBackend implements SpeechBackend {
     return this.warmPromise;
   }
 
-  async transcribe(audio: Buffer, options: TranscribeOptions = {}): Promise<string> {
+  async transcribe(
+    audio: Buffer,
+    options: TranscribeOptions = {},
+  ): Promise<string> {
     // Queue behind any in-flight load/transcribe: record audio, block on the
     // load, then transcribe — instead of rejecting as "busy".
     return this.queue.run(async () => {

@@ -3853,7 +3853,8 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
           permissions: body.permissions,
           recapMode: helperSettings.recapMode,
           recapAfterSeconds:
-            helperSettings.recapAfterSeconds ?? originalMetadata?.recapAfterSeconds,
+            helperSettings.recapAfterSeconds ??
+            originalMetadata?.recapAfterSeconds,
           // Inherit the source session's preference unless the body overrides.
           promptSuggestionMode:
             helperSettings.promptSuggestionMode ??
@@ -3963,7 +3964,8 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         permissions: body.permissions,
         recapMode: helperSettings.recapMode,
         recapAfterSeconds:
-          helperSettings.recapAfterSeconds ?? originalMetadata?.recapAfterSeconds,
+          helperSettings.recapAfterSeconds ??
+          originalMetadata?.recapAfterSeconds,
         // Inherit the source session's preference unless the body overrides.
         promptSuggestionMode:
           helperSettings.promptSuggestionMode ??

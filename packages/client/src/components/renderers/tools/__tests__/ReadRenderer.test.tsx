@@ -305,12 +305,9 @@ describe("ReadRenderer", () => {
       setInlineMediaExpandedPreference(false);
       const { container } = renderInSession(
         <div>
-          {readRenderer.renderToolResult(
-            imageResult,
-            false,
-            renderContext,
-            { file_path: "/tmp/screenshot.png" },
-          )}
+          {readRenderer.renderToolResult(imageResult, false, renderContext, {
+            file_path: "/tmp/screenshot.png",
+          })}
         </div>,
       );
 
@@ -324,12 +321,9 @@ describe("ReadRenderer", () => {
       setInlineMediaExpandedPreference(true);
       const { container } = renderInSession(
         <div>
-          {readRenderer.renderToolResult(
-            imageResult,
-            false,
-            renderContext,
-            { file_path: "/tmp/screenshot.png" },
-          )}
+          {readRenderer.renderToolResult(imageResult, false, renderContext, {
+            file_path: "/tmp/screenshot.png",
+          })}
         </div>,
       );
 
@@ -343,12 +337,9 @@ describe("ReadRenderer", () => {
       setInlineMediaExpandedPreference(false);
       const { container } = renderInSession(
         <div>
-          {readRenderer.renderToolResult(
-            imageResult,
-            false,
-            renderContext,
-            { file_path: "/tmp/screenshot.png" },
-          )}
+          {readRenderer.renderToolResult(imageResult, false, renderContext, {
+            file_path: "/tmp/screenshot.png",
+          })}
         </div>,
       );
 

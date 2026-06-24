@@ -239,9 +239,13 @@ export async function createRelayServer(
       );
     }
 
-    return c.html(await generateRelayStatsHtml(telemetryStatus.eventsDir), 200, {
-      "Cache-Control": "no-cache, no-store, must-revalidate",
-    });
+    return c.html(
+      await generateRelayStatsHtml(telemetryStatus.eventsDir),
+      200,
+      {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+      },
+    );
   });
 
   // Check if a specific username has a server online (waiting for client)

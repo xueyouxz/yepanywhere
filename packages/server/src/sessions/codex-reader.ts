@@ -138,9 +138,7 @@ function getCodexEntryDedupeKey(entry: CodexSessionEntry): string | null {
   return null;
 }
 
-function dedupeCodexEntries(
-  entries: CodexSessionEntry[],
-): CodexSessionEntry[] {
+function dedupeCodexEntries(entries: CodexSessionEntry[]): CodexSessionEntry[] {
   const seen = new Set<string>();
   let deduped: CodexSessionEntry[] | null = null;
 

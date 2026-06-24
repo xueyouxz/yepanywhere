@@ -88,7 +88,10 @@ export async function createStreamCoordinator(
       // Check if we're in a streaming code block
       const streamingCodeBlock = detector.getStreamingCodeBlock();
       if (streamingCodeBlock) {
-        if (streamingCodeBlock.content.length > STREAMING_CODE_LIVE_RENDER_MAX_CHARS) {
+        if (
+          streamingCodeBlock.content.length >
+          STREAMING_CODE_LIVE_RENDER_MAX_CHARS
+        ) {
           return {
             raw: chunk,
             augments,

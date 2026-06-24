@@ -1163,7 +1163,7 @@ export class ClaudeProvider implements AgentProvider {
               ? "You are a title helper. Reply with the session title only, no preamble."
               : request.purpose === "recap"
                 ? "You are a recap helper. Reply with the recap text only, no preamble."
-              : "You are a handoff summary helper. Reply with the summary text only, no preamble.",
+                : "You are a handoff summary helper. Reply with the summary text only, no preamble.",
         },
       });
 

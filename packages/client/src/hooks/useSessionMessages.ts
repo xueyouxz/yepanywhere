@@ -744,9 +744,7 @@ export function useSessionMessages(
         // Update session metadata (including title, model, contextUsage) which may have changed
         // For new sessions, prev may be null if JSONL didn't exist on initial load
         setSession((prev) =>
-          prev
-            ? { ...prev, ...data.session }
-            : data.session,
+          prev ? { ...prev, ...data.session } : data.session,
         );
       } catch {
         // Silent fail for incremental updates
@@ -761,11 +759,7 @@ export function useSessionMessages(
     });
 
     return request;
-  }, [
-    projectId,
-    sessionId,
-    updatePersistedTimestampWatermark,
-  ]);
+  }, [projectId, sessionId, updatePersistedTimestampWatermark]);
 
   // Load older messages (previous chunk before the current truncation point)
   const loadOlderMessages = useCallback(async () => {
@@ -798,12 +792,7 @@ export function useSessionMessages(
     } finally {
       setLoadingOlder(false);
     }
-  }, [
-    projectId,
-    sessionId,
-    pagination,
-    updatePersistedTimestampWatermark,
-  ]);
+  }, [projectId, sessionId, pagination, updatePersistedTimestampWatermark]);
 
   // Fetch session metadata only
   const fetchSessionMetadata = useCallback(async () => {
@@ -815,9 +804,7 @@ export function useSessionMessages(
       };
       // For new sessions, prev may be null if JSONL didn't exist on initial load
       setSession((prev) =>
-        prev
-          ? { ...prev, ...metadataSession }
-          : metadataSession,
+        prev ? { ...prev, ...metadataSession } : metadataSession,
       );
     } catch {
       // Silent fail for metadata updates

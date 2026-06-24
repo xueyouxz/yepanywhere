@@ -14,8 +14,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../../hooks/useDeveloperMode", () => ({
   getRemoteLogCollectionEnabled: mocks.getRemoteLogCollectionEnabled,
-  setRemoteLogCollectionEnabledValue:
-    mocks.setRemoteLogCollectionEnabledValue,
+  setRemoteLogCollectionEnabledValue: mocks.setRemoteLogCollectionEnabledValue,
   subscribeDeveloperMode: vi.fn((listener: () => void) => {
     mocks.developerModeListeners.add(listener);
     return () => mocks.developerModeListeners.delete(listener);

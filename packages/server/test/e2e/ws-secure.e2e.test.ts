@@ -402,7 +402,10 @@ describe("Secure WebSocket Transport E2E", () => {
       transportNonce: verify.transportNonce,
       resumeProtocolVersion: 3,
     });
-    const sessionKey = deriveTransportKey(baseSessionKey, verify.transportNonce);
+    const sessionKey = deriveTransportKey(
+      baseSessionKey,
+      verify.transportNonce,
+    );
 
     await new Promise((resolve) => setTimeout(resolve, 10));
     return { sessionKey, baseSessionKey, sessionId: verify.sessionId };

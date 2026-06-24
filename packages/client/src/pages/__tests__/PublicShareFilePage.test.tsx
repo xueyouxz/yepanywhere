@@ -98,7 +98,9 @@ describe("PublicShareFilePage", () => {
 
     expect(await screen.findByRole("heading", { name: "Guide" })).toBeTruthy();
     expect(screen.queryByAltText("diagram.png")).toBeNull();
-    fireEvent.click(await screen.findByRole("button", { name: "Expand image" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Expand image" }),
+    );
 
     const inlineImage = await screen.findByAltText("diagram.png");
     expect(inlineImage.getAttribute("src")).toBe("blob:embedded-media");

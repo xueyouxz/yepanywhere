@@ -107,7 +107,9 @@ export function ActiveCountBadge({ variant, count }: CountBadgeProps) {
   if (!label) return null;
 
   return (
-    <span className={`status-badge status-${getCountBadgeStatusClass(variant)}`}>
+    <span
+      className={`status-badge status-${getCountBadgeStatusClass(variant)}`}
+    >
       {label}
     </span>
   );

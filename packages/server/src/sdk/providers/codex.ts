@@ -2785,7 +2785,7 @@ export class CodexProvider implements AgentProvider {
           ? "You are a title helper. Reply with the session title only, no preamble. Do not call tools."
           : request.purpose === "recap"
             ? "You are a recap helper. Reply with the recap text only, no preamble. Do not call tools."
-          : "You are a handoff summary helper. Reply with the summary text only, no preamble. Do not call tools.",
+            : "You are a handoff summary helper. Reply with the summary text only, no preamble. Do not call tools.",
     };
     if (experimentalApiEnabled) {
       params.excludeTurns = true;

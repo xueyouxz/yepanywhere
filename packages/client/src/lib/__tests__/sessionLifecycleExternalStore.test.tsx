@@ -1,8 +1,5 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
-import type {
-  SessionOwnership,
-  UrlProjectId,
-} from "@yep-anywhere/shared";
+import type { SessionOwnership, UrlProjectId } from "@yep-anywhere/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type MockActivityCallback = (event: unknown) => void;

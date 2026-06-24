@@ -300,9 +300,12 @@ export function createProcessesRoutes(deps: ProcessesDeps): Hono {
       deps.sessionMetadataService &&
       updates.recapAfterSeconds !== undefined
     ) {
-      await deps.sessionMetadataService.updateMetadata(updatedProcess.sessionId, {
-        recapAfterSeconds: updatedProcess.recapAfterSeconds,
-      });
+      await deps.sessionMetadataService.updateMetadata(
+        updatedProcess.sessionId,
+        {
+          recapAfterSeconds: updatedProcess.recapAfterSeconds,
+        },
+      );
     }
     return c.json({
       success: true,

@@ -44,8 +44,7 @@ function parseCorrectionDisplay(text: string): CorrectionDisplay | null {
 
   const body = text.slice(CORRECTION_PREFIX.length);
   const changeIndex = body.indexOf(CORRECTION_CHANGE_SEPARATOR);
-  const correctedText =
-    changeIndex === -1 ? body : body.slice(0, changeIndex);
+  const correctedText = changeIndex === -1 ? body : body.slice(0, changeIndex);
   const change =
     changeIndex === -1
       ? undefined

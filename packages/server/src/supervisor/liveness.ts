@@ -95,7 +95,8 @@ export function buildSessionLivenessSnapshot({
   const serializedProviderRetention =
     serializeProviderRetention(providerRetention);
   const silenceMs = elapsedMs(now, lastProviderMessageAt);
-  const activeSilenceAnchor = lastProviderMessageAt ?? lastStateChangeAt ?? startedAt;
+  const activeSilenceAnchor =
+    lastProviderMessageAt ?? lastStateChangeAt ?? startedAt;
   const activeSilenceMs = elapsedMs(now, activeSilenceAnchor) ?? 0;
   const rawProviderEventAgeMs = elapsedMs(now, lastRawProviderEventAt);
   let derivedStatus: SessionLivenessDerivedStatus;

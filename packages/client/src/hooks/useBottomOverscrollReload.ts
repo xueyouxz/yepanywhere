@@ -22,7 +22,9 @@ function targetToElement(target: EventTarget | null): Element | null {
 }
 
 export function hasSufficientScrollOverflow(container: HTMLElement): boolean {
-  return container.scrollHeight - container.clientHeight > MIN_SCROLL_OVERFLOW_PX;
+  return (
+    container.scrollHeight - container.clientHeight > MIN_SCROLL_OVERFLOW_PX
+  );
 }
 
 export function isScrollContainerAtBottom(

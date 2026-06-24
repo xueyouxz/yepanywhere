@@ -29,12 +29,7 @@ interface SessionRecapModalProps {
   }) => void;
 }
 
-const RECAP_MODE_ORDER: RecapMode[] = [
-  "off",
-  "side-session",
-  "fork",
-  "native",
-];
+const RECAP_MODE_ORDER: RecapMode[] = ["off", "side-session", "fork", "native"];
 type Translate = ReturnType<typeof useI18n>["t"];
 
 function modeLabel(mode: RecapMode, t: Translate): string {
@@ -71,9 +66,9 @@ export function SessionRecapModal({
   const [helperSideModel, setHelperSideModel] = useState<string>(
     HELPER_SIDE_MODEL_CHEAPEST,
   );
-  const [processProvider, setProcessProvider] = useState<ProviderName | undefined>(
-    provider,
-  );
+  const [processProvider, setProcessProvider] = useState<
+    ProviderName | undefined
+  >(provider);
   const [processModel, setProcessModel] = useState<string | undefined>(
     currentModel,
   );
@@ -98,12 +93,16 @@ export function SessionRecapModal({
         setHelperSideModel(
           process?.helperSideModel ?? HELPER_SIDE_MODEL_CHEAPEST,
         );
-        setProcessProvider((process?.provider as ProviderName | undefined) ?? provider);
+        setProcessProvider(
+          (process?.provider as ProviderName | undefined) ?? provider,
+        );
         setProcessModel(process?.model ?? currentModel);
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : t("sessionRecapLoadFailed"));
+          setError(
+            err instanceof Error ? err.message : t("sessionRecapLoadFailed"),
+          );
         }
       })
       .finally(() => {
@@ -174,7 +173,9 @@ export function SessionRecapModal({
       });
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("sessionRecapSaveFailed"));
+      setError(
+        err instanceof Error ? err.message : t("sessionRecapSaveFailed"),
+      );
     } finally {
       setIsSaving(false);
     }
@@ -190,7 +191,10 @@ export function SessionRecapModal({
   ]);
 
   return (
-    <Modal title={t("sessionRecapTitle")} onClose={isSaving ? () => {} : onClose}>
+    <Modal
+      title={t("sessionRecapTitle")}
+      onClose={isSaving ? () => {} : onClose}
+    >
       <div className="settings-group session-recap-modal">
         <div className="settings-item model-settings-item">
           <div className="settings-item-info">

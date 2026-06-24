@@ -183,10 +183,7 @@ const VERSION_COLORS = [
   "#db2777",
 ];
 
-function buildStatsHtml(
-  eventsDir: string,
-  summary: RelayStatsSummary,
-): string {
+function buildStatsHtml(eventsDir: string, summary: RelayStatsSummary): string {
   const { dailyStats, recentSamples } = summary;
   const dates = Object.keys(dailyStats).sort();
   const versionSet = new Set<string>();

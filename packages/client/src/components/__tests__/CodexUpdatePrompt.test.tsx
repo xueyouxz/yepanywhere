@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CodexUpdatePrompt } from "../CodexUpdatePrompt";
 
@@ -138,9 +144,7 @@ describe("CodexUpdatePrompt", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
-    expect(window.localStorage.getItem("codex-update-seen-tag")).toBe(
-      "0.4.3",
-    );
+    expect(window.localStorage.getItem("codex-update-seen-tag")).toBe("0.4.3");
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 

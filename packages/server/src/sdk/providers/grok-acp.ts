@@ -349,8 +349,7 @@ export class GrokACPProvider implements AgentProvider {
     try {
       const connectStart = Date.now();
       const xaiApiKey = this.ambientXaiApiKey;
-      const passXaiApiKey =
-        this.useAmbientXaiApiKey && xaiApiKey !== undefined;
+      const passXaiApiKey = this.useAmbientXaiApiKey && xaiApiKey !== undefined;
       await client.connect({
         command: grokPath,
         args,

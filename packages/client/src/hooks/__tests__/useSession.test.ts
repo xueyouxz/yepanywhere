@@ -839,9 +839,7 @@ describe("useSession completion reconciliation", () => {
       "bypassPermissions",
     );
 
-    const { result } = renderHook(() =>
-      useSession(PROJECT_ID, "sess-1"),
-    );
+    const { result } = renderHook(() => useSession(PROJECT_ID, "sess-1"));
 
     expect(result.current.permissionMode).toBe("default");
     expect(apiMocks.setPermissionMode).not.toHaveBeenCalled();
@@ -902,7 +900,9 @@ describe("useSession completion reconciliation", () => {
     });
 
     expect(result.current.permissionMode).toBe("acceptEdits");
-    expect(window.localStorage.getItem("yep-anywhere-permission-mode")).toBeNull();
+    expect(
+      window.localStorage.getItem("yep-anywhere-permission-mode"),
+    ).toBeNull();
 
     act(() => {
       fileActivityOptions?.onSessionStatusChange?.({

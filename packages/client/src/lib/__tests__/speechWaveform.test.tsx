@@ -45,7 +45,9 @@ describe("speech waveform", () => {
       moveTo: vi.fn(),
       setTransform: vi.fn(),
     } as unknown as CanvasRenderingContext2D;
-    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context);
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
+      context,
+    );
     vi.spyOn(
       HTMLCanvasElement.prototype,
       "getBoundingClientRect",

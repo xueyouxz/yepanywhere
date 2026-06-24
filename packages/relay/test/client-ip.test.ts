@@ -40,14 +40,18 @@ describe("parseTrustedProxies", () => {
   });
 
   it("drops malformed entries silently", () => {
-    const proxies = parseTrustedProxies("not-an-ip, 127.0.0.1, 256.0.0.1, 10.0.0.0/33");
+    const proxies = parseTrustedProxies(
+      "not-an-ip, 127.0.0.1, 256.0.0.1, 10.0.0.0/33",
+    );
     expect(proxies).toHaveLength(1);
     expect(proxies[0]?.maskBits).toBe(32);
   });
 });
 
 describe("getClientIp", () => {
-  const trusted: TrustedProxy[] = parseTrustedProxies("127.0.0.1, ::1, 10.0.0.0/8");
+  const trusted: TrustedProxy[] = parseTrustedProxies(
+    "127.0.0.1, ::1, 10.0.0.0/8",
+  );
 
   it("returns peer when trustedProxies list is empty", () => {
     const req = makeReq("203.0.113.7", "1.2.3.4");

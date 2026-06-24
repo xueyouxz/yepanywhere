@@ -188,5 +188,4 @@ describe("buildSessionLivenessSnapshot", () => {
       state: "waiting-input",
     });
   });
-
 });

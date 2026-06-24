@@ -113,7 +113,9 @@ export function reconcileParakeetBackendForModel(
   if (!isParakeetModelBackend(method)) return method;
   const preset = getParakeetSpeechPreset(cleanParakeetSpeechModel(model));
   if (!preset || preset.supportedBackends.includes(method)) return method;
-  return resolveParakeetModelBackend(model, method, availableBackends) ?? method;
+  return (
+    resolveParakeetModelBackend(model, method, availableBackends) ?? method
+  );
 }
 
 export function getCompatibleParakeetModelForBackend(

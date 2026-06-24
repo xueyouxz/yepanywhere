@@ -23,10 +23,7 @@ import { getLogger } from "../logging/logger.js";
 import type { ISessionReader } from "../sessions/types.js";
 import type { SessionSummary } from "../supervisor/types.js";
 import type { EventBus, FileChangeEvent } from "../watcher/index.js";
-import type {
-  ISessionIndexService,
-  SessionIndexListOptions,
-} from "./types.js";
+import type { ISessionIndexService, SessionIndexListOptions } from "./types.js";
 
 const logger = getLogger();
 const LOG_CACHE_PERF = process.env.SESSION_INDEX_LOG_PERF === "true";
@@ -910,7 +907,8 @@ export class SessionIndexService implements ISessionIndexService {
     const validationKey = this.getValidationKey(sessionDir, reader, options);
     const index = await this.loadIndex(sessionDir, projectId, reader);
     const now = Date.now();
-    const lastFullValidation = this.lastFullValidationAt.get(validationKey) ?? 0;
+    const lastFullValidation =
+      this.lastFullValidationAt.get(validationKey) ?? 0;
     const hasDirDirty = this.dirtyDirs.has(scopeKey);
     const dirtySessions = this.dirtySessionsByDir.get(scopeKey);
     const hasDirtySessions = Boolean(dirtySessions && dirtySessions.size > 0);

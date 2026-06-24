@@ -30,19 +30,13 @@ describe("ModeSelector", () => {
 
   it("labels busy mode changes as next-turn changes", () => {
     render(
-      <ModeSelector
-        mode="plan"
-        onModeChange={vi.fn()}
-        changesApplyNextTurn
-      />,
+      <ModeSelector mode="plan" onModeChange={vi.fn()} changesApplyNextTurn />,
     );
 
     expect(screen.getByText("Plan")).toBeTruthy();
     expect(screen.getByText("Next turn")).toBeTruthy();
     expect(
-      screen.getByTitle(
-        "Click to select mode - Applies to the next user turn",
-      ),
+      screen.getByTitle("Click to select mode - Applies to the next user turn"),
     ).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /Plan/ }));

@@ -69,7 +69,11 @@ describe("OpenCodeProvider.startSession — blocking session ID", () => {
         _file: string,
         _args: string[],
         _options: unknown,
-        callback: (error: Error | null, stdout?: string, stderr?: string) => void,
+        callback: (
+          error: Error | null,
+          stdout?: string,
+          stderr?: string,
+        ) => void,
       ) => callback(new Error("execFile not mocked")),
     );
     fetchMock = vi.fn();
@@ -324,7 +328,11 @@ describe("OpenCodeProvider.startSession — blocking session ID", () => {
         _file: string,
         _args: string[],
         _options: unknown,
-        callback: (error: Error | null, stdout?: string, stderr?: string) => void,
+        callback: (
+          error: Error | null,
+          stdout?: string,
+          stderr?: string,
+        ) => void,
       ) =>
         callback(
           null,
@@ -532,7 +540,9 @@ describe("OpenCodeProvider.startSession — blocking session ID", () => {
 
     const toolUses = messages.flatMap((m) =>
       Array.isArray(m.message?.content)
-        ? m.message.content.filter((b: { type?: string }) => b.type === "tool_use")
+        ? m.message.content.filter(
+            (b: { type?: string }) => b.type === "tool_use",
+          )
         : [],
     );
     const toolResults = messages.flatMap((m) =>
@@ -622,9 +632,9 @@ describe("OpenCodeProvider.startSession — blocking session ID", () => {
       String(c[0]).includes("/permission/per_1/reply"),
     );
     expect(replyCall).toBeDefined();
-    expect(
-      JSON.parse(String((replyCall?.[1] as RequestInit)?.body)),
-    ).toEqual({ reply: "once" });
+    expect(JSON.parse(String((replyCall?.[1] as RequestInit)?.body))).toEqual({
+      reply: "once",
+    });
 
     session.abort();
   });
@@ -730,7 +740,10 @@ describe("OpenCodeProvider.startSession — blocking session ID", () => {
           ]),
         );
       }
-      if (url.endsWith(`/session/${sessionId}/abort`) && init?.method === "POST") {
+      if (
+        url.endsWith(`/session/${sessionId}/abort`) &&
+        init?.method === "POST"
+      ) {
         abortCalled = true;
         return Promise.resolve(jsonResponse({ ok: true }));
       }
@@ -1046,4 +1059,3 @@ describe("OpenCodeProvider.startSession — blocking session ID", () => {
     session.abort();
   });
 });
-

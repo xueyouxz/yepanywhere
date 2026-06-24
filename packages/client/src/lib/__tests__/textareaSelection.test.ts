@@ -67,7 +67,13 @@ describe("textarea speech edit selection", () => {
     const selection = captureTextareaAppendSelection(textarea, textarea.value);
     textarea.value = "alpha speech beta";
 
-    restoreTextareaInsertionSelection(textarea, selection, textarea.value, 6, 7);
+    restoreTextareaInsertionSelection(
+      textarea,
+      selection,
+      textarea.value,
+      6,
+      7,
+    );
 
     expect(textarea.selectionStart).toBe(3);
     expect(textarea.selectionEnd).toBe(3);
@@ -80,7 +86,13 @@ describe("textarea speech edit selection", () => {
     const selection = captureTextareaAppendSelection(textarea, textarea.value);
     textarea.value = "alpha speech beta";
 
-    restoreTextareaInsertionSelection(textarea, selection, textarea.value, 6, 7);
+    restoreTextareaInsertionSelection(
+      textarea,
+      selection,
+      textarea.value,
+      6,
+      7,
+    );
 
     expect(textarea.selectionStart).toBe(13);
     expect(textarea.selectionEnd).toBe(13);

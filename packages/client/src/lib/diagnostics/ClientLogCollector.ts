@@ -255,8 +255,8 @@ export class ClientLogCollector {
         typeof document !== "undefined"
           ? {
               nodes: document.getElementsByTagName("*").length,
-              messageRows:
-                document.querySelectorAll(".message-render-row").length,
+              messageRows: document.querySelectorAll(".message-render-row")
+                .length,
               streamingBlocks:
                 document.querySelectorAll(".streaming-block").length,
               toolRows: document.querySelectorAll(".tool-row").length,

@@ -399,7 +399,8 @@ export function FloatingActionButton() {
   const handleVoiceTranscript = useCallback(
     (transcript: string, metadata?: SpeechTranscriptionResultMetadata) => {
       const speechRange = metadata?.speechTargetId
-        ? (speechInsertionRangesRef.current.get(metadata.speechTargetId) ?? null)
+        ? (speechInsertionRangesRef.current.get(metadata.speechTargetId) ??
+          null)
         : speechInsertionRangeRef.current;
       const delayMs = metadata?.smartTurnCommand
         ? 0
@@ -576,8 +577,10 @@ export function FloatingActionButton() {
                   clearPendingSpeechFinal();
                   if (speechInsertionRangesRef.current.size > 0) {
                     const nextRanges = new Map<string, SpeechInsertionRange>();
-                    for (const [targetId, range] of speechInsertionRangesRef
-                      .current) {
+                    for (const [
+                      targetId,
+                      range,
+                    ] of speechInsertionRangesRef.current) {
                       nextRanges.set(
                         targetId,
                         clearSpeechInsertionRangeReplacement(

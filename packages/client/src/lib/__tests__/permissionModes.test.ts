@@ -16,13 +16,7 @@ describe("permission mode options", () => {
       getPermissionModeOptions({
         model: { id: "fable", name: "Fable", supportsAutoMode: true },
       }),
-    ).toEqual([
-      "default",
-      "acceptEdits",
-      "plan",
-      "bypassPermissions",
-      "auto",
-    ]);
+    ).toEqual(["default", "acceptEdits", "plan", "bypassPermissions", "auto"]);
   });
 
   it("preserves an already-selected auto mode for display", () => {

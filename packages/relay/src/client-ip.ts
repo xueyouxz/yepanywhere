@@ -78,7 +78,8 @@ function parseCidr(spec: string): TrustedProxy | null {
   const ip = parseIp(ipPart);
   if (!ip) return null;
   const totalBits = ip.v6 ? 128 : 32;
-  const maskBits = maskPart === null ? totalBits : Number.parseInt(maskPart, 10);
+  const maskBits =
+    maskPart === null ? totalBits : Number.parseInt(maskPart, 10);
   if (!Number.isInteger(maskBits) || maskBits < 0 || maskBits > totalBits) {
     return null;
   }
@@ -90,7 +91,9 @@ function parseCidr(spec: string): TrustedProxy | null {
 
 function parseIp(s: string): { big: bigint; v6: boolean } | null {
   const stripped = s.includes("%") ? s.slice(0, s.indexOf("%")) : s;
-  const mapped = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i.exec(stripped);
+  const mapped = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i.exec(
+    stripped,
+  );
   if (mapped?.[1]) return parseIpV4(mapped[1]);
   if (stripped.includes(":")) return parseIpV6(stripped);
   return parseIpV4(stripped);
@@ -122,7 +125,11 @@ function parseIpV6(s: string): { big: bigint; v6: true } | null {
     const tailParts = tail ? tail.split(":") : [];
     const missing = 8 - headParts.length - tailParts.length;
     if (missing < 0) return null;
-    parts = [...headParts, ...new Array<string>(missing).fill("0"), ...tailParts];
+    parts = [
+      ...headParts,
+      ...new Array<string>(missing).fill("0"),
+      ...tailParts,
+    ];
   }
   let big = 0n;
   for (const p of parts) {

@@ -28,7 +28,10 @@ export class DeepgramBackend implements SpeechBackend {
       });
       if (res.ok) return { ok: true };
       if (res.status === 401 || res.status === 403) {
-        return { ok: false, reason: `Deepgram API key rejected (HTTP ${res.status})` };
+        return {
+          ok: false,
+          reason: `Deepgram API key rejected (HTTP ${res.status})`,
+        };
       }
       return { ok: false, reason: `Deepgram API returned HTTP ${res.status}` };
     } catch (err) {
@@ -39,7 +42,10 @@ export class DeepgramBackend implements SpeechBackend {
     }
   }
 
-  async transcribe(audio: Buffer, options: TranscribeOptions = {}): Promise<string> {
+  async transcribe(
+    audio: Buffer,
+    options: TranscribeOptions = {},
+  ): Promise<string> {
     const params = new URLSearchParams({
       model: "nova-3",
       smart_format: "true",
@@ -57,13 +63,18 @@ export class DeepgramBackend implements SpeechBackend {
         Authorization: `Token ${this.apiKey}`,
         "Content-Type": mimeType,
       },
-      body: audio.buffer.slice(audio.byteOffset, audio.byteOffset + audio.byteLength) as ArrayBuffer,
+      body: audio.buffer.slice(
+        audio.byteOffset,
+        audio.byteOffset + audio.byteLength,
+      ) as ArrayBuffer,
       signal: AbortSignal.timeout(30_000),
     });
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`Deepgram transcription failed (HTTP ${res.status}): ${text}`);
+      throw new Error(
+        `Deepgram transcription failed (HTTP ${res.status}): ${text}`,
+      );
     }
 
     const data = (await res.json()) as DeepgramResponse;

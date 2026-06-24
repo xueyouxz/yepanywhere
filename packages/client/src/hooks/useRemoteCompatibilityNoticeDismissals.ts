@@ -2,8 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { RemoteCompatibilityNotice } from "../lib/remoteCompatibilityNotices";
 
 const DISMISSAL_EVENT = "yep-anywhere:remote-compatibility-dismissal-change";
-export const REMOTE_COMPATIBILITY_REMINDER_SNOOZE_MS =
-  24 * 60 * 60 * 1000;
+export const REMOTE_COMPATIBILITY_REMINDER_SNOOZE_MS = 24 * 60 * 60 * 1000;
 const LEGACY_PERMANENT_DISMISSAL_VALUE = "1";
 const PERMANENT_DISMISSAL_VALUE = "dismissed";
 const SNOOZE_UNTIL_PREFIX = "snooze-until:";
@@ -102,9 +101,7 @@ export function useRemoteCompatibilityNoticeDismissals(
   const [sessionDismissed, setSessionDismissed] = useState<Set<string>>(
     () => new Set(),
   );
-  const [snoozed, setSnoozed] = useState<Set<string>>(() =>
-    readSnoozed(keys),
-  );
+  const [snoozed, setSnoozed] = useState<Set<string>>(() => readSnoozed(keys));
 
   useEffect(() => {
     setSessionDismissed(
@@ -186,9 +183,7 @@ export function useRemoteCompatibilityNoticeDismissals(
   );
 
   const dismissNotice = useCallback((notice: RemoteCompatibilityNotice) => {
-    setSessionDismissed(
-      (current) => new Set([...current, notice.dismissKey]),
-    );
+    setSessionDismissed((current) => new Set([...current, notice.dismissKey]));
     emitDismissalChange({ keys: [notice.dismissKey], action: "dismiss" });
   }, []);
 

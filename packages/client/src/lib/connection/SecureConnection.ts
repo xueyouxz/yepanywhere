@@ -429,10 +429,7 @@ export class SecureConnection implements Connection {
     );
   }
 
-  private decryptProofEnvelope(
-    proof: string,
-    key: Uint8Array,
-  ): string | null {
+  private decryptProofEnvelope(proof: string, key: Uint8Array): string | null {
     try {
       const proofEnvelope = JSON.parse(proof) as {
         nonce?: unknown;
@@ -566,9 +563,7 @@ export class SecureConnection implements Connection {
     }
   }
 
-  private acceptGraceProtocolVersion(
-    resumeProtocolVersion: number,
-  ): boolean {
+  private acceptGraceProtocolVersion(resumeProtocolVersion: number): boolean {
     return this.acceptAuthenticatedResumeProtocolVersion(
       resumeProtocolVersion,
       GRACE_FULL_SRP_PROTOCOL_VERSION,
@@ -679,7 +674,8 @@ export class SecureConnection implements Connection {
           return;
         }
         const transportNonce = msg.transportNonce;
-        let authenticatedResumeProtocolVersion = GRACE_FULL_SRP_PROTOCOL_VERSION;
+        let authenticatedResumeProtocolVersion =
+          GRACE_FULL_SRP_PROTOCOL_VERSION;
         if (msg.serverProof) {
           const proofProtocolVersion = this.verifyResumeServerProof({
             serverProof: msg.serverProof,
@@ -689,9 +685,7 @@ export class SecureConnection implements Connection {
           });
           if (
             proofProtocolVersion === null ||
-            !this.acceptAuthenticatedResumeProtocolVersion(
-              proofProtocolVersion,
-            )
+            !this.acceptAuthenticatedResumeProtocolVersion(proofProtocolVersion)
           ) {
             console.error("[SecureConnection] Resume server proof failed");
             this.connectionState = "failed";
@@ -1061,7 +1055,11 @@ export class SecureConnection implements Connection {
       JSON.stringify(
         channel === DEFAULT_RELAY_CHANNEL
           ? { type: "client_connect", username: relayUsername }
-          : { type: "client_connect_channel", username: relayUsername, channel },
+          : {
+              type: "client_connect_channel",
+              username: relayUsername,
+              channel,
+            },
       ),
     );
 
@@ -1429,9 +1427,7 @@ export class SecureConnection implements Connection {
     this.send({ type: "speech_control", message });
   }
 
-  sendSpeechAudioFrame(
-    data: ArrayBuffer | Uint8Array | ArrayBufferView,
-  ): void {
+  sendSpeechAudioFrame(data: ArrayBuffer | Uint8Array | ArrayBufferView): void {
     const websocketOpenState =
       typeof WebSocket !== "undefined" ? WebSocket.OPEN : 1;
     if (!this.ws || this.ws.readyState !== websocketOpenState) {

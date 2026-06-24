@@ -31,12 +31,12 @@ describe("sessionAge", () => {
       expect(formatBriefAge(new Date(now - 5 * 60_000).toISOString())).toBe(
         "5m",
       );
-      expect(
-        formatBriefAge(new Date(now - 3 * 3_600_000).toISOString()),
-      ).toBe("3h");
-      expect(
-        formatBriefAge(new Date(now - 2 * 86_400_000).toISOString()),
-      ).toBe("2d");
+      expect(formatBriefAge(new Date(now - 3 * 3_600_000).toISOString())).toBe(
+        "3h",
+      );
+      expect(formatBriefAge(new Date(now - 2 * 86_400_000).toISOString())).toBe(
+        "2d",
+      );
     });
   });
 });

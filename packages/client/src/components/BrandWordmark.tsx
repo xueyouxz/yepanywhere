@@ -19,7 +19,9 @@ export function BrandWordmark({
   }
 
   return (
-    <span className={`brand-wordmark brand-wordmark--short ${className}`.trim()}>
+    <span
+      className={`brand-wordmark brand-wordmark--short ${className}`.trim()}
+    >
       yep
     </span>
   );

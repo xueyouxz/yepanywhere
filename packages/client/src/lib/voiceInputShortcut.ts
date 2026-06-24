@@ -13,8 +13,6 @@ export function isVoiceInputShortcut(event: VoiceShortcutEvent): boolean {
     !event.metaKey &&
     !event.altKey &&
     !event.shiftKey &&
-    (event.code === "Space" ||
-      event.key === " " ||
-      event.key === "Spacebar")
+    (event.code === "Space" || event.key === " " || event.key === "Spacebar")
   );
 }

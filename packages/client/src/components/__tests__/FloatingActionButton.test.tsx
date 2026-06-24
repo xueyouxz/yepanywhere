@@ -134,7 +134,9 @@ describe("FloatingActionButton speech", () => {
     expect(badge.textContent).toContain("Transcribing");
 
     expect(textarea.disabled).toBe(false);
-    fireEvent.change(textarea, { target: { value: "typed while transcribing" } });
+    fireEvent.change(textarea, {
+      target: { value: "typed while transcribing" },
+    });
     expect(textarea.value).toBe("typed while transcribing");
 
     fireEvent.keyDown(textarea, { key: "Escape" });

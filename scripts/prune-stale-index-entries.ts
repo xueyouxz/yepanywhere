@@ -73,7 +73,9 @@ function providerFrom(value: unknown): ExternalProvider | null {
     return null;
   }
   const normalized = value.toLowerCase();
-  return EXTERNAL_PROVIDERS.find((provider) => normalized.includes(provider)) ?? null;
+  return (
+    EXTERNAL_PROVIDERS.find((provider) => normalized.includes(provider)) ?? null
+  );
 }
 
 function exactProviderFrom(value: string): ExternalProvider | null {
@@ -238,7 +240,9 @@ async function writeJsonFile(
 }
 
 function rowTitle(row: CachedSessionRow): string {
-  return String(row.title ?? row.fullTitle ?? row.initialPrompt ?? "(no title)");
+  return String(
+    row.title ?? row.fullTitle ?? row.initialPrompt ?? "(no title)",
+  );
 }
 
 async function pruneIndexFile(
@@ -348,7 +352,9 @@ async function archiveByPattern(
       if (!entry.endsWith(".json")) {
         continue;
       }
-      const data = await readJsonFile<SessionIndexFile>(path.join(indexesDir, entry));
+      const data = await readJsonFile<SessionIndexFile>(
+        path.join(indexesDir, entry),
+      );
       if (!data || !isRecord(data.sessions)) {
         continue;
       }
@@ -389,7 +395,9 @@ async function archiveByPattern(
   }
 
   if (toArchive.size === 0) {
-    console.log("  No matches found for the archive pattern in current indexes/metadata.");
+    console.log(
+      "  No matches found for the archive pattern in current indexes/metadata.",
+    );
     return 0;
   }
 
@@ -403,7 +411,10 @@ async function archiveByPattern(
     console.log(`  ... +${toArchive.size - 5} more`);
   }
 
-  const meta: SessionMetadataFile = existingMeta ?? { sessions: {}, version: 1 };
+  const meta: SessionMetadataFile = existingMeta ?? {
+    sessions: {},
+    version: 1,
+  };
   meta.sessions ??= {};
   for (const sessionId of toArchive) {
     meta.sessions[sessionId] = {
@@ -413,12 +424,16 @@ async function archiveByPattern(
   }
   await writeJsonFile(metaPath, meta, options.dryRun);
   if (!options.dryRun) {
-    console.log("  Wrote isArchived=true into session-metadata.json for matches.");
+    console.log(
+      "  Wrote isArchived=true into session-metadata.json for matches.",
+    );
   }
   return toArchive.size;
 }
 
-function parseProviderSet(value: string | undefined): Set<ExternalProvider> | "all" {
+function parseProviderSet(
+  value: string | undefined,
+): Set<ExternalProvider> | "all" {
   if (!value) {
     return "all";
   }
@@ -428,9 +443,9 @@ function parseProviderSet(value: string | undefined): Set<ExternalProvider> | "a
     const provider = exactProviderFrom(token);
     if (!provider) {
       throw new Error(
-        "Unsupported provider \"" +
+        'Unsupported provider "' +
           token +
-          "\". Expected one of: " +
+          '". Expected one of: ' +
           EXTERNAL_PROVIDERS.join(", "),
       );
     }
@@ -457,7 +472,9 @@ async function main(): Promise<void> {
   const dataDirArg = args.find((arg) => arg.startsWith("--data-dir="));
   const providerArg = args.find((arg) => arg.startsWith("--providers="));
   const archiveArg = args.find(
-    (arg) => arg.startsWith("--archive-pattern=") || arg.startsWith("--archive-if-title="),
+    (arg) =>
+      arg.startsWith("--archive-pattern=") ||
+      arg.startsWith("--archive-if-title="),
   );
   const dataDir =
     argValue(dataDirArg) ?? process.env.YEP_DATA_DIR ?? DEFAULT_DATA_DIR;

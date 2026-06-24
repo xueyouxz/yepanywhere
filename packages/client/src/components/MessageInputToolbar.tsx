@@ -1778,7 +1778,9 @@ export function MessageInputToolbarView({
               <button
                 type="button"
                 onClick={actionsControl.send.alternate.onClick}
-                disabled={actionsControl.disabled || !actionsControl.send.canSend}
+                disabled={
+                  actionsControl.disabled || !actionsControl.send.canSend
+                }
                 className="send-button fork-summary-no-summary-button"
                 aria-label={actionsControl.send.alternate.label}
                 title={actionsControl.send.alternate.tooltip}

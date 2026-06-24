@@ -30,9 +30,7 @@ export function recordSessionVisit(sessionId: string, projectId: string): void {
  * Fetches on mount and provides methods to record visits and clear.
  * Returns enriched entries with session title and project name.
  */
-export function useRecentSessions(
-  options: UseRecentSessionsOptions = {},
-): {
+export function useRecentSessions(options: UseRecentSessionsOptions = {}): {
   recentSessions: EnrichedRecentEntry[];
   isLoading: boolean;
   error: Error | null;

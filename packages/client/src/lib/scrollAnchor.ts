@@ -11,9 +11,10 @@ export function useScrollPreservingToggle(
   toggleFn: () => void,
 ) {
   const btnRef = useRef<HTMLButtonElement>(null);
-  const pendingRef = useRef<{ scrollEl: Element; initialOffset: number } | null>(
-    null,
-  );
+  const pendingRef = useRef<{
+    scrollEl: Element;
+    initialOffset: number;
+  } | null>(null);
 
   const handleClick = useCallback(() => {
     const btn = btnRef.current;

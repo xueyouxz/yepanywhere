@@ -16,11 +16,16 @@ let animationFrameId: number | null = null;
 let lastRenderedAt = Number.NEGATIVE_INFINITY;
 
 function isDocumentVisible(): boolean {
-  return typeof document === "undefined" || document.visibilityState !== "hidden";
+  return (
+    typeof document === "undefined" || document.visibilityState !== "hidden"
+  );
 }
 
 function cancelPendingFrame(): void {
-  if (animationFrameId === null || typeof cancelAnimationFrame === "undefined") {
+  if (
+    animationFrameId === null ||
+    typeof cancelAnimationFrame === "undefined"
+  ) {
     animationFrameId = null;
     return;
   }

@@ -51,8 +51,9 @@ describe("YA client route builders", () => {
     expect(buildYaClientRelayLoginUrl(DEFAULT_YA_CLIENT_BASE_URL)).toBe(
       "https://yepanywhere.com/remote/login/relay",
     );
-    expect(buildYaClientPublicShareUrl("abc/def", DEFAULT_YA_CLIENT_BASE_URL))
-      .toBe("https://yepanywhere.com/remote/share/abc%2Fdef");
+    expect(
+      buildYaClientPublicShareUrl("abc/def", DEFAULT_YA_CLIENT_BASE_URL),
+    ).toBe("https://yepanywhere.com/remote/share/abc%2Fdef");
   });
 
   it("builds login and share routes at a custom root host", () => {
@@ -66,9 +67,7 @@ describe("YA client route builders", () => {
 
   it("converts legacy share-viewer URLs to YA client bases", () => {
     expect(
-      normalizeYaClientBaseUrlFromShareViewerUrl(
-        "https://ya.graehl.org/share",
-      ),
+      normalizeYaClientBaseUrlFromShareViewerUrl("https://ya.graehl.org/share"),
     ).toBe("https://ya.graehl.org");
     expect(
       normalizeYaClientBaseUrlFromShareViewerUrl(

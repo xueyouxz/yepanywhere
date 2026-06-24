@@ -139,10 +139,7 @@ describe("getModelIndicatorModelLabel", () => {
     });
     it("huggingface org-namespaced model keeps a verbatim basename (no glyph, no stray slash)", () => {
       expect(
-        getModelIndicatorModelLabel(
-          "pi",
-          "huggingface/qwen/qwen3-coder-next",
-        ),
+        getModelIndicatorModelLabel("pi", "huggingface/qwen/qwen3-coder-next"),
       ).toBe("pi HF qwen3-coder-next");
       expect(
         getModelIndicatorModelLabel(

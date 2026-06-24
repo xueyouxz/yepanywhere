@@ -169,7 +169,10 @@ describe("OpenCodeSessionReader", () => {
     expect(normalized.messages).toHaveLength(2);
     expect(normalized.messages[1]).toMatchObject({
       type: "assistant",
-      message: { role: "assistant", content: [{ type: "text", text: bigText }] },
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: bigText }],
+      },
     });
   });
 

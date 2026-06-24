@@ -248,9 +248,7 @@ export function parseOpenCodeModelVariants(
 
 function isProcessStillAlive(process: ChildProcess): boolean {
   return (
-    !process.killed &&
-    process.exitCode === null &&
-    process.signalCode === null
+    !process.killed && process.exitCode === null && process.signalCode === null
   );
 }
 
@@ -272,7 +270,9 @@ function updateOpenCodeRuntimeEvent(
   }
 }
 
-function getOpenCodeEventSessionId(event: OpenCodeSSEEvent): string | undefined {
+function getOpenCodeEventSessionId(
+  event: OpenCodeSSEEvent,
+): string | undefined {
   switch (event.type) {
     case "session.status":
     case "session.idle":
@@ -471,10 +471,16 @@ export class OpenCodeProvider implements AgentProvider {
       );
 
       serverProcess.stdout?.on("data", (chunk: Buffer) => {
-        log.debug({ port, line: chunk.toString().trim() }, "OpenCode server stdout");
+        log.debug(
+          { port, line: chunk.toString().trim() },
+          "OpenCode server stdout",
+        );
       });
       serverProcess.stderr?.on("data", (chunk: Buffer) => {
-        log.debug({ port, line: chunk.toString().trim() }, "OpenCode server stderr");
+        log.debug(
+          { port, line: chunk.toString().trim() },
+          "OpenCode server stderr",
+        );
       });
     } catch (error) {
       return this.errorSession(
@@ -500,12 +506,17 @@ export class OpenCodeProvider implements AgentProvider {
       try {
         const sessionResponse = await fetch(`${baseUrl}/session`, {
           method: "POST",
-          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
           body: JSON.stringify({ title: "Yep Anywhere Session" }),
         });
 
         if (!sessionResponse.ok) {
-          throw new Error(`Failed to create session: ${sessionResponse.status}`);
+          throw new Error(
+            `Failed to create session: ${sessionResponse.status}`,
+          );
         }
 
         const sessionData = (await sessionResponse.json()) as { id: string };
@@ -569,9 +580,7 @@ export class OpenCodeProvider implements AgentProvider {
    * Stop the current OpenCode turn without killing the per-session server,
    * via POST /session/:id/abort. Returns true when the request succeeds.
    */
-  private async interruptTurn(
-    runtime: OpenCodeRuntimeState,
-  ): Promise<boolean> {
+  private async interruptTurn(runtime: OpenCodeRuntimeState): Promise<boolean> {
     const log = getLogger();
     try {
       const response = await fetch(
@@ -667,10 +676,7 @@ export class OpenCodeProvider implements AgentProvider {
       }
 
       const statusMap = statuses as Record<string, unknown>;
-      const hasStatus = Object.hasOwn(
-        statusMap,
-        runtime.opencodeSessionId,
-      );
+      const hasStatus = Object.hasOwn(statusMap, runtime.opencodeSessionId);
       if (!hasStatus) {
         return {
           status: "idle",
@@ -1048,14 +1054,15 @@ export class OpenCodeProvider implements AgentProvider {
           `Failed to send message: ${response.status} ${errorText}`,
         );
       }
-      const responsePayload = (await response.json().catch(() => null)) as
-        | OpenCodeMessageResponse
-        | null;
+      const responsePayload = (await response
+        .json()
+        .catch(() => null)) as OpenCodeMessageResponse | null;
       if (!streamState.sawAssistantContent) {
-        const fallbackMessages = this.convertOpenCodeMessageResponseToSDKMessages(
-          responsePayload,
-          sessionId,
-        );
+        const fallbackMessages =
+          this.convertOpenCodeMessageResponseToSDKMessages(
+            responsePayload,
+            sessionId,
+          );
         if (fallbackMessages.length > 0) {
           streamState.sawAssistantContent = true;
           streamState.usedPostBodyFallback = true;

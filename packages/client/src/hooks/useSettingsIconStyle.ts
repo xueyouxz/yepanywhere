@@ -57,9 +57,7 @@ function emitChange() {
   }
 }
 
-export function setSettingsIconStylePreference(
-  style: SettingsIconStyle,
-): void {
+export function setSettingsIconStylePreference(style: SettingsIconStyle): void {
   saveSettingsIconStyle(style);
   emitChange();
 }
@@ -71,10 +69,7 @@ export function useSettingsIconStyle() {
     () => DEFAULT_SETTINGS_ICON_STYLE,
   );
 
-  const setSettingsIconStyle = useCallback(
-    setSettingsIconStylePreference,
-    [],
-  );
+  const setSettingsIconStyle = useCallback(setSettingsIconStylePreference, []);
 
   return {
     settingsIconStyle,

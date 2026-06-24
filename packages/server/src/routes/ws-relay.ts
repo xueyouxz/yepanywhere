@@ -251,8 +251,9 @@ export function createWsRelayRoutes(
     const uploads = new Map<string, RelayUploadState>();
     // Track active emulator streaming sessions for this connection
     const deviceSessions = new Set<string>();
-    const speechSessionRef: Parameters<typeof handleMessage>[7]["speechSessionRef"] =
-      { current: null };
+    const speechSessionRef: Parameters<
+      typeof handleMessage
+    >[7]["speechSessionRef"] = { current: null };
     // Message queue to serialize async message handling
     let messageQueue: Promise<void> = Promise.resolve();
     // Connection state for SRP authentication
@@ -436,8 +437,9 @@ export function createAcceptRelayConnection(
     const uploads = new Map<string, RelayUploadState>();
     // Track active emulator streaming sessions for this connection
     const deviceSessions = new Set<string>();
-    const speechSessionRef: Parameters<typeof handleMessage>[7]["speechSessionRef"] =
-      { current: null };
+    const speechSessionRef: Parameters<
+      typeof handleMessage
+    >[7]["speechSessionRef"] = { current: null };
     // Message queue to serialize async message handling
     let messageQueue: Promise<void> = Promise.resolve();
 

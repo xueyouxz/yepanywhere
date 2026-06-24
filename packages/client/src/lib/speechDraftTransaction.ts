@@ -32,7 +32,9 @@ export interface SpeechCommitContext {
   speechInsertionRangeRef: { current: SpeechInsertionRange | null };
   activeSpeechTargetIdRef: { current: string | null };
   speechInsertionRangesRef: { current: Map<string, SpeechInsertionRange> };
-  pendingTextareaSelectionRef: { current: PendingTextareaSelectionRestore | null };
+  pendingTextareaSelectionRef: {
+    current: PendingTextareaSelectionRestore | null;
+  };
   /** Record a programmatic draft edit (composition timing); no-op if absent. */
   onEdit?: (next: string) => void;
   /** Capture a transcription id for submission metadata; no-op if absent. */
@@ -109,7 +111,9 @@ export function commitSpeechTranscript(
           range,
         );
       } else {
-        speechInsertionRangesRef.current.delete(activeSpeechTargetIdRef.current);
+        speechInsertionRangesRef.current.delete(
+          activeSpeechTargetIdRef.current,
+        );
       }
     }
   };

@@ -820,7 +820,8 @@ describe("Render Parity Harness", () => {
     let summaryTextCount = 0;
     for (const msg of state) {
       const message = (msg as { message?: { content?: unknown } }).message;
-      const content = message?.content ?? (msg as { content?: unknown }).content;
+      const content =
+        message?.content ?? (msg as { content?: unknown }).content;
       if (typeof content === "string") {
         if (content.includes("const x = 1;")) summaryTextCount += 1;
         continue;

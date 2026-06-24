@@ -8,10 +8,10 @@ vi.mock("../../i18n", () => ({
   useI18n: () => ({
     t: (key: string) =>
       (
-        {
+        ({
           slashCommandsLabel: "Slash commands",
           slashCommandsShow: "Show slash commands",
-        } satisfies Record<string, string>
+        }) satisfies Record<string, string>
       )[key] ?? key,
   }),
 }));

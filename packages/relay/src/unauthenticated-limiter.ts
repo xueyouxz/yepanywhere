@@ -17,7 +17,9 @@ export class UnauthenticatedConnectionLimiter {
   ) {}
 
   canAccept(ip: string): boolean {
-    return this.limitPerIp <= 0 || (this.countsByIp.get(ip) ?? 0) < this.limitPerIp;
+    return (
+      this.limitPerIp <= 0 || (this.countsByIp.get(ip) ?? 0) < this.limitPerIp
+    );
   }
 
   track(ws: WebSocket, ip: string): void {

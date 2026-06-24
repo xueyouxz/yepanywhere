@@ -175,7 +175,9 @@ export async function ensureRemoteDirectory(
     5000,
   );
   if (!result.success) {
-    throw new Error(result.error ?? `Failed to create remote directory: ${path}`);
+    throw new Error(
+      result.error ?? `Failed to create remote directory: ${path}`,
+    );
   }
 }
 

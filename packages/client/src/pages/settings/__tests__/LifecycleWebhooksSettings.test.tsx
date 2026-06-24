@@ -138,11 +138,8 @@ describe("LifecycleWebhooksSettings", () => {
         .value,
     ).toBe("");
     expect(
-      (
-        screen.getByLabelText(
-          "lifecycleWebhooksTokenTitle",
-        ) as HTMLInputElement
-      ).value,
+      (screen.getByLabelText("lifecycleWebhooksTokenTitle") as HTMLInputElement)
+        .value,
     ).toBe("");
   });
 });

@@ -455,7 +455,9 @@ export function RemoteAccessSetup({
 
   // Build connect URL with query params (for manual entry - no password)
   const connectUrl = (() => {
-    const connectBaseUrl = buildYaClientRelayLoginUrl(getUsableYaClientBaseUrl());
+    const connectBaseUrl = buildYaClientRelayLoginUrl(
+      getUsableYaClientBaseUrl(),
+    );
     const params = new URLSearchParams();
     if (username) {
       params.set("u", username);

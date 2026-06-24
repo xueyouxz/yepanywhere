@@ -8,9 +8,7 @@ export const INTERRUPT_PREAMBLE = "interrupt resumable after:";
 /** Claude CLI command-queue lanes, most to least urgent. */
 const PRIORITY_RANK = { now: 0, next: 1, later: 2 } as const;
 
-function mostUrgentPriority(
-  messages: UserMessage[],
-): UserMessage["priority"] {
+function mostUrgentPriority(messages: UserMessage[]): UserMessage["priority"] {
   let result: UserMessage["priority"];
   for (const msg of messages) {
     if (!msg.priority) continue;

@@ -1,7 +1,4 @@
-import type {
-  SessionOwnership,
-  UrlProjectId,
-} from "@yep-anywhere/shared";
+import type { SessionOwnership, UrlProjectId } from "@yep-anywhere/shared";
 import { describe, expect, it } from "vitest";
 import type { GlobalSessionItem, InboxResponse } from "../../api/client";
 import type { ProcessInfo } from "../../hooks/useProcesses";
@@ -114,14 +111,12 @@ describe("sessionLifecycleApiSnapshots", () => {
     const snapshots = createInboxLifecycleSnapshots(inbox);
 
     expect(snapshots).toHaveLength(3);
-    expect(snapshots.find((s) => s.sessionId === "needs-input")).toMatchObject(
-      {
-        activity: "waiting-input",
-        pendingInputType: "user-question",
-        includesActivity: true,
-        hasUnread: true,
-      },
-    );
+    expect(snapshots.find((s) => s.sessionId === "needs-input")).toMatchObject({
+      activity: "waiting-input",
+      pendingInputType: "user-question",
+      includesActivity: true,
+      hasUnread: true,
+    });
     expect(snapshots.find((s) => s.sessionId === "active")).toMatchObject({
       activity: "in-turn",
       includesActivity: true,

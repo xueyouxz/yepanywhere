@@ -959,7 +959,11 @@ export function createFilesRoutes(deps: FilesDeps): Hono {
     const projectRoot = project.path;
 
     // Resolve and validate file path
-    const filePath = await resolveFilePath(projectRoot, relativePath, pathPolicy);
+    const filePath = await resolveFilePath(
+      projectRoot,
+      relativePath,
+      pathPolicy,
+    );
     if (!filePath) {
       return c.json({ error: "Invalid file path" }, 400);
     }
@@ -1117,7 +1121,11 @@ export function createFilesRoutes(deps: FilesDeps): Hono {
     const projectRoot = project.path;
 
     // Resolve and validate file path
-    const filePath = await resolveFilePath(projectRoot, relativePath, pathPolicy);
+    const filePath = await resolveFilePath(
+      projectRoot,
+      relativePath,
+      pathPolicy,
+    );
     if (!filePath) {
       return c.json({ error: "Invalid file path" }, 400);
     }

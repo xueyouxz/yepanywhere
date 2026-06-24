@@ -142,9 +142,9 @@ describe("useSessionMessages cache", () => {
       { tailCompactions: 2 },
     );
     await waitFor(() => expect(second.result.current.loading).toBe(false));
-    expect(second.result.current.messages.map((message) => message.uuid)).toEqual(
-      ["msg-1", "msg-2"],
-    );
+    expect(
+      second.result.current.messages.map((message) => message.uuid),
+    ).toEqual(["msg-1", "msg-2"]);
   });
 
   it("reuses the warm session cache on remount and fetches only deltas", async () => {
@@ -228,9 +228,9 @@ describe("useSessionMessages cache", () => {
       { tailCompactions: 2 },
     );
     await waitFor(() => expect(second.result.current.messages).toHaveLength(2));
-    expect(second.result.current.messages.map((message) => message.uuid)).toEqual(
-      ["msg-1", "msg-2"],
-    );
+    expect(
+      second.result.current.messages.map((message) => message.uuid),
+    ).toEqual(["msg-1", "msg-2"]);
     expect(second.result.current.pagination?.totalMessageCount).toBe(1);
   });
 
@@ -364,9 +364,9 @@ describe("useSessionMessages cache", () => {
 
     await waitFor(() => expect(apiMocks.getSession).toHaveBeenCalledTimes(2));
     await waitFor(() =>
-      expect(second.result.current.messages.map((message) => message.uuid)).toEqual(
-        ["msg-1"],
-      ),
+      expect(
+        second.result.current.messages.map((message) => message.uuid),
+      ).toEqual(["msg-1"]),
     );
     expect(second.result.current.pagination?.truncatedBeforeMessageId).toBe(
       "older-msg",

@@ -23,9 +23,6 @@ export const BaseEntrySchema = z.object({
   // but were not authored by the user (e.g. `task-notification`). Note that
   // `promptSource: "sdk"` is NOT such a signal — YA delivers genuine user turns
   // through the SDK too, so it appears on real prompts as well.
-  origin: z
-    .object({ kind: z.string() })
-    .passthrough()
-    .optional(),
+  origin: z.object({ kind: z.string() }).passthrough().optional(),
   promptSource: z.string().optional(),
 });

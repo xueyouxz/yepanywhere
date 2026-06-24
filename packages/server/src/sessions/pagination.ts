@@ -216,7 +216,9 @@ export function sliceAtUserTurnBoundary(
   }
 
   const slicedMessages = messages.slice(sliceFromIdx);
-  const firstId = slicedMessages[0] ? getMessageId(slicedMessages[0]) : undefined;
+  const firstId = slicedMessages[0]
+    ? getMessageId(slicedMessages[0])
+    : undefined;
 
   return {
     messages: slicedMessages,

@@ -42,11 +42,9 @@ function clone({ name, url, note }) {
   }
 
   console.log(`↓ cloning ${name} from ${url} …`);
-  const result = spawnSync(
-    "git",
-    ["clone", "--depth", "1", url, dest],
-    { stdio: "inherit" },
-  );
+  const result = spawnSync("git", ["clone", "--depth", "1", url, dest], {
+    stdio: "inherit",
+  });
 
   if (result.status !== 0) {
     console.error(`✗ failed to clone ${name} (git exited ${result.status})`);

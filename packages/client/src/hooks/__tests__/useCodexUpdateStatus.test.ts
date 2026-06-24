@@ -6,8 +6,7 @@ const installCodexUpdate = vi.fn();
 
 vi.mock("../../api/client", () => ({
   api: {
-    getCodexUpdateStatus: (...args: unknown[]) =>
-      getCodexUpdateStatus(...args),
+    getCodexUpdateStatus: (...args: unknown[]) => getCodexUpdateStatus(...args),
     installCodexUpdate: (...args: unknown[]) => installCodexUpdate(...args),
   },
 }));

@@ -43,9 +43,7 @@ const DEFAULT_SECTION_EXPANSION = {
  * order that useGlobalSessions already preserves across refetches.
  */
 function isActiveSession(session: GlobalSessionItem): boolean {
-  return (
-    session.activity === "in-turn" || session.activity === "waiting-input"
-  );
+  return session.activity === "in-turn" || session.activity === "waiting-input";
 }
 
 type SidebarSectionKey = keyof typeof DEFAULT_SECTION_EXPANSION;

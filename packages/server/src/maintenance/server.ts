@@ -38,11 +38,7 @@ import { handleDebugRequest } from "./debug-routes.js";
 let proxyDebugEnabled =
   process.env.PROXY_DEBUG === "1" || process.env.PROXY_DEBUG === "true";
 
-const LOOPBACK_MAINTENANCE_HOSTS = new Set([
-  "localhost",
-  "127.0.0.1",
-  "::1",
-]);
+const LOOPBACK_MAINTENANCE_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
 /** Export for use by proxy module */
 export function isProxyDebugEnabled(): boolean {

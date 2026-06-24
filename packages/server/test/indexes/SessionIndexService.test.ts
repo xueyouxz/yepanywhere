@@ -533,18 +533,14 @@ describe("SessionIndexService", () => {
         projectAId,
         projectAReader,
       );
-      expect(projectASessions.map((session) => session.id)).toEqual([
-        "grok-a",
-      ]);
+      expect(projectASessions.map((session) => session.id)).toEqual(["grok-a"]);
 
       const projectBSessions = await grokService.getSessionsWithCache(
         grokSessionsDir,
         projectBId,
         projectBReader,
       );
-      expect(projectBSessions.map((session) => session.id)).toEqual([
-        "grok-b",
-      ]);
+      expect(projectBSessions.map((session) => session.id)).toEqual(["grok-b"]);
       expect(projectBSessions[0]?.projectId).toBe(projectBId);
     });
   });

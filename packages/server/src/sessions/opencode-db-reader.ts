@@ -234,7 +234,10 @@ export class OpenCodeDbReader {
         const out: { id: string; timeUpdated: number }[] = [];
         for (const row of rows) {
           if (typeof row.id === "string") {
-            out.push({ id: row.id, timeUpdated: numberOrNull(row.time_updated) ?? 0 });
+            out.push({
+              id: row.id,
+              timeUpdated: numberOrNull(row.time_updated) ?? 0,
+            });
           }
         }
         return out;
@@ -260,7 +263,11 @@ export class OpenCodeDbReader {
           .all(messageId) as DbRow[];
         for (const p of parts) {
           const part = parseJson(p.data);
-          if (part?.type === "text" && typeof part.text === "string" && part.text.trim()) {
+          if (
+            part?.type === "text" &&
+            typeof part.text === "string" &&
+            part.text.trim()
+          ) {
             return part.text.trim();
           }
         }
@@ -305,20 +312,25 @@ export class OpenCodeDbReader {
   ): Promise<OpenCodeSessionEntry[] | null> {
     return this.run((db) => {
       const messageRows = db
-        .prepare("SELECT id, data FROM message WHERE session_id = ? ORDER BY id")
+        .prepare(
+          "SELECT id, data FROM message WHERE session_id = ? ORDER BY id",
+        )
         .all(sessionId) as DbRow[];
 
       // Parts grouped by message. part.id is a chronological ULID, so a single
       // session-scoped query ordered by id keeps per-message part order without
       // an N+1 query per message.
       const partRows = db
-        .prepare("SELECT id, message_id, data FROM part WHERE session_id = ? ORDER BY id")
+        .prepare(
+          "SELECT id, message_id, data FROM part WHERE session_id = ? ORDER BY id",
+        )
         .all(sessionId) as DbRow[];
       const partsByMessage = new Map<string, OpenCodeStoredPart[]>();
       for (const row of partRows) {
         const messageId = row.message_id;
         const partId = row.id;
-        if (typeof messageId !== "string" || typeof partId !== "string") continue;
+        if (typeof messageId !== "string" || typeof partId !== "string")
+          continue;
         const part = asStoredPart(row.data, partId, sessionId, messageId);
         if (!part) continue;
         const list = partsByMessage.get(messageId);

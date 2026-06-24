@@ -50,11 +50,7 @@ describe("parseRawEditPatch", () => {
         oldLines: 0,
         newStart: 1,
         newLines: 3,
-        lines: [
-          "+# Recent MT Adapter Progress",
-          "+",
-          "+- **win** in `dev`",
-        ],
+        lines: ["+# Recent MT Adapter Progress", "+", "+- **win** in `dev`"],
       },
     ]);
   });

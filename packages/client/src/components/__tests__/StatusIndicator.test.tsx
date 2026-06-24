@@ -48,9 +48,9 @@ describe("StatusIndicator", () => {
     );
 
     expect(
-      container.querySelector(".status-dot")?.classList.contains(
-        "status-external",
-      ),
+      container
+        .querySelector(".status-dot")
+        ?.classList.contains("status-external"),
     ).toBe(true);
   });
 });

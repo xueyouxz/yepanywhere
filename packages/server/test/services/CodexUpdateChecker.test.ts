@@ -39,12 +39,10 @@ describe("CodexUpdateChecker version helpers", () => {
         "/usr/local/Cellar/codex/0.4.3/libexec/bin/codex",
       ),
     ).toBe("brew upgrade codex");
-    expect(
-      inferManualInstallCommand("/home/graehl/.cargo/bin/codex"),
-    ).toBe("cargo install --locked codex");
-    expect(
-      inferManualInstallCommand("/opt/codex-bundle/codex"),
-    ).toBeNull();
+    expect(inferManualInstallCommand("/home/graehl/.cargo/bin/codex")).toBe(
+      "cargo install --locked codex",
+    );
+    expect(inferManualInstallCommand("/opt/codex-bundle/codex")).toBeNull();
   });
 
   it("extracts npm package names from global node_modules paths", () => {
@@ -158,7 +156,8 @@ describe("CodexUpdateChecker", () => {
   });
 
   it("coalesces concurrent refreshes", async () => {
-    let resolveLatest: (v: { tagName: string; htmlUrl: null }) => void = () => {};
+    let resolveLatest: (v: { tagName: string; htmlUrl: null }) => void =
+      () => {};
     const fetchLatest = vi.fn(
       () =>
         new Promise<{ tagName: string; htmlUrl: null }>((resolve) => {

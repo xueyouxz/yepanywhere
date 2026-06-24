@@ -105,8 +105,14 @@ async function measureHydratedPreviewHeightPx({
 describe("deferred Bash preview height estimator", () => {
   beforeAll(async () => {
     [rendererCss, toolRowsCss] = await Promise.all([
-      readFile(new URL("../../../styles/renderers.css", import.meta.url), "utf8"),
-      readFile(new URL("../../../styles/tool-rows.css", import.meta.url), "utf8"),
+      readFile(
+        new URL("../../../styles/renderers.css", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../../../styles/tool-rows.css", import.meta.url),
+        "utf8",
+      ),
     ]);
     browser = await chromium.launch();
     page = await browser.newPage();

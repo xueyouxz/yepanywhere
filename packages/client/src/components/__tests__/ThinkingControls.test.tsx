@@ -18,7 +18,7 @@ const effortOptions: EffortLevelOption[] = [
 ];
 const t = ((key: string) =>
   (
-    {
+    ({
       modelSettingsThinkingTitle: "Thinking",
       modelSettingsThinkingOffLabel: "Off",
       modelSettingsThinkingAutoLabel: "Auto",
@@ -31,7 +31,7 @@ const t = ((key: string) =>
       showThinkingDefault: "Default",
       showThinkingDefaultShown: "Shown",
       showThinkingDefaultHidden: "Hidden",
-    } as Record<string, string>
+    }) as Record<string, string>
   )[key] ?? key) as ReturnType<typeof useI18n>["t"];
 
 describe("ThinkingControls", () => {

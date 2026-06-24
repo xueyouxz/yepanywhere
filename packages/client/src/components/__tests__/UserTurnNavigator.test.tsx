@@ -238,12 +238,8 @@ describe("UserTurnNavigator", () => {
     fireEvent.contextMenu(marker, { clientX: 492, clientY: 150 });
 
     expect(screen.getByRole("menuitem", { name: "Jump" })).toBeTruthy();
-    expect(
-      screen.getByRole("menuitem", { name: "Fork before…" }),
-    ).toBeTruthy();
-    expect(
-      screen.getByRole("menuitem", { name: "Fork after…" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Fork before…" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Fork after…" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Copy" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Show from" })).toBeTruthy();
 

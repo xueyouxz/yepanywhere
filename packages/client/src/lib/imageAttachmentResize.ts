@@ -50,11 +50,7 @@ async function blobFromCanvas(
 ): Promise<Blob | null> {
   return await new Promise<Blob | null>((resolve) => {
     const quality = mimeType === "image/png" ? undefined : SD_JPEG_QUALITY;
-    canvas.toBlob(
-      (blob) => resolve(blob),
-      mimeType,
-      quality,
-    );
+    canvas.toBlob((blob) => resolve(blob), mimeType, quality);
   });
 }
 

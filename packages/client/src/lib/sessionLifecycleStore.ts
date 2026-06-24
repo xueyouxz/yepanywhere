@@ -166,7 +166,10 @@ export function applyProcessStateChanged(
   event: ProcessStateChangedInput,
   observedAt = Date.now(),
 ): Map<string, SessionLifecycle> {
-  const entry = withProjectId(getEntry(state, event.sessionId), event.projectId);
+  const entry = withProjectId(
+    getEntry(state, event.sessionId),
+    event.projectId,
+  );
   return putEntry(
     state,
     applyActivityFields(
@@ -320,7 +323,10 @@ export function applySessionLifecycleSnapshot(
       ...entry,
       ownership: snapshot.ownership,
       ownershipObservedAt: requestStartedAt,
-      lifecycleObservedAt: Math.max(entry.lifecycleObservedAt, requestStartedAt),
+      lifecycleObservedAt: Math.max(
+        entry.lifecycleObservedAt,
+        requestStartedAt,
+      ),
     };
   }
 
@@ -352,9 +358,7 @@ export function selectSessionActivity(
   };
 }
 
-export function selectAnySessionWorking(
-  state: SessionLifecycleState,
-): boolean {
+export function selectAnySessionWorking(state: SessionLifecycleState): boolean {
   for (const entry of state.values()) {
     if (entry.activity === "in-turn") {
       return true;

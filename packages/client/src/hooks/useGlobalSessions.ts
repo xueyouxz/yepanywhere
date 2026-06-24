@@ -155,10 +155,7 @@ export function useGlobalSessions(options: UseGlobalSessionsOptions = {}) {
         statsPromise,
       ]);
 
-      reportGlobalSessionLifecycleSnapshots(
-        data.sessions,
-        requestStartedAt,
-      );
+      reportGlobalSessionLifecycleSnapshots(data.sessions, requestStartedAt);
 
       if (!hasInitialLoadRef.current || optionsChanged) {
         setSessions(data.sessions);
@@ -216,10 +213,7 @@ export function useGlobalSessions(options: UseGlobalSessionsOptions = {}) {
         includeStats: false,
       });
 
-      reportGlobalSessionLifecycleSnapshots(
-        data.sessions,
-        requestStartedAt,
-      );
+      reportGlobalSessionLifecycleSnapshots(data.sessions, requestStartedAt);
 
       setSessions((prev) => {
         // Deduplicate when appending

@@ -39,12 +39,7 @@ import { Modal } from "./ui/Modal";
 
 type ThinkingMode = "off" | "auto" | "on";
 
-const RECAP_MODE_ORDER: RecapMode[] = [
-  "off",
-  "side-session",
-  "fork",
-  "native",
-];
+const RECAP_MODE_ORDER: RecapMode[] = ["off", "side-session", "fork", "native"];
 const PROMPT_SUGGESTION_MODE_ORDER: PromptSuggestionMode[] = ["off", "native"];
 
 function parseThinkingOption(option: ThinkingOption | undefined): {
@@ -480,7 +475,9 @@ export function RestartSessionModal({
       }),
     );
     setRecapAfterSeconds(
-      normalizeRecapAfterSeconds(settings?.newSessionDefaults?.recapAfterSeconds),
+      normalizeRecapAfterSeconds(
+        settings?.newSessionDefaults?.recapAfterSeconds,
+      ),
     );
   }, [
     helperSelectableModels,
@@ -586,7 +583,9 @@ export function RestartSessionModal({
       }),
     );
     setRecapAfterSeconds(
-      normalizeRecapAfterSeconds(settings?.newSessionDefaults?.recapAfterSeconds),
+      normalizeRecapAfterSeconds(
+        settings?.newSessionDefaults?.recapAfterSeconds,
+      ),
     );
   };
 

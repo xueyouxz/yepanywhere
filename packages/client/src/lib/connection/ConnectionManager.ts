@@ -318,7 +318,9 @@ export class ConnectionManager {
    */
   forceReconnect(reason?: string): void {
     if (this._shouldSuppressHealthReconnect(reason)) {
-      this._log(`suppressing health reconnect during critical operation: ${reason}`);
+      this._log(
+        `suppressing health reconnect during critical operation: ${reason}`,
+      );
       return;
     }
     this._log(`force reconnect${reason ? `: ${reason}` : ""}`);

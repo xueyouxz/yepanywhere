@@ -53,7 +53,9 @@ export class ClaudeProviderRetentionTracker {
   getSnapshot(): ProviderRetentionSnapshot {
     const reasons: string[] = [];
     if (this.stopBackgroundTaskCount > 0) {
-      reasons.push(`stop-hook-background-tasks:${this.stopBackgroundTaskCount}`);
+      reasons.push(
+        `stop-hook-background-tasks:${this.stopBackgroundTaskCount}`,
+      );
     }
     if (this.stopSessionCronCount > 0) {
       reasons.push(`stop-hook-session-crons:${this.stopSessionCronCount}`);

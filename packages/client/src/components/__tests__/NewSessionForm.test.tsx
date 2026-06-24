@@ -341,23 +341,21 @@ vi.mock("../../lib/newSessionPrefill", () => ({
 }));
 
 vi.mock("../VoiceInputButton", () => ({
-  VoiceInputButton: forwardRef(
-    (props: Record<string, unknown>, ref) => {
-      voicePropsState.current = props as typeof voicePropsState.current;
-      useImperativeHandle(
-        ref,
-        () => ({
-          stopAndFinalize: () => "",
-          toggle: mockVoiceToggle,
-          cancelProcessing: mockVoiceCancelProcessing,
-          isListening: false,
-          isAvailable: true,
-        }),
-        [],
-      );
-      return <button type="button">voice</button>;
-    },
-  ),
+  VoiceInputButton: forwardRef((props: Record<string, unknown>, ref) => {
+    voicePropsState.current = props as typeof voicePropsState.current;
+    useImperativeHandle(
+      ref,
+      () => ({
+        stopAndFinalize: () => "",
+        toggle: mockVoiceToggle,
+        cancelProcessing: mockVoiceCancelProcessing,
+        isListening: false,
+        isAvailable: true,
+      }),
+      [],
+    );
+    return <button type="button">voice</button>;
+  }),
 }));
 
 const chooserProjects = [
@@ -939,7 +937,9 @@ describe("NewSessionForm", () => {
     expect(badge.textContent).toContain("Transcribing");
 
     expect(textarea.disabled).toBe(false);
-    fireEvent.change(textarea, { target: { value: "typed while transcribing" } });
+    fireEvent.change(textarea, {
+      target: { value: "typed while transcribing" },
+    });
     expect(textarea.value).toBe("typed while transcribing");
 
     fireEvent.keyDown(textarea, { key: "Escape" });
@@ -982,9 +982,11 @@ describe("NewSessionForm", () => {
       }),
     ).toBeNull();
     expect(
-      screen.getByRole("radio", {
-        name: /^Grok STT direct Browser streams PCM audio directly to xAI\.$/,
-      }).getAttribute("aria-checked"),
+      screen
+        .getByRole("radio", {
+          name: /^Grok STT direct Browser streams PCM audio directly to xAI\.$/,
+        })
+        .getAttribute("aria-checked"),
     ).toBe("true");
     expect(screen.getByText("Smart Turn")).toBeDefined();
 

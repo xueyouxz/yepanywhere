@@ -1,7 +1,4 @@
-import {
-  clientLogCollector,
-  isClientLogCollectionActive,
-} from "./index";
+import { clientLogCollector, isClientLogCollectionActive } from "./index";
 
 type TraceDetails = Record<string, unknown>;
 
@@ -99,8 +96,7 @@ function recordHighChurnTrace(key: string, details: TraceDetails): void {
     );
   }
   highChurnTraceBatch.total += 1;
-  highChurnTraceBatch.counts[key] =
-    (highChurnTraceBatch.counts[key] ?? 0) + 1;
+  highChurnTraceBatch.counts[key] = (highChurnTraceBatch.counts[key] ?? 0) + 1;
   highChurnTraceBatch.lastEventId = details.eventId;
 }
 

@@ -297,21 +297,24 @@ export function PublicSharePage() {
     : t("publicShareLoading");
   const isFetching = loading || retrying;
 
-  const refresh = useCallback(async (afterMessageId?: string) => {
-    if (!secret || !relayUsername) {
-      throw new Error(t("publicShareMissingRelay"));
-    }
-    if (relayConfig.error) {
-      throw new Error(relayConfig.error);
-    }
-    return await fetchPublicShareViaRelay({
-      afterMessageId,
-      relayUrl: relayConfig.url,
-      relayUsername,
-      secret,
-      viewerId,
-    });
-  }, [relayConfig.error, relayConfig.url, relayUsername, secret, t, viewerId]);
+  const refresh = useCallback(
+    async (afterMessageId?: string) => {
+      if (!secret || !relayUsername) {
+        throw new Error(t("publicShareMissingRelay"));
+      }
+      if (relayConfig.error) {
+        throw new Error(relayConfig.error);
+      }
+      return await fetchPublicShareViaRelay({
+        afterMessageId,
+        relayUrl: relayConfig.url,
+        relayUsername,
+        secret,
+        viewerId,
+      });
+    },
+    [relayConfig.error, relayConfig.url, relayUsername, secret, t, viewerId],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -351,7 +354,9 @@ export function PublicSharePage() {
           return;
         }
         setRetrying(false);
-        setError(err instanceof Error ? err.message : t("publicShareUnavailable"));
+        setError(
+          err instanceof Error ? err.message : t("publicShareUnavailable"),
+        );
       }
     };
 
@@ -522,10 +527,7 @@ export function PublicSharePage() {
               ) : (
                 <div className="public-share-empty">
                   {isFetching && (
-                    <span
-                      className="public-share-spinner"
-                      aria-hidden="true"
-                    />
+                    <span className="public-share-spinner" aria-hidden="true" />
                   )}
                   {loadStatusLabel}
                 </div>

@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  hasAnsiEscapes,
-  renderAnsiToHtml,
-} from "../src/ansi-renderer.js";
+import { hasAnsiEscapes, renderAnsiToHtml } from "../src/ansi-renderer.js";
 
 describe("hasAnsiEscapes", () => {
   it("detects CSI introducer", () => {
@@ -25,9 +22,7 @@ describe("renderAnsiToHtml", () => {
 
   it("wraps SGR-colored runs in spans with class", () => {
     const html = renderAnsiToHtml("\x1b[31mred\x1b[0m plain");
-    expect(html).toBe(
-      '<span class="ansi-fg-red">red</span> plain',
-    );
+    expect(html).toBe('<span class="ansi-fg-red">red</span> plain');
   });
 
   it("combines fg, bg, and attribute classes", () => {

@@ -22,7 +22,9 @@ function recap(
   };
 }
 
-function providerMessage(overrides: Partial<Message> & { uuid: string }): Message {
+function providerMessage(
+  overrides: Partial<Message> & { uuid: string },
+): Message {
   return {
     type: "assistant",
     timestamp: "2026-06-24T12:00:00.000Z",
@@ -48,35 +50,41 @@ function summary(overrides: Partial<SessionSummary> = {}): SessionSummary {
 
 describe("recap overlays", () => {
   it("renders same-content persisted recaps within the duplicate window once", () => {
-    const merged = mergeRecapMessages([], [
-      recap({
-        uuid: "recap-1",
-        content: "Finished the cleanup.",
-        timestamp: "2026-06-24T12:00:00.000Z",
-      }),
-      recap({
-        uuid: "recap-2",
-        content: "Finished the cleanup.",
-        timestamp: "2026-06-24T12:00:04.000Z",
-      }),
-    ]);
+    const merged = mergeRecapMessages(
+      [],
+      [
+        recap({
+          uuid: "recap-1",
+          content: "Finished the cleanup.",
+          timestamp: "2026-06-24T12:00:00.000Z",
+        }),
+        recap({
+          uuid: "recap-2",
+          content: "Finished the cleanup.",
+          timestamp: "2026-06-24T12:00:04.000Z",
+        }),
+      ],
+    );
 
     expect(merged.map((message) => message.uuid)).toEqual(["recap-1"]);
   });
 
   it("dedupes persisted recaps with the same UUID", () => {
-    const merged = mergeRecapMessages([], [
-      recap({
-        uuid: "recap-1",
-        content: "First copy.",
-        timestamp: "2026-06-24T12:00:00.000Z",
-      }),
-      recap({
-        uuid: "recap-1",
-        content: "Second copy.",
-        timestamp: "2026-06-24T12:00:10.000Z",
-      }),
-    ]);
+    const merged = mergeRecapMessages(
+      [],
+      [
+        recap({
+          uuid: "recap-1",
+          content: "First copy.",
+          timestamp: "2026-06-24T12:00:00.000Z",
+        }),
+        recap({
+          uuid: "recap-1",
+          content: "Second copy.",
+          timestamp: "2026-06-24T12:00:10.000Z",
+        }),
+      ],
+    );
 
     expect(merged).toHaveLength(1);
     expect(merged[0]?.uuid).toBe("recap-1");

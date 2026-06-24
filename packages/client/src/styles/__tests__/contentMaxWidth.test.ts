@@ -72,7 +72,8 @@ describe("session content width CSS contract", () => {
 
   it("keeps the /btw split-pane full-track exception explicit", async () => {
     const css = await readStylesheet();
-    const splitOverride = /\.main-content-constrained\s+\.session-split\.session-split-with-aside\s*>\s*\.session-messages\s+\.message-list,\s*\.main-content-constrained\s+\.session-split\.session-split-with-aside\s*>\s*\.session-input\s+\.session-input-inner\s*\{[^}]*max-width:\s*none\s*;/m;
+    const splitOverride =
+      /\.main-content-constrained\s+\.session-split\.session-split-with-aside\s*>\s*\.session-messages\s+\.message-list,\s*\.main-content-constrained\s+\.session-split\.session-split-with-aside\s*>\s*\.session-input\s+\.session-input-inner\s*\{[^}]*max-width:\s*none\s*;/m;
 
     expect(
       css,

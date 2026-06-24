@@ -116,120 +116,126 @@ export function useStreamingMarkdown(): StreamingMarkdownState & {
    * Apply a completed block augment.
    * Creates a div with the augment's HTML and inserts it at the correct position.
    */
-  const applyAugment = useCallback((augment: AugmentEvent) => {
-    const container = containerRef.current;
+  const applyAugment = useCallback(
+    (augment: AugmentEvent) => {
+      const container = containerRef.current;
 
-    debugLog("augment", "Received augment", {
-      blockIndex: augment.blockIndex,
-      type: augment.type,
-      htmlLength: augment.html.length,
-      htmlPreview: augment.html.substring(0, 100),
-    });
-
-    if (!container) {
-      debugLog(
-        "augment",
-        "ERROR: containerRef.current is null - refs not attached!",
-      );
-      return;
-    }
-
-    // Mark as streaming on first augment
-    markStreaming();
-
-    const { blockIndex, html } = augment;
-
-    // Check if we already have this block (dedupe)
-    if (blocksRef.current.has(blockIndex)) {
-      // Update existing block's content
-      const existingBlock = blocksRef.current.get(blockIndex);
-      if (existingBlock) {
-        debugLog("dom", "Updating existing block", { blockIndex });
-        existingBlock.innerHTML = html;
-      }
-      return;
-    }
-
-    // Create new block element
-    const blockElement = document.createElement("div");
-    blockElement.className = "streaming-block";
-    blockElement.dataset.blockIndex = String(blockIndex);
-    blockElement.innerHTML = html;
-
-    debugLog("dom", "Created new block element", {
-      blockIndex,
-      className: blockElement.className,
-    });
-
-    // Find the correct position to insert
-    // Blocks should be ordered by blockIndex
-    if (blockIndex > maxBlockIndexRef.current) {
-      // This is the newest block, append to end
-      container.appendChild(blockElement);
-      maxBlockIndexRef.current = blockIndex;
-      debugLog("dom", "Appended block to end", {
-        blockIndex,
-        maxBlockIndex: maxBlockIndexRef.current,
+      debugLog("augment", "Received augment", {
+        blockIndex: augment.blockIndex,
+        type: augment.type,
+        htmlLength: augment.html.length,
+        htmlPreview: augment.html.substring(0, 100),
       });
-    } else {
-      // Out-of-order block, find where to insert
-      let inserted = false;
-      const children = container.children;
-      for (let i = 0; i < children.length; i++) {
-        const child = children[i] as HTMLElement;
-        const childIndex = Number.parseInt(
-          child.dataset.blockIndex ?? "-1",
-          10,
+
+      if (!container) {
+        debugLog(
+          "augment",
+          "ERROR: containerRef.current is null - refs not attached!",
         );
-        if (childIndex > blockIndex) {
-          container.insertBefore(blockElement, child);
-          inserted = true;
-          debugLog("dom", "Inserted block before", {
-            blockIndex,
-            beforeIndex: childIndex,
-          });
-          break;
+        return;
+      }
+
+      // Mark as streaming on first augment
+      markStreaming();
+
+      const { blockIndex, html } = augment;
+
+      // Check if we already have this block (dedupe)
+      if (blocksRef.current.has(blockIndex)) {
+        // Update existing block's content
+        const existingBlock = blocksRef.current.get(blockIndex);
+        if (existingBlock) {
+          debugLog("dom", "Updating existing block", { blockIndex });
+          existingBlock.innerHTML = html;
+        }
+        return;
+      }
+
+      // Create new block element
+      const blockElement = document.createElement("div");
+      blockElement.className = "streaming-block";
+      blockElement.dataset.blockIndex = String(blockIndex);
+      blockElement.innerHTML = html;
+
+      debugLog("dom", "Created new block element", {
+        blockIndex,
+        className: blockElement.className,
+      });
+
+      // Find the correct position to insert
+      // Blocks should be ordered by blockIndex
+      if (blockIndex > maxBlockIndexRef.current) {
+        // This is the newest block, append to end
+        container.appendChild(blockElement);
+        maxBlockIndexRef.current = blockIndex;
+        debugLog("dom", "Appended block to end", {
+          blockIndex,
+          maxBlockIndex: maxBlockIndexRef.current,
+        });
+      } else {
+        // Out-of-order block, find where to insert
+        let inserted = false;
+        const children = container.children;
+        for (let i = 0; i < children.length; i++) {
+          const child = children[i] as HTMLElement;
+          const childIndex = Number.parseInt(
+            child.dataset.blockIndex ?? "-1",
+            10,
+          );
+          if (childIndex > blockIndex) {
+            container.insertBefore(blockElement, child);
+            inserted = true;
+            debugLog("dom", "Inserted block before", {
+              blockIndex,
+              beforeIndex: childIndex,
+            });
+            break;
+          }
+        }
+        if (!inserted) {
+          container.appendChild(blockElement);
+          debugLog("dom", "Appended out-of-order block to end", { blockIndex });
         }
       }
-      if (!inserted) {
-        container.appendChild(blockElement);
-        debugLog("dom", "Appended out-of-order block to end", { blockIndex });
-      }
-    }
 
-    // Track this block
-    blocksRef.current.set(blockIndex, blockElement);
-    debugLog("dom", "Block tracking updated", {
-      totalBlocks: blocksRef.current.size,
-    });
-  }, [markStreaming]);
+      // Track this block
+      blocksRef.current.set(blockIndex, blockElement);
+      debugLog("dom", "Block tracking updated", {
+        totalBlocks: blocksRef.current.size,
+      });
+    },
+    [markStreaming],
+  );
 
   /**
    * Apply pending/incomplete text update.
    * Updates the pendingRef's innerHTML with the pending HTML.
    */
-  const applyPending = useCallback((pending: PendingEvent) => {
-    const pendingElement = pendingRef.current;
+  const applyPending = useCallback(
+    (pending: PendingEvent) => {
+      const pendingElement = pendingRef.current;
 
-    debugLog("pending", "Received pending update", {
-      htmlLength: pending.html.length,
-      htmlPreview: pending.html.substring(0, 80),
-    });
+      debugLog("pending", "Received pending update", {
+        htmlLength: pending.html.length,
+        htmlPreview: pending.html.substring(0, 80),
+      });
 
-    if (!pendingElement) {
-      debugLog(
-        "pending",
-        "ERROR: pendingRef.current is null - refs not attached!",
-      );
-      return;
-    }
+      if (!pendingElement) {
+        debugLog(
+          "pending",
+          "ERROR: pendingRef.current is null - refs not attached!",
+        );
+        return;
+      }
 
-    // Mark as streaming on first pending update
-    markStreaming();
+      // Mark as streaming on first pending update
+      markStreaming();
 
-    pendingElement.innerHTML = pending.html;
-    debugLog("pending", "Updated pending element innerHTML");
-  }, [markStreaming]);
+      pendingElement.innerHTML = pending.html;
+      debugLog("pending", "Updated pending element innerHTML");
+    },
+    [markStreaming],
+  );
 
   const clearScheduledFlush = useCallback(() => {
     if (flushTimerRef.current === null) return;

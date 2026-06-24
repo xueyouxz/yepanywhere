@@ -108,7 +108,11 @@ describe("QuestionAnswerPanel", () => {
             question: "Pick one",
             header: "OnlyTab",
             options: [
-              { label: "Alpha", description: "first", preview: "PREVIEW-ALPHA" },
+              {
+                label: "Alpha",
+                description: "first",
+                preview: "PREVIEW-ALPHA",
+              },
               { label: "Beta", description: "second" },
             ],
             multiSelect: false,

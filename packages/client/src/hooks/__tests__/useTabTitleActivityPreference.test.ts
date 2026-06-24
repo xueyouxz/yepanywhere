@@ -43,9 +43,7 @@ describe("useTabTitleActivityPreference", () => {
   });
 
   it("persists and publishes updates to mounted consumers", () => {
-    const { result: first } = renderHook(() =>
-      useTabTitleActivityPreference(),
-    );
+    const { result: first } = renderHook(() => useTabTitleActivityPreference());
     const { result: second } = renderHook(() =>
       useTabTitleActivityPreference(),
     );

@@ -42,12 +42,12 @@ describe("logSessionUiTrace", () => {
     expect(mocks.record).toHaveBeenCalledTimes(1);
     expect(mocks.record.mock.calls[0]?.[0]).toBe("log");
     expect(mocks.record.mock.calls[0]?.[1]).toBe("[SessionUITrace]");
-    expect(parseTraceMessage(mocks.record.mock.calls[0]?.[2] as string)).toEqual(
-      {
-        event: "stream-complete",
-        sessionId: "session-1",
-      },
-    );
+    expect(
+      parseTraceMessage(mocks.record.mock.calls[0]?.[2] as string),
+    ).toEqual({
+      event: "stream-complete",
+      sessionId: "session-1",
+    });
     expect(consoleLog).not.toHaveBeenCalled();
   });
 

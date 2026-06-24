@@ -316,7 +316,10 @@ export class PushNotifier {
     return prompt;
   }
 
-  private getDurationMs(startedAt: Date | undefined, timestamp: string): number {
+  private getDurationMs(
+    startedAt: Date | undefined,
+    timestamp: string,
+  ): number {
     if (!startedAt) {
       return 0;
     }

@@ -124,8 +124,7 @@ export function SessionHeartbeatModal({
   const isAfterOffSelected = !isEnabled;
 
   const isForceOffSelected =
-    forceAfterMinutes.trim().length === 0 ||
-    (normalizedForceMinutes ?? 0) <= 0;
+    forceAfterMinutes.trim().length === 0 || (normalizedForceMinutes ?? 0) <= 0;
 
   const isForcePresetSelected =
     !isForceOffSelected &&
@@ -147,7 +146,9 @@ export function SessionHeartbeatModal({
 
   const forceStatusMinutes = useMemo(() => {
     if (forceAfterMinutes.trim().length === 0) return 0;
-    return Number.isFinite(forceAfterMinutesNumber) ? forceAfterMinutesNumber : 0;
+    return Number.isFinite(forceAfterMinutesNumber)
+      ? forceAfterMinutesNumber
+      : 0;
   }, [forceAfterMinutes, forceAfterMinutesNumber]);
 
   const isForceSectionHighlighted = isAfterOffSelected;
@@ -162,11 +163,7 @@ export function SessionHeartbeatModal({
   const enableAfterForForce = useCallback(
     (nextForceValue: string) => {
       const parsedForce = Number.parseInt(nextForceValue, 10);
-      if (
-        Number.isFinite(parsedForce) &&
-        parsedForce > 0 &&
-        !isEnabled
-      ) {
+      if (Number.isFinite(parsedForce) && parsedForce > 0 && !isEnabled) {
         setAfterMinutes(String(defaultAfterMinutes));
         setIsEnabled(true);
       }
@@ -174,90 +171,97 @@ export function SessionHeartbeatModal({
     [defaultAfterMinutes, isEnabled],
   );
 
-  const saveSettings = useCallback(async (
-    next: {
-      isEnabled?: boolean;
-      afterMinutes?: string;
-      forceAfterMinutes?: string;
-      text?: string;
-    } = {},
-  ) => {
-    const nextIsEnabled = next.isEnabled ?? isEnabled;
-    const nextAfterMinutes = next.afterMinutes ?? afterMinutes;
-    const nextForceAfterMinutes = next.forceAfterMinutes ?? forceAfterMinutes;
-    const nextText = next.text ?? text;
+  const saveSettings = useCallback(
+    async (
+      next: {
+        isEnabled?: boolean;
+        afterMinutes?: string;
+        forceAfterMinutes?: string;
+        text?: string;
+      } = {},
+    ) => {
+      const nextIsEnabled = next.isEnabled ?? isEnabled;
+      const nextAfterMinutes = next.afterMinutes ?? afterMinutes;
+      const nextForceAfterMinutes = next.forceAfterMinutes ?? forceAfterMinutes;
+      const nextText = next.text ?? text;
 
-    setIsSaving(true);
-    setError(null);
-    try {
-      const parsedAfterMinutes = Number.parseInt(nextAfterMinutes, 10);
-      const heartbeatTurnsAfterMinutesUpdate = nextIsEnabled
-        ? nextAfterMinutes.trim().length === 0
-          ? null
-          : Number.isFinite(parsedAfterMinutes) && parsedAfterMinutes >= 1
-            ? Math.min(parsedAfterMinutes, 1440)
-            : Number.NaN
-        : null;
+      setIsSaving(true);
+      setError(null);
+      try {
+        const parsedAfterMinutes = Number.parseInt(nextAfterMinutes, 10);
+        const heartbeatTurnsAfterMinutesUpdate = nextIsEnabled
+          ? nextAfterMinutes.trim().length === 0
+            ? null
+            : Number.isFinite(parsedAfterMinutes) && parsedAfterMinutes >= 1
+              ? Math.min(parsedAfterMinutes, 1440)
+              : Number.NaN
+          : null;
 
-      if (Number.isNaN(heartbeatTurnsAfterMinutesUpdate)) {
-        throw new Error(t("sessionHeartbeatSaveFailed"));
+        if (Number.isNaN(heartbeatTurnsAfterMinutesUpdate)) {
+          throw new Error(t("sessionHeartbeatSaveFailed"));
+        }
+
+        const parsedForceAfterMinutes = Number.parseInt(
+          nextForceAfterMinutes,
+          10,
+        );
+        const heartbeatForceAfterMinutesUpdate =
+          nextForceAfterMinutes.trim().length === 0 ||
+          parsedForceAfterMinutes <= 0
+            ? null
+            : Number.isFinite(parsedForceAfterMinutes) &&
+                parsedForceAfterMinutes >= 1
+              ? Math.min(parsedForceAfterMinutes, 1440)
+              : Number.NaN;
+
+        if (Number.isNaN(heartbeatForceAfterMinutesUpdate)) {
+          throw new Error(t("sessionHeartbeatSaveFailed"));
+        }
+
+        const effectiveText = nextText.trim();
+        const shouldPersistText =
+          effectiveText.length > 0 && effectiveText !== defaultText;
+
+        await api.updateSessionMetadata(sessionId, {
+          heartbeatTurnsEnabled: nextIsEnabled,
+          heartbeatTurnsAfterMinutes: heartbeatTurnsAfterMinutesUpdate,
+          heartbeatTurnText: shouldPersistText ? effectiveText : null,
+          heartbeatForceAfterMinutes: heartbeatForceAfterMinutesUpdate,
+        });
+
+        onSaved({
+          enabled: nextIsEnabled,
+          heartbeatTurnsAfterMinutes:
+            heartbeatTurnsAfterMinutesUpdate === null
+              ? undefined
+              : heartbeatTurnsAfterMinutesUpdate,
+          heartbeatTurnText: shouldPersistText ? effectiveText : undefined,
+          heartbeatForceAfterMinutes:
+            heartbeatForceAfterMinutesUpdate === null
+              ? undefined
+              : heartbeatForceAfterMinutesUpdate,
+        });
+        onClose();
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : t("sessionHeartbeatSaveFailed"),
+        );
+      } finally {
+        setIsSaving(false);
       }
-
-      const parsedForceAfterMinutes = Number.parseInt(nextForceAfterMinutes, 10);
-      const heartbeatForceAfterMinutesUpdate =
-        nextForceAfterMinutes.trim().length === 0 || parsedForceAfterMinutes <= 0
-          ? null
-          : Number.isFinite(parsedForceAfterMinutes) &&
-              parsedForceAfterMinutes >= 1
-            ? Math.min(parsedForceAfterMinutes, 1440)
-            : Number.NaN;
-
-      if (Number.isNaN(heartbeatForceAfterMinutesUpdate)) {
-        throw new Error(t("sessionHeartbeatSaveFailed"));
-      }
-
-      const effectiveText = nextText.trim();
-      const shouldPersistText =
-        effectiveText.length > 0 && effectiveText !== defaultText;
-
-      await api.updateSessionMetadata(sessionId, {
-        heartbeatTurnsEnabled: nextIsEnabled,
-        heartbeatTurnsAfterMinutes: heartbeatTurnsAfterMinutesUpdate,
-        heartbeatTurnText: shouldPersistText ? effectiveText : null,
-        heartbeatForceAfterMinutes: heartbeatForceAfterMinutesUpdate,
-      });
-
-      onSaved({
-        enabled: nextIsEnabled,
-        heartbeatTurnsAfterMinutes:
-          heartbeatTurnsAfterMinutesUpdate === null
-            ? undefined
-            : heartbeatTurnsAfterMinutesUpdate,
-        heartbeatTurnText: shouldPersistText ? effectiveText : undefined,
-        heartbeatForceAfterMinutes:
-          heartbeatForceAfterMinutesUpdate === null
-            ? undefined
-            : heartbeatForceAfterMinutesUpdate,
-      });
-      onClose();
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : t("sessionHeartbeatSaveFailed"),
-      );
-    } finally {
-      setIsSaving(false);
-    }
-  }, [
-    afterMinutes,
-    defaultText,
-    forceAfterMinutes,
-    isEnabled,
-    onClose,
-    onSaved,
-    sessionId,
-    text,
-    t,
-  ]);
+    },
+    [
+      afterMinutes,
+      defaultText,
+      forceAfterMinutes,
+      isEnabled,
+      onClose,
+      onSaved,
+      sessionId,
+      text,
+      t,
+    ],
+  );
 
   const handleTextSave = useCallback(() => {
     void saveSettings();
@@ -312,9 +316,7 @@ export function SessionHeartbeatModal({
 
   return (
     <Modal title={t("sessionHeartbeatTitle")} onClose={onClose}>
-      <div
-        className="settings-group session-heartbeat-modal"
-      >
+      <div className="settings-group session-heartbeat-modal">
         <div className="settings-item session-heartbeat-item">
           <div className="settings-item-info">
             <p className="session-heartbeat-item-title">
@@ -394,7 +396,9 @@ export function SessionHeartbeatModal({
               : t("sessionHeartbeatAfterStatusOff")}
           </p>
           <p className="session-heartbeat-item-description">
-            {t("sessionHeartbeatAfterDescription", { value: defaultAfterMinutes })}
+            {t("sessionHeartbeatAfterDescription", {
+              value: defaultAfterMinutes,
+            })}
           </p>
           <div className="settings-item-info">
             <p className="session-heartbeat-item-title">
@@ -428,9 +432,7 @@ export function SessionHeartbeatModal({
           </div>
         </div>
 
-        <div
-          className={forceSectionClassName}
-        >
+        <div className={forceSectionClassName}>
           <div className="settings-item-info">
             <p className="session-heartbeat-item-title">
               {t("sessionHeartbeatForceTitle")}

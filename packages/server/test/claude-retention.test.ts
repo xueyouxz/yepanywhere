@@ -18,10 +18,7 @@ describe("ClaudeProviderRetentionTracker", () => {
       backgroundTaskCount: 1,
       sessionCronCount: 1,
       liveTaskCount: 0,
-      reasons: [
-        "stop-hook-background-tasks:1",
-        "stop-hook-session-crons:1",
-      ],
+      reasons: ["stop-hook-background-tasks:1", "stop-hook-session-crons:1"],
     });
     expect(onChange).toHaveBeenCalledTimes(1);
   });

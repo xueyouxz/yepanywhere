@@ -218,17 +218,20 @@ describe("real provider /btw storage-fork smoke", () => {
         }
 
         const provider =
-          providerName === "claude" ? new ClaudeProvider() : new CodexProvider();
+          providerName === "claude"
+            ? new ClaudeProvider()
+            : new CodexProvider();
         if (!(await provider.isInstalled())) {
           console.log(`Skipping ${providerName} /btw smoke - provider missing`);
           return;
         }
 
-        const model = process.env[
-          providerName === "claude"
-            ? "BTW_ASIDE_CLAUDE_MODEL"
-            : "BTW_ASIDE_CODEX_MODEL"
-        ];
+        const model =
+          process.env[
+            providerName === "claude"
+              ? "BTW_ASIDE_CLAUDE_MODEL"
+              : "BTW_ASIDE_CODEX_MODEL"
+          ];
         const parent = await runTurn(
           provider,
           projectDir,
@@ -250,7 +253,10 @@ describe("real provider /btw storage-fork smoke", () => {
               `Could not find Claude source session ${parent.sessionId}`,
             );
           }
-          clone = await cloneClaudeSession(dirname(sourcePath), parent.sessionId);
+          clone = await cloneClaudeSession(
+            dirname(sourcePath),
+            parent.sessionId,
+          );
         } else {
           const codexSearchRoots = [
             process.env.CODEX_SESSIONS_DIR,

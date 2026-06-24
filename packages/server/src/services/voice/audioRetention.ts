@@ -124,9 +124,8 @@ export async function persistSpeechAudio(
           transcript: input.transcript,
           transcriptChars: input.transcript.length,
           streamingTranscriptTrace: input.streamingTranscriptTrace,
-          streamingTranscriptTraceText: input.streamingTranscriptTrace?.join(
-            "\n",
-          ),
+          streamingTranscriptTraceText:
+            input.streamingTranscriptTrace?.join("\n"),
           streamingTranscriptEvents: input.streamingTranscriptEvents,
           startedAt: input.startedAt,
           completedAt: input.completedAt,

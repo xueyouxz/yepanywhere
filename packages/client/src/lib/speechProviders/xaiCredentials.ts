@@ -8,9 +8,7 @@ export interface XaiSttCredential {
   source: XaiSttCredentialSource;
 }
 
-export type XaiSttStreamingSecretSource =
-  | "browser-local"
-  | "server-ephemeral";
+export type XaiSttStreamingSecretSource = "browser-local" | "server-ephemeral";
 
 export interface XaiSttStreamingSecret {
   clientSecret: string;
@@ -49,9 +47,7 @@ export function setBrowserXaiSttApiKey(apiKey: string): void {
   }
 }
 
-export function subscribeBrowserXaiSttApiKey(
-  listener: () => void,
-): () => void {
+export function subscribeBrowserXaiSttApiKey(listener: () => void): () => void {
   if (typeof window === "undefined") return () => {};
   const handleStorage = () => listener();
   window.addEventListener(XAI_STT_KEY_CHANGE_EVENT, listener);

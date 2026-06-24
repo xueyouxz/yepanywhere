@@ -47,9 +47,7 @@ function getDatabase(): Promise<IDBDatabase> {
         const store = db.createObjectStore(STORE_NAME);
         store.createIndex("byLastAccessedAt", "lastAccessedAt");
       } else {
-        const store = tx.objectStore(
-          STORE_NAME,
-        );
+        const store = tx.objectStore(STORE_NAME);
         if (!store.indexNames.contains("byLastAccessedAt")) {
           store.createIndex("byLastAccessedAt", "lastAccessedAt");
         }
@@ -91,7 +89,10 @@ async function createThumbnailBlob(
     bitmap.close();
 
     const blob = await new Promise<Blob | undefined>((resolve) => {
-      canvas.toBlob((value) => resolve(value ?? undefined), THUMBNAIL_MIME_TYPE);
+      canvas.toBlob(
+        (value) => resolve(value ?? undefined),
+        THUMBNAIL_MIME_TYPE,
+      );
     });
     if (!blob) {
       return undefined;
@@ -111,10 +112,12 @@ async function calculateCacheSize(db: IDBDatabase): Promise<number> {
   const tx = db.transaction(STORE_NAME, "readonly");
   const store = tx.objectStore(STORE_NAME);
   const request = store.getAll();
-  const entries = (await new Promise<CachedAttachmentPreview[]>((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result as CachedAttachmentPreview[]);
-    request.onerror = () => reject(request.error);
-  })) ?? [];
+  const entries =
+    (await new Promise<CachedAttachmentPreview[]>((resolve, reject) => {
+      request.onsuccess = () =>
+        resolve(request.result as CachedAttachmentPreview[]);
+      request.onerror = () => reject(request.error);
+    })) ?? [];
   return entries.reduce((sum, entry) => sum + (entry.totalBytes ?? 0), 0);
 }
 
@@ -177,7 +180,8 @@ export async function storeUploadedAttachmentPreview(
     mimeType: uploadedFile.mimeType,
     size: uploadedFile.size,
     thumbnailVariant: THUMBNAIL_CACHE_VARIANT,
-    thumbnailWidth: thumbnail?.width ?? uploadDimensions?.width ?? THUMBNAIL_HEIGHT_PX,
+    thumbnailWidth:
+      thumbnail?.width ?? uploadDimensions?.width ?? THUMBNAIL_HEIGHT_PX,
     thumbnailHeight:
       thumbnail?.height ?? uploadDimensions?.height ?? THUMBNAIL_HEIGHT_PX,
     thumbnailBlob: thumbnail?.blob,
@@ -207,7 +211,11 @@ export async function loadCachedAttachmentPreview(
   legacyPath?: string,
 ): Promise<CachedAttachmentPreview | null> {
   const db = await getDatabase();
-  let entry = await getEntry<CachedAttachmentPreview>(db, STORE_NAME, attachmentId);
+  let entry = await getEntry<CachedAttachmentPreview>(
+    db,
+    STORE_NAME,
+    attachmentId,
+  );
   if (!entry && legacyPath && legacyPath !== attachmentId) {
     const legacyEntry = await getEntry<CachedAttachmentPreview>(
       db,
@@ -262,7 +270,9 @@ export async function loadCachedAttachmentPreview(
   return updated;
 }
 
-export async function deleteCachedAttachmentPreview(path: string): Promise<void> {
+export async function deleteCachedAttachmentPreview(
+  path: string,
+): Promise<void> {
   const db = await getDatabase();
   await deleteEntry(db, STORE_NAME, path);
 }

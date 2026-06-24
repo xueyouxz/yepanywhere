@@ -237,9 +237,7 @@ describe("NewSessionPage", () => {
     );
     renderPage("/new-session?projectId=project-1");
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Select No Project" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Select No Project" }));
 
     await waitFor(() => {
       expect(screen.getByTestId("location").textContent).toBe(

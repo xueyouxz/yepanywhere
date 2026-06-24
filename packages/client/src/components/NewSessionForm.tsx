@@ -130,12 +130,7 @@ interface PendingSpeechFinal {
   metadata?: SpeechTranscriptionResultMetadata;
 }
 
-const RECAP_MODE_ORDER: RecapMode[] = [
-  "off",
-  "side-session",
-  "fork",
-  "native",
-];
+const RECAP_MODE_ORDER: RecapMode[] = ["off", "side-session", "fork", "native"];
 const PROMPT_SUGGESTION_MODE_ORDER: PromptSuggestionMode[] = [
   ...PROMPT_SUGGESTION_MODES,
 ];

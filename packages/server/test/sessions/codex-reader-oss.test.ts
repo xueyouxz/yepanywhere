@@ -387,8 +387,7 @@ describe("CodexSessionReader - OSS Support", () => {
     expect(
       second?.data.session.entries.filter(
         (entry) =>
-          entry.type === "event_msg" &&
-          entry.payload.type === "user_message",
+          entry.type === "event_msg" && entry.payload.type === "user_message",
       ),
     ).toHaveLength(2);
   });

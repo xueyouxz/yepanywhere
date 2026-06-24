@@ -63,7 +63,9 @@ describe("RemoteCompatibilityNotices", () => {
       "Server update required soon",
     );
     expect(screen.getByText(/compatibility window/i)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Remind me later" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Remind me later" }),
+    ).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
 

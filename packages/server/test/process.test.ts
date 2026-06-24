@@ -895,7 +895,10 @@ describe("Process", () => {
 
       const result = await process.runProviderCommand("compact", "preserve X");
       expect(result).toEqual({ handled: true });
-      expect(runProviderCommandFn).toHaveBeenCalledWith("compact", "preserve X");
+      expect(runProviderCommandFn).toHaveBeenCalledWith(
+        "compact",
+        "preserve X",
+      );
 
       resolveIterator?.();
       await process.abort();
@@ -1154,7 +1157,9 @@ describe("Process", () => {
 
     it("uses an organic native recap before running the tailed fallback", async () => {
       const controller = createControllableIterator();
-      const generateSummary = vi.fn(async () => ({ text: "synthetic summary" }));
+      const generateSummary = vi.fn(async () => ({
+        text: "synthetic summary",
+      }));
       const process = new Process(controller.iterator, {
         projectPath: "/test",
         projectId: "proj-1" as UrlProjectId,
@@ -1177,7 +1182,9 @@ describe("Process", () => {
       controller.push({ type: "result", session_id: "sess-1" });
       await waitFor(() => expect(process.state.type).toBe("idle"));
 
-      const request = process.requestRecap(provider, { sinceMs: Date.now() - 1 });
+      const request = process.requestRecap(provider, {
+        sinceMs: Date.now() - 1,
+      });
       controller.push({
         type: "system",
         subtype: "away_summary",

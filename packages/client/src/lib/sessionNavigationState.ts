@@ -40,9 +40,7 @@ function isPermissionMode(value: unknown): value is PermissionMode {
 }
 
 function normalizeModeVersion(value: unknown): number | undefined {
-  return typeof value === "number" &&
-    Number.isInteger(value) &&
-    value >= 0
+  return typeof value === "number" && Number.isInteger(value) && value >= 0
     ? value
     : undefined;
 }
@@ -68,7 +66,11 @@ export function normalizeInitialSessionStatus(
     ...(modeVersion !== undefined ? { modeVersion } : {}),
     ...(typeof value.recapAfterSeconds === "number" &&
     Number.isFinite(value.recapAfterSeconds)
-      ? { recapAfterSeconds: normalizeRecapAfterSeconds(value.recapAfterSeconds) }
+      ? {
+          recapAfterSeconds: normalizeRecapAfterSeconds(
+            value.recapAfterSeconds,
+          ),
+        }
       : {}),
   };
 }
@@ -102,6 +104,8 @@ export function createSessionNavigationState(
     ...(state.initialStatus ? { initialStatus: state.initialStatus } : {}),
     ...(state.initialTitle ? { initialTitle: state.initialTitle } : {}),
     ...(state.initialModel ? { initialModel: state.initialModel } : {}),
-    ...(state.initialProvider ? { initialProvider: state.initialProvider } : {}),
+    ...(state.initialProvider
+      ? { initialProvider: state.initialProvider }
+      : {}),
   };
 }

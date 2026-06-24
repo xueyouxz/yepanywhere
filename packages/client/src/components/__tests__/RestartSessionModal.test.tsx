@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import type { ProviderInfo } from "@yep-anywhere/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RestartSessionModal } from "../RestartSessionModal";
@@ -106,7 +112,9 @@ describe("RestartSessionModal", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "sessionRestartStart" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "sessionRestartStart" }),
+    );
 
     await waitFor(() => {
       expect(mockRestartSession).toHaveBeenCalledWith(
@@ -152,7 +160,9 @@ describe("RestartSessionModal", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Codex/ }));
-    fireEvent.click(screen.getByRole("button", { name: "sessionRestartStart" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "sessionRestartStart" }),
+    );
 
     await waitFor(() => {
       expect(mockRestartSession).toHaveBeenCalledWith(
@@ -204,7 +214,9 @@ describe("RestartSessionModal", () => {
         .getAllByRole("button", { name: /Haiku/ })
         .some((button) => button.className.includes("active")),
     ).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "sessionRestartStart" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "sessionRestartStart" }),
+    );
 
     await waitFor(() => {
       expect(mockRestartSession).toHaveBeenCalledWith(
@@ -234,9 +246,7 @@ describe("RestartSessionModal", () => {
         projectId="proj-1"
         sessionId="sess-1"
         provider="claude"
-        providers={[
-          providerInfo("claude", [{ id: "sonnet", name: "Sonnet" }]),
-        ]}
+        providers={[providerInfo("claude", [{ id: "sonnet", name: "Sonnet" }])]}
         currentModel="sonnet"
         mode="default"
         thinking="off"
@@ -251,7 +261,9 @@ describe("RestartSessionModal", () => {
         .getAllByRole("button", { name: /promptSuggestionModeOff/ })
         .some((button) => button.className.includes("active")),
     ).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "sessionRestartStart" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "sessionRestartStart" }),
+    );
 
     await waitFor(() => {
       expect(mockRestartSession).toHaveBeenCalledWith(

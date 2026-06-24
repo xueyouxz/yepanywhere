@@ -113,7 +113,9 @@ export interface RelayClientError {
 // ============================================================================
 
 /** Messages from yepanywhere server to relay */
-export type RelayServerMessage = RelayServerRegister | RelayServerChannelRegister;
+export type RelayServerMessage =
+  | RelayServerRegister
+  | RelayServerChannelRegister;
 
 /** Responses from relay to yepanywhere server */
 export type RelayServerResponse = RelayServerRegistered | RelayServerRejected;

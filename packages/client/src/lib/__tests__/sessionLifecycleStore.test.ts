@@ -1,7 +1,4 @@
-import type {
-  SessionOwnership,
-  UrlProjectId,
-} from "@yep-anywhere/shared";
+import type { SessionOwnership, UrlProjectId } from "@yep-anywhere/shared";
 import { describe, expect, it } from "vitest";
 import {
   applyProcessStateChanged,

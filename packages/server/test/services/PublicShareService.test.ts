@@ -274,9 +274,9 @@ describe("PublicShareService", () => {
       service.getViewerSnapshotResponse(frozenRecord!, "viewer-one")?.session
         .updatedAt,
     ).toBe("2026-05-01T00:04:00.000Z");
-    expect(service.getSessionShareStatus(projectId, "session-1").viewers).toEqual(
-      [],
-    );
+    expect(
+      service.getSessionShareStatus(projectId, "session-1").viewers,
+    ).toEqual([]);
 
     await service.disconnectSessionViewerToken(
       projectId,
@@ -284,9 +284,9 @@ describe("PublicShareService", () => {
       "viewer-one",
     );
     const disconnectedRecord = service.getRecordBySecret(secret);
-    expect(service.isViewerDisconnected(disconnectedRecord!, "viewer-one")).toBe(
-      true,
-    );
+    expect(
+      service.isViewerDisconnected(disconnectedRecord!, "viewer-one"),
+    ).toBe(true);
     expect(
       service.getViewerSnapshotResponse(disconnectedRecord!, "viewer-one"),
     ).toBeNull();
@@ -331,9 +331,11 @@ describe("PublicShareService", () => {
       service.buildLiveResponse(firstRecord!, makeSession()).share
         .activeViewerCount,
     ).toBe(2);
-    expect(service.getSessionShareStatus(projectId, "session-1")).toMatchObject({
-      activeViewerCount: 3,
-    });
+    expect(service.getSessionShareStatus(projectId, "session-1")).toMatchObject(
+      {
+        activeViewerCount: 3,
+      },
+    );
   });
 
   it("keeps viewers active until they miss a session update grace period", async () => {

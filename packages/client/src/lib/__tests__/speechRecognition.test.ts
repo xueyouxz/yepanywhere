@@ -250,20 +250,20 @@ describe("speech transcript text edits", () => {
   });
 
   it("does not delay final chunks without a hot non-empty selection", () => {
-    expect(getSpeechSelectionFinalDelayMs(createSpeechInsertionRange(4, 4))).toBe(
-      0,
-    );
-    expect(getSpeechSelectionFinalDelayMs(createSpeechInsertionRange(4, 8))).toBe(
-      0,
-    );
+    expect(
+      getSpeechSelectionFinalDelayMs(createSpeechInsertionRange(4, 4)),
+    ).toBe(0);
+    expect(
+      getSpeechSelectionFinalDelayMs(createSpeechInsertionRange(4, 8)),
+    ).toBe(0);
   });
 
   it("does not retarget speech replacement for a collapsed selection", () => {
     const range = createSpeechInsertionRange(4, 4);
 
-    expect(
-      retargetSpeechInsertionRangeReplacement(range, 8, 8, 1000),
-    ).toBe(range);
+    expect(retargetSpeechInsertionRangeReplacement(range, 8, 8, 1000)).toBe(
+      range,
+    );
   });
 
   it("removes only the latest committed speech chunk", () => {
@@ -282,10 +282,7 @@ describe("speech transcript text edits", () => {
 
     expect(second.text).toBe("prefix first. second. suffix");
 
-    const removal = removeLatestSpeechChunkFromRange(
-      second.text,
-      second.range,
-    );
+    const removal = removeLatestSpeechChunkFromRange(second.text, second.range);
 
     expect(removal).toMatchObject({
       text: "prefix first. suffix",

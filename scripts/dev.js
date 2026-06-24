@@ -227,10 +227,7 @@ function startServer() {
 
     // If server exited cleanly (code 0) and we're in manual reload mode,
     // it was a reload request - restart it
-    if (
-      !backendWatch &&
-      (reloadRequested || (code === 0 && signal === null))
-    ) {
+    if (!backendWatch && (reloadRequested || (code === 0 && signal === null))) {
       console.log("\nRestarting server...");
       startServer();
     } else if (code !== null && code !== 0) {

@@ -204,7 +204,10 @@ export class ProjectScanner {
     return snapshot;
   }
 
-  private buildSnapshot(projects: Project[], timestamp = Date.now()): ProjectSnapshot {
+  private buildSnapshot(
+    projects: Project[],
+    timestamp = Date.now(),
+  ): ProjectSnapshot {
     const byId = new Map<string, Project>();
     const bySessionDirSuffix = new Map<string, Project>();
 
@@ -253,7 +256,9 @@ export class ProjectScanner {
       }
 
       const currentSourceState = await this.getSourceState();
-      if (!this.areSourceStatesCompatible(currentSourceState, parsed.sourceState)) {
+      if (
+        !this.areSourceStatesCompatible(currentSourceState, parsed.sourceState)
+      ) {
         return null;
       }
 
@@ -292,11 +297,7 @@ export class ProjectScanner {
     };
 
     await mkdir(dirname(this.projectScanCachePath), { recursive: true });
-    await writeFile(
-      this.projectScanCachePath,
-      JSON.stringify(data),
-      "utf-8",
-    );
+    await writeFile(this.projectScanCachePath, JSON.stringify(data), "utf-8");
   }
 
   private async getSourceState(): Promise<ProjectScanSourceState> {
@@ -335,9 +336,7 @@ export class ProjectScanner {
     };
   }
 
-  private async getDirectoryEntries(
-    targetPath: string,
-  ): Promise<string[]> {
+  private async getDirectoryEntries(targetPath: string): Promise<string[]> {
     try {
       const entries = await readdir(targetPath, { withFileTypes: true });
       return entries
@@ -380,7 +379,8 @@ export class ProjectScanner {
       current.geminiSessionsDirMtimeMs === cached.geminiSessionsDirMtimeMs &&
       current.projectMetadataFilePath === cached.projectMetadataFilePath &&
       current.projectMetadataFileExists === cached.projectMetadataFileExists &&
-      current.projectMetadataFileMtimeMs === cached.projectMetadataFileMtimeMs &&
+      current.projectMetadataFileMtimeMs ===
+        cached.projectMetadataFileMtimeMs &&
       current.enableCodex === cached.enableCodex &&
       current.enableGemini === cached.enableGemini
     );
@@ -441,11 +441,14 @@ export class ProjectScanner {
       typeof project.sessionCount === "number" &&
       typeof project.activeOwnedCount === "number" &&
       typeof project.activeExternalCount === "number" &&
-      (project.lastActivity === null || typeof project.lastActivity === "string") &&
+      (project.lastActivity === null ||
+        typeof project.lastActivity === "string") &&
       typeof project.provider === "string" &&
       (project.mergedSessionDirs === undefined ||
         (Array.isArray(project.mergedSessionDirs) &&
-          project.mergedSessionDirs.every((item) => typeof item === "string"))) &&
+          project.mergedSessionDirs.every(
+            (item) => typeof item === "string",
+          ))) &&
       (project.hasCodexSessions === undefined ||
         typeof project.hasCodexSessions === "boolean") &&
       (project.hasGeminiSessions === undefined ||
@@ -610,8 +613,15 @@ export class ProjectScanner {
       const projectDirPaths = projectDirNames.map((projectDir) =>
         join(dirPath, projectDir),
       );
-      for (let i = 0; i < projectDirPaths.length; i += CLAUDE_PROJECT_SCAN_BATCH_SIZE) {
-        const batch = projectDirPaths.slice(i, i + CLAUDE_PROJECT_SCAN_BATCH_SIZE);
+      for (
+        let i = 0;
+        i < projectDirPaths.length;
+        i += CLAUDE_PROJECT_SCAN_BATCH_SIZE
+      ) {
+        const batch = projectDirPaths.slice(
+          i,
+          i + CLAUDE_PROJECT_SCAN_BATCH_SIZE,
+        );
         const batchInfos = await Promise.all(
           batch.map((projectDirPath) => this.getProjectDirInfo(projectDirPath)),
         );
@@ -902,16 +912,23 @@ export class ProjectScanner {
 
       // Read cwd from session files in small batches and return early on first match.
       // Most project dirs have a session file with cwd near the top of the first file.
-      const regularSessionFiles = jsonlFiles.filter((f) => !f.startsWith("agent-"));
+      const regularSessionFiles = jsonlFiles.filter(
+        (f) => !f.startsWith("agent-"),
+      );
       const orderedFiles =
         regularSessionFiles.length > 0
-          ? [...regularSessionFiles, ...jsonlFiles.filter((f) => f.startsWith("agent-"))]
+          ? [
+              ...regularSessionFiles,
+              ...jsonlFiles.filter((f) => f.startsWith("agent-")),
+            ]
           : jsonlFiles;
 
       for (let i = 0; i < orderedFiles.length; i += CWD_SCAN_BATCH_SIZE) {
         const batch = orderedFiles.slice(i, i + CWD_SCAN_BATCH_SIZE);
         const batchCwds = await Promise.all(
-          batch.map((file) => readCwdFromSessionFile(join(projectDirPath, file))),
+          batch.map((file) =>
+            readCwdFromSessionFile(join(projectDirPath, file)),
+          ),
         );
 
         for (const cwd of batchCwds) {

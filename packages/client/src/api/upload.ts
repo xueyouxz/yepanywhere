@@ -137,7 +137,8 @@ export async function uploadChunks(
   const { onProgress, signal } = options;
   const rateLimiter = createUploadRateLimiter(options.maxBytesPerSecond);
   console.log("[Upload] Starting upload to:", url);
-  const endCriticalOperation = connectionManager.beginCriticalOperation("upload");
+  const endCriticalOperation =
+    connectionManager.beginCriticalOperation("upload");
 
   return new Promise<UploadedFile>((resolve, reject) => {
     // Early abort check

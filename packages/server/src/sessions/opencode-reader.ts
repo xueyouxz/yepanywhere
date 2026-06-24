@@ -271,12 +271,19 @@ export class OpenCodeSessionReader implements ISessionReader {
     afterMessageId?: string,
     _options?: GetSessionOptions,
   ): Promise<LoadedSession | null> {
-    const fromDb = await this.loadDbSession(sessionId, projectId, afterMessageId);
+    const fromDb = await this.loadDbSession(
+      sessionId,
+      projectId,
+      afterMessageId,
+    );
     if (fromDb) return fromDb;
 
     const fileSummary = await this.getFileSessionSummary(sessionId, projectId);
     if (fileSummary) {
-      const messages = await this.loadSessionMessages(sessionId, afterMessageId);
+      const messages = await this.loadSessionMessages(
+        sessionId,
+        afterMessageId,
+      );
       return {
         summary: fileSummary,
         data: {
@@ -779,7 +786,9 @@ export class OpenCodeSessionReader implements ISessionReader {
     });
   }
 
-  private async loadCliExport(sessionId: string): Promise<OpenCodeExport | null> {
+  private async loadCliExport(
+    sessionId: string,
+  ): Promise<OpenCodeExport | null> {
     const output = await this.runOpenCodeCli(["export", sessionId]);
     if (!output) return null;
 
@@ -879,9 +888,7 @@ export class OpenCodeSessionReader implements ISessionReader {
     exported: OpenCodeExport,
     afterMessageId?: string,
   ): OpenCodeSessionEntry[] {
-    const messages = Array.isArray(exported.messages)
-      ? exported.messages
-      : [];
+    const messages = Array.isArray(exported.messages) ? exported.messages : [];
     const entries: OpenCodeSessionEntry[] = [];
     let foundAfterMessage = !afterMessageId;
 

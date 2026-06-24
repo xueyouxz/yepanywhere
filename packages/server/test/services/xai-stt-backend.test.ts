@@ -44,9 +44,9 @@ describe("XaiSttBackend", () => {
     };
     expect(url).toBe("https://api.x.ai/v1/stt");
     expect(init.method).toBe("POST");
-    expect(
-      (init.headers as Record<string, string>).Authorization,
-    ).toBe("Bearer xai-key");
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      "Bearer xai-key",
+    );
     expect(init.body).toBeInstanceOf(FormData);
     const form = init.body as FormData;
     expect(form.get("format")).toBe("true");

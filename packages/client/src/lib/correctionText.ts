@@ -22,7 +22,11 @@ function commonPrefixLength(a: string, b: string): number {
   return index;
 }
 
-function commonSuffixLength(a: string, b: string, prefixLength: number): number {
+function commonSuffixLength(
+  a: string,
+  b: string,
+  prefixLength: number,
+): number {
   let length = 0;
   while (
     length + prefixLength < a.length &&
@@ -109,7 +113,10 @@ function correctionMessage(corrected: string, change?: string): string {
   return change ? `${message}\n\nChange: ${change}` : message;
 }
 
-export function buildCorrectionText(before: string, after: string): string | null {
+export function buildCorrectionText(
+  before: string,
+  after: string,
+): string | null {
   const original = before.trim();
   const corrected = after.trim();
   if (!corrected || original === corrected) {
@@ -128,14 +135,22 @@ export function buildCorrectionText(before: string, after: string): string | nul
   const smallBefore = beforeMiddle.length > 0 && beforeMiddle.length <= 80;
   const smallAfter = afterMiddle.length > 0 && afterMiddle.length <= 80;
 
-  if (smallBefore && smallAfter && countOccurrences(original, beforeMiddle) === 1) {
+  if (
+    smallBefore &&
+    smallAfter &&
+    countOccurrences(original, beforeMiddle) === 1
+  ) {
     return correctionMessage(
       corrected,
       `replace ${quote(beforeMiddle)} with ${quote(afterMiddle)}.`,
     );
   }
 
-  if (smallBefore && !afterMiddle && countOccurrences(original, beforeMiddle) === 1) {
+  if (
+    smallBefore &&
+    !afterMiddle &&
+    countOccurrences(original, beforeMiddle) === 1
+  ) {
     return correctionMessage(corrected, `delete ${quote(beforeMiddle)}.`);
   }
 

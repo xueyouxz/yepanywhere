@@ -11,8 +11,8 @@ describe("static file path containment", () => {
       true,
     );
     expect(isPathInsideDirectory(sibling, root)).toBe(false);
-    expect(isPathInsideDirectory(path.resolve(root, "../secret.txt"), root)).toBe(
-      false,
-    );
+    expect(
+      isPathInsideDirectory(path.resolve(root, "../secret.txt"), root),
+    ).toBe(false);
   });
 });

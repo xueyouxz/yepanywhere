@@ -10,7 +10,9 @@ function generateRequestId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-async function decodeWebSocketData(data: MessageEvent["data"]): Promise<string> {
+async function decodeWebSocketData(
+  data: MessageEvent["data"],
+): Promise<string> {
   if (typeof data === "string") {
     return data;
   }

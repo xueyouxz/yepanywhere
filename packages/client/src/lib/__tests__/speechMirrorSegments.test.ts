@@ -31,7 +31,10 @@ describe("getSpeechMirrorSegments", () => {
   });
 
   it("keeps arrival order for tags at the same position (stable)", () => {
-    const segs = getSpeechMirrorSegments("abcd", [tag("first", 2), tag("second", 2)]);
+    const segs = getSpeechMirrorSegments("abcd", [
+      tag("first", 2),
+      tag("second", 2),
+    ]);
     expect(segs).toEqual([
       { type: "text", text: "ab", key: "t0" },
       { type: "tag", tag: tag("first", 2) },

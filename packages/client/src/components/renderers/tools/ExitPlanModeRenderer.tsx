@@ -18,7 +18,10 @@ interface ExitPlanModeResultWithHtml extends ExitPlanModeResult {
 function PlanContent({
   plan,
   renderedHtml,
-}: { plan?: string; renderedHtml?: string }) {
+}: {
+  plan?: string;
+  renderedHtml?: string;
+}) {
   if (renderedHtml) {
     // Server-rendered HTML with shiki syntax highlighting
     // biome-ignore lint/security/noDangerouslySetInnerHtml: server-rendered markdown is safe
