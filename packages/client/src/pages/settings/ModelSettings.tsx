@@ -46,12 +46,7 @@ import {
 import { ProviderBadge } from "../../components/ProviderBadge";
 import { ThinkingControlsPanel } from "../../components/ThinkingControls";
 
-const RECAP_MODE_ORDER: RecapMode[] = [
-  "off",
-  "side-session",
-  "fork",
-  "native",
-];
+const RECAP_MODE_ORDER: RecapMode[] = ["off", "side-session", "fork", "native"];
 const PROMPT_SUGGESTION_MODE_ORDER: PromptSuggestionMode[] = [
   ...PROMPT_SUGGESTION_MODES,
 ];
@@ -381,7 +376,6 @@ export function ModelSettings() {
   )
     ? (savedDefaults?.permissionMode ?? "default")
     : "default";
-  const claudeProvider = availableProviders.find((p) => p.name === "claude");
   const modeLabels: Record<PermissionMode, string> = {
     default: t("modeDefaultLabel"),
     acceptEdits: t("modeAcceptEditsLabel"),
@@ -906,7 +900,7 @@ export function ModelSettings() {
         </div>
       </div>
 
-      {claudeProvider && (
+      {selectedProvider?.name === "claude" && (
         <div className="settings-group">
           <div className="model-settings-subsection">
             <h3>{t("modelSettingsClaudeSectionTitle")}</h3>
