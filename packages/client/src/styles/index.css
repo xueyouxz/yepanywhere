@@ -8357,11 +8357,8 @@ a.sidebar-nav-item {
   align-items: stretch;
 }
 
-.output-appearance-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-3);
+.output-appearance-title strong {
+  font-size: var(--font-size-base);
 }
 
 .output-appearance-panel {
@@ -8373,7 +8370,7 @@ a.sidebar-nav-item {
 
 .output-appearance-controls {
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-2);
   container-type: inline-size;
   container-name: output-controls;
 }
@@ -8382,7 +8379,7 @@ a.sidebar-nav-item {
   display: grid;
   grid-template-columns: minmax(8rem, 0.36fr) minmax(0, 1fr);
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
 .output-appearance-label {
@@ -8424,7 +8421,7 @@ a.sidebar-nav-item {
 }
 
 .output-appearance-number {
-  width: 5.25rem;
+  width: 4.25rem;
 }
 
 .output-appearance-number-wrap {
@@ -8456,6 +8453,13 @@ a.sidebar-nav-item {
   gap: var(--space-1);
 }
 
+.output-appearance-specimen-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
 .output-appearance-specimen-label {
   color: var(--text-muted);
   font-size: var(--font-size-xs);
@@ -8467,9 +8471,8 @@ a.sidebar-nav-item {
   display: grid;
   box-sizing: border-box;
   width: 100%;
-  min-height: 24rem;
   gap: var(--output-prose-paragraph-gap);
-  padding: var(--space-3);
+  padding: var(--space-2);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   background: var(--bg-primary);
@@ -8712,17 +8715,8 @@ a.sidebar-nav-item {
 }
 
 @media (max-width: 600px) {
-  .output-appearance-header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .output-appearance-header .settings-button {
-    align-self: flex-start;
-  }
-
   .output-appearance-number {
-    width: 4.75rem;
+    width: 4rem;
   }
 
   .session-toolbar-preview {

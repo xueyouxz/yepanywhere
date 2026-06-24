@@ -573,21 +573,11 @@ export function AppearanceSettings() {
           </div>
         </div>
         <div className="settings-item output-appearance-settings">
-          <div className="output-appearance-header">
-            <div className="settings-item-info">
-              <strong>{t("appearanceOutputTypographyTitle")}</strong>
-            </div>
-            <button
-              type="button"
-              className="settings-button settings-button-secondary"
-              onClick={resetOutputAppearance}
-            >
-              {t("appearanceOutputTypographyReset")}
-            </button>
-          </div>
-
           <div className="output-appearance-panel">
             <div className="output-appearance-controls">
+              <div className="output-appearance-title settings-item-info">
+                <strong>{t("appearanceOutputTypographyTitle")}</strong>
+              </div>
               <div className="output-appearance-control">
                 <span className="output-appearance-label">
                   {t("appearanceOutputFontLabel")}
@@ -944,8 +934,17 @@ export function AppearanceSettings() {
             </div>
 
             <div className="output-appearance-specimen">
-              <div className="output-appearance-specimen-label">
-                {t("appearanceOutputSpecimenLabel")}
+              <div className="output-appearance-specimen-header">
+                <span className="output-appearance-specimen-label">
+                  {t("appearanceOutputSpecimenLabel")}
+                </span>
+                <button
+                  type="button"
+                  className="settings-button settings-button-secondary"
+                  onClick={resetOutputAppearance}
+                >
+                  {t("appearanceOutputTypographyReset")}
+                </button>
               </div>
               <div
                 className="output-appearance-preview"
@@ -954,23 +953,16 @@ export function AppearanceSettings() {
               >
                 <div className="output-preview-system">
                   <span className="output-preview-system-icon">ok</span>
-                  <span>
-                    System note: provider configuration was applied after the
-                    session reconnected.
-                  </span>
+                  <span>System note: applied after reconnect.</span>
                 </div>
                 <div className="output-preview-prose">
                   <p>
-                    Inline code such as <code>codex update</code> stays fixed
-                    width. The specimen is deliberately phone-width so font,
-                    spacing, and Markdown rendering can be judged after a
-                    natural line wrap.
+                    Inline code like <code>codex update</code> stays fixed
+                    width; prose wraps at phone width.
                   </p>
                   <pre className="output-preview-fixed">
                     <code>
-                      {
-                        '> grep -n "needle" packages/client/src\n+ fixed-width ASCII stays aligned'
-                      }
+                      {'> grep -n "needle" src\n+ ASCII stays aligned'}
                     </code>
                   </pre>
                   <p>
@@ -981,31 +973,24 @@ export function AppearanceSettings() {
                       dangerouslySetInnerHTML={{ __html: outputInlineMathHtml }}
                     />
                   </p>
-                  <p>Specimen rows:</p>
                   <ul>
                     <li>
-                      Source-like tokens: <code>fixed width</code>
+                      Tokens: <code>fixed width</code>
                     </li>
-                    <li>Math uses a TeX-like face with its own offset.</li>
+                    <li>Math uses a TeX-like face.</li>
                   </ul>
                 </div>
                 <div className="output-preview-thinking thinking-content">
-                  <ThinkingText
-                    text={[
-                      "**Considering spacing adjustments**",
-                      "",
-                      "Thinking text stays quieter, narrower, and [configured offset] smaller.",
-                    ].join("\n")}
-                  />
+                  <ThinkingText text="**Spacing** — thinking text stays quieter and smaller." />
                 </div>
                 <div className="output-preview-diff" aria-hidden="true">
                   <div>
                     <span className="output-preview-diff-gutter">+</span>
-                    <span>Rendered diff prose follows the output font.</span>
+                    <span>Diff prose follows the output font.</span>
                   </div>
                   <div>
                     <span className="output-preview-diff-gutter">-</span>
-                    <span>Extra paragraph space can be dialed down.</span>
+                    <span>Paragraph space can be dialed down.</span>
                   </div>
                 </div>
               </div>
