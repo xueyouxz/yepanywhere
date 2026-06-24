@@ -22,6 +22,8 @@ interface RecapAfterSecondsControlProps {
   onCommit: (value: number) => void | Promise<void>;
 }
 
+const RECAP_AFTER_SECONDS_SLIDER_MAX = 3000;
+
 export function RecapAfterSecondsControl({
   value,
   disabled,
@@ -98,6 +100,7 @@ export function RecapAfterSecondsControl({
       resetDraft();
     }
   };
+  const sliderValue = Math.min(draftValue, RECAP_AFTER_SECONDS_SLIDER_MAX);
 
   return (
     <div
@@ -113,9 +116,9 @@ export function RecapAfterSecondsControl({
       <span className="output-appearance-slider-row recap-after-seconds-row">
         <CommittedRangeInput
           min={MIN_RECAP_AFTER_SECONDS}
-          max={MAX_RECAP_AFTER_SECONDS}
+          max={RECAP_AFTER_SECONDS_SLIDER_MAX}
           step={1}
-          value={draftValue}
+          value={sliderValue}
           disabled={disabled}
           aria-label={t("recapAfterSecondsAria")}
           onDraftChange={updateSliderDraft}
