@@ -387,6 +387,7 @@
   "sessionErrorPrefix": "Se produjo un error:",
   "sessionToggleSidebar": "Alternar barra lateral",
   "sessionOpenSidebar": "Abrir barra lateral",
+  "sessionCloseRecentSessions": "Cerrar sesiones recientes",
   "sessionStarredLabel": "Destacada",
   "sessionArchivedBadge": "Archivada",
   "sessionViewInfo": "Ver información de la sesión",

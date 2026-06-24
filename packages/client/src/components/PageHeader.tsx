@@ -6,6 +6,8 @@ interface PageHeaderProps {
   title: string;
   /** Optional custom element to render instead of the default title */
   titleElement?: ReactNode;
+  /** Optional action for clicking the default title text */
+  onTitleClick?: () => void;
   /** Mobile: opens the sidebar overlay */
   onOpenSidebar?: () => void;
   /** Desktop: toggles sidebar expanded/collapsed */
@@ -58,6 +60,7 @@ const BackIcon = () => (
 export function PageHeader({
   title,
   titleElement,
+  onTitleClick,
   onOpenSidebar,
   onToggleSidebar,
   isWideScreen = false,
@@ -105,14 +108,24 @@ export function PageHeader({
               </button>
             )
           )}
-          {titleElement ?? (
-            <span
-              className="session-title"
-              title={title.length > 60 ? title : undefined}
-            >
-              {truncateText(title)}
-            </span>
-          )}
+          {titleElement ??
+            (onTitleClick ? (
+              <button
+                type="button"
+                className="session-title"
+                onClick={onTitleClick}
+                title={title.length > 60 ? title : undefined}
+              >
+                {truncateText(title)}
+              </button>
+            ) : (
+              <span
+                className="session-title"
+                title={title.length > 60 ? title : undefined}
+              >
+                {truncateText(title)}
+              </span>
+            ))}
         </div>
         {actions && <div className="session-header-actions">{actions}</div>}
       </div>

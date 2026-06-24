@@ -560,6 +560,7 @@ export function Sidebar({
       title={getSessionDisplayTitle(session)}
       fullTitle={session.fullTitle ?? getSessionDisplayTitle(session)}
       initialPrompt={session.initialPrompt}
+      hasCustomTitle={!!session.customTitle}
       lastAgentText={session.lastAgentText}
       provider={session.provider}
       model={session.model}

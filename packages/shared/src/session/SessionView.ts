@@ -110,11 +110,11 @@ export class SessionView {
   }
 
   /**
-   * Get the title for tooltips (full content, not truncated).
-   * Falls back to autoTitle if fullTitle not available.
+   * Get the title for tooltips.
+   * Priority: customTitle > fullTitle > autoTitle
    */
   get tooltipTitle(): string | null {
-    return this.fullTitle ?? this.autoTitle;
+    return this.customTitle ?? this.fullTitle ?? this.autoTitle;
   }
 
   /**

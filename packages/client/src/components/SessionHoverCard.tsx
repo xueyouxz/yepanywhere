@@ -14,6 +14,8 @@ const MARGIN_PX = 8;
 const CURSOR_OFFSET_PX = 14;
 
 interface SessionHoverCardProps {
+  /** Stable id used by the owning row to recognize pointer transfers. */
+  hoverCardId: string;
   /** Viewport-fixed row geometry + cursor x; the card picks below/above. */
   anchor: { rowTop: number; rowBottom: number; cursorX: number };
   /** The full first user turn, shown turn-styled and line-clamped to fit. */
@@ -30,6 +32,8 @@ interface SessionHoverCardProps {
   projectName?: string;
   /** Preformatted age line, e.g. "5m ago (est. 2d)"; omitted when null. */
   ageLabel: string | null;
+  /** Called when the pointer leaves the card after selecting/reading it. */
+  onMouseLeave?: () => void;
   status?: SessionStatus;
   pendingInputType?: PendingInputType;
   hasUnread?: boolean;
@@ -54,11 +58,13 @@ interface Placement {
  * Hover card for compact sidebar rows: the full first user turn at hover-card
  * size, line-clamped to the room in whichever direction fits, plus a
  * status line (provider+model badge, project, age, status). Portaled + fixed
- * and pointer-events:none so it never clips in the scrolling sidebar nor blocks
- * the row's menu trigger. Prefers below the row + right of the cursor, flipping
- * above when the content is too tall to fit below.
+ * so it never clips in the scrolling sidebar. It remains pointer-selectable so
+ * copied text comes from the visible card, not from page content behind it.
+ * Prefers below the row + right of the cursor, flipping above when the content
+ * is too tall to fit below.
  */
 export function SessionHoverCard({
+  hoverCardId,
   anchor,
   prompt,
   lastAgentText,
@@ -66,6 +72,7 @@ export function SessionHoverCard({
   model,
   projectName,
   ageLabel,
+  onMouseLeave,
   status,
   pendingInputType,
   hasUnread,
@@ -136,9 +143,11 @@ export function SessionHoverCard({
   return createPortal(
     <div
       ref={ref}
+      data-session-hovercard-id={hoverCardId}
       className={`session-hovercard${
         placement?.loosened ? " session-hovercard--wide" : ""
       }`}
+      onMouseLeave={onMouseLeave}
       style={
         placement
           ? {
@@ -148,7 +157,7 @@ export function SessionHoverCard({
             }
           : { top: 0, left: 0, visibility: "hidden" }
       }
-      role="presentation"
+      role="tooltip"
     >
       {prompt && (
         <div

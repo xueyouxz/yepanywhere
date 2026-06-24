@@ -387,6 +387,7 @@
   "sessionErrorPrefix": "Fehler:",
   "sessionToggleSidebar": "Seitenleiste umschalten",
   "sessionOpenSidebar": "Seitenleiste öffnen",
+  "sessionCloseRecentSessions": "Letzte Sitzungen schließen",
   "sessionStarredLabel": "Markiert",
   "sessionArchivedBadge": "Archiviert",
   "sessionViewInfo": "Sitzungsinfo anzeigen",

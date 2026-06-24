@@ -10,9 +10,12 @@ import {
   isBtwAsideSessionTitle,
 } from "../lib/btwAsideSessions";
 import { toBrowserAppHref } from "../lib/appHref";
+import { ProviderBadge } from "./ProviderBadge";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 
 const MAX_RECENT_SESSIONS = 10;
+const DROPDOWN_MAX_WIDTH_PX = 830;
+const DROPDOWN_MARGIN_PX = 8;
 
 interface RecentSessionsDropdownProps {
   /** Current session ID (will be excluded from list) */
@@ -50,7 +53,9 @@ function formatRelativeTime(timestamp: string): string {
 
 /** Get display title */
 function getDisplayTitle(session: GlobalSessionItem): string {
-  return session.customTitle || session.title || "Untitled";
+  return (
+    session.customTitle || session.fullTitle || session.title || "Untitled"
+  );
 }
 
 function getVisibleDisplayTitle(title: string): string {
@@ -59,22 +64,23 @@ function getVisibleDisplayTitle(title: string): string {
     : title;
 }
 
+function getTitleTooltip(session: GlobalSessionItem, title: string): string {
+  return session.customTitle ? title : (session.fullTitle ?? title);
+}
+
 /** Compact status indicator */
 function StatusIndicator({ session }: { session: GlobalSessionItem }) {
   const activity = session.activity as AgentActivity | undefined;
 
-  // In-turn/thinking indicator
   if (activity === "in-turn") {
     return <ThinkingIndicator />;
   }
 
-  // Needs input
   if (session.pendingInputType) {
     const label = session.pendingInputType === "tool-approval" ? "Appr" : "Q";
     return <span className="recent-sessions-badge needs-input">{label}</span>;
   }
 
-  // External session
   if (session.ownership.owner === "external") {
     return <span className="recent-sessions-badge external">Ext</span>;
   }
@@ -145,16 +151,31 @@ export function RecentSessionsDropdown({
 
   if (!isOpen) return null;
 
-  // Position dropdown below trigger
+  // Position dropdown below the title row and keep the right edge on-screen.
   const triggerRect = triggerRef.current?.getBoundingClientRect();
-  const style: React.CSSProperties = triggerRect
-    ? {
-        position: "fixed",
-        top: triggerRect.bottom + 4,
-        left: Math.max(8, triggerRect.left - 100), // Offset left to align better
-        width: "min(830px, calc(100vw - 32px))",
-      }
-    : {};
+  const style: React.CSSProperties = (() => {
+    if (!triggerRect || typeof window === "undefined") return {};
+
+    const dropdownWidth = Math.min(
+      DROPDOWN_MAX_WIDTH_PX,
+      Math.max(0, window.innerWidth - DROPDOWN_MARGIN_PX * 2),
+    );
+    const maxLeft = Math.max(
+      DROPDOWN_MARGIN_PX,
+      window.innerWidth - dropdownWidth - DROPDOWN_MARGIN_PX,
+    );
+    const left = Math.min(
+      Math.max(DROPDOWN_MARGIN_PX, triggerRect.left),
+      maxLeft,
+    );
+
+    return {
+      position: "fixed",
+      top: triggerRect.bottom + 4,
+      left,
+      width: dropdownWidth,
+    };
+  })();
 
   const dropdown = (
     <div ref={dropdownRef} className="recent-sessions-dropdown" style={style}>
@@ -188,6 +209,7 @@ export function RecentSessionsDropdown({
                   onNavigate(session.id, session.projectId);
                   onClose();
                 }}
+                title={getTitleTooltip(session, title)}
               >
                 <div className="recent-session-content">
                   <span className="recent-session-title">
@@ -254,14 +276,19 @@ export function RecentSessionsDropdown({
                       {getVisibleDisplayTitle(title)}
                     </span>
                   </span>
-                  <span className="recent-session-project">
-                    {session.projectName}
-                  </span>
-                </div>
-                <div className="recent-session-meta">
-                  <StatusIndicator session={session} />
-                  <span className="recent-session-time">
-                    {formatRelativeTime(session.updatedAt)}
+                  <span className="recent-session-details">
+                    <ProviderBadge
+                      provider={session.provider}
+                      model={session.model}
+                      className="recent-session-provider-badge"
+                    />
+                    <span className="recent-session-project">
+                      {session.projectName}
+                    </span>
+                    <span className="recent-session-time">
+                      {formatRelativeTime(session.updatedAt)}
+                    </span>
+                    <StatusIndicator session={session} />
                   </span>
                 </div>
               </Link>

@@ -390,6 +390,7 @@
   "sessionRenamed": "Session renamed",
   "sessionRenameFailed": "Failed to rename session",
   "sessionRecentSessions": "Recent sessions",
+  "sessionCloseRecentSessions": "Close recent sessions",
   "sessionGenerateNewTitle": "Generate new title",
   "sessionRetitleUseGenerated": "Use generated title",
   "sessionRetitleUseGeneratedWhenReady": "Use generated title when ready",

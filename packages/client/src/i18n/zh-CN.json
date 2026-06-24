@@ -387,6 +387,7 @@
   "sessionErrorPrefix": "错误：",
   "sessionToggleSidebar": "切换侧边栏",
   "sessionOpenSidebar": "打开侧边栏",
+  "sessionCloseRecentSessions": "关闭最近会话",
   "sessionStarredLabel": "已收藏",
   "sessionArchivedBadge": "已归档",
   "sessionViewInfo": "查看会话信息",

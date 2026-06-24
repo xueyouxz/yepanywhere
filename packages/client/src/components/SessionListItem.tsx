@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import type { AgentActivity } from "../hooks/useFileActivity";
 import { useI18n } from "../i18n";
+import { activityBus } from "../lib/activityBus";
 import { toBrowserAppHref } from "../lib/appHref";
 import { formatBriefAge } from "../lib/sessionAge";
 import {
@@ -39,6 +40,8 @@ interface SessionListItemProps {
   // Optional display data
   fullTitle?: string | null;
   initialPrompt?: string | null;
+  /** True when title is a user-provided override rather than the first turn. */
+  hasCustomTitle?: boolean;
   /** Capped excerpt of the most recent regular agent turn, for the hover card. */
   lastAgentText?: string | null;
   projectName?: string;
@@ -138,6 +141,7 @@ export function SessionListItem({
   // Optional display data
   fullTitle,
   initialPrompt,
+  hasCustomTitle = false,
   lastAgentText,
   projectName,
   updatedAt,
@@ -240,6 +244,7 @@ export function SessionListItem({
     (messageCount === 0 || (messageCount == null && activity === "in-turn"));
   const displayTitle =
     localTitle ?? title ?? (isNewSession ? "New session" : "Untitled session");
+  const hasEffectiveCustomTitle = !!localTitle || hasCustomTitle;
   const isBtwAsideSession =
     !!parentSessionId ||
     isBtwAsideSessionTitle(displayTitle) ||
@@ -320,8 +325,9 @@ export function SessionListItem({
   };
 
   const handleSaveRename = async () => {
-    if (!renameValue.trim() || isSaving) return;
-    if (renameValue.trim() === displayTitle) {
+    const trimmedTitle = renameValue.trim();
+    if (!trimmedTitle || isSaving) return;
+    if (trimmedTitle === displayTitle) {
       handleCancelEditing();
       return;
     }
@@ -329,9 +335,15 @@ export function SessionListItem({
     setIsSaving(true);
     try {
       await api.updateSessionMetadata(sessionId, {
-        title: renameValue.trim(),
+        title: trimmedTitle,
       });
-      setLocalTitle(renameValue.trim());
+      setLocalTitle(trimmedTitle);
+      activityBus.emitLocal("session-metadata-changed", {
+        type: "session-metadata-changed",
+        sessionId,
+        title: trimmedTitle,
+        timestamp: new Date().toISOString(),
+      });
       setIsEditing(false);
       onRename?.();
     } catch (err) {
@@ -426,7 +438,14 @@ export function SessionListItem({
 
   // The full first user turn (body) and the most recent agent turn (reply)
   // shown in the replacement tooltip.
-  const hoverPrompt = (initialPrompt || fullTitle || displayTitle || "").trim();
+  const titleTooltip = hasEffectiveCustomTitle
+    ? displayTitle
+    : fullTitle || displayTitle;
+  const hoverPrompt = (
+    hasEffectiveCustomTitle
+      ? displayTitle
+      : initialPrompt || fullTitle || displayTitle || ""
+  ).trim();
   const hoverLastAgent = lastAgentText?.trim() || undefined;
 
   // Recompute an idle session's stale preview once on the server; the result
@@ -544,6 +563,23 @@ export function SessionListItem({
     }
     clearPreview();
   }, [clearPreview]);
+
+  const isOwnHoverCardTarget = useCallback((target: EventTarget | null) => {
+    if (!(target instanceof Element)) return false;
+    const hoverCardId = hoverCardIdRef.current;
+    if (!hoverCardId) return false;
+    return (
+      target.closest(`[data-session-hovercard-id="${hoverCardId}"]`) !== null
+    );
+  }, []);
+
+  const handlePreviewLeave = useCallback(
+    (e: React.MouseEvent) => {
+      if (isOwnHoverCardTarget(e.relatedTarget)) return;
+      handlePreviewCancel();
+    },
+    [handlePreviewCancel, isOwnHoverCardTarget],
+  );
 
   // The ... menu opening dismisses the card and, while open, suppresses new
   // shows so cursor moves over the row/menu do not pop cards. Hovering the
@@ -672,7 +708,7 @@ export function SessionListItem({
       className={liClasses}
       onMouseEnter={showHoverCard ? handlePreviewEnter : undefined}
       onMouseMove={showHoverCard ? handlePreviewMove : undefined}
-      onMouseLeave={showHoverCard ? handlePreviewCancel : undefined}
+      onMouseLeave={showHoverCard ? handlePreviewLeave : undefined}
       onWheel={showHoverCard ? handlePreviewCancel : undefined}
     >
       {/* Checkbox for multi-select (only shown when onSelect is provided) */}
@@ -704,7 +740,7 @@ export function SessionListItem({
           onClick={handleSessionClick}
           onMouseDown={handleSessionMouseDown}
           onAuxClick={handleSessionAuxClick}
-          title={showHoverCard ? undefined : fullTitle || displayTitle}
+          title={showHoverCard ? undefined : titleTooltip}
           className="session-list-item__link"
         >
           {mode === "card" ? (
@@ -872,6 +908,7 @@ export function SessionListItem({
 
       {showHoverCard && provider && previewPos && (
         <SessionHoverCard
+          hoverCardId={hoverCardIdRef.current!}
           anchor={previewPos}
           prompt={hoverPrompt}
           lastAgentText={hoverLastAgent}
@@ -884,6 +921,7 @@ export function SessionListItem({
           hasUnread={hasUnread}
           activity={activity}
           maxHeightPx={hoverCardMaxHeightPx}
+          onMouseLeave={handlePreviewCancel}
         />
       )}
     </li>

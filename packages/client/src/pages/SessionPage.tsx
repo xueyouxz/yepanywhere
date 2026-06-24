@@ -90,6 +90,7 @@ import {
   buildBtwAsideParentHref,
   getBtwAsideSessionDisplayTitle,
 } from "../lib/btwAsideSessions";
+import { activityBus } from "../lib/activityBus";
 import {
   getRecallSubmissionAfterQueuedCancel,
   type LastComposerSubmission,
@@ -1524,7 +1525,7 @@ function SessionPageContent({
 
   // Recent sessions dropdown state
   const [showRecentSessions, setShowRecentSessions] = useState(false);
-  const titleButtonRef = useRef<HTMLButtonElement>(null);
+  const titleRowRef = useRef<HTMLDivElement>(null);
 
   // Local metadata state (for optimistic updates)
   // Reset when session changes to avoid showing stale data from previous session
@@ -3367,6 +3368,11 @@ function SessionPageContent({
     (sessionTitle !== "Untitled" ? sessionTitle : null) ??
     initialTitle ??
     t("sessionUntitled");
+  const titleTooltip =
+    localCustomTitle ??
+    session?.customTitle ??
+    session?.fullTitle ??
+    displayTitle;
   const isArchived = localIsArchived ?? session?.isArchived ?? false;
   const isStarred = localIsStarred ?? session?.isStarred ?? false;
   const heartbeatTurnsEnabled =
@@ -3458,6 +3464,12 @@ function SessionPageContent({
     try {
       await api.updateSessionMetadata(sessionId, { title: trimmed });
       setLocalCustomTitle(trimmed);
+      activityBus.emitLocal("session-metadata-changed", {
+        type: "session-metadata-changed",
+        sessionId,
+        title: trimmed,
+        timestamp: new Date().toISOString(),
+      });
       setIsEditingTitle(false);
       setTitleEditMode("manual");
       setRenameValue("");
@@ -3472,6 +3484,7 @@ function SessionPageContent({
   };
 
   const handleStartEditingTitle = () => {
+    setShowRecentSessions(false);
     invalidateGeneratedRetitle();
     setTitleEditMode("manual");
     setRenameValue(displayTitle);
@@ -3923,7 +3936,7 @@ function SessionPageContent({
                   : project.name}
               </Link>
             )}
-            <div className="session-title-row">
+            <div ref={titleRowRef} className="session-title-row">
               {isStarred && (
                 <svg
                   className="star-indicator-inline"
@@ -4093,7 +4106,7 @@ function SessionPageContent({
                     type="button"
                     className="session-title session-title-retitle-trigger"
                     onClick={() => handleStartRetitleTitle()}
-                    title={session?.fullTitle ?? displayTitle}
+                    title={titleTooltip}
                   >
                     <span className="session-title-text">{displayTitle}</span>
                   </button>
@@ -4106,12 +4119,13 @@ function SessionPageContent({
                       aria-label={t("sessionGenerateNewTitle")}
                     >
                       <svg
+                        className="session-title-generate-icon"
                         width="15"
                         height="15"
                         viewBox="0 0 24 24"
                         fill="none"
                         stroke="currentColor"
-                        strokeWidth="2"
+                        strokeWidth="1.75"
                         strokeLinecap="round"
                         strokeLinejoin="round"
                         aria-hidden="true"
@@ -4123,12 +4137,22 @@ function SessionPageContent({
                     </button>
                   )}
                   <button
-                    ref={titleButtonRef}
                     type="button"
-                    className="session-title-chevron-trigger"
+                    className={`session-title-chevron-trigger${
+                      showRecentSessions ? " is-open" : ""
+                    }`}
                     onClick={() => setShowRecentSessions(!showRecentSessions)}
-                    title={t("sessionRecentSessions")}
-                    aria-label={t("sessionRecentSessions")}
+                    title={
+                      showRecentSessions
+                        ? t("sessionCloseRecentSessions")
+                        : t("sessionRecentSessions")
+                    }
+                    aria-label={
+                      showRecentSessions
+                        ? t("sessionCloseRecentSessions")
+                        : t("sessionRecentSessions")
+                    }
+                    aria-expanded={showRecentSessions}
                   >
                     <svg
                       className="session-title-chevron"
@@ -4150,7 +4174,7 @@ function SessionPageContent({
                     isOpen={showRecentSessions}
                     onClose={() => setShowRecentSessions(false)}
                     onNavigate={() => setShowRecentSessions(false)}
-                    triggerRef={titleButtonRef}
+                    triggerRef={titleRowRef}
                     basePath={basePath}
                   />
                 </>
@@ -4214,6 +4238,9 @@ function SessionPageContent({
                   onShare={showPublicShareControls ? handleShare : undefined}
                   useFixedPositioning
                   useEllipsisIcon
+                  onOpenChange={(open) => {
+                    if (open) setShowRecentSessions(false);
+                  }}
                 />
               )}
             </div>
@@ -4243,7 +4270,7 @@ function SessionPageContent({
             )}
             {canStopOwnedProcess && (
               <ThinkingIndicator
-                variant="pill"
+                variant="icon"
                 className="session-header-thinking"
               />
             )}

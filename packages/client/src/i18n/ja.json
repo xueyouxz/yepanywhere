@@ -387,6 +387,7 @@
   "sessionErrorPrefix": "エラー:",
   "sessionToggleSidebar": "サイドバーを切り替え",
   "sessionOpenSidebar": "サイドバーを開く",
+  "sessionCloseRecentSessions": "最近のセッションを閉じる",
   "sessionStarredLabel": "スター付き",
   "sessionArchivedBadge": "アーカイブ済み",
   "sessionViewInfo": "セッション情報を表示",

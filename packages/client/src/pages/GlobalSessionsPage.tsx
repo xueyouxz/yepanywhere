@@ -982,6 +982,7 @@ export function GlobalSessionsPage() {
                         session.fullTitle ?? getSessionDisplayTitle(session)
                       }
                       initialPrompt={session.initialPrompt}
+                      hasCustomTitle={!!session.customTitle}
                       lastAgentText={session.lastAgentText}
                       updatedAt={session.updatedAt}
                       createdAt={session.createdAt}
@@ -1058,6 +1059,7 @@ export function GlobalSessionsPage() {
                               getSessionDisplayTitle(session)
                             }
                             initialPrompt={session.initialPrompt}
+                            hasCustomTitle={!!session.customTitle}
                             lastAgentText={session.lastAgentText}
                             updatedAt={session.updatedAt}
                             createdAt={session.createdAt}

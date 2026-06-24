@@ -197,8 +197,9 @@ describe("SessionListItem links", () => {
             <SessionListItem
               sessionId="failed-1"
               projectId="project-1"
-              title="Short title"
+              title="Custom title"
               fullTitle="Full initial prompt that should be recoverable"
+              hasCustomTitle
               provider="claude"
               mode="compact"
             />
@@ -215,6 +216,66 @@ describe("SessionListItem links", () => {
         "Full initial prompt that should be recoverable",
       );
     });
+  });
+
+  it("uses custom titles for native row tooltips", () => {
+    render(
+      <I18nProvider>
+        <MemoryRouter>
+          <ul>
+            <SessionListItem
+              sessionId="session-1"
+              projectId="project-1"
+              title="Custom title"
+              fullTitle="Original first turn"
+              hasCustomTitle
+              mode="compact"
+            />
+          </ul>
+        </MemoryRouter>
+      </I18nProvider>,
+    );
+
+    expect(
+      screen.getByRole("link", { name: /Custom title/ }).getAttribute("title"),
+    ).toBe("Custom title");
+  });
+
+  it("uses custom titles for session hover previews", () => {
+    vi.useFakeTimers();
+
+    render(
+      <I18nProvider>
+        <MemoryRouter>
+          <ul>
+            <SessionListItem
+              sessionId="session-1"
+              projectId="project-1"
+              title="Custom title"
+              fullTitle="Original first turn"
+              initialPrompt="Original first turn"
+              hasCustomTitle
+              provider="claude"
+              status={{ owner: "self", processId: "pid-1" }}
+              mode="compact"
+            />
+          </ul>
+        </MemoryRouter>
+      </I18nProvider>,
+    );
+
+    const item = screen
+      .getByRole("link", { name: /Custom title/ })
+      .closest("li");
+    expect(item).toBeTruthy();
+
+    fireEvent.mouseEnter(item!, { clientX: 20 });
+    act(() => {
+      vi.advanceTimersByTime(DEFAULT_HOVERCARD_SHOW_DELAY_MS);
+    });
+
+    const hoverTurn = document.querySelector(".session-hovercard__turn");
+    expect(hoverTurn?.textContent).toBe("Custom title");
   });
 
   it("delays session hover previews", () => {
@@ -253,6 +314,49 @@ describe("SessionListItem links", () => {
       vi.advanceTimersByTime(1);
     });
     expect(screen.getByText("Delayed hover prompt")).toBeTruthy();
+  });
+
+  it("keeps a session hover preview open while the pointer is over the card", () => {
+    vi.useFakeTimers();
+
+    render(
+      <I18nProvider>
+        <MemoryRouter>
+          <ul>
+            <SessionListItem
+              sessionId="session-1"
+              projectId="project-1"
+              title="Selectable hover"
+              initialPrompt="Selectable hover prompt"
+              lastAgentText="Selectable recap text"
+              provider="claude"
+              status={{ owner: "self", processId: "pid-1" }}
+              mode="compact"
+            />
+          </ul>
+        </MemoryRouter>
+      </I18nProvider>,
+    );
+
+    const item = screen
+      .getByRole("link", { name: /Selectable hover/ })
+      .closest("li");
+    expect(item).toBeTruthy();
+
+    fireEvent.mouseEnter(item!, { clientX: 20 });
+    act(() => {
+      vi.advanceTimersByTime(DEFAULT_HOVERCARD_SHOW_DELAY_MS);
+    });
+
+    const hoverCard = document.querySelector(".session-hovercard");
+    expect(hoverCard).toBeTruthy();
+    expect(screen.getByText("Selectable recap text")).toBeTruthy();
+
+    fireEvent.mouseLeave(item!, { relatedTarget: hoverCard });
+    expect(screen.getByText("Selectable recap text")).toBeTruthy();
+
+    fireEvent.mouseLeave(hoverCard!);
+    expect(screen.queryByText("Selectable recap text")).toBeNull();
   });
 
   it("keeps only one session hover preview visible", () => {

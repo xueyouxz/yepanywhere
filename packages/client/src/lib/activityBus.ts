@@ -476,6 +476,16 @@ class ActivityBus {
     };
   }
 
+  emitLocal<K extends ActivityEventType>(
+    eventType: K,
+    data: ActivityEventMap[K],
+  ): void {
+    if (this.debugEnabled) {
+      console.log("[ActivityBus] Dispatching local event:", eventType, data);
+    }
+    this.emit(eventType, data);
+  }
+
   private emit<K extends ActivityEventType>(
     eventType: K,
     data: ActivityEventMap[K],
