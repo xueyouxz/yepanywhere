@@ -577,16 +577,50 @@ export function AppearanceSettings() {
         </div>
         <div className="settings-item">
           <div className="settings-item-info">
-            <strong>{t("appearanceToolbarSettingsShortcutTitle")}</strong>
-            <p>{t("appearanceToolbarSettingsShortcutDescription")}</p>
+            <strong>{t("appearanceContentWidthTitle")}</strong>
+            <p>{t("appearanceContentWidthDescription")}</p>
           </div>
           <div className="settings-item-actions">
+            <CommittedRangeInput
+              min={MIN_CONTENT_MAX_WIDTH_PX}
+              max={MAX_CONTENT_MAX_WIDTH_PX}
+              step={10}
+              value={contentMaxWidth}
+              onDraftChange={(value) => setContentMaxWidthDraft(String(value))}
+              onCommit={setContentMaxWidth}
+              aria-label={t("appearanceContentWidthTitle")}
+            />
+            <span className="settings-input-unit">
+              <input
+                type="number"
+                className="settings-input-small"
+                min={MIN_CONTENT_MAX_WIDTH_PX}
+                max={MAX_CONTENT_MAX_WIDTH_PX}
+                step={10}
+                value={contentMaxWidthDraft}
+                onChange={(e) => setContentMaxWidthDraft(e.target.value)}
+                onBlur={commitContentMaxWidth}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    commitContentMaxWidth();
+                    e.currentTarget.blur();
+                  }
+                }}
+                aria-label={t("appearanceContentWidthTitle")}
+              />
+              {t("appearanceContentWidthUnit")}
+            </span>
             <button
               type="button"
-              className="settings-button"
-              onClick={() => navigate(`${basePath}/settings/toolbar`)}
+              className="settings-inline-x"
+              onClick={() => {
+                setContentMaxWidth(DEFAULT_CONTENT_MAX_WIDTH_PX);
+                setContentMaxWidthDraft(String(DEFAULT_CONTENT_MAX_WIDTH_PX));
+              }}
+              aria-label={t("appearanceContentWidthReset")}
+              title={t("appearanceContentWidthReset")}
             >
-              {t("appearanceToolbarSettingsShortcutAction")}
+              ×
             </button>
           </div>
         </div>
@@ -1082,55 +1116,6 @@ export function AppearanceSettings() {
         </div>
         <div className="settings-item">
           <div className="settings-item-info">
-            <strong>{t("appearanceContentWidthTitle")}</strong>
-            <p>{t("appearanceContentWidthDescription")}</p>
-          </div>
-          <div className="settings-item-actions">
-            <CommittedRangeInput
-              min={MIN_CONTENT_MAX_WIDTH_PX}
-              max={MAX_CONTENT_MAX_WIDTH_PX}
-              step={10}
-              value={contentMaxWidth}
-              onDraftChange={(value) => setContentMaxWidthDraft(String(value))}
-              onCommit={setContentMaxWidth}
-              aria-label={t("appearanceContentWidthTitle")}
-            />
-            <span className="settings-input-unit">
-              <input
-                type="number"
-                className="settings-input-small"
-                min={MIN_CONTENT_MAX_WIDTH_PX}
-                max={MAX_CONTENT_MAX_WIDTH_PX}
-                step={10}
-                value={contentMaxWidthDraft}
-                onChange={(e) => setContentMaxWidthDraft(e.target.value)}
-                onBlur={commitContentMaxWidth}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    commitContentMaxWidth();
-                    e.currentTarget.blur();
-                  }
-                }}
-                aria-label={t("appearanceContentWidthTitle")}
-              />
-              {t("appearanceContentWidthUnit")}
-            </span>
-            <button
-              type="button"
-              className="settings-inline-x"
-              onClick={() => {
-                setContentMaxWidth(DEFAULT_CONTENT_MAX_WIDTH_PX);
-                setContentMaxWidthDraft(String(DEFAULT_CONTENT_MAX_WIDTH_PX));
-              }}
-              aria-label={t("appearanceContentWidthReset")}
-              title={t("appearanceContentWidthReset")}
-            >
-              ×
-            </button>
-          </div>
-        </div>
-        <div className="settings-item">
-          <div className="settings-item-info">
             <strong>{t("appearanceGeneratedTitleLengthTitle")}</strong>
             <p>{t("appearanceGeneratedTitleLengthDescription")}</p>
           </div>
@@ -1404,6 +1389,21 @@ export function AppearanceSettings() {
             />
             <span className="toggle-slider" />
           </label>
+        </div>
+        <div className="settings-item">
+          <div className="settings-item-info">
+            <strong>{t("appearanceToolbarSettingsShortcutTitle")}</strong>
+            <p>{t("appearanceToolbarSettingsShortcutDescription")}</p>
+          </div>
+          <div className="settings-item-actions">
+            <button
+              type="button"
+              className="settings-button"
+              onClick={() => navigate(`${basePath}/settings/toolbar`)}
+            >
+              {t("appearanceToolbarSettingsShortcutAction")}
+            </button>
+          </div>
         </div>
       </div>
     </section>
