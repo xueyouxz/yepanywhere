@@ -8728,13 +8728,13 @@ a.sidebar-nav-item {
 
 /*
  * Specimen alongside the controls. The switch is structural, not a tuned
- * pixel: alongside whenever the specimen can fit in at most half the panel
- * (threshold = 2x its side-column min of 13rem); below that it stacks
- * full-width per the rule above. In the alongside case the panel is a flex row
- * where the controls hold priority -- the specimen is capped to its side-column
- * width (16rem) and yields toward 13rem when space is tight, so the controls
- * never get starved below an operable width. The shared-space behaviour is the
- * flex allocator's job; no column width is matched to a target viewport.
+ * pixel: alongside once the panel passes the 26rem threshold; below that it
+ * stacks full-width per the rule above. In the alongside case the panel is a
+ * flex row where the controls hold priority -- the specimen is capped to its
+ * side-column width (17.6rem) and yields toward 14.3rem when space is tight, so
+ * the controls never get starved below an operable width. The shared-space
+ * behaviour is the flex allocator's job; no column width is matched to a target
+ * viewport.
  */
 @container output-appearance (min-width: 26rem) {
   .output-appearance-panel {
@@ -8750,11 +8750,11 @@ a.sidebar-nav-item {
   }
 
   .output-appearance-specimen {
-    flex: 1 1 16rem;
+    flex: 1 1 17.6rem;
     justify-self: auto;
     width: auto;
-    min-width: 13rem;
-    max-width: 16rem;
+    min-width: 14.3rem;
+    max-width: 17.6rem;
   }
 }
 

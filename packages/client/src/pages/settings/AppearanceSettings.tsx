@@ -572,6 +572,46 @@ export function AppearanceSettings() {
             </button>
           </div>
         </div>
+        <div className="settings-item">
+          <div className="settings-item-info">
+            <strong>{t("appearanceOutputToolPreviewLinesLabel")}</strong>
+          </div>
+          <div className="settings-item-actions">
+            <input
+              type="range"
+              min={OUTPUT_TOOL_PREVIEW_LINE_COUNT_MIN}
+              max={OUTPUT_TOOL_PREVIEW_LINE_COUNT_MAX}
+              step={OUTPUT_TOOL_PREVIEW_LINE_COUNT_STEP}
+              value={outputToolPreviewLineCount}
+              onChange={(e) =>
+                setOutputToolPreviewLineCount(Number(e.target.value))
+              }
+              aria-label={t("appearanceOutputToolPreviewLinesLabel")}
+            />
+            <span className="settings-input-unit">
+              <input
+                type="number"
+                className="settings-input-small"
+                min={OUTPUT_TOOL_PREVIEW_LINE_COUNT_MIN}
+                max={OUTPUT_TOOL_PREVIEW_LINE_COUNT_MAX}
+                step={OUTPUT_TOOL_PREVIEW_LINE_COUNT_STEP}
+                value={outputToolPreviewLineCountDraft}
+                onChange={(e) =>
+                  setOutputToolPreviewLineCountDraft(e.target.value)
+                }
+                onBlur={commitOutputToolPreviewLineCount}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    commitOutputToolPreviewLineCount();
+                    e.currentTarget.blur();
+                  }
+                }}
+                aria-label={t("appearanceOutputToolPreviewLinesLabel")}
+              />
+              {t("appearanceOutputToolPreviewLinesUnit")}
+            </span>
+          </div>
+        </div>
         <div className="settings-item output-appearance-settings">
           <div className="output-appearance-panel">
             <div className="output-appearance-controls">
@@ -882,52 +922,6 @@ export function AppearanceSettings() {
                       aria-label={t("appearanceOutputVerticalSpacingLabel")}
                     />
                     <span className="output-appearance-unit">%</span>
-                  </span>
-                </span>
-              </label>
-
-              <label
-                className="output-appearance-control"
-                htmlFor="output-tool-preview-lines"
-              >
-                <span className="output-appearance-label">
-                  {t("appearanceOutputToolPreviewLinesLabel")}
-                </span>
-                <span className="output-appearance-slider-row">
-                  <input
-                    id="output-tool-preview-lines"
-                    type="range"
-                    min={OUTPUT_TOOL_PREVIEW_LINE_COUNT_MIN}
-                    max={OUTPUT_TOOL_PREVIEW_LINE_COUNT_MAX}
-                    step={OUTPUT_TOOL_PREVIEW_LINE_COUNT_STEP}
-                    value={outputToolPreviewLineCount}
-                    onChange={(e) =>
-                      setOutputToolPreviewLineCount(Number(e.target.value))
-                    }
-                  />
-                  <span className="output-appearance-number-wrap">
-                    <input
-                      type="number"
-                      className="settings-input-small output-appearance-number"
-                      min={OUTPUT_TOOL_PREVIEW_LINE_COUNT_MIN}
-                      max={OUTPUT_TOOL_PREVIEW_LINE_COUNT_MAX}
-                      step={OUTPUT_TOOL_PREVIEW_LINE_COUNT_STEP}
-                      value={outputToolPreviewLineCountDraft}
-                      onChange={(e) =>
-                        setOutputToolPreviewLineCountDraft(e.target.value)
-                      }
-                      onBlur={commitOutputToolPreviewLineCount}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          commitOutputToolPreviewLineCount();
-                          e.currentTarget.blur();
-                        }
-                      }}
-                      aria-label={t("appearanceOutputToolPreviewLinesLabel")}
-                    />
-                    <span className="output-appearance-unit">
-                      {t("appearanceOutputToolPreviewLinesUnit")}
-                    </span>
                   </span>
                 </span>
               </label>
