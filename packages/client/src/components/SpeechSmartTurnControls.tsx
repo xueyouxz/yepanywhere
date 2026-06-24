@@ -1,9 +1,10 @@
-import { type ChangeEvent, useId } from "react";
+import { useId } from "react";
 import { useI18n } from "../i18n";
 import {
   DEFAULT_SPEECH_SMART_TURN_SETTINGS,
   type SpeechSmartTurnSettings,
 } from "../lib/speechProviders/SpeechProvider";
+import { CommittedRangeInput } from "./ui/CommittedRangeInput";
 
 const MAX_SMART_TURN_TIMEOUT_MS = 10000;
 
@@ -58,11 +59,11 @@ export function SpeechSmartTurnControls({
       update({ enabled: true });
     }
   };
-  const handleThresholdChange = (event: ChangeEvent<HTMLInputElement>) => {
-    update({ enabled: true, threshold: Number(event.target.value) });
+  const commitThreshold = (threshold: number) => {
+    update({ enabled: true, threshold });
   };
-  const handleTimeoutChange = (event: ChangeEvent<HTMLInputElement>) => {
-    update({ enabled: true, timeoutMs: Number(event.target.value) });
+  const commitTimeout = (timeoutMs: number) => {
+    update({ enabled: true, timeoutMs });
   };
   const body = (
     <div className="speech-smart-turn-body">
@@ -77,9 +78,8 @@ export function SpeechSmartTurnControls({
       </label>
       <div className="speech-smart-turn-row">
         <label htmlFor={thresholdId}>Threshold</label>
-        <input
+        <CommittedRangeInput
           id={thresholdId}
-          type="range"
           min="0"
           max="1"
           step="0.01"
@@ -87,7 +87,7 @@ export function SpeechSmartTurnControls({
           disabled={disabled}
           onFocus={activate}
           onPointerDown={activate}
-          onChange={handleThresholdChange}
+          onCommit={commitThreshold}
         />
         <input
           type="number"
@@ -98,7 +98,7 @@ export function SpeechSmartTurnControls({
           disabled={disabled}
           onFocus={activate}
           onPointerDown={activate}
-          onChange={handleThresholdChange}
+          onChange={(event) => commitThreshold(Number(event.target.value))}
           aria-describedby={thresholdHintId}
           aria-label="Smart Turn threshold"
         />
@@ -108,9 +108,8 @@ export function SpeechSmartTurnControls({
       </div>
       <div className="speech-smart-turn-row">
         <label htmlFor={timeoutId}>Timeout</label>
-        <input
+        <CommittedRangeInput
           id={timeoutId}
-          type="range"
           min="0"
           max="10000"
           step="100"
@@ -118,7 +117,7 @@ export function SpeechSmartTurnControls({
           disabled={disabled}
           onFocus={activate}
           onPointerDown={activate}
-          onChange={handleTimeoutChange}
+          onCommit={commitTimeout}
         />
         <input
           type="number"
@@ -129,7 +128,7 @@ export function SpeechSmartTurnControls({
           disabled={disabled}
           onFocus={activate}
           onPointerDown={activate}
-          onChange={handleTimeoutChange}
+          onChange={(event) => commitTimeout(Number(event.target.value))}
           aria-label="Smart Turn timeout milliseconds"
         />
       </div>

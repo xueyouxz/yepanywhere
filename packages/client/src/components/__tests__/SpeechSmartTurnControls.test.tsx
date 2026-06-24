@@ -18,9 +18,7 @@ function SmartTurnHarness() {
     timeoutMs: 3000,
   });
 
-  return (
-    <SpeechSmartTurnControls settings={settings} onChange={setSettings} />
-  );
+  return <SpeechSmartTurnControls settings={settings} onChange={setSettings} />;
 }
 
 describe("SpeechSmartTurnControls", () => {
@@ -36,9 +34,12 @@ describe("SpeechSmartTurnControls", () => {
     });
     expect(checkbox.checked).toBe(false);
 
-    fireEvent.change(screen.getByLabelText("Threshold"), {
+    const slider = screen.getByLabelText("Threshold");
+    fireEvent.pointerDown(slider);
+    fireEvent.change(slider, {
       target: { value: "0.82" },
     });
+    fireEvent.pointerUp(slider);
 
     expect(checkbox.checked).toBe(true);
   });
@@ -51,9 +52,7 @@ describe("SpeechSmartTurnControls", () => {
     );
 
     expect(screen.getByText("1 requires perfect confidence.")).toBeDefined();
-    expect(screen.getByLabelText("Timeout").getAttribute("max")).toBe(
-      "10000",
-    );
+    expect(screen.getByLabelText("Timeout").getAttribute("max")).toBe("10000");
     expect(
       screen
         .getByLabelText("Smart Turn timeout milliseconds")

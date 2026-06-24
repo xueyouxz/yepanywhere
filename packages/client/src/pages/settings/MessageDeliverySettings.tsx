@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CommittedRangeInput } from "../../components/ui/CommittedRangeInput";
 import { useServerSettings } from "../../hooks/useServerSettings";
 import { useI18n } from "../../i18n";
 import { useSettingsUndo } from "./SettingsUndoContext";
@@ -161,9 +162,8 @@ export function MessageDeliverySettings() {
             <p>{t("messageDeliveryJoinWindowDescription")}</p>
           </div>
           <span className="output-appearance-slider-row">
-            <input
+            <CommittedRangeInput
               id="message-delivery-join-window"
-              type="range"
               min={0}
               max={JOIN_WINDOW_SLIDER_MAX_SECONDS}
               step={5}
@@ -171,7 +171,8 @@ export function MessageDeliverySettings() {
                 shownJoinWindowSeconds,
                 JOIN_WINDOW_SLIDER_MAX_SECONDS,
               )}
-              onChange={(e) => setDraftJoinWindow(e.target.value)}
+              aria-label={t("messageDeliveryJoinWindowTitle")}
+              onCommit={(value) => setDraftJoinWindow(String(value))}
             />
             <span className="output-appearance-number-wrap">
               <input

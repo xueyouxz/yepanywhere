@@ -45,6 +45,7 @@ import {
   FilterDropdown,
   type FilterOption,
 } from "../../components/FilterDropdown";
+import { CommittedRangeInput } from "../../components/ui/CommittedRangeInput";
 import { ProviderBadge } from "../../components/ProviderBadge";
 import { RecapAfterSecondsControl } from "../../components/RecapAfterSecondsControl";
 import { ThinkingControlsPanel } from "../../components/ThinkingControls";
@@ -517,9 +518,9 @@ export function ModelSettings() {
     if (!selectedProvider) return;
 
     const current = settings?.promptCacheKeepalive ?? {};
-    const providersByName = { ...(current.providers ?? {}) };
+    const providersByName = { ...current.providers };
     providersByName[selectedProvider.name] = {
-      ...(providersByName[selectedProvider.name] ?? {}),
+      ...providersByName[selectedProvider.name],
       ...updates,
     };
 
@@ -641,19 +642,15 @@ export function ModelSettings() {
                 {t("modelSettingsCompactThresholdDescription")}
               </p>
               <span className="output-appearance-slider-row">
-                <input
-                  type="range"
+                <CommittedRangeInput
                   min={0}
                   max={99}
                   step={1}
                   value={compactPercentDraft}
                   disabled={settingsLoading}
                   aria-label={t("modelSettingsCompactThresholdTitle")}
-                  onChange={(e) =>
-                    setCompactPercentDraft(Number(e.target.value))
-                  }
-                  onPointerUp={() => commitCompactPercent(compactPercentDraft)}
-                  onKeyUp={() => commitCompactPercent(compactPercentDraft)}
+                  onDraftChange={setCompactPercentDraft}
+                  onCommit={commitCompactPercent}
                 />
                 <span className="output-appearance-number-wrap">
                   <input

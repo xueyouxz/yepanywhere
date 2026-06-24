@@ -77,7 +77,7 @@ describe("MessageDeliverySettings", () => {
     vi.useFakeTimers();
     render(<MessageDeliverySettings />);
 
-    fireEvent.change(screen.getByLabelText("messageDeliveryJoinWindowTitle"), {
+    fireEvent.change(screen.getByRole("spinbutton"), {
       target: { value: "30" },
     });
     expect(mockUpdateSettings).not.toHaveBeenCalled();
@@ -85,6 +85,26 @@ describe("MessageDeliverySettings", () => {
     vi.advanceTimersByTime(500);
     expect(mockUpdateSettings).toHaveBeenCalledWith({
       deferredJoinWindowSeconds: 30,
+    });
+  });
+
+  it("does not save the join-window slider until release", () => {
+    vi.useFakeTimers();
+    render(<MessageDeliverySettings />);
+
+    const slider = screen.getByRole<HTMLInputElement>("slider", {
+      name: "messageDeliveryJoinWindowTitle",
+    });
+    fireEvent.change(slider, { target: { value: "45" } });
+
+    vi.advanceTimersByTime(500);
+    expect(mockUpdateSettings).not.toHaveBeenCalled();
+
+    fireEvent.pointerUp(slider);
+    vi.advanceTimersByTime(500);
+
+    expect(mockUpdateSettings).toHaveBeenCalledWith({
+      deferredJoinWindowSeconds: 45,
     });
   });
 

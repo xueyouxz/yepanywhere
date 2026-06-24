@@ -4,6 +4,7 @@ import { useServerSettings } from "../hooks/useServerSettings";
 import { useI18n } from "../i18n";
 import type { ContextUsage } from "../types";
 import { ContextUsageIndicator } from "./ContextUsageIndicator";
+import { CommittedRangeInput } from "./ui/CommittedRangeInput";
 
 interface ContextThresholdQuickEditProps {
   usage?: ContextUsage;
@@ -164,16 +165,14 @@ export function ContextThresholdQuickEdit({
           <div className="context-threshold-popover-title">
             {t("compactThresholdQuickTitle")}
           </div>
-          <input
-            type="range"
+          <CommittedRangeInput
             min={0}
             max={99}
             step={1}
             value={draft}
             aria-label={t("compactThresholdQuickTitle")}
-            onChange={(e) => setDraft(Number(e.target.value))}
-            onPointerUp={() => commit(draft)}
-            onKeyUp={() => commit(draft)}
+            onDraftChange={setDraft}
+            onCommit={commit}
           />
           <div className="context-threshold-popover-hint">
             {draft > 0

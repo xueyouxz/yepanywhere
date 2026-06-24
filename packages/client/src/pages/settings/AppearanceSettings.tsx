@@ -92,6 +92,7 @@ import {
   settingsCategoryEmojiIcons,
   settingsCategoryIcons,
 } from "./SettingsCategoryIcons";
+import { CommittedRangeInput } from "../../components/ui/CommittedRangeInput";
 
 const OUTPUT_INLINE_MATH_SAMPLE = "$E=mc^2$";
 
@@ -594,15 +595,15 @@ export function AppearanceSettings() {
             <strong>{t("appearanceOutputToolPreviewLinesLabel")}</strong>
           </div>
           <div className="settings-item-actions">
-            <input
-              type="range"
+            <CommittedRangeInput
               min={OUTPUT_TOOL_PREVIEW_LINE_COUNT_MIN}
               max={OUTPUT_TOOL_PREVIEW_LINE_COUNT_MAX}
               step={OUTPUT_TOOL_PREVIEW_LINE_COUNT_STEP}
               value={outputToolPreviewLineCount}
-              onChange={(e) =>
-                setOutputToolPreviewLineCount(Number(e.target.value))
+              onDraftChange={(value) =>
+                setOutputToolPreviewLineCountDraft(formatNumberSetting(value))
               }
+              onCommit={setOutputToolPreviewLineCount}
               aria-label={t("appearanceOutputToolPreviewLinesLabel")}
             />
             <span className="settings-input-unit">
@@ -697,17 +698,17 @@ export function AppearanceSettings() {
                   {t("appearanceOutputFontSizeLabel")}
                 </span>
                 <span className="output-appearance-slider-row">
-                  <input
+                  <CommittedRangeInput
                     id="output-font-size"
-                    type="range"
                     min={OUTPUT_FONT_SIZE_MIN_PX}
                     max={OUTPUT_FONT_SIZE_MAX_PX}
                     step={OUTPUT_FONT_SIZE_STEP_PX}
                     value={outputFontSizePx}
                     list="output-font-size-presets"
-                    onChange={(e) =>
-                      setOutputFontSizePx(Number(e.target.value))
+                    onDraftChange={(value) =>
+                      setOutputFontSizeDraft(formatNumberSetting(value))
                     }
+                    onCommit={setOutputFontSizePx}
                   />
                   <span className="output-appearance-number-wrap">
                     <input
@@ -749,16 +750,18 @@ export function AppearanceSettings() {
                   {t("appearanceOutputThinkingSizeOffsetLabel")}
                 </span>
                 <span className="output-appearance-slider-row">
-                  <input
+                  <CommittedRangeInput
                     id="output-thinking-size-offset"
-                    type="range"
                     min={OUTPUT_THINKING_FONT_SIZE_OFFSET_MIN_PX}
                     max={OUTPUT_THINKING_FONT_SIZE_OFFSET_MAX_PX}
                     step={OUTPUT_THINKING_FONT_SIZE_OFFSET_STEP_PX}
                     value={outputThinkingFontSizeOffsetPx}
-                    onChange={(e) =>
-                      setOutputThinkingFontSizeOffsetPx(Number(e.target.value))
+                    onDraftChange={(value) =>
+                      setOutputThinkingFontSizeOffsetDraft(
+                        formatNumberSetting(value),
+                      )
                     }
+                    onCommit={setOutputThinkingFontSizeOffsetPx}
                   />
                   <span className="output-appearance-number-wrap">
                     <input
@@ -811,16 +814,18 @@ export function AppearanceSettings() {
                   {t("appearanceOutputFixedSizeOffsetLabel")}
                 </span>
                 <span className="output-appearance-slider-row">
-                  <input
+                  <CommittedRangeInput
                     id="output-fixed-size-offset"
-                    type="range"
                     min={OUTPUT_FIXED_FONT_SIZE_OFFSET_MIN_PX}
                     max={OUTPUT_FIXED_FONT_SIZE_OFFSET_MAX_PX}
                     step={OUTPUT_FIXED_FONT_SIZE_OFFSET_STEP_PX}
                     value={outputFixedFontSizeOffsetPx}
-                    onChange={(e) =>
-                      setOutputFixedFontSizeOffsetPx(Number(e.target.value))
+                    onDraftChange={(value) =>
+                      setOutputFixedFontSizeOffsetDraft(
+                        formatNumberSetting(value),
+                      )
                     }
+                    onCommit={setOutputFixedFontSizeOffsetPx}
                   />
                   <span className="output-appearance-number-wrap">
                     <input
@@ -855,16 +860,18 @@ export function AppearanceSettings() {
                   {t("appearanceOutputMathSizeOffsetLabel")}
                 </span>
                 <span className="output-appearance-slider-row">
-                  <input
+                  <CommittedRangeInput
                     id="output-math-size-offset"
-                    type="range"
                     min={OUTPUT_MATH_FONT_SIZE_OFFSET_MIN_PX}
                     max={OUTPUT_MATH_FONT_SIZE_OFFSET_MAX_PX}
                     step={OUTPUT_MATH_FONT_SIZE_OFFSET_STEP_PX}
                     value={outputMathFontSizeOffsetPx}
-                    onChange={(e) =>
-                      setOutputMathFontSizeOffsetPx(Number(e.target.value))
+                    onDraftChange={(value) =>
+                      setOutputMathFontSizeOffsetDraft(
+                        formatNumberSetting(value),
+                      )
                     }
+                    onCommit={setOutputMathFontSizeOffsetPx}
                   />
                   <span className="output-appearance-number-wrap">
                     <input
@@ -899,16 +906,16 @@ export function AppearanceSettings() {
                   {t("appearanceOutputLineSpacingLabel")}
                 </span>
                 <span className="output-appearance-slider-row">
-                  <input
+                  <CommittedRangeInput
                     id="output-line-spacing"
-                    type="range"
                     min={OUTPUT_LINE_SPACING_MIN_PERCENT}
                     max={OUTPUT_LINE_SPACING_MAX_PERCENT}
                     step={OUTPUT_LINE_SPACING_STEP_PERCENT}
                     value={outputLineSpacingPercent}
-                    onChange={(e) =>
-                      setOutputLineSpacingPercent(Number(e.target.value))
+                    onDraftChange={(value) =>
+                      setOutputLineSpacingDraft(formatNumberSetting(value))
                     }
+                    onCommit={setOutputLineSpacingPercent}
                   />
                   <span className="output-appearance-number-wrap">
                     <input
@@ -943,16 +950,16 @@ export function AppearanceSettings() {
                   {t("appearanceOutputVerticalSpacingLabel")}
                 </span>
                 <span className="output-appearance-slider-row">
-                  <input
+                  <CommittedRangeInput
                     id="output-vertical-spacing"
-                    type="range"
                     min={OUTPUT_VERTICAL_SPACING_MIN_PERCENT}
                     max={OUTPUT_VERTICAL_SPACING_MAX_PERCENT}
                     step={OUTPUT_VERTICAL_SPACING_STEP_PERCENT}
                     value={outputVerticalSpacingPercent}
-                    onChange={(e) =>
-                      setOutputVerticalSpacingPercent(Number(e.target.value))
+                    onDraftChange={(value) =>
+                      setOutputVerticalSpacingDraft(formatNumberSetting(value))
                     }
+                    onCommit={setOutputVerticalSpacingPercent}
                   />
                   <span className="output-appearance-number-wrap">
                     <input
@@ -1079,13 +1086,13 @@ export function AppearanceSettings() {
             <p>{t("appearanceContentWidthDescription")}</p>
           </div>
           <div className="settings-item-actions">
-            <input
-              type="range"
+            <CommittedRangeInput
               min={MIN_CONTENT_MAX_WIDTH_PX}
               max={MAX_CONTENT_MAX_WIDTH_PX}
               step={10}
               value={contentMaxWidth}
-              onChange={(e) => setContentMaxWidth(Number(e.target.value))}
+              onDraftChange={(value) => setContentMaxWidthDraft(String(value))}
+              onCommit={setContentMaxWidth}
               aria-label={t("appearanceContentWidthTitle")}
             />
             <span className="settings-input-unit">
@@ -1128,13 +1135,15 @@ export function AppearanceSettings() {
             <p>{t("appearanceGeneratedTitleLengthDescription")}</p>
           </div>
           <div className="settings-item-actions">
-            <input
-              type="range"
+            <CommittedRangeInput
               min={GENERATED_TITLE_LENGTH_MIN}
               max={GENERATED_TITLE_LENGTH_MAX}
               step={GENERATED_TITLE_LENGTH_STEP}
               value={generatedTitleLength}
-              onChange={(e) => setGeneratedTitleLength(Number(e.target.value))}
+              onDraftChange={(value) =>
+                setGeneratedTitleLengthDraft(String(value))
+              }
+              onCommit={setGeneratedTitleLength}
               aria-label={t("appearanceGeneratedTitleLengthTitle")}
             />
             <span className="settings-input-unit">
@@ -1179,13 +1188,13 @@ export function AppearanceSettings() {
             <p>{t("appearanceHoverCardDelayDescription")}</p>
           </div>
           <div className="settings-item-actions">
-            <input
-              type="range"
+            <CommittedRangeInput
               min={HOVERCARD_SHOW_DELAY_MIN_MS}
               max={HOVERCARD_SHOW_DELAY_MAX_MS}
               step={HOVERCARD_SHOW_DELAY_STEP_MS}
               value={hoverCardShowDelayMs}
-              onChange={(e) => setHoverCardShowDelayMs(Number(e.target.value))}
+              onDraftChange={(value) => setHoverCardDelayDraft(String(value))}
+              onCommit={setHoverCardShowDelayMs}
               aria-label={t("appearanceHoverCardDelayTitle")}
             />
             <span className="settings-input-unit">
@@ -1228,13 +1237,13 @@ export function AppearanceSettings() {
             <p>{t("appearanceHoverCardHeightDescription")}</p>
           </div>
           <div className="settings-item-actions">
-            <input
-              type="range"
+            <CommittedRangeInput
               min={HOVERCARD_MAX_HEIGHT_MIN_PX}
               max={HOVERCARD_MAX_HEIGHT_MAX_PX}
               step={HOVERCARD_MAX_HEIGHT_STEP_PX}
               value={hoverCardMaxHeightPx}
-              onChange={(e) => setHoverCardMaxHeightPx(Number(e.target.value))}
+              onDraftChange={(value) => setHoverCardHeightDraft(String(value))}
+              onCommit={setHoverCardMaxHeightPx}
               aria-label={t("appearanceHoverCardHeightTitle")}
             />
             <span className="settings-input-unit">
