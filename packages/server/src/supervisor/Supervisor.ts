@@ -503,7 +503,11 @@ export class Supervisor {
   private patientCheckTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private interruptTimeoutMs: number;
   private sessionMetadataService?: SessionMetadataService;
-  private forkedRecapInFlight = new Set<string>();
+  // In-flight forked recaps, keyed by process id. The AbortController cancels
+  // the generator-fork helper turn when the parent becomes active again, so a
+  // returning user's new turn is never shadowed by a stale recap. See
+  // topics/recaps.md.
+  private forkedRecapInFlight = new Map<string, AbortController>();
   private pendingForkedRecapRequests = new Map<string, number | null>();
 
   constructor(options: SupervisorOptions) {
@@ -2116,7 +2120,8 @@ export class Supervisor {
       };
     }
 
-    this.forkedRecapInFlight.add(process.id);
+    const abortController = new AbortController();
+    this.forkedRecapInFlight.set(process.id, abortController);
     let generatorSessionId: string | undefined;
     try {
       const generator = await this.forkSession({
@@ -2139,6 +2144,7 @@ export class Supervisor {
           strategy: "fork",
           generatorSessionId: generator.sessionId,
           cwd: process.projectPath,
+          signal: abortController.signal,
         })
       ).text.trim();
       if (!text) {
@@ -2151,6 +2157,14 @@ export class Supervisor {
       process.emitSyntheticSystemMessage("away_summary", text);
       return { supported: true, emitted: true, text };
     } catch (error) {
+      // Cancellation on parent activity is expected, not a failure.
+      if (abortController.signal.aborted) {
+        return {
+          supported: true,
+          emitted: false,
+          reason: "recap cancelled by new activity",
+        };
+      }
       const reason = error instanceof Error ? error.message : String(error);
       getLogger().warn(
         {
@@ -2168,6 +2182,20 @@ export class Supervisor {
     } finally {
       this.forkedRecapInFlight.delete(process.id);
     }
+  }
+
+  /**
+   * Parent became active again: abort any in-flight forked recap (cancelling
+   * the generator-fork helper turn) and drop a not-yet-started deferred
+   * request, so a returning user's new turn is never shadowed by a stale
+   * recap. See topics/fork-recap.md.
+   */
+  private cancelInFlightForkedRecap(process: Process): void {
+    const abortController = this.forkedRecapInFlight.get(process.id);
+    if (abortController && !abortController.signal.aborted) {
+      abortController.abort();
+    }
+    this.pendingForkedRecapRequests.delete(process.id);
   }
 
   private flushPendingForkedRecapRequest(process: Process): void {
@@ -3057,7 +3085,11 @@ export class Supervisor {
 
     const result =
       process.recapMode === "fork"
-        ? await this.requestForkedRecap(process, provider, options?.sinceMs ?? null)
+        ? await this.requestForkedRecap(
+            process,
+            provider,
+            options?.sinceMs ?? null,
+          )
         : await process.requestRecap(provider, options);
     // A fresh recap is newer than any prior turn, so surface it as the
     // session's current agent line in lists/hovers via the live update path
@@ -3342,6 +3374,11 @@ export class Supervisor {
         if (event.state.type === "idle") {
           this.flushPendingForkedRecapRequest(process);
         }
+        // Parent started a new turn: cancel any in-flight/deferred forked recap
+        // so a returning user's live turn is not shadowed by a stale recap.
+        if (event.state.type === "in-turn") {
+          this.cancelInFlightForkedRecap(process);
+        }
       } else if (event.type === "deferred-queue") {
         if (
           event.reason === "queued" &&
@@ -3430,6 +3467,7 @@ export class Supervisor {
   private unregisterProcess(process: Process): void {
     this.observedProcessIds.delete(process.id);
     this.pendingForkedRecapRequests.delete(process.id);
+    this.forkedRecapInFlight.get(process.id)?.abort();
     this.forkedRecapInFlight.delete(process.id);
     const patientTimer = this.patientCheckTimers.get(process.id);
     if (patientTimer) {
