@@ -66,6 +66,7 @@ import { useDeveloperMode } from "../hooks/useDeveloperMode";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import type { DraftControls } from "../hooks/useDraftPersistence";
 import { useEngagementTracking } from "../hooks/useEngagementTracking";
+import { useGeneratedTitleLength } from "../hooks/useGeneratedTitleLength";
 import {
   getModelSetting,
   getThinkingSetting,
@@ -613,8 +614,6 @@ interface GeneratedRetitleState {
   deferredInsertion?: GeneratedRetitleInsertion;
 }
 
-const SESSION_RETITLE_LENGTH_TARGET = 72;
-
 function createSessionRetitleSubmittedTurnText(
   currentTitle: string,
   lengthTarget: number,
@@ -791,6 +790,7 @@ function SessionPageContent({
 
   // Developer mode settings
   const { showConnectionBars } = useDeveloperMode();
+  const { generatedTitleLength } = useGeneratedTitleLength();
   const { settings: serverSettings } = useServerSettings();
   const publicSharesEnabled = serverSettings?.publicSharesEnabled ?? false;
   const { status: publicShareGlobalStatus } = usePublicShareStatus({
@@ -3505,7 +3505,7 @@ function SessionPageContent({
     retitleRequestIdRef.current = requestId;
     const submittedTurnText = createSessionRetitleSubmittedTurnText(
       displayTitle,
-      SESSION_RETITLE_LENGTH_TARGET,
+      generatedTitleLength,
     );
     if (!supportsForkFromTurn) {
       setRetitleState({
@@ -3529,7 +3529,7 @@ function SessionPageContent({
       try {
         const result = await api.proposeSessionRetitle(projectId, sessionId, {
           currentTitle: displayTitle,
-          lengthTarget: SESSION_RETITLE_LENGTH_TARGET,
+          lengthTarget: generatedTitleLength,
         });
         if (retitleRequestIdRef.current !== requestId) return;
         const current = generatedRetitleRef.current;

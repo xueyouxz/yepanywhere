@@ -74,6 +74,7 @@ export const UI_KEYS = {
   sessionToolbarVisibility: "yep-anywhere-session-toolbar-visibility",
   sessionHoverCardShowDelayMs: "yep-anywhere-session-hover-card-show-delay-ms",
   sessionHoverCardMaxHeightPx: "yep-anywhere-session-hover-card-max-height-px",
+  sessionGeneratedTitleLength: "yep-anywhere-session-generated-title-length",
   alwaysShowQuoteCircles: "yep-anywhere-always-show-quote-circles",
   sessionThinkingVisible: "yep-anywhere-session-thinking-visible",
   sessionThinkingLatestOnly: "yep-anywhere-session-thinking-latest-only",

@@ -25,6 +25,13 @@ import { useAlwaysShowQuoteCircles } from "../../hooks/useAlwaysShowQuoteCircles
 import { useFloatingActionButtonEnabled } from "../../hooks/useFloatingActionButtonEnabled";
 import { FONT_SIZES, useFontSize } from "../../hooks/useFontSize";
 import { useFunPhrases } from "../../hooks/useFunPhrases";
+import {
+  DEFAULT_GENERATED_TITLE_LENGTH,
+  GENERATED_TITLE_LENGTH_MAX,
+  GENERATED_TITLE_LENGTH_MIN,
+  GENERATED_TITLE_LENGTH_STEP,
+  useGeneratedTitleLength,
+} from "../../hooks/useGeneratedTitleLength";
 import { useInlineMedia } from "../../hooks/useInlineMedia";
 import {
   DEFAULT_OUTPUT_FIXED_FONT_SIZE_OFFSET_PX,
@@ -142,6 +149,8 @@ export function AppearanceSettings() {
     setHoverCardShowDelayMs,
     setHoverCardMaxHeightPx,
   } = useHoverCardAppearance();
+  const { generatedTitleLength, setGeneratedTitleLength } =
+    useGeneratedTitleLength();
   // Estimated visible request lines at the chosen height. Uses the with-reply
   // case — the conservative estimate shown when a recent reply is also present.
   const hoverCardHeightLines = estimateHoverCardPromptLines(
@@ -156,6 +165,9 @@ export function AppearanceSettings() {
   );
   const [hoverCardHeightDraft, setHoverCardHeightDraft] = useState(() =>
     String(hoverCardMaxHeightPx),
+  );
+  const [generatedTitleLengthDraft, setGeneratedTitleLengthDraft] = useState(
+    () => String(generatedTitleLength),
   );
   const [outputFontSizeDraft, setOutputFontSizeDraft] = useState(() =>
     formatNumberSetting(outputFontSizePx),
@@ -215,6 +227,7 @@ export function AppearanceSettings() {
       contentMaxWidth,
       hoverCardShowDelayMs,
       hoverCardMaxHeightPx,
+      generatedTitleLength,
       theme,
       settingsIconStyle,
       streamingEnabled,
@@ -243,6 +256,7 @@ export function AppearanceSettings() {
       contentMaxWidth,
       hoverCardShowDelayMs,
       hoverCardMaxHeightPx,
+      generatedTitleLength,
       theme,
       settingsIconStyle,
       streamingEnabled,
@@ -275,6 +289,7 @@ export function AppearanceSettings() {
       setContentMaxWidth(snapshot.contentMaxWidth);
       setHoverCardShowDelayMs(snapshot.hoverCardShowDelayMs);
       setHoverCardMaxHeightPx(snapshot.hoverCardMaxHeightPx);
+      setGeneratedTitleLength(snapshot.generatedTitleLength);
       setTheme(snapshot.theme);
       setSettingsIconStyle(snapshot.settingsIconStyle);
       setStreamingEnabled(snapshot.streamingEnabled);
@@ -288,6 +303,7 @@ export function AppearanceSettings() {
       setContentMaxWidthDraft(String(snapshot.contentMaxWidth));
       setHoverCardDelayDraft(String(snapshot.hoverCardShowDelayMs));
       setHoverCardHeightDraft(String(snapshot.hoverCardMaxHeightPx));
+      setGeneratedTitleLengthDraft(String(snapshot.generatedTitleLength));
       setOutputFontSizeDraft(formatNumberSetting(snapshot.outputFontSizePx));
       setOutputFixedFontSizeOffsetDraft(
         formatNumberSetting(snapshot.outputFixedFontSizeOffsetPx),
@@ -325,6 +341,7 @@ export function AppearanceSettings() {
       setContentMaxWidth,
       setHoverCardShowDelayMs,
       setHoverCardMaxHeightPx,
+      setGeneratedTitleLength,
       setTheme,
       setSettingsIconStyle,
       setStreamingEnabled,
@@ -352,6 +369,10 @@ export function AppearanceSettings() {
   useEffect(() => {
     setHoverCardHeightDraft(String(hoverCardMaxHeightPx));
   }, [hoverCardMaxHeightPx]);
+
+  useEffect(() => {
+    setGeneratedTitleLengthDraft(String(generatedTitleLength));
+  }, [generatedTitleLength]);
 
   useEffect(() => {
     setOutputFontSizeDraft(formatNumberSetting(outputFontSizePx));
@@ -409,6 +430,13 @@ export function AppearanceSettings() {
     const parsed = Number(hoverCardHeightDraft);
     setHoverCardMaxHeightPx(
       Number.isFinite(parsed) ? parsed : DEFAULT_HOVERCARD_MAX_HEIGHT_PX,
+    );
+  };
+
+  const commitGeneratedTitleLength = () => {
+    const parsed = Number(generatedTitleLengthDraft);
+    setGeneratedTitleLength(
+      Number.isFinite(parsed) ? parsed : DEFAULT_GENERATED_TITLE_LENGTH,
     );
   };
 
@@ -1089,6 +1117,57 @@ export function AppearanceSettings() {
               }}
               aria-label={t("appearanceContentWidthReset")}
               title={t("appearanceContentWidthReset")}
+            >
+              ×
+            </button>
+          </div>
+        </div>
+        <div className="settings-item">
+          <div className="settings-item-info">
+            <strong>{t("appearanceGeneratedTitleLengthTitle")}</strong>
+            <p>{t("appearanceGeneratedTitleLengthDescription")}</p>
+          </div>
+          <div className="settings-item-actions">
+            <input
+              type="range"
+              min={GENERATED_TITLE_LENGTH_MIN}
+              max={GENERATED_TITLE_LENGTH_MAX}
+              step={GENERATED_TITLE_LENGTH_STEP}
+              value={generatedTitleLength}
+              onChange={(e) => setGeneratedTitleLength(Number(e.target.value))}
+              aria-label={t("appearanceGeneratedTitleLengthTitle")}
+            />
+            <span className="settings-input-unit">
+              <input
+                type="number"
+                className="settings-input-small"
+                min={GENERATED_TITLE_LENGTH_MIN}
+                max={GENERATED_TITLE_LENGTH_MAX}
+                step={GENERATED_TITLE_LENGTH_STEP}
+                value={generatedTitleLengthDraft}
+                onChange={(e) => setGeneratedTitleLengthDraft(e.target.value)}
+                onBlur={commitGeneratedTitleLength}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    commitGeneratedTitleLength();
+                    e.currentTarget.blur();
+                  }
+                }}
+                aria-label={t("appearanceGeneratedTitleLengthTitle")}
+              />
+              {t("appearanceGeneratedTitleLengthUnit")}
+            </span>
+            <button
+              type="button"
+              className="settings-inline-x"
+              onClick={() => {
+                setGeneratedTitleLength(DEFAULT_GENERATED_TITLE_LENGTH);
+                setGeneratedTitleLengthDraft(
+                  String(DEFAULT_GENERATED_TITLE_LENGTH),
+                );
+              }}
+              aria-label={t("appearanceGeneratedTitleLengthReset")}
+              title={t("appearanceGeneratedTitleLengthReset")}
             >
               ×
             </button>

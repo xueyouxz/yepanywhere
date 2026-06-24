@@ -63,6 +63,11 @@ Target length: <configured or UI-stated length target>.
 Return only the title.
 ```
 
+The browser Appearance setting **Generated Title Length** controls the target.
+It defaults to 80 characters and clamps the visible setting to 50-132
+characters. The server accepts that upper bound so the client cannot choose a
+target that the retitle route rejects.
+
 The first implementation should use a temporary fork, matching the
 fork-after-summary constraint: do not pollute the source provider transcript
 with a "summarize/title yourself" turn. The generated title is viewer/UI state
