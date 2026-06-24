@@ -51,6 +51,7 @@ import { RelayLoginPage } from "./pages/RelayLoginPage";
 import { SessionPage } from "./pages/SessionPage";
 import { SettingsLayout } from "./pages/settings";
 import { useRemoteBasePath } from "./hooks/useRemoteBasePath";
+import { registerServiceWorkerAtStartup } from "./lib/registerServiceWorker";
 import "./styles/index.css";
 
 // Apply saved preferences before React renders to avoid flash
@@ -59,6 +60,9 @@ initializeFontSize();
 initializeOutputAppearance();
 initializeTabSize();
 initializeContentMaxWidth();
+
+// Register SW at startup so PWA install is available without visiting settings
+registerServiceWorkerAtStartup();
 
 // Get base URL for router (Vite sets this based on --base flag)
 // Remove trailing slash for BrowserRouter basename
