@@ -7,6 +7,15 @@
 
 Topic: responsive-layout-gaps
 
+## Method and authority
+
+Treat the layout guidance in `~/agents/topics/functional-layout.md` (and the
+other `~/agents` UI docs) as an untested hint, not the authority for this work.
+The authorities are quality field-practitioner advice and first-principles
+reasoning about the actual mechanism. Where a finding here contradicts those
+docs, the finding wins and the `~/agents` rule becomes a revision candidate,
+recorded as such rather than silently followed.
+
 ## The anti-pattern
 
 anti-pattern: '...' hiding text that doesn't fit computed by math fit to current font and size settings that are user-configurable
@@ -19,7 +28,38 @@ a layout constraint solving discipline that references real geometry and AGENTS 
 
 shortcuts for fixed-width text are not allowed; always measure real horizontal extents
 
+The declarative form of "measure real extents" is font-relative units, not a JS
+pass: `ch` for horizontal text width (exact for a fixed-width block like the
+`Ran` line; it over-counts for proportional fonts, where you bias or measure)
+and `lh`/`rlh` for vertical line allocation. These move the offending fixed-px
+and fixed-character-count constants onto the live font metrics, which is what
+actually cures the anti-patterns. Confirm current `lh` and `line-clamp` baseline
+support before relying on them in committed code.
+
 efficiency matters esp. where layout rules affect unbounded session content
+
+## Two change axes, two cost budgets
+
+Distinguish the parameter being changed; the cost budget differs, and this is
+the load-bearing decision for the whole scheme.
+
+- *Window/container resize* is frequent and live (drag). Its response must be
+  smooth and cheap: continuous in width, with no per-frame re-measure or
+  re-solve.
+- *Font, size, and spacing preferences* change rarely and deliberately, in a
+  settings pane. A full re-measure and even a discontinuous re-layout is
+  acceptable there, because the user is already re-learning positions from the
+  change.
+
+So put expensive work on the rare event and keep the frequent one cheap:
+recompute leaf intrinsic extents and any mode-threshold widths when a
+font/spacing pref changes; on resize, only re-evaluate the already-solved
+layout — CSS reflows continuously, and a JS allocator merely compares the
+current width against cached thresholds (O(modes), no re-measure). The matching
+failure mode is a *stale threshold*: a cached width cutoff not invalidated when
+metrics change is the fixed-px anti-pattern returning, so font/size/spacing (and
+browser zoom / text-size-adjust) changes must invalidate the cache and
+re-measure.
 
 ## The plan
 
@@ -27,7 +67,71 @@ locate an appropriate constraint-aware layout pattern (maybe some basics are alr
 
 ### Prior art search / framework-lite invention
 
-Flesh out: what well-regarded layout constraint toolkits or frameworks easily admit incremental adoption without imposing undue global 'framework' / scene-graph burden? Clearly an all-encompassing layout algo can be run within a given rectangle canvas, but we want it to be able to feed requests/min/max to the enclosing not-framework-adopting layout system. If nothing suitable, you may propose a homegrown system evolvable toward this. Support for flicker/jitter free live-resize 'animation' is a plus but not strictly required.
+Three engines can execute a "declare min/max ranges per priority, solve for
+fit" model; they are not equivalent, and this project's stated preferences pick
+one.
+
+**A. A general constraint solver** (Cassowary, and its de-facto JS port
+`kiwi.js` / `@lume/kiwi`) — the engine behind Apple Auto Layout: linear
+(in)equalities with priorities (`required` plus soft strong/medium/weak),
+minimizing weighted violation. It matches "allowed ranges per priority level"
+most literally and is still the wrong default here. A constrained optimum can
+change *which* constraints are active as inputs vary, so the solution jumps at
+those transitions — discontinuity, i.e. jitter, with the target itself
+teleporting so damping only smears it. It also wants the whole variable system
+(it owns a subtree rather than feeding one min/max request up to a host layout —
+the scene-graph burden we want to avoid), and it is content-blind (you must feed
+it measured intrinsic sizes anyway, after which it mostly re-derives what the
+browser already would). Worst-case solve cost is a lesser objection than these.
+
+**B. CSS intrinsic sizing** (Grid/Flexbox, `min-content` / `max-content` /
+`fit-content()` / `minmax()` / `clamp()`, container queries) — the browser's own
+constraint propagator, and the right default. It propagates min/max-content
+contributions up the box tree and resolves flexible lengths against the
+container. It is content-aware for free (`max-content` *is* a control's no-wrap
+extent), continuous/monotone within a mode by construction (the low-jitter
+property), incrementally adoptable per region with no global graph, and runs in
+the engine with no JS. Its one structural limit: it cannot do *conditional
+visibility* (drop control X when even its min will not fit — hiding changes the
+budget the next decision sees, a feedback loop CSS will not close) and cannot
+pick a discrete mode by measuring siblings (a container query keys on container
+size, the proxy the specimen gap above shows is not the real fit predicate).
+Note also that `flex-wrap` is itself a *discontinuous* primitive — a wrap is a
+jump — so the continuity property holds only when shrink, not wrap, is the fit
+mechanism. The current `.output-font-selector` and `.settings-item-actions` use
+`flex-wrap: wrap`, which is the live form of this bug.
+
+**C. A small measured allocator** (JS + `ResizeObserver`), used only where B
+cannot reach — the shipped composer-bottom-bar pattern. Read rendered leaf
+extents, walk a *priority order*, keep the richest set/mode whose summed extent
+(plus gaps and required side slots) fits, fold the rest behind one overflow
+affordance. It is a *monotone ladder of hand-authored modes* (wide ->
+collapsed-drawer -> mobile), not an optimizer: enumerate a few discrete layouts
+and pick the richest that fits. Monotone-in-width transitions are single,
+predictable, and FLIP-animatable — you place the discontinuities instead of a
+solver scattering them.
+
+**Verdict — a two-tier system, not one solver.** Tier 1 is CSS intrinsic
+sizing for within-region allocation; it covers most of the gap inventory (shrink
+the slider track before wrapping the number; shrink/fit the font-selector row
+before it wraps). Tier 2 is the measured allocator over a monotone mode ladder,
+only for conditional visibility and discrete mode selection (collapse-to-drawer,
+fold-to-overflow, side-specimen vs stacked). "Priority" lives in both but as
+different artifacts: Tier-1 `fr`/flex weights and `minmax` floors decide who
+*shrinks* first; Tier-2 drop order decides who *disappears* first. The
+constraint-propagation instinct is correct and adopted — just split across two
+tiers, each using the right tool, rather than bolted on as a solver.
+
+This stays a ~1-D problem because vertical is an affordance (scroll) and the
+constrained axis is almost always horizontal — which is exactly what intrinsic
+sizing and a width-sorted ladder handle, and why no 2-D solver is warranted. A
+general solver becomes *tolerable* only if confined to the rare font/spacing-
+change path per *Two change axes* above (where jitter is welcome) while resize
+stays the cheap evaluation; but since CSS already does the continuous part for
+free, the solver earns its keep only when the rare-path allocation is genuinely
+too complex for intrinsic sizing plus a ladder — which this gap inventory is
+not. Not every gap is a Tier-1 fix, though: controls that must keep full labels
+(e.g. the four font buttons) can only wrap or overflow, so they belong to Tier 2.
 
 layout invariants specified by user deserve tests; every such test should be run under a range of font size settings and screen widths; this topic proposes concretely additionally testing with a larger UI font and a particular prose font, but this is not the only possibility.
 
@@ -101,6 +205,67 @@ That points to a shared settings-control grid: label/copy column plus an action
 column whose range track is `minmax(<usable-min>, 1fr)` and whose number/unit
 and reset slots are `max-content`. Wrapping should be an explicit narrow-mode
 state, not a side effect of `flex-wrap: wrap` on a content-width action box.
+
+## First conversions
+
+Concrete starting points, in priority order. Each is a worked instance of the
+two-tier verdict above.
+
+### 1. Settings action rows → Tier 1 grid (the reference conversion)
+
+`.settings-item-actions` (Max Content Width, Generated Title Length, Hover Card
+Delay, Hover Card Max Height, Tool preview lines) is `flex-wrap: wrap` today, so
+it breaks to 2–4 rows instead of shrinking. The fix already exists in this same
+stylesheet: `.output-appearance-slider-row` is `grid-template-columns:
+minmax(8rem, 1fr) max-content` — the range track shrinks continuously while the
+value/unit slot stays intrinsic. Adopt that shape:
+
+```css
+.settings-item-actions {
+  display: grid;
+  /* range track          value+unit   reset */
+  grid-template-columns: minmax(6rem, 1fr) max-content max-content;
+  align-items: center;
+  gap: var(--space-2);
+}
+```
+
+The `minmax(<usable-min>, 1fr)` range absorbs all width change; number+unit and
+reset are `max-content` so they never wrap internally; the Hover Card Max Height
+line-count estimate gets its own `max-content` slot instead of wrapping to a
+fourth row. State `<usable-min>` as the smallest operable track (≈6rem) and make
+the narrow case an explicit two-row mode (controls under label, via a container
+query on the settings item), not `flex-wrap`. Invariant: one row whenever
+`usable-min + value/unit + reset + gaps ≤ item inline size`; below that, the
+documented two-row mode, never per-control wrap.
+
+### 2. Font selectors → Tier 2, but a selector ladder, not overflow-hide
+
+`.output-font-selector` (UI / Prose / Fixed font, three–four full-label buttons)
+cannot be Tier 1 — full labels can only wrap or overflow. But hiding font
+choices behind a `...` is the wrong Tier-2 shape: these are mutually exclusive
+options the user is choosing among, so all options should stay discoverable.
+([composer-bottom-bar-overflow](composer-bottom-bar-overflow.md) already notes
+appearance/settings previews "may need a friendlier multi-row or horizontally
+scrollable treatment" and that arbitrary hiding is not preferred.) So the font
+selector's mode ladder is **one row → explicit two-row → horizontal-scroll
+strip** at the narrowest, with the selected option always visible. Replace the
+accidental `flex-wrap: wrap` with that named ladder.
+
+### 3. Vertical line reserve and the "Ran" block cap → font-relative units
+
+- **Reserve at least N, at most M wrapped lines** — the one content-dependent
+  (width→height) case. `min-height: calc(N * 1lh)` reserves N lines against the
+  *live* line-height; cap with `max-height: calc(M * 1lh)` plus `overflow`
+  (scroll) or `line-clamp: M` with ellipsis. No fixed px, so the reserve tracks
+  font and line-height changes.
+- **"Ran" block truncation** is a fixed character count for a fixed-width font,
+  but the fixed-font *size* is configurable, so the cap drifts. Monospace makes
+  `ch` exact: replace the char-count cap with `max-width: <N>ch; overflow:
+  hidden; text-overflow: ellipsis; white-space: nowrap` (or `line-clamp` for a
+  multi-line cap). One `ch`-based extent rule removes the observed "wrap, then
+  unused space, then `…`" artifact — the symptom of mixing a wrap with a
+  separate char-count truncation.
 
 ## Verification Direction
 
