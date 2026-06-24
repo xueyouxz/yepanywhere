@@ -13,7 +13,7 @@ Related topics: [recaps](recaps.md), [side-session-config](side-session-config.m
 ## Contract
 
 - A session title must not change from generated text without an explicit user
-  confirmation or a clearly requested one-shot generated-and-apply action.
+  confirmation or the clearly requested one-shot generated-and-apply action.
 - The existing session-menu **Rename** entry remains manual rename. It does not
   start the generated-retitle helper flow, but it should share the same
   temporary confirm and dismiss controls as the retitle surface.
@@ -94,13 +94,21 @@ While that deferred accept is armed, the title edit field should stop looking
 editable and momentarily show a generating-title placeholder until the helper
 result lands. The `X` escape hatch remains visible; additional typing should
 not be encouraged because it would not be part of the captured deferred save.
+The generating/deferred status surface exposes the submitted helper turn text
+on hover so the user can inspect what YA asked the provider to do.
 
 ## One-Shot Apply
 
-A future power-user action may generate and apply in one step, but only when
-the user explicitly requested that exact action. It must be visually and
-semantically distinct from the normal generated proposal flow, because normal
-retitles require confirmation.
+The compact generated-title button beside the recent-session chevron generates
+and applies a new title in one click. It enters the same retitle surface as the
+normal proposal flow, immediately arms the deferred generated-title accept path,
+and shows the generating placeholder until the helper returns. The generated
+text replaces the whole current title because there is no active caret or text
+selection before the one-shot action starts.
+
+This remains distinct from clicking the title text: title text starts the normal
+generated proposal flow and does not update metadata until the user accepts the
+suggestion.
 
 ## Helper Model Notes
 

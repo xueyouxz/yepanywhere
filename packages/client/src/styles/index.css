@@ -1593,6 +1593,7 @@ a.sidebar-nav-item {
 }
 
 .session-title-edit-button,
+.session-title-generate-trigger,
 .session-title-chevron-trigger {
   display: inline-flex;
   align-items: center;
@@ -1610,6 +1611,8 @@ a.sidebar-nav-item {
 
 .session-title-edit-button:hover:not(:disabled),
 .session-title-edit-button:focus-visible:not(:disabled),
+.session-title-generate-trigger:hover,
+.session-title-generate-trigger:focus-visible,
 .session-title-chevron-trigger:hover,
 .session-title-chevron-trigger:focus-visible {
   background: var(--bg-hover);

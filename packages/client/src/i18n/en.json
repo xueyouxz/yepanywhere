@@ -388,6 +388,7 @@
   "sessionRenamed": "Session renamed",
   "sessionRenameFailed": "Failed to rename session",
   "sessionRecentSessions": "Recent sessions",
+  "sessionGenerateNewTitle": "Generate new title",
   "sessionRetitleUseGenerated": "Use generated title",
   "sessionRetitleUseGeneratedWhenReady": "Use generated title when ready",
   "sessionRetitleSaveAsTyped": "Save title as typed (Ctrl+Enter)",

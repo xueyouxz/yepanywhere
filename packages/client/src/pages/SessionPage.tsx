@@ -606,9 +606,29 @@ interface GeneratedRetitleInsertion {
 interface GeneratedRetitleState {
   requestId: number;
   status: "generating" | "ready" | "error";
+  submittedTurnText: string;
   title?: string;
   error?: string;
   deferredInsertion?: GeneratedRetitleInsertion;
+}
+
+const SESSION_RETITLE_LENGTH_TARGET = 72;
+
+function createSessionRetitleSubmittedTurnText(
+  currentTitle: string,
+  lengthTarget: number,
+): string {
+  const title = currentTitle.trim();
+  return [
+    "What is a good new title for this session?",
+    "",
+    `Target length: under ${lengthTarget} characters.`,
+    title ? `Current title: ${title}` : undefined,
+    "Prefer a concrete task/result phrase over a generic chat title.",
+    "Return only the title. Do not quote it. Do not add a trailing period.",
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join("\n");
 }
 
 export function SessionPage() {
@@ -3459,30 +3479,44 @@ function SessionPageContent({
     focusAndSelectTitleInput();
   };
 
-  const handleStartRetitleTitle = () => {
+  const handleStartRetitleTitle = (options?: { applyWhenReady?: boolean }) => {
     setShowRecentSessions(false);
     setTitleEditMode("retitle");
     setRenameValue(displayTitle);
     setIsEditingTitle(true);
-    focusAndSelectTitleInput();
+    if (!options?.applyWhenReady) {
+      focusAndSelectTitleInput();
+    }
 
     const requestId = retitleRequestIdRef.current + 1;
     retitleRequestIdRef.current = requestId;
+    const submittedTurnText = createSessionRetitleSubmittedTurnText(
+      displayTitle,
+      SESSION_RETITLE_LENGTH_TARGET,
+    );
     if (!supportsForkFromTurn) {
       setRetitleState({
         requestId,
         status: "error",
+        submittedTurnText,
         error: t("sessionRetitleUnsupported"),
       });
       return;
     }
 
-    setRetitleState({ requestId, status: "generating" });
+    setRetitleState({
+      requestId,
+      status: "generating",
+      submittedTurnText,
+      ...(options?.applyWhenReady
+        ? { deferredInsertion: { prefix: "", suffix: "" } }
+        : {}),
+    });
     void (async () => {
       try {
         const result = await api.proposeSessionRetitle(projectId, sessionId, {
           currentTitle: displayTitle,
-          lengthTarget: 72,
+          lengthTarget: SESSION_RETITLE_LENGTH_TARGET,
         });
         if (retitleRequestIdRef.current !== requestId) return;
         const current = generatedRetitleRef.current;
@@ -3496,6 +3530,7 @@ function SessionPageContent({
         setRetitleState({
           requestId,
           status: "ready",
+          submittedTurnText,
           title: result.title,
         });
       } catch (err) {
@@ -3504,10 +3539,15 @@ function SessionPageContent({
         setRetitleState({
           requestId,
           status: "error",
+          submittedTurnText,
           error: message || t("sessionRetitleFailed"),
         });
       }
     })();
+  };
+
+  const handleGenerateAndApplyTitle = () => {
+    handleStartRetitleTitle({ applyWhenReady: true });
   };
 
   const handleCancelEditingTitle = () => {
@@ -3923,6 +3963,11 @@ function SessionPageContent({
                       disabled={
                         isRenaming || !!generatedRetitle?.deferredInsertion
                       }
+                      title={
+                        generatedRetitle?.deferredInsertion
+                          ? generatedRetitle.submittedTurnText
+                          : undefined
+                      }
                     />
                     {titleEditMode === "retitle" && (
                       <button
@@ -4023,6 +4068,12 @@ function SessionPageContent({
                       className={`session-title-retitle-status is-${generatedRetitle.status}${
                         generatedRetitle.deferredInsertion ? " is-armed" : ""
                       }`}
+                      title={
+                        generatedRetitle.status === "generating" ||
+                        generatedRetitle.deferredInsertion
+                          ? generatedRetitle.submittedTurnText
+                          : undefined
+                      }
                     >
                       {generatedRetitle.deferredInsertion
                         ? t("sessionRetitleDeferred")
@@ -4041,11 +4092,36 @@ function SessionPageContent({
                   <button
                     type="button"
                     className="session-title session-title-retitle-trigger"
-                    onClick={handleStartRetitleTitle}
+                    onClick={() => handleStartRetitleTitle()}
                     title={session?.fullTitle ?? displayTitle}
                   >
                     <span className="session-title-text">{displayTitle}</span>
                   </button>
+                  {supportsForkFromTurn && (
+                    <button
+                      type="button"
+                      className="session-title-generate-trigger"
+                      onClick={handleGenerateAndApplyTitle}
+                      title={t("sessionGenerateNewTitle")}
+                      aria-label={t("sessionGenerateNewTitle")}
+                    >
+                      <svg
+                        width="15"
+                        height="15"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5z" />
+                        <path d="m11 8 4 4-4 4" />
+                        <path d="M8 12h7" />
+                      </svg>
+                    </button>
+                  )}
                   <button
                     ref={titleButtonRef}
                     type="button"
