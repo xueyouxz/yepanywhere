@@ -219,6 +219,23 @@ externally-(TUI-)owned pi session render without spawning pi, exactly as the
 OpenCode DB reader did for unowned OpenCode sessions
 ([`opencode-backend.md`](opencode-backend.md) § *Direct SQLite reader*).
 
+### Thinking replay parity — fixed 2026-06-24
+
+Observed session `019ef653-92a0-7c29-83fc-7b7df7c89d06` in `/home/graehl/pi`
+persisted 12 non-empty assistant `thinking` blocks. `PiSessionReader` and the
+REST payload were correct: the blocks reached the client as normalized
+`{type:"thinking", thinking}` render items. The visible mismatch was client
+expansion policy: historical thinking blocks present when the view mounts load
+collapsed under YA's Codex-oriented "all-new" policy, while browser/YA search
+can still find their text inside closed `<details>` nodes.
+
+PI parity is different from Codex reasoning summaries. PI's own TUI renders full
+thinking text by default and its `hideThinkingBlock` toggle collapses it to a
+`Thinking...` label. YA therefore auto-expands historical PI thinking rows when
+they are rendered, while preserving the existing visibility gate and manual
+per-row overrides. Codex historical reasoning summaries remain collapsed on
+load.
+
 ## Action rendering hardening — implemented 2026-06-22
 
 The pi provider is still rough-draft work, and action rendering should be

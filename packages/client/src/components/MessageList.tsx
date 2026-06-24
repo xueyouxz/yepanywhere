@@ -775,6 +775,10 @@ function countThinkingItems(items: readonly RenderItem[]) {
   return count;
 }
 
+function providerExpandsHistoricalThinking(provider: string | undefined) {
+  return provider === "pi";
+}
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}\u202fb`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}\u202fkb`;
@@ -1162,6 +1166,7 @@ export const MessageList = memo(function MessageList({
     null,
   );
   const observedThinkingItemIdsRef = useRef<ReadonlySet<string> | null>(null);
+  const autoExpandedHistoricalThinkingProviderRef = useRef<string | null>(null);
   const thinkingDeltaFollowAllowedRef = useRef(false);
   const navMotionCueTokenRef = useRef(0);
   const navMotionCueClearTimerRef = useRef<ReturnType<
@@ -1557,6 +1562,13 @@ export const MessageList = memo(function MessageList({
       }
     }
     observedThinkingItemIdsRef.current = existingThinkingIds;
+    const seedHistoricalThinking =
+      existingThinkingIds.size > 0 &&
+      providerExpandsHistoricalThinking(provider) &&
+      autoExpandedHistoricalThinkingProviderRef.current !== provider;
+    if (seedHistoricalThinking) {
+      autoExpandedHistoricalThinkingProviderRef.current = provider ?? null;
+    }
 
     setAutoExpandedThinkingItemIds((previous) => {
       const next = new Set<string>();
@@ -1569,7 +1581,14 @@ export const MessageList = memo(function MessageList({
         }
       }
 
-      if (previouslyObservedThinkingIds !== null) {
+      if (seedHistoricalThinking) {
+        for (const itemId of existingThinkingIds) {
+          if (!next.has(itemId)) {
+            next.add(itemId);
+            changed = true;
+          }
+        }
+      } else if (previouslyObservedThinkingIds !== null) {
         for (const itemId of existingThinkingIds) {
           if (!previouslyObservedThinkingIds.has(itemId) && !next.has(itemId)) {
             next.add(itemId);
@@ -1580,7 +1599,7 @@ export const MessageList = memo(function MessageList({
 
       return changed ? next : previous;
     });
-  }, [renderItems]);
+  }, [provider, renderItems]);
   const turnGroups = useMemo(() => {
     const startedAt = highResolutionNowMs();
     const grouped = groupItemsIntoTurns(displayRenderItems);

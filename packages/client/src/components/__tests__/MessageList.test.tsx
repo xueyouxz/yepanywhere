@@ -14,6 +14,7 @@ import { RenderModeProvider } from "../../contexts/RenderModeContext";
 import { SessionMetadataProvider } from "../../contexts/SessionMetadataContext";
 import { StreamingMarkdownProvider } from "../../contexts/StreamingMarkdownContext";
 import { buildCorrectionText } from "../../lib/correctionText";
+import { UI_KEYS } from "../../lib/storageKeys";
 import type { Message } from "../../types";
 import { MessageList } from "../MessageList";
 
@@ -27,11 +28,14 @@ vi.mock("../../i18n", () => ({
           "Show hidden thinking transcript rows",
         processingThinkingTranscriptShowWhenAvailable:
           "Show thinking transcript rows when available",
+        sessionQuoteBlock: "Quote this block",
         sessionSteerNow: "Steer now",
         sessionSteerQueuedMessageNow: "Steer queued message now",
         sessionQueuedInlineEditLabel: "Edit queued message text",
         sessionQueuedInlineSave: "Save edit",
         sessionQueuedInlineCancel: "Cancel edit (Esc)",
+        userPromptCopyAction: "Copy message text",
+        userPromptEditAction: "Edit latest message",
       })[key] ?? key,
   }),
 }));
@@ -307,11 +311,7 @@ describe("MessageList", () => {
 
   it("auto-expands newly observed Codex thinking blocks", () => {
     const { container, rerender } = render(
-      <MessageList
-        provider="codex"
-        isProcessing={true}
-        messages={[]}
-      />,
+      <MessageList provider="codex" isProcessing={true} messages={[]} />,
     );
 
     let thinkingBlocks = container.querySelectorAll<HTMLDetailsElement>(
@@ -392,6 +392,60 @@ describe("MessageList", () => {
     expect(thinkingBlocks).toHaveLength(2);
     expect(thinkingBlocks[0]?.open).toBe(false);
     expect(thinkingBlocks[1]?.open).toBe(false);
+  });
+
+  it("auto-expands historical pi thinking blocks", () => {
+    const { container } = render(
+      <MessageList
+        provider="pi"
+        isProcessing={false}
+        messages={[
+          {
+            type: "assistant",
+            uuid: "pi-thinking-1",
+            message: {
+              role: "assistant",
+              content: [
+                { type: "thinking", thinking: "Historical pi thought" },
+                { type: "text", text: "Visible pi answer" },
+              ],
+            },
+          } as Message,
+        ]}
+      />,
+    );
+
+    const thinkingBlock = container.querySelector<HTMLDetailsElement>(
+      "details.thinking-block",
+    );
+    expect(thinkingBlock).not.toBeNull();
+    expect(thinkingBlock?.open).toBe(true);
+  });
+
+  it("restores hidden historical pi thinking blocks expanded", () => {
+    window.localStorage.setItem(UI_KEYS.sessionThinkingVisible, "false");
+    const { container } = render(
+      <MessageList
+        provider="pi"
+        messages={[codexThinkingMessage("pi-thinking-1", "Stored pi thought")]}
+      />,
+    );
+
+    expect(container.querySelectorAll("details.thinking-block")).toHaveLength(
+      0,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Show hidden thinking transcript rows",
+      }),
+    );
+
+    const thinkingBlock = container.querySelector<HTMLDetailsElement>(
+      "details.thinking-block",
+    );
+    expect(thinkingBlock).not.toBeNull();
+    expect(thinkingBlock?.open).toBe(true);
   });
 
   it("keeps an auto-expanded thinking block open after completion", async () => {
@@ -641,7 +695,11 @@ describe("MessageList", () => {
     const prompts = Array.from(
       container.querySelectorAll(".message-user-prompt"),
     ).map((node) => node.textContent);
-    expect(prompts).toEqual(["regular first", "patient second", "regular third"]);
+    expect(prompts).toEqual([
+      "regular first",
+      "patient second",
+      "regular third",
+    ]);
     expect(
       screen
         .getByText("patient second")
