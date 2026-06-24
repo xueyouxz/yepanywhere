@@ -168,6 +168,10 @@
   /* Typography */
   --font-sans:
     -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", sans-serif;
+  /* UI chrome font (composer, titles, captions). Defaults to the system
+     sans; the Output Typography "UI font" control overrides it. Kept
+     separate from --font-sans so prose "System" stays the OS sans. */
+  --font-ui: var(--font-sans);
   --font-brand:
     "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Baskerville,
     Georgia, "Times New Roman", ui-serif, serif;
@@ -631,7 +635,7 @@
 }
 
 body {
-  font-family: var(--font-sans);
+  font-family: var(--font-ui);
   margin: 0;
   padding: 0;
   /* Safe area insets for Tauri mobile (edge-to-edge mode) and PWA standalone.
@@ -688,6 +692,16 @@ h1 {
 }
 h2 {
   margin: 2rem 0 1rem;
+}
+
+/* Form controls don't inherit font-family by default, so without this they
+   keep the UA font and ignore the UI font (--font-ui via body). Mono/code
+   fields set their own font-family on a more specific selector and win. */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
 }
 
 /* Page header with title and actions */
@@ -976,7 +990,7 @@ h2 {
   border: 1px solid var(--border-input);
   border-radius: 8px;
   color: inherit;
-  font-family: var(--font-sans);
+  font-family: var(--font-ui);
   font-size: var(--font-size-base);
   resize: none;
   box-sizing: border-box;
@@ -998,7 +1012,7 @@ h2 {
   border: 1px solid var(--border-input);
   border-radius: 8px;
   color: inherit;
-  font-family: var(--font-sans);
+  font-family: var(--font-ui);
   font-size: var(--font-size-base);
   line-height: 1.35;
   resize: none;
@@ -1373,7 +1387,7 @@ h2 {
   color: var(--text-primary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  font-family: var(--font-sans);
+  font-family: var(--font-ui);
 }
 
 .sidebar-new-session textarea:focus {
@@ -1615,7 +1629,7 @@ a.sidebar-nav-item {
   padding: 0;
   cursor: pointer;
   font-size: calc(0.95em - 1pt);
-  font-family: var(--font-sans);
+  font-family: var(--font-ui);
   text-align: left;
 }
 
@@ -3624,7 +3638,7 @@ a.sidebar-nav-item {
   border: 1px solid var(--border-input);
   border-radius: 8px;
   color: inherit;
-  font-family: var(--font-sans);
+  font-family: var(--font-ui);
   font-size: var(--font-size-base);
   resize: none;
 }
@@ -3689,7 +3703,7 @@ a.sidebar-nav-item {
   min-width: 0;
   padding: var(--speech-draft-padding);
   color: var(--text-primary);
-  font-family: var(--font-sans);
+  font-family: var(--font-ui);
   font-size: var(--speech-draft-font-size);
   line-height: var(--speech-draft-line-height);
   pointer-events: none;
@@ -8468,10 +8482,6 @@ a.sidebar-nav-item {
   align-items: stretch;
 }
 
-.output-appearance-title strong {
-  font-size: var(--font-size-base);
-}
-
 .output-appearance-panel {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -8700,6 +8710,44 @@ a.sidebar-nav-item {
   font-family: var(--font-mono);
   text-align: center;
   user-select: none;
+}
+
+/*
+ * UI-chrome samples in the specimen: a session title, a composer field, and a
+ * caption. Unlike the prose rows above, these use the UI font (--font-ui) and
+ * the rem-scaled UI sizes (--font-size-*), so they visibly respond to the UI
+ * font and UI size controls -- which the fixed-px prose rows do not.
+ */
+.output-preview-ui {
+  display: grid;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+  font-family: var(--font-ui);
+}
+
+.output-preview-ui-title {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+
+.output-preview-ui-composer {
+  padding: var(--space-2);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-base);
+  color: var(--text-secondary);
+}
+
+.output-preview-ui-caption {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
 }
 
 .experimental-features-settings {

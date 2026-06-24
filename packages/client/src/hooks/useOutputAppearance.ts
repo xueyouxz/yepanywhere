@@ -69,6 +69,7 @@ const SOURCE_SERIF_4_OUTPUT_OPSZ_MAX = 20;
 
 interface OutputAppearance {
   font: OutputProseFont;
+  uiFont: OutputProseFont;
   fontSizePx: number;
   fixedFont: OutputFixedFont;
   fixedFontSizeOffsetPx: number;
@@ -81,6 +82,7 @@ interface OutputAppearance {
 
 const DEFAULT_OUTPUT_APPEARANCE: OutputAppearance = {
   font: "system",
+  uiFont: "system",
   fontSizePx: DEFAULT_OUTPUT_FONT_SIZE_PX,
   fixedFont: "system",
   fixedFontSizeOffsetPx: DEFAULT_OUTPUT_FIXED_FONT_SIZE_OFFSET_PX,
@@ -254,6 +256,7 @@ function readStoredVerticalSpacingPercent(fontSizePx: number): number {
 
 function clearStoredOutputAppearance(): void {
   localStorage.removeItem(UI_KEYS.outputProseFont);
+  localStorage.removeItem(UI_KEYS.outputUiFont);
   localStorage.removeItem(UI_KEYS.outputProseFontSize);
   localStorage.removeItem(UI_KEYS.outputFixedFont);
   localStorage.removeItem(UI_KEYS.outputFixedFontSizeOffset);
@@ -272,6 +275,7 @@ function loadOutputAppearance(): OutputAppearance {
 
   return {
     font: normalizeOutputFont(localStorage.getItem(UI_KEYS.outputProseFont)),
+    uiFont: normalizeOutputFont(localStorage.getItem(UI_KEYS.outputUiFont)),
     fontSizePx,
     fixedFont: normalizeOutputFixedFont(
       localStorage.getItem(UI_KEYS.outputFixedFont),
@@ -324,6 +328,7 @@ function applyOutputAppearance(appearance: OutputAppearance) {
     "--output-prose-font-family",
     outputFontStacks[appearance.font],
   );
+  root.style.setProperty("--font-ui", outputFontStacks[appearance.uiFont]);
   root.style.setProperty(
     "--output-prose-font-size",
     `${appearance.fontSizePx}px`,
@@ -413,6 +418,12 @@ export function useOutputAppearance() {
     const normalized = normalizeOutputFont(font);
     localStorage.setItem(UI_KEYS.outputProseFont, normalized);
     setAppearance((current) => ({ ...current, font: normalized }));
+  }, []);
+
+  const setOutputUiFont = useCallback((font: OutputProseFont) => {
+    const normalized = normalizeOutputFont(font);
+    localStorage.setItem(UI_KEYS.outputUiFont, normalized);
+    setAppearance((current) => ({ ...current, uiFont: normalized }));
   }, []);
 
   const setOutputFontSizePx = useCallback((fontSizePx: number) => {
@@ -511,6 +522,7 @@ export function useOutputAppearance() {
 
   return {
     outputFont: appearance.font,
+    outputUiFont: appearance.uiFont,
     outputFontSizePx: appearance.fontSizePx,
     outputFixedFont: appearance.fixedFont,
     outputFixedFontSizeOffsetPx: appearance.fixedFontSizeOffsetPx,
@@ -520,6 +532,7 @@ export function useOutputAppearance() {
     outputVerticalSpacingPercent: appearance.verticalSpacingPercent,
     outputToolPreviewLineCount: appearance.toolPreviewLineCount,
     setOutputFont,
+    setOutputUiFont,
     setOutputFontSizePx,
     setOutputFixedFont,
     setOutputFixedFontSizeOffsetPx,

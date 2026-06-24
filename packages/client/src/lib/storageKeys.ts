@@ -46,6 +46,7 @@ export const UI_KEYS = {
   theme: "yep-anywhere-theme",
   fontSize: "yep-anywhere-font-size",
   outputProseFont: "yep-anywhere-output-prose-font",
+  outputUiFont: "yep-anywhere-output-ui-font",
   outputProseFontSize: "yep-anywhere-output-prose-font-size",
   outputFixedFont: "yep-anywhere-output-fixed-font",
   outputFixedFontSizeOffset: "yep-anywhere-output-fixed-font-size-offset",

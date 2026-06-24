@@ -113,6 +113,7 @@ export function AppearanceSettings() {
   const { fontSize, setFontSize } = useFontSize();
   const {
     outputFont,
+    outputUiFont,
     outputFontSizePx,
     outputFixedFont,
     outputFixedFontSizeOffsetPx,
@@ -122,6 +123,7 @@ export function AppearanceSettings() {
     outputVerticalSpacingPercent,
     outputToolPreviewLineCount,
     setOutputFont,
+    setOutputUiFont,
     setOutputFontSizePx,
     setOutputFixedFont,
     setOutputFixedFontSizeOffsetPx,
@@ -200,6 +202,7 @@ export function AppearanceSettings() {
       locale,
       fontSize,
       outputFont,
+      outputUiFont,
       outputFontSizePx,
       outputFixedFont,
       outputFixedFontSizeOffsetPx,
@@ -227,6 +230,7 @@ export function AppearanceSettings() {
       locale,
       fontSize,
       outputFont,
+      outputUiFont,
       outputFontSizePx,
       outputFixedFont,
       outputFixedFontSizeOffsetPx,
@@ -256,6 +260,7 @@ export function AppearanceSettings() {
       setLocale(snapshot.locale);
       setFontSize(snapshot.fontSize);
       setOutputFont(snapshot.outputFont);
+      setOutputUiFont(snapshot.outputUiFont);
       setOutputFontSizePx(snapshot.outputFontSizePx);
       setOutputFixedFont(snapshot.outputFixedFont);
       setOutputFixedFontSizeOffsetPx(snapshot.outputFixedFontSizeOffsetPx);
@@ -307,6 +312,7 @@ export function AppearanceSettings() {
       setLocale,
       setFontSize,
       setOutputFont,
+      setOutputUiFont,
       setOutputFontSizePx,
       setOutputFixedFont,
       setOutputFixedFontSizeOffsetPx,
@@ -506,23 +512,6 @@ export function AppearanceSettings() {
         </div>
         <div className="settings-item">
           <div className="settings-item-info">
-            <strong>{t("appearanceFontSizeTitle")}</strong>
-          </div>
-          <div className="font-size-selector">
-            {FONT_SIZES.map((size) => (
-              <button
-                key={size}
-                type="button"
-                className={`font-size-option ${fontSize === size ? "active" : ""}`}
-                onClick={() => setFontSize(size)}
-              >
-                {getFontSizeLabel(size, translate)}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="settings-item">
-          <div className="settings-item-info">
             <strong>{t("appearanceSettingsIconStyleTitle")}</strong>
             <p>{t("appearanceSettingsIconStyleDescription")}</p>
           </div>
@@ -618,6 +607,42 @@ export function AppearanceSettings() {
               <div className="output-appearance-title settings-item-info">
                 <strong>{t("appearanceOutputTypographyTitle")}</strong>
               </div>
+              <div className="output-appearance-control">
+                <span className="output-appearance-label">
+                  {t("appearanceOutputUiFontLabel")}
+                </span>
+                <div className="font-size-selector output-font-selector">
+                  {OUTPUT_PROSE_FONTS.map((font) => (
+                    <button
+                      key={font}
+                      type="button"
+                      className={`font-size-option output-font-option output-font-option-${font} ${outputUiFont === font ? "active" : ""}`}
+                      onClick={() => setOutputUiFont(font)}
+                    >
+                      {getOutputProseFontLabel(font, translate)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="output-appearance-control">
+                <span className="output-appearance-label">
+                  {t("appearanceFontSizeTitle")}
+                </span>
+                <div className="font-size-selector output-font-selector">
+                  {FONT_SIZES.map((size) => (
+                    <button
+                      key={size}
+                      type="button"
+                      className={`font-size-option ${fontSize === size ? "active" : ""}`}
+                      onClick={() => setFontSize(size)}
+                    >
+                      {getFontSizeLabel(size, translate)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="output-appearance-control">
                 <span className="output-appearance-label">
                   {t("appearanceOutputFontLabel")}
@@ -980,11 +1005,22 @@ export function AppearanceSettings() {
                 <div className="output-preview-diff" aria-hidden="true">
                   <div>
                     <span className="output-preview-diff-gutter">+</span>
-                    <span>Diff prose follows the output font.</span>
+                    <span>Diff prose follows the prose font.</span>
                   </div>
                   <div>
                     <span className="output-preview-diff-gutter">-</span>
                     <span>Paragraph space can be dialed down.</span>
+                  </div>
+                </div>
+                <div className="output-preview-ui" aria-hidden="true">
+                  <div className="output-preview-ui-title">
+                    Session title — uses the UI font and size
+                  </div>
+                  <div className="output-preview-ui-composer">
+                    Composer: type a message to the agent…
+                  </div>
+                  <div className="output-preview-ui-caption">
+                    Caption · updated 2m ago · 3 files
                   </div>
                 </div>
               </div>
