@@ -7,6 +7,10 @@ import {
   decideSmartTurn,
   prewarmYaServerSpeechBackend,
 } from "../speechProviders/YaServerProvider";
+import type {
+  SpeechProvider,
+  SpeechProviderStatus,
+} from "../speechProviders/SpeechProvider";
 import { decideBatchSpeechCommand } from "../speechProviders/speechCommands";
 import {
   SHARED_SPEECH_MIC_LEASE_STORAGE_KEY,
@@ -42,6 +46,13 @@ function deferred<T>(): {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+async function waitForProviderStatus(
+  provider: Pick<SpeechProvider, "getState">,
+  status: SpeechProviderStatus,
+): Promise<void> {
+  await vi.waitFor(() => expect(provider.getState().status).toBe(status));
 }
 
 afterEach(() => {
@@ -820,8 +831,7 @@ describe("YA server speech provider", () => {
     });
 
     provider.start();
-    await Promise.resolve();
-    expect(provider.getState().status).toBe("listening");
+    await waitForProviderStatus(provider, "listening");
 
     provider.stop();
     await Promise.resolve();
@@ -832,8 +842,7 @@ describe("YA server speech provider", () => {
 
     currentSpeechTargetId = "target-2";
     provider.start();
-    await Promise.resolve();
-    expect(provider.getState().status).toBe("listening");
+    await waitForProviderStatus(provider, "listening");
     expect(FakeMediaRecorder.instances).toHaveLength(2);
 
     firstFetch.resolve(
@@ -861,8 +870,7 @@ describe("YA server speech provider", () => {
     await Promise.resolve();
     currentSpeechTargetId = "target-3";
     provider.start();
-    await Promise.resolve();
-    expect(provider.getState().status).toBe("listening");
+    await waitForProviderStatus(provider, "listening");
 
     secondFetch.reject(new Error("model load failed"));
     await vi.waitFor(() =>
@@ -940,8 +948,7 @@ describe("YA server speech provider", () => {
     });
 
     provider.start();
-    await Promise.resolve();
-    expect(provider.getState().status).toBe("listening");
+    await waitForProviderStatus(provider, "listening");
 
     provider.stop();
     await Promise.resolve();
@@ -1035,9 +1042,8 @@ describe("YA server speech provider", () => {
     });
 
     provider.start();
-    await Promise.resolve();
+    await waitForProviderStatus(provider, "listening");
     provider.stop();
-    await Promise.resolve();
     expect(provider.getState().status).toBe("processing");
 
     provider.cancel();
@@ -3048,9 +3054,7 @@ describe("direct xAI speech provider", () => {
     });
 
     provider.start();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(provider.getState().status).toBe("listening");
+    await waitForProviderStatus(provider, "listening");
 
     provider.stop();
     await Promise.resolve();
