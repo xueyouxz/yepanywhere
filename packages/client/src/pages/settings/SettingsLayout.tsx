@@ -164,7 +164,6 @@ export function SettingsLayout() {
   const { title: paneTitle, setTitle: setPaneTitle } =
     useSettingsPaneTitleRegistration();
 
-  // Build the list of categories, conditionally including emulator and dev
   const categories: SettingsCategory[] = [
     ...getSettingsCategories((key) => t(key as never)),
   ];
@@ -173,7 +172,6 @@ export function SettingsLayout() {
     capabilities.includes("deviceBridge-download") ||
     capabilities.includes("deviceBridge-available")
   ) {
-    // Insert before "about"
     const aboutIndex = categories.findIndex((c) => c.id === "about");
     categories.splice(
       aboutIndex >= 0 ? aboutIndex : categories.length,
@@ -220,7 +218,6 @@ export function SettingsLayout() {
     navigate(`${basePath}/settings`);
   };
 
-  // Get the component for the current category
   const CategoryComponent = effectiveCategory
     ? CATEGORY_COMPONENTS[effectiveCategory]
     : null;
