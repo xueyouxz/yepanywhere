@@ -358,6 +358,12 @@ export const ENV_VAR_REGISTRY: EnvVarDescriptor[] = [
     group: "Providers & features",
     description: "Alternate path hint for the Claude Code CLI executable.",
   },
+  {
+    name: "PI_PATH",
+    group: "Providers & features",
+    description:
+      "Path to the pi CLI executable for the pi provider. Checked before the PATH lookup, so it overrides a pi found on PATH (e.g. an npm global bin).",
+  },
 
   // Speech & transcription
   {
@@ -427,6 +433,18 @@ export const ENV_VAR_REGISTRY: EnvVarDescriptor[] = [
     name: "NEMO_DEVICE",
     group: "Speech & transcription",
     description: "Device for the ya-nemo backend (default auto).",
+  },
+  {
+    name: "HF_HUB_CACHE",
+    group: "Speech & transcription",
+    description:
+      "Hugging Face hub cache directory for local STT model weights (ya-whisper/parakeet/nemo). YA mirrors HF's own resolution, so this overrides HF_HOME/hub and the default ~/.cache/huggingface/hub.",
+  },
+  {
+    name: "HF_HOME",
+    group: "Speech & transcription",
+    description:
+      "Hugging Face home directory; YA uses {HF_HOME}/hub as the local STT model cache when HF_HUB_CACHE is unset.",
   },
 
   // Logging
