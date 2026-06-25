@@ -8,13 +8,16 @@ Progress:
   `topics/codex-sessions.md`.
 - [x] 2026-06-25: Captured current scanner gaps and `.jsonl.zst` default
   gating in `topics/codex-metadata-scanner.md`.
-- [ ] Gate or revert default `.jsonl.zst` discovery until scanner metadata reads
-  are first-line-only or cache-backed.
+- [x] 2026-06-25: Implemented streaming zstd first-line reads for
+  `readFirstLine()`, so default compressed metadata discovery no longer uses
+  whole-file decompression.
+- [x] Gate or revert default `.jsonl.zst` discovery until scanner metadata
+  reads are first-line-only or cache-backed.
 - [ ] Add a durable Codex rollout metadata index.
 - [ ] Stop rereading `session_meta` on ordinary append/mtime/size changes.
 - [ ] Reconcile `.jsonl` and `.jsonl.zst` as two representations of one
   rollout.
-- [ ] Add streaming zstd first-line reads, or keep compressed discovery
+- [x] Add streaming zstd first-line reads, or keep compressed discovery
   explicitly opt-in until that exists.
 - [ ] Add Codex scanner metrics and slow logs.
 - [ ] Make Codex watcher missed-event recovery bounded under expensive trees.
@@ -87,6 +90,12 @@ Codex metadata discovery should instead be bounded by a durable metadata index:
 
 Do this before relying on compressed rollout discovery in normal lists.
 
+Implemented 2026-06-25 with option 1 below: `readFirstLine()` now uses a
+streaming zstd decompressor and stops after the first decoded JSONL record or
+the metadata byte limit. Full compressed session detail reads still use the
+full-file path, which is acceptable because detail loading intentionally reads
+the transcript.
+
 Options, in preference order:
 
 1. Implement streaming zstd first-line reads and keep `.jsonl.zst` discovery
@@ -100,10 +109,10 @@ Options, in preference order:
 
 Acceptance criteria:
 
-- Normal Codex project/session listing never performs whole-file zstd
+- [x] Normal Codex project/session listing never performs whole-file zstd
   decompression for metadata discovery by default.
-- Tests cover the chosen gate.
-- The user-visible behavior for plain `.jsonl` history remains complete.
+- [x] Tests cover the chosen gate.
+- [x] The user-visible behavior for plain `.jsonl` history remains complete.
 
 ## Phase 1: Durable Metadata Index
 

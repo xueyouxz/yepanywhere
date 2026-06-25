@@ -74,8 +74,10 @@ Default `.jsonl.zst` discovery is gated on at least one of:
 - an explicit opt-in slow path for users who accept whole-file decompression
   during discovery.
 
-Until one of those is true, `.jsonl.zst` support should be treated as a
-targeted recovery/debug capability, not ordinary default scanning behavior.
+As of 2026-06-25, YA satisfies this gate with a streaming zstd first-line
+reader in `readFirstLine()`. Keep that separation intact: full compressed
+session detail loads may read the full transcript, but scanner metadata
+discovery must not depend on whole-file zstd decompression.
 
 ## Watcher And Scheduling Gaps
 
@@ -131,8 +133,8 @@ the scanner should gain:
    not `session_meta`, unless replacement/truncation evidence exists.
 3. Compression reconciliation: `.jsonl` and `.jsonl.zst` map to the same
    logical rollout, with plain-precedence and transition-safe dirty handling.
-4. Streaming zstd first-line reads, plus tests proving scanner discovery does
-   not decompress full compressed transcripts.
+4. Keep streaming zstd first-line reads covered by tests so scanner discovery
+   does not regress to full compressed transcript decompression.
 5. Scanner metrics and slow logs specific to Codex metadata discovery.
 6. Adaptive periodic-rescan behavior or a different missed-event recovery
    strategy that cannot spin indefinitely on very large trees.

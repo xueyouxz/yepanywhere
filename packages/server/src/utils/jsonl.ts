@@ -5,6 +5,7 @@
  * and partial reads (to avoid loading multi-MB files entirely).
  */
 
+import { createReadStream } from "node:fs";
 import { open, readFile } from "node:fs/promises";
 import * as zlib from "node:zlib";
 import { promisify } from "node:util";
@@ -18,11 +19,17 @@ type ZstdDecompress = (
   input: Buffer,
   callback: (error: Error | null, result: Buffer) => void,
 ) => void;
+type ZstdStream = NodeJS.ReadWriteStream &
+  AsyncIterable<Buffer | string> & {
+    destroy(error?: Error): void;
+  };
+type CreateZstdDecompress = () => ZstdStream;
 
 let zstdDecompressAsync:
   | ((input: Buffer) => Promise<Buffer>)
   | null
   | undefined;
+let createZstdDecompressCached: CreateZstdDecompress | null | undefined;
 
 function isZstdPath(filePath: string): boolean {
   return filePath.endsWith(".zst");
@@ -40,6 +47,26 @@ function getZstdDecompress(): ((input: Buffer) => Promise<Buffer>) | null {
   return zstdDecompressAsync;
 }
 
+function getCreateZstdDecompress(): CreateZstdDecompress | null {
+  if (createZstdDecompressCached !== undefined) {
+    return createZstdDecompressCached;
+  }
+
+  const candidate = (
+    zlib as typeof zlib & { createZstdDecompress?: CreateZstdDecompress }
+  ).createZstdDecompress;
+  createZstdDecompressCached =
+    typeof candidate === "function" ? candidate : null;
+  return createZstdDecompressCached;
+}
+
+function firstLineFromContent(content: string): string | null {
+  const stripped = stripBom(content);
+  const nl = stripped.indexOf("\n");
+  const line = (nl > 0 ? stripped.slice(0, nl) : stripped).trim();
+  return line || null;
+}
+
 async function readUtf8File(filePath: string): Promise<string> {
   if (!isZstdPath(filePath)) {
     return readFile(filePath, "utf-8");
@@ -55,6 +82,45 @@ async function readUtf8File(filePath: string): Promise<string> {
   return decompressed.toString("utf-8");
 }
 
+async function readFirstLineFromZstd(
+  filePath: string,
+  maxBytes: number,
+): Promise<string | null> {
+  const createZstdDecompress = getCreateZstdDecompress();
+  if (!createZstdDecompress) {
+    throw new Error("zstd-compressed JSONL is not supported by this Node.js");
+  }
+
+  const source = createReadStream(filePath);
+  const decompressor = createZstdDecompress();
+  const stream = source.pipe(decompressor);
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  let content = "";
+
+  try {
+    for await (const chunk of stream) {
+      const buffer =
+        typeof chunk === "string" ? Buffer.from(chunk, "utf-8") : chunk;
+      const remaining = maxBytes - totalBytes;
+      if (remaining <= 0) break;
+
+      const slice =
+        buffer.length > remaining ? buffer.subarray(0, remaining) : buffer;
+      chunks.push(slice);
+      totalBytes += slice.length;
+      content = Buffer.concat(chunks).toString("utf-8");
+      if (content.includes("\n")) break;
+    }
+  } finally {
+    source.destroy();
+    decompressor.destroy();
+  }
+
+  if (totalBytes === 0) return null;
+  return firstLineFromContent(content);
+}
+
 /**
  * Read the first line of a file using a partial read.
  * Reads in chunks until it finds a newline, reaches EOF, or hits maxBytes.
@@ -66,10 +132,7 @@ export async function readFirstLine(
 ): Promise<string | null> {
   if (isZstdPath(filePath)) {
     try {
-      const content = stripBom(await readUtf8File(filePath));
-      const nl = content.indexOf("\n");
-      const line = (nl > 0 ? content.slice(0, nl) : content).trim();
-      return line || null;
+      return await readFirstLineFromZstd(filePath, maxBytes);
     } catch {
       return null;
     }
@@ -97,10 +160,7 @@ export async function readFirstLine(
 
     if (totalBytes === 0) return null;
 
-    const stripped = stripBom(content);
-    const nl = stripped.indexOf("\n");
-    const line = (nl > 0 ? stripped.slice(0, nl) : stripped).trim();
-    return line || null;
+    return firstLineFromContent(content);
   } catch {
     return null;
   } finally {
