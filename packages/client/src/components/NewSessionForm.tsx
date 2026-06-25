@@ -1067,7 +1067,10 @@ export function NewSessionForm({
           {
             ...newSessionDefaultsRef.current,
             provider: selectedProvider ?? undefined,
-            permissionMode: effectivePermissionMode,
+            // Permission mode is an all-provider preference. Keep an
+            // unsupported saved value such as Auto intact while the visible /
+            // launch-time mode falls back to Ask for the selected model.
+            permissionMode: mode,
             recapMode: selectedRecapMode,
             recapAfterSeconds,
             promptSuggestionMode: selectedPromptSuggestionMode,
@@ -1086,9 +1089,9 @@ export function NewSessionForm({
       console.error("Failed to save new session defaults:", err);
     });
   }, [
-    effectivePermissionMode,
     getLegacyProviderDefaultSeed,
     helperSideModel,
+    mode,
     recapAfterSeconds,
     selectedModel,
     selectedEffortLevel,

@@ -52,3 +52,4 @@
 - session-retitle - Explicit title editing and user-confirmed generated retitle proposals.
 - responsive-layout-gaps - Font-metric-sensitive responsive wrapping gaps and the measured layout invariants that should replace fixed pixel/rem thresholds.
 - session-defaults - New-session default scoping: all-provider controls vs provider/model economics controls.
+- permission-mode - Provider-independent approval preference with model-capability-gated Auto fallback.

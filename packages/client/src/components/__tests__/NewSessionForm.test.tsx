@@ -94,7 +94,12 @@ const {
       supportsRecaps?: boolean;
       supportsNativeRecaps?: boolean;
       supportsNativePromptSuggestions?: boolean;
-      models?: Array<{ id: string; name: string; description?: string }>;
+      models?: Array<{
+        id: string;
+        name: string;
+        description?: string;
+        supportsAutoMode?: boolean;
+      }>;
     }>,
     loading: false,
   },
@@ -103,7 +108,7 @@ const {
       newSessionDefaults?: {
         provider?: "claude" | "codex";
         model?: string;
-        permissionMode?: "default";
+        permissionMode?: "default" | "auto";
         recapMode?: "off" | "native" | "side-session" | "fork";
         recapAfterSeconds?: number;
         promptSuggestionMode?: "off" | "native";
@@ -596,6 +601,78 @@ describe("NewSessionForm", () => {
       expect(screen.getByTestId("filter-selected").textContent).toBe("opus");
       expect(screen.getByRole("radio", { name: "Medium" }).className).toContain(
         "active",
+      );
+    });
+  });
+
+  it("preserves Auto as the all-provider permission default across unsupported providers", async () => {
+    const claudeProvider = providersState.providers[0];
+    if (!claudeProvider) throw new Error("expected Claude provider fixture");
+    providersState.providers[0] = {
+      ...claudeProvider,
+      models: [
+        { id: "fable", name: "Fable", supportsAutoMode: true },
+        { id: "opus", name: "Opus 4.8" },
+      ],
+    };
+    serverSettingsState.settings = {
+      newSessionDefaults: {
+        provider: "claude",
+        permissionMode: "auto",
+        providers: {
+          claude: { model: "fable" },
+          codex: { model: "gpt-5.3-codex" },
+        },
+      },
+    };
+    serverSettingsState.isLoading = false;
+
+    render(
+      <NewSessionForm
+        projectId="project-1"
+        selectedProject={chooserProjects[0]}
+        projects={[...chooserProjects]}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /modeAutoLabel/ }).className,
+      ).toContain("selected");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /modeDefaultLabel/ }).className,
+      ).toContain("selected");
+      expect(mockUpdateSetting).toHaveBeenCalledWith(
+        "newSessionDefaults",
+        expect.objectContaining({
+          provider: "codex",
+          permissionMode: "auto",
+        }),
+      );
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("newSessionPlaceholder"), {
+      target: { value: "hello" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "newSessionStartAction" }),
+    );
+
+    await waitFor(() => {
+      expect(mockStartSession).toHaveBeenCalledWith(
+        "project-1",
+        "hello",
+        expect.objectContaining({
+          provider: "codex",
+          mode: "default",
+        }),
+        undefined,
+        expect.any(Number),
       );
     });
   });

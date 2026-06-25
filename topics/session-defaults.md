@@ -6,6 +6,9 @@
 
 Topic: session-defaults
 
+See also: [permission-mode](permission-mode.md) for the `Auto` permission-mode
+fallback contract when a selected model cannot honor provider-decided approval.
+
 ## Contract
 
 Session defaults are not one flat bucket. A default either answers "what should
