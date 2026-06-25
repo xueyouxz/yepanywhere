@@ -113,14 +113,9 @@ const baseSettings: ServerSettings = {
 };
 
 function checkboxFor(labelKey: string): HTMLInputElement {
-  const item = screen.getByText(labelKey).closest(".settings-item");
-  const checkbox = item?.querySelector<HTMLInputElement>(
-    'input[type="checkbox"]',
-  );
-  if (!checkbox) {
-    throw new Error(`Missing checkbox for ${labelKey}`);
-  }
-  return checkbox;
+  return screen.getByRole("checkbox", {
+    name: labelKey,
+  }) as HTMLInputElement;
 }
 
 describe("LocalAccessSettings", () => {
@@ -142,8 +137,12 @@ describe("LocalAccessSettings", () => {
   it("shows file access controls in relay mode without direct port controls", async () => {
     render(<LocalAccessSettings />);
 
-    expect(await screen.findByText("fileAccessTitle")).toBeTruthy();
-    expect(screen.getByText("fileAccessHome")).toBeTruthy();
+    const fileAccessPanel = await screen.findByRole("group", {
+      name: "fileAccessTitle",
+    });
+    expect(fileAccessPanel.contains(screen.getByText("fileAccessHome"))).toBe(
+      true,
+    );
     expect(screen.getByText("localAccessRelayDebugTitle")).toBeTruthy();
     expect(screen.queryByText("localAccessListeningPortTitle")).toBeNull();
   });

@@ -8543,6 +8543,74 @@ a.sidebar-nav-item {
   margin-top: 0;
 }
 
+.file-access-settings-panel {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-3);
+}
+
+.file-access-settings-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.file-access-settings-header strong {
+  color: var(--text-primary);
+}
+
+.file-access-settings-header p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.file-access-settings-list {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.file-access-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3);
+  border-top: 1px solid var(--border-color);
+}
+
+.file-access-setting-row:first-child {
+  border-top: 0;
+}
+
+.file-access-setting-row--field,
+.file-access-setting-row--readonly {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.file-access-setting-row--field .settings-item-info,
+.file-access-setting-row--readonly .settings-item-info {
+  flex: 1 1 18rem;
+}
+
+.file-access-setting-row--field > .settings-input {
+  flex: 1 1 20rem;
+  width: auto;
+  min-width: min(100%, 18rem);
+  max-width: 28rem;
+  margin-top: 0;
+}
+
+.file-access-settings-warning {
+  margin: 0;
+}
+
 .session-toolbar-settings {
   flex-direction: column;
   align-items: stretch;
