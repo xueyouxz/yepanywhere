@@ -8,6 +8,7 @@ import type {
   ToolResultData,
   UserPromptItem,
 } from "../types/renderItems";
+import { formatCommandTurn, parseCommandTurn } from "./commandTurn";
 import { getMessageId } from "./mergeMessages";
 import {
   isTaskNotificationMessage,
@@ -159,7 +160,7 @@ function isUserPromptMessage(msg: Message): boolean {
   if (Array.isArray(content)) {
     return !content.every((block) => block.type === "tool_result");
   }
-  return typeof content === "string";
+  return typeof content === "string" && !parseCommandTurn(content);
 }
 
 function isDisplayableThinking(
@@ -340,6 +341,18 @@ function processMessage(
   // String content = user prompt (only if type is user)
   if (typeof content === "string") {
     if (isUserMessage) {
+      const commandTurn = parseCommandTurn(content);
+      if (commandTurn) {
+        items.push({
+          type: "system",
+          id: msgId,
+          subtype: "local_command",
+          content: formatCommandTurn(commandTurn),
+          sourceMessages: [msg],
+          isSubagent: msg.isSubagent,
+        });
+        return;
+      }
       // SDK-injected task notifications render as a system/event chip, not a
       // user bubble. Gated on origin.kind (non-heuristic), then the XML body is
       // parsed for the chip's structured fields.

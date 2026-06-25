@@ -281,6 +281,7 @@ export const RenderItemComponent = memo(function RenderItemComponent({
           item.subtype === "status" && item.status === "compacting";
         const isError = item.subtype === "error";
         const isConfigAck = item.subtype === "config_ack";
+        const isLocalCommand = item.subtype === "local_command";
         const isSubagentActivity = item.subtype === "subagent_activity";
         const isHighlightedConfigAck =
           isConfigAck && item.configChanged !== false;
@@ -288,12 +289,14 @@ export const RenderItemComponent = memo(function RenderItemComponent({
           ? "!"
           : isConfigAck
             ? "✓"
-            : isSubagentActivity
-              ? "↳"
-              : "⟳";
+            : isLocalCommand
+              ? "/"
+              : isSubagentActivity
+                ? "↳"
+                : "⟳";
         return (
           <div
-            className={`system-message ${isCompacting ? "system-message-compacting" : ""} ${isError ? "system-message-error" : ""} ${isHighlightedConfigAck ? "system-message-config-ack" : ""}`}
+            className={`system-message ${isCompacting ? "system-message-compacting" : ""} ${isError ? "system-message-error" : ""} ${isHighlightedConfigAck ? "system-message-config-ack" : ""} ${isLocalCommand ? "system-message-local-command" : ""}`}
           >
             <span
               className={`system-message-icon ${isCompacting ? "spinning" : ""}`}

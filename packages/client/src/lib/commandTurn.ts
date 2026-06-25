@@ -1,5 +1,10 @@
 const COMMAND_NAME_RE = /<command-name>([\s\S]*?)<\/command-name>/;
+const COMMAND_MESSAGE_RE = /<command-message>[\s\S]*?<\/command-message>/g;
 const COMMAND_ARGS_RE = /<command-args>([\s\S]*?)<\/command-args>/;
+const COMMAND_NAME_TAG_RE = /<command-name>[\s\S]*?<\/command-name>/g;
+const COMMAND_ARGS_TAG_RE = /<command-args>[\s\S]*?<\/command-args>/g;
+const LOCAL_COMMAND_CAVEAT_RE =
+  /<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g;
 
 export interface CommandTurn {
   /** The slash command, e.g. "/harsh-review". */
@@ -18,6 +23,19 @@ export interface CommandTurn {
 export function parseCommandTurn(text: string): CommandTurn | null {
   const command = text.match(COMMAND_NAME_RE)?.[1]?.trim();
   if (!command) return null;
+  const unparsed = text
+    .replace(LOCAL_COMMAND_CAVEAT_RE, "")
+    .replace(COMMAND_NAME_TAG_RE, "")
+    .replace(COMMAND_MESSAGE_RE, "")
+    .replace(COMMAND_ARGS_TAG_RE, "")
+    .trim();
+  if (unparsed) return null;
   const args = text.match(COMMAND_ARGS_RE)?.[1]?.trim() ?? "";
   return { command, args };
+}
+
+export function formatCommandTurn(commandTurn: CommandTurn): string {
+  return commandTurn.args
+    ? `${commandTurn.command} ${commandTurn.args}`
+    : commandTurn.command;
 }

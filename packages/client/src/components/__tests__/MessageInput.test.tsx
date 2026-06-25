@@ -1619,6 +1619,41 @@ describe("MessageInput", () => {
     expect(textarea.value).toBe("/compact ");
   });
 
+  it("hides slash suggestions once the command is completely typed", () => {
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        slashCommands: ["clear", "compact"],
+        onCustomCommand: vi.fn(() => false),
+      },
+    ) as HTMLTextAreaElement;
+
+    fireEvent.change(textarea, { target: { value: "/clear" } });
+
+    expect(screen.queryByRole("menuitem", { name: "/clear" })).toBeNull();
+  });
+
+  it("submits a completed slash suggestion without the inserted space", async () => {
+    const restoreMatchMedia = installDesktopMatchMedia();
+    const onSend = vi.fn();
+    const textarea = renderMessageInput(
+      vi.fn(() => true),
+      {
+        onSend,
+        slashCommands: ["clear"],
+        onCustomCommand: vi.fn(() => false),
+      },
+    ) as HTMLTextAreaElement;
+
+    fireEvent.change(textarea, { target: { value: "/cl" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(textarea.value).toBe("/clear "));
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expectSubmission(onSend, "/clear", "direct");
+    restoreMatchMedia();
+  });
+
   it("shows the isearch key guide on shortcut help hover while search is active", async () => {
     renderMessageInput();
 

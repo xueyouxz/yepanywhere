@@ -7264,6 +7264,11 @@ a.sidebar-nav-item {
   font-style: normal;
 }
 
+.system-message-local-command .system-message-text {
+  font-style: normal;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
 /* Task notification — SDK-injected background-task lifecycle chip */
 .task-notification {
   display: flex;

@@ -131,6 +131,10 @@ function getLeadingSlashQuery(text: string): string | null {
   return match ? (match[1] ?? "").toLowerCase() : null;
 }
 
+function normalizeSlashCommandForMatch(command: string): string {
+  return command.replace(/^\/+/, "").toLowerCase();
+}
+
 function readPixelValue(value: string): number {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -428,13 +432,19 @@ export function MessageInput({
   const matchingSlashCommands = useMemo(() => {
     if (slashQuery === null) return [];
     return slashCommands.filter((command) =>
-      command.toLowerCase().startsWith(slashQuery),
+      normalizeSlashCommandForMatch(command).startsWith(slashQuery),
     );
   }, [slashCommands, slashQuery]);
+  const hasExactSlashCommand =
+    slashQuery !== null &&
+    matchingSlashCommands.some(
+      (command) => normalizeSlashCommandForMatch(command) === slashQuery,
+    );
   const showSlashSuggestions =
     !collapsed &&
     !disabled &&
     slashQuery !== null &&
+    !hasExactSlashCommand &&
     dismissedSlashQuery !== slashQuery &&
     matchingSlashCommands.length > 0;
   const canSubmit = forkSummaryMode

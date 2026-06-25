@@ -620,6 +620,31 @@ describe("preprocessMessages", () => {
     });
   });
 
+  it("renders Claude local slash commands as system markers", () => {
+    const messages: Message[] = [
+      {
+        id: "msg-1",
+        role: "user",
+        content:
+          "<local-command-caveat>Caveat: local command.</local-command-caveat>\n" +
+          "<command-name>/clear</command-name>\n" +
+          "<command-message>clear</command-message>\n" +
+          "<command-args></command-args>\n" +
+          "<local-command-caveat>Caveat: local command.</local-command-caveat>",
+        timestamp: "2024-01-01T00:00:00Z",
+      },
+    ];
+
+    const items = preprocessMessages(messages);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      type: "system",
+      subtype: "local_command",
+      content: "/clear",
+    });
+  });
+
   it("collapses leading session setup prompts into one item", () => {
     const messages: Message[] = [
       {
