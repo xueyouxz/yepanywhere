@@ -3,8 +3,8 @@
 > The Codex metadata scanner is the YA subsystem that maps date-bucketed Codex
 > rollout files to projects and session summaries by reading rollout head
 > metadata; its current shortcut caches and durable discovery index help common
-> navigation, but watcher scheduling, reader-side metrics, and same-identity
-> overwrite validation still have known scale gaps.
+> navigation, but adaptive watcher scheduling, reader-side metrics, and
+> same-identity overwrite validation still have known scale gaps.
 
 Topic: codex-metadata-scanner
 
@@ -59,7 +59,8 @@ index:
   through the reader and stats discovered paths.
 - `FileWatcher` marks Codex scopes dirty when rollout files change; because a
   raw file event does not identify the owning project scope cheaply, loaded
-  Codex scopes are marked dirty broadly.
+  Codex scopes are marked dirty broadly. Full-tree rescans now record duration,
+  files scanned, emitted create/modify/delete counts, and overlap skips.
 
 These layers are useful for normal navigation and request bursts. The discovery
 index now avoids rereading `session_meta` for observed known rollouts, including
@@ -155,9 +156,9 @@ transitions and very large trees, the scanner should gain:
 1. An explicit validation strategy for same-identity, non-shrinking header
    overwrites; current source-fingerprint and shrink checks cover common
    replacement/truncation cases without rereading ordinary appends.
-2. Extend scanner-style metrics to `CodexSessionReader` and watcher rescan
-   paths; project-scanner metrics now distinguish cache-backed compressed
-   discovery from zstd first-line reads.
+2. Extend scanner-style metrics to `CodexSessionReader`; project-scanner and
+   watcher-rescan metrics now cover cache behavior, compressed discovery, file
+   walk size, emitted change counts, and overlap skips.
 3. Keep streaming zstd first-line reads covered by tests so scanner discovery
    does not regress to full compressed transcript decompression.
 4. Date-bucket/high-water metrics once routine scans stop walking the whole

@@ -93,8 +93,9 @@ current shape has important scale and representation gaps:
   validation pass exists.
 - `CodexSessionScanner` now records project-scan metrics and slow logs for
   file walking, discovery-index behavior, plain/zstd precedence, and
-  cache-backed compressed discovery. `CodexSessionReader` and watcher rescan
-  metrics are still thinner.
+  cache-backed compressed discovery. `FileWatcher` now records rescan duration,
+  files walked, emitted create/modify/delete counts, and overlap skips.
+  `CodexSessionReader` metrics are still thinner.
 - `session_meta` is effectively append-immutable, and the Codex adapter now
   reuses cached metadata across ordinary append/mtime/size changes.
 - Recursive discovery is still O(number of rollout files). Date-bucket layout
@@ -123,7 +124,7 @@ index without letting it diverge from provider-owned history:
    missing or invalid, the file appears replaced/truncated, or an explicit
    validation pass marks the cache suspect.
 4. Extend scanner instrumentation before broadening scope: `CodexSessionReader`
-   session-list scans, watcher rescan duration/backoff, dirty scopes, and
+   session-list scans, adaptive watcher backoff interval, dirty scopes, and
    skipped date buckets once date-bucket probing exists.
 
 Invariant: the discovery index is derived and non-authoritative. YA must first

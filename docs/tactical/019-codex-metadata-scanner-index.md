@@ -25,6 +25,7 @@ Progress:
 - [x] Add streaming zstd first-line reads, or keep compressed discovery
   explicitly opt-in until that exists.
 - [x] Add Codex project-scanner metrics and slow logs.
+- [x] Add watcher rescan metrics and slow logs.
 - [ ] Make Codex watcher missed-event recovery bounded under expensive trees.
 
 ## Context
@@ -293,7 +294,9 @@ Longer-term option:
 Acceptance criteria:
 
 - Periodic rescans cannot run continuously on a large tree.
-- Slow logs identify the watched dir, files walked, duration, and backoff.
+- [x] Slow logs identify the watched dir, provider, rescan reason, files
+  walked, duration, emitted create/modify/delete counts, and overlap skips.
+- Slow logs identify the active backoff interval once adaptive backoff lands.
 - Watcher teardown still clears timers and state.
 - Existing `architecture-mandates` resource-quiescence requirements remain
   satisfied.
@@ -320,7 +323,7 @@ spirit to `SessionIndexService` performance logs.
 Remaining metrics gaps:
 
 - extend equivalent metrics to `CodexSessionReader` session-list scans;
-- watcher rescan duration and backoff interval;
+- watcher adaptive backoff interval;
 - dirty-scope count;
 - skipped date buckets, once date-bucket probing exists.
 
@@ -337,6 +340,7 @@ Automated:
   reconciliation.
 - Unit tests for scanner metrics around cache hits/misses, plain/zstd
   precedence, and cache-backed compressed discovery.
+- Unit tests for watcher rescan metrics and overlap-skip accounting.
 - Unit tests for streaming zstd first-line reads if Phase 4 lands.
 - Existing server tests:
   - `test/projects/codex-scanner.test.ts`

@@ -23,7 +23,37 @@ export interface FileWatcherOptions {
    * Useful on platforms where fs.watch may miss deep file writes.
    */
   periodicRescanMs?: number;
+  /** Slow rescan log threshold in ms (default: 250). */
+  rescanSlowLogThresholdMs?: number;
 }
+
+export type FileWatcherRescanReason = "fallback" | "periodic";
+
+export interface FileWatcherRescanMetrics {
+  provider: WatchProvider;
+  watchDir: string;
+  reason: FileWatcherRescanReason;
+  periodicRescanMs: number;
+  durationMs: number;
+  directoriesVisited: number;
+  filesScanned: number;
+  directoryReadErrors: number;
+  statFailures: number;
+  knownFilesBefore: number;
+  currentFiles: number;
+  knownFilesAfter: number;
+  createEvents: number;
+  modifyEvents: number;
+  deleteEvents: number;
+  emittedEvents: number;
+  sessionEvents: number;
+  agentSessionEvents: number;
+  otherEvents: number;
+  overlapSkipsSinceLast: number;
+  overlapSkipsTotal: number;
+}
+
+const DEFAULT_RESCAN_SLOW_LOG_THRESHOLD_MS = 250;
 
 export class FileWatcher {
   private watchDir: string;
@@ -31,12 +61,16 @@ export class FileWatcher {
   private eventBus: EventBus;
   private debounceMs: number;
   private periodicRescanMs: number;
+  private rescanSlowLogThresholdMs: number;
   private watcher: fs.FSWatcher | null = null;
   private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
   private rescanTimer: NodeJS.Timeout | null = null;
   private rescanInProgress = false;
   private periodicRescanTimer: NodeJS.Timeout | null = null;
   private knownFileMtimes: Map<string, number> = new Map();
+  private lastRescanMetrics: FileWatcherRescanMetrics | null = null;
+  private rescanOverlapSkipsSinceLast = 0;
+  private rescanOverlapSkipsTotal = 0;
 
   constructor(options: FileWatcherOptions) {
     this.watchDir = options.watchDir;
@@ -44,6 +78,11 @@ export class FileWatcher {
     this.eventBus = options.eventBus;
     this.debounceMs = options.debounceMs ?? 200;
     this.periodicRescanMs = options.periodicRescanMs ?? 0;
+    this.rescanSlowLogThresholdMs = Math.max(
+      0,
+      options.rescanSlowLogThresholdMs ??
+        DEFAULT_RESCAN_SLOW_LOG_THRESHOLD_MS,
+    );
   }
 
   /**
@@ -81,7 +120,7 @@ export class FileWatcher {
 
       if (this.periodicRescanMs > 0) {
         this.periodicRescanTimer = setInterval(() => {
-          this.rescanAndEmit();
+          this.rescanAndEmit("periodic");
         }, this.periodicRescanMs);
         getLogger().info(
           `[FileWatcher] Periodic rescan enabled (${this.periodicRescanMs}ms) for ${this.watchDir}`,
@@ -126,28 +165,42 @@ export class FileWatcher {
     return this.watcher !== null;
   }
 
+  getLastRescanMetrics(): FileWatcherRescanMetrics | null {
+    return this.lastRescanMetrics
+      ? { ...this.lastRescanMetrics }
+      : null;
+  }
+
   private scanExistingFiles(): void {
     this.knownFileMtimes.clear();
     this.scanDir(this.watchDir, this.knownFileMtimes);
   }
 
-  private scanDir(dir: string, index: Map<string, number>): void {
+  private scanDir(
+    dir: string,
+    index: Map<string, number>,
+    metrics?: FileWatcherRescanMetrics,
+  ): void {
     try {
+      if (metrics) metrics.directoriesVisited += 1;
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
         const fullPath = path.join(dir, entry.name);
         if (entry.isDirectory()) {
-          this.scanDir(fullPath, index);
+          this.scanDir(fullPath, index, metrics);
         } else {
+          if (metrics) metrics.filesScanned += 1;
           try {
             const stats = fs.statSync(fullPath);
             index.set(fullPath, stats.mtimeMs);
           } catch {
+            if (metrics) metrics.statFailures += 1;
             // File may have disappeared between readdir/stat
           }
         }
       }
     } catch {
+      if (metrics) metrics.directoryReadErrors += 1;
       // Ignore errors (e.g., permission denied)
     }
   }
@@ -208,6 +261,14 @@ export class FileWatcher {
       this.knownFileMtimes.set(fullPath, mtimeMs);
     }
 
+    this.emitFileChangeEvent(fullPath, changeType);
+  }
+
+  private emitFileChangeEvent(
+    fullPath: string,
+    changeType: FileChangeType,
+    metrics?: FileWatcherRescanMetrics,
+  ): void {
     const relativePath = path.relative(this.watchDir, fullPath);
 
     const event: FileChangeEvent = {
@@ -219,6 +280,20 @@ export class FileWatcher {
       timestamp: new Date().toISOString(),
       fileType: this.parseFileType(relativePath),
     };
+
+    if (metrics) {
+      metrics.emittedEvents += 1;
+      if (changeType === "create") metrics.createEvents += 1;
+      if (changeType === "modify") metrics.modifyEvents += 1;
+      if (changeType === "delete") metrics.deleteEvents += 1;
+      if (event.fileType === "session") {
+        metrics.sessionEvents += 1;
+      } else if (event.fileType === "agent-session") {
+        metrics.agentSessionEvents += 1;
+      } else {
+        metrics.otherEvents += 1;
+      }
+    }
 
     getLogger().debug(
       `[FileWatcher] Emitting file-change provider=${event.provider} changeType=${event.changeType} fileType=${event.fileType} relativePath=${event.relativePath}`,
@@ -243,44 +318,110 @@ export class FileWatcher {
     this.rescanTimer = setTimeout(
       () => {
         this.rescanTimer = null;
-        this.rescanAndEmit();
+        this.rescanAndEmit("fallback");
       },
       Math.max(this.debounceMs * 2, 400),
     );
   }
 
-  private rescanAndEmit(): void {
+  private rescanAndEmit(reason: FileWatcherRescanReason): void {
     if (this.rescanInProgress) {
+      this.rescanOverlapSkipsSinceLast += 1;
+      this.rescanOverlapSkipsTotal += 1;
+      getLogger().debug(
+        {
+          event: "file_watcher_rescan_skipped",
+          provider: this.provider,
+          watchDir: this.watchDir,
+          reason,
+          overlapSkipsSinceLast: this.rescanOverlapSkipsSinceLast,
+          overlapSkipsTotal: this.rescanOverlapSkipsTotal,
+        },
+        "FILE_WATCHER: rescan skipped; already in progress",
+      );
       return;
     }
     this.rescanInProgress = true;
+    const metrics = this.createRescanMetrics(reason);
+    const startedAt = Date.now();
 
     try {
       getLogger().debug(
-        `[FileWatcher] Running fallback rescan provider=${this.provider}`,
+        `[FileWatcher] Running ${reason} rescan provider=${this.provider}`,
       );
       const current = new Map<string, number>();
-      this.scanDir(this.watchDir, current);
+      metrics.knownFilesBefore = this.knownFileMtimes.size;
+      this.scanDir(this.watchDir, current, metrics);
+      metrics.currentFiles = current.size;
 
       // Create/modify events
       for (const [fullPath, mtimeMs] of current.entries()) {
         const prevMtime = this.knownFileMtimes.get(fullPath);
         if (prevMtime === undefined || prevMtime !== mtimeMs) {
-          this.emitEvent(fullPath, "change");
+          this.emitFileChangeEvent(
+            fullPath,
+            prevMtime === undefined ? "create" : "modify",
+            metrics,
+          );
         }
       }
 
       // Delete events
       for (const fullPath of this.knownFileMtimes.keys()) {
         if (!current.has(fullPath)) {
-          this.emitEvent(fullPath, "rename");
+          this.emitFileChangeEvent(fullPath, "delete", metrics);
         }
       }
 
       this.knownFileMtimes = current;
+      metrics.knownFilesAfter = this.knownFileMtimes.size;
     } finally {
+      metrics.durationMs = Date.now() - startedAt;
+      this.lastRescanMetrics = { ...metrics };
+      this.logRescanMetrics(metrics);
+      this.rescanOverlapSkipsSinceLast = 0;
       this.rescanInProgress = false;
     }
+  }
+
+  private createRescanMetrics(
+    reason: FileWatcherRescanReason,
+  ): FileWatcherRescanMetrics {
+    return {
+      provider: this.provider,
+      watchDir: this.watchDir,
+      reason,
+      periodicRescanMs: this.periodicRescanMs,
+      durationMs: 0,
+      directoriesVisited: 0,
+      filesScanned: 0,
+      directoryReadErrors: 0,
+      statFailures: 0,
+      knownFilesBefore: this.knownFileMtimes.size,
+      currentFiles: 0,
+      knownFilesAfter: this.knownFileMtimes.size,
+      createEvents: 0,
+      modifyEvents: 0,
+      deleteEvents: 0,
+      emittedEvents: 0,
+      sessionEvents: 0,
+      agentSessionEvents: 0,
+      otherEvents: 0,
+      overlapSkipsSinceLast: this.rescanOverlapSkipsSinceLast,
+      overlapSkipsTotal: this.rescanOverlapSkipsTotal,
+    };
+  }
+
+  private logRescanMetrics(metrics: FileWatcherRescanMetrics): void {
+    const payload = {
+      event: "file_watcher_rescan",
+      ...metrics,
+    };
+    if (metrics.durationMs >= this.rescanSlowLogThresholdMs) {
+      getLogger().warn(payload, "FILE_WATCHER: slow rescan");
+      return;
+    }
+    getLogger().debug(payload, "FILE_WATCHER: rescan complete");
   }
 
   private parseFileType(relativePath: string): FileChangeEvent["fileType"] {
