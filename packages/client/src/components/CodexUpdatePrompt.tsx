@@ -47,7 +47,6 @@ export function CodexUpdatePrompt() {
     policy === "notify" &&
     !!status &&
     status.updateAvailable &&
-    status.updateMethod === "npm" &&
     !!latestTag &&
     latestTag !== seenTag &&
     latestTag !== dismissedTag;
@@ -75,6 +74,8 @@ export function CodexUpdatePrompt() {
   if (!activeTag || !status || !latestTag) {
     return null;
   }
+
+  const canInstall = status.updateMethod === "npm";
 
   const close = ({ markSeen = false }: { markSeen?: boolean } = {}) => {
     if (markSeen) {
@@ -158,23 +159,33 @@ export function CodexUpdatePrompt() {
 
         {installCommand && (
           <div className="codex-update-prompt__command-block">
-            <span className="settings-hint">Yep Anywhere will run:</span>
+            <span className="settings-hint">
+              {canInstall
+                ? t("codexUpdateWillRunCommand")
+                : t("providersCodexUpdateWithInstaller")}
+            </span>
             <code className="codex-update-prompt__command">
               {installCommand}
             </code>
           </div>
         )}
 
-        <label className="codex-update-prompt__checkbox-label">
-          <input
-            type="checkbox"
-            className="codex-update-prompt__checkbox"
-            checked={autoUpdate}
-            onChange={(e) => setAutoUpdate(e.target.checked)}
-            disabled={isInstalling || installSucceeded === true}
-          />
-          <span>Update next versions too</span>
-        </label>
+        {!canInstall && (
+          <p className="settings-hint">{t("codexUpdateManualInstallHint")}</p>
+        )}
+
+        {canInstall && (
+          <label className="codex-update-prompt__checkbox-label">
+            <input
+              type="checkbox"
+              className="codex-update-prompt__checkbox"
+              checked={autoUpdate}
+              onChange={(e) => setAutoUpdate(e.target.checked)}
+              disabled={isInstalling || installSucceeded === true}
+            />
+            <span>{t("codexUpdateAutoFutureVersions")}</span>
+          </label>
+        )}
 
         {isInstalling && (
           <p className="settings-hint codex-update-prompt__progress">
@@ -212,13 +223,13 @@ export function CodexUpdatePrompt() {
         )}
 
         <div className="codex-update-prompt__actions">
-          {installSucceeded === true ? (
+          {installSucceeded === true || !canInstall ? (
             <button
               type="button"
               className="settings-button"
               onClick={() => close({ markSeen: true })}
             >
-              Done
+              {t("codexUpdateDone")}
             </button>
           ) : (
             <>

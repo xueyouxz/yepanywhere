@@ -96,8 +96,8 @@ export function getCodexCommonPaths(): string[] {
     process.env.LOCALAPPDATA ?? `${home}${sep}AppData${sep}Local`;
   return isWindows
     ? [
-        `${home}${sep}.codex${sep}.sandbox-bin${sep}codex${ext}`,
         ...getOpenAICodexDesktopPaths(localAppData),
+        `${home}${sep}.codex${sep}.sandbox-bin${sep}codex${ext}`,
         `${home}${sep}.cargo${sep}bin${sep}codex${ext}`,
         `${home}${sep}.codex${sep}bin${sep}codex${ext}`,
         `${localAppData}${sep}bin${sep}codex${ext}`,
