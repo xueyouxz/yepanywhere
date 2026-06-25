@@ -32,11 +32,14 @@ export async function registerServiceWorkerAtStartup(): Promise<void> {
         );
         return;
       }
-    } catch {
-      // If settings fetch fails, proceed with SW enabled (fail open)
+    } catch (err) {
+      // In dev, respect the settings gate when it cannot be read. This avoids
+      // re-registering SW on unauthenticated startup or while debugging reloads.
       console.warn(
-        "[registerServiceWorker] Failed to fetch server settings, proceeding with SW enabled",
+        "[registerServiceWorker] Failed to fetch server settings, skipping SW registration",
+        err,
       );
+      return;
     }
   }
 
