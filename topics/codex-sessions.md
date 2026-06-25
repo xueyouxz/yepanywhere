@@ -48,8 +48,10 @@ There are two main YA surfaces over the same rollout tree:
 
 `ProjectScanner` and route-level provider catalogs try to share this work
 within a request path, while `SessionIndexService` persists provider-neutral
-session summaries. These layers reduce duplicate reads, but they are not a
-durable Codex rollout metadata catalog.
+session summaries. `SessionDiscoveryIndex` now persists normalized provider
+head metadata for observed rollout files under
+`{dataDir}/indexes/session-discovery/`. These layers reduce duplicate reads,
+but only provider-owned files are authoritative.
 
 ## Compression And Representation
 
@@ -82,13 +84,12 @@ YA should mirror the same logical identity rule:
 Codex session support is correct for ordinary small local trees, but the
 current shape has important scale and representation gaps:
 
-- There is no durable `rollout file -> session_meta` catalog. Short-lived
-  scanner caches and persisted session summaries do not prevent first-line
-  metadata from being read again after TTL expiry, restart, invalidation, or
-  full validation.
-- `session_meta` is effectively append-immutable, but current discovery is
-  still tied to file freshness paths. A rollout append changes mtime and size,
-  while the first line almost certainly did not change.
+- The durable `rollout file -> session_meta` catalog exists as a
+  provider-neutral discovery index, but replacement validation is still
+  conservative: a same-path, non-shrinking plain-file replacement can keep
+  cached head metadata until a stronger validation pass exists.
+- `session_meta` is effectively append-immutable, and the Codex adapter now
+  reuses cached metadata across ordinary append/mtime/size changes.
 - Recursive discovery is still O(number of rollout files). Date-bucket layout
   is not yet used as a first-class pruning/indexing primitive.
 - Provider archived sessions are not modeled as a first-class YA source. Codex
@@ -102,21 +103,23 @@ current shape has important scale and representation gaps:
 
 ## Near-Term Direction
 
-The next durable improvement should treat Codex rollout metadata as its own
-indexing problem:
+The next durable improvements should build on the provider-neutral discovery
+index without letting it diverge from provider-owned history:
 
-1. Cache successful `session_meta` reads durably by canonical rollout stem and
-   file identity.
-2. Reuse cached metadata on append/modify events; only session summary or
-   transcript detail needs to refresh.
-3. Reconcile rename/compression/delete events against the canonical stem so a
+1. Strengthen replacement/truncation detection for cached head metadata.
+2. Reconcile rename/compression/delete events against the canonical stem so a
    `.jsonl -> .jsonl.zst` transition preserves the session.
-4. Re-read head metadata only when the rollout is new, cached metadata is
+3. Re-read head metadata only when the rollout is new, cached metadata is
    missing or invalid, the file appears replaced/truncated, or an explicit
    validation pass marks the cache suspect.
-5. Add scanner instrumentation before broadening scope: files walked, metadata
+4. Add scanner instrumentation before broadening scope: files walked, metadata
    cache hits/misses, compressed opens, zstd first-line reads, scan duration,
    and skipped date buckets.
+
+Invariant: the discovery index is derived and non-authoritative. YA must first
+observe a provider file and only then reuse indexed metadata for that file. A
+deleted or rotated provider file must disappear from YA lists immediately even
+if its discovery shard still contains a stale record.
 
 This keeps YA faithful to Codex's local transcript model while preserving the
 resource-quiescence requirement from

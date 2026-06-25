@@ -666,6 +666,7 @@ async function startServer() {
     scanner,
     codexScanner: new CodexSessionScanner({
       sessionsDir: config.codexSessionsDir,
+      dataDir: config.dataDir,
     }),
     geminiScanner: new GeminiSessionScanner({
       sessionsDir: config.geminiSessionsDir,

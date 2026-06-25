@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as zlib from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import { CodexSessionScanner } from "../../src/projects/codex-scanner.js";
+import { createCodexSessionDiscoveryIndex } from "../../src/sessions/codex-discovery.js";
+import { getCodexRolloutDiscoveryIdentity } from "../../src/utils/codexRolloutFiles.js";
 
 function makeSessionMeta(
   id: string,
@@ -212,6 +214,97 @@ describe("CodexSessionScanner", () => {
 
     expect(projects).toHaveLength(1);
     expect(projects[0].path).toBe("/home/user/project-large");
+  });
+
+  it("persists normalized metadata and reuses it after append", async () => {
+    const sessionsDir = join(tmpdir(), `codex-scan-${randomUUID()}`);
+    const dataDir = join(tmpdir(), `codex-data-${randomUUID()}`);
+    tempDirs.push(sessionsDir, dataDir);
+
+    const dateDir = join(sessionsDir, "2026", "06", "25");
+    await mkdir(dateDir, { recursive: true });
+
+    const largeInstructions = "x".repeat(80_000);
+    const id = randomUUID();
+    const meta = JSON.stringify({
+      type: "session_meta",
+      payload: {
+        id,
+        cwd: "/home/user/project-cache",
+        timestamp: new Date().toISOString(),
+        base_instructions: { text: largeInstructions },
+      },
+    });
+    const sessionPath = join(dateDir, `rollout-${id}.jsonl`);
+    await writeFile(sessionPath, `${meta}\n`);
+
+    const scanner = new CodexSessionScanner({ sessionsDir, dataDir });
+    const projects = await scanner.listProjects();
+    expect(projects).toHaveLength(1);
+
+    const index = createCodexSessionDiscoveryIndex(dataDir, sessionsDir);
+    expect(index).toBeDefined();
+    if (!index) return;
+
+    const identity = getCodexRolloutDiscoveryIdentity(
+      sessionsDir,
+      sessionPath,
+    );
+    const shardPath = index.getShardPath(identity.shardKey);
+    const beforeRaw = await readFile(shardPath, "utf-8");
+    expect(beforeRaw).not.toContain("base_instructions");
+
+    const before = JSON.parse(beforeRaw) as {
+      records: Record<string, { lastValidatedAtMs: number }>;
+    };
+    const beforeRecord = before.records[identity.key];
+    expect(beforeRecord).toBeDefined();
+    const lastValidatedAtMs = beforeRecord?.lastValidatedAtMs;
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await appendFile(
+      sessionPath,
+      `${JSON.stringify({
+        type: "event_msg",
+        payload: { type: "user_message", message: "hello" },
+      })}\n`,
+    );
+
+    const restartedScanner = new CodexSessionScanner({ sessionsDir, dataDir });
+    const restartedProjects = await restartedScanner.listProjects();
+    expect(restartedProjects).toHaveLength(1);
+    expect(restartedProjects[0].path).toBe("/home/user/project-cache");
+
+    const after = JSON.parse(await readFile(shardPath, "utf-8")) as {
+      records: Record<string, { lastValidatedAtMs: number }>;
+    };
+    expect(after.records[identity.key]?.lastValidatedAtMs).toBe(
+      lastValidatedAtMs,
+    );
+  });
+
+  it("does not list deleted rollouts from the discovery index", async () => {
+    const sessionsDir = join(tmpdir(), `codex-scan-${randomUUID()}`);
+    const dataDir = join(tmpdir(), `codex-data-${randomUUID()}`);
+    tempDirs.push(sessionsDir, dataDir);
+
+    const dateDir = join(sessionsDir, "2026", "06", "25");
+    await mkdir(dateDir, { recursive: true });
+
+    const id = randomUUID();
+    const sessionPath = join(dateDir, `rollout-${id}.jsonl`);
+    await writeFile(
+      sessionPath,
+      `${makeSessionMeta(id, "/home/user/project-deleted")}\n`,
+    );
+
+    const scanner = new CodexSessionScanner({ sessionsDir, dataDir });
+    expect(await scanner.listProjects()).toHaveLength(1);
+
+    await rm(sessionPath);
+
+    const restartedScanner = new CodexSessionScanner({ sessionsDir, dataDir });
+    expect(await restartedScanner.listProjects()).toHaveLength(0);
   });
 
   it("skips empty files", async () => {

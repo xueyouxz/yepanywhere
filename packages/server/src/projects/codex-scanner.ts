@@ -14,13 +14,17 @@
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import type { SessionDiscoveryIndex } from "../indexes/SessionDiscoveryIndex.js";
 import { getLogger } from "../logging/logger.js";
+import {
+  createCodexSessionDiscoveryIndex,
+  readCodexRolloutMetadata,
+} from "../sessions/codex-discovery.js";
 import type { Project } from "../supervisor/types.js";
 import {
   isCodexRolloutFileName,
   preferPlainCodexRollouts,
 } from "../utils/codexRolloutFiles.js";
-import { readFirstLine } from "../utils/jsonl.js";
 import { canonicalizeProjectPath, encodeProjectId } from "./paths.js";
 
 export const CODEX_SESSIONS_DIR =
@@ -35,14 +39,6 @@ export function getDefaultCodexSessionsDir(): string {
   return join(getDefaultCodexHomeDir(), "sessions");
 }
 
-interface CodexSessionMeta {
-  id: string;
-  cwd: string;
-  timestamp: string;
-  cli_version?: string;
-  model_provider?: string;
-}
-
 interface CodexSessionInfo {
   id: string;
   cwd: string;
@@ -51,10 +47,10 @@ interface CodexSessionInfo {
   mtime: number;
 }
 
-const CODEX_META_READ_MAX_BYTES = 1024 * 1024;
-
 export interface CodexScannerOptions {
   sessionsDir?: string; // override for testing
+  dataDir?: string;
+  discoveryIndex?: SessionDiscoveryIndex;
 }
 
 /** How long to cache scan results (ms) */
@@ -62,11 +58,15 @@ const SCAN_CACHE_TTL = 5_000;
 
 export class CodexSessionScanner {
   private sessionsDir: string;
+  private discoveryIndex?: SessionDiscoveryIndex;
   private cachedScan: { result: CodexSessionInfo[]; timestamp: number } | null =
     null;
 
   constructor(options: CodexScannerOptions = {}) {
     this.sessionsDir = options.sessionsDir ?? CODEX_SESSIONS_DIR;
+    this.discoveryIndex =
+      options.discoveryIndex ??
+      createCodexSessionDiscoveryIndex(options.dataDir, this.sessionsDir);
   }
 
   invalidateCache(): void {
@@ -189,6 +189,7 @@ export class CodexSessionScanner {
         }
       }
     }
+    await this.discoveryIndex?.flush();
 
     if (files.length > 0 && sessions.length === 0) {
       getLogger().warn(
@@ -239,42 +240,20 @@ export class CodexSessionScanner {
     filePath: string,
   ): Promise<CodexSessionInfo | null> {
     try {
-      const [stats, firstLine] = await Promise.all([
-        stat(filePath),
-        readFirstLine(filePath, CODEX_META_READ_MAX_BYTES),
-      ]);
-
-      if (!firstLine) {
-        getLogger().debug(
-          `[CodexScanner] Empty file or first line: ${filePath}`,
-        );
-        return null;
-      }
-
-      const parsed = JSON.parse(firstLine);
-
-      // Validate it's a session_meta entry
-      if (parsed.type !== "session_meta" || !parsed.payload) {
-        getLogger().debug(
-          `[CodexScanner] Unexpected first line type=${parsed.type} payload=${!!parsed.payload}: ${filePath}`,
-        );
-        return null;
-      }
-
-      const meta = parsed.payload as CodexSessionMeta;
-      if (!meta.id || !meta.cwd) {
-        getLogger().debug(
-          `[CodexScanner] session_meta missing id or cwd: ${filePath}`,
-        );
-        return null;
-      }
-
-      return {
-        id: meta.id,
-        cwd: meta.cwd,
+      const session = await readCodexRolloutMetadata({
+        sessionsDir: this.sessionsDir,
         filePath,
-        timestamp: meta.timestamp,
-        mtime: stats.mtimeMs,
+        ...(this.discoveryIndex
+          ? { discoveryIndex: this.discoveryIndex }
+          : {}),
+      });
+      if (!session) return null;
+      return {
+        id: session.id,
+        cwd: session.cwd,
+        filePath,
+        timestamp: session.timestamp,
+        mtime: session.mtime,
       };
     } catch (error) {
       getLogger().debug(

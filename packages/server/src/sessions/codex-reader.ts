@@ -22,6 +22,7 @@ import {
   parseCodexSessionEntry,
   truncateSessionTitle,
 } from "@yep-anywhere/shared";
+import type { SessionDiscoveryIndex } from "../indexes/SessionDiscoveryIndex.js";
 import { canonicalizeProjectPath } from "../projects/paths.js";
 import type {
   ContextUsage,
@@ -32,7 +33,11 @@ import {
   isCodexRolloutFileName,
   preferPlainCodexRollouts,
 } from "../utils/codexRolloutFiles.js";
-import { readFirstLine, readJsonlLines } from "../utils/jsonl.js";
+import { readJsonlLines } from "../utils/jsonl.js";
+import {
+  createCodexSessionDiscoveryIndex,
+  readCodexRolloutMetadata,
+} from "./codex-discovery.js";
 import type {
   GetSessionOptions,
   ISessionReader,
@@ -50,6 +55,8 @@ export interface CodexSessionReaderOptions {
    * Only sessions with this cwd will be listed.
    */
   projectPath?: string;
+  dataDir?: string;
+  discoveryIndex?: SessionDiscoveryIndex;
 }
 
 interface CodexSessionFile {
@@ -62,7 +69,6 @@ interface CodexSessionFile {
   isSubagent: boolean;
 }
 
-const CODEX_META_READ_MAX_BYTES = 1024 * 1024;
 const CODEX_SCAN_CACHE_TTL_MS = 5000;
 
 function isCompressedCodexSessionFile(filePath: string): boolean {
@@ -179,6 +185,7 @@ function dedupeCodexEntries(entries: CodexSessionEntry[]): CodexSessionEntry[] {
 export class CodexSessionReader implements ISessionReader {
   private sessionsDir: string;
   private projectPath?: string;
+  private discoveryIndex?: SessionDiscoveryIndex;
 
   // Cache of session ID -> file path for quick lookups
   private sessionFileCache: Map<string, CodexSessionFile> = new Map();
@@ -189,6 +196,9 @@ export class CodexSessionReader implements ISessionReader {
     this.projectPath = options.projectPath
       ? canonicalizeProjectPath(options.projectPath)
       : undefined;
+    this.discoveryIndex =
+      options.discoveryIndex ??
+      createCodexSessionDiscoveryIndex(options.dataDir, this.sessionsDir);
   }
 
   invalidateCache(): void {
@@ -441,6 +451,7 @@ export class CodexSessionReader implements ISessionReader {
         sessions.push(session);
       }
     }
+    await this.discoveryIndex?.flush();
 
     return sessions;
   }
@@ -599,58 +610,29 @@ export class CodexSessionReader implements ISessionReader {
     options?: CodexScanOptions,
   ): Promise<CodexSessionFile | null> {
     try {
-      const stats = await stat(filePath);
-      if (options?.activeAfterMs && stats.mtimeMs < options.activeAfterMs) {
-        return null;
-      }
-
-      const firstLine = await readFirstLine(
+      const session = await readCodexRolloutMetadata({
+        sessionsDir: this.sessionsDir,
         filePath,
-        CODEX_META_READ_MAX_BYTES,
-      );
-
-      if (!firstLine) return null;
-
-      const entry = parseCodexSessionEntry(firstLine);
-      if (entry?.type !== "session_meta") return null;
-
-      const meta = entry.payload;
-
+        ...(this.discoveryIndex
+          ? { discoveryIndex: this.discoveryIndex }
+          : {}),
+        ...(options?.activeAfterMs !== undefined
+          ? { activeAfterMs: options.activeAfterMs }
+          : {}),
+      });
+      if (!session) return null;
       return {
-        id: meta.id,
+        id: session.id,
         filePath,
-        cwd: meta.cwd,
-        timestamp: meta.timestamp,
-        mtime: stats.mtimeMs,
-        size: stats.size,
-        isSubagent: this.isSubagentSessionMeta(meta),
+        cwd: session.cwd,
+        timestamp: session.timestamp,
+        mtime: session.mtime,
+        size: session.size,
+        isSubagent: session.isSubagent,
       };
     } catch {
       return null;
     }
-  }
-
-  private isSubagentSessionMeta(
-    meta: CodexSessionMetaEntry["payload"],
-  ): boolean {
-    if (
-      !("forked_from_id" in meta) ||
-      typeof meta.forked_from_id !== "string"
-    ) {
-      return false;
-    }
-
-    const source = meta.source;
-    if (!source || typeof source !== "object") return false;
-
-    const subagentSource = source as {
-      subagent?: { thread_spawn?: { parent_thread_id?: string } };
-    };
-
-    return (
-      typeof subagentSource.subagent?.thread_spawn?.parent_thread_id ===
-      "string"
-    );
   }
 
   /**

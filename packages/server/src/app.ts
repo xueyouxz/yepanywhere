@@ -106,6 +106,7 @@ import type { ServerSettingsService } from "./services/ServerSettingsService.js"
 import type { SharingService } from "./services/SharingService.js";
 import type { SpeechBackendRegistry } from "./services/voice/registry.js";
 import { CodexSessionReader } from "./sessions/codex-reader.js";
+import { createCodexSessionDiscoveryIndex } from "./sessions/codex-discovery.js";
 import { GeminiSessionReader } from "./sessions/gemini-reader.js";
 import { GrokSessionReader } from "./sessions/grok-reader.js";
 import { OpenCodeSessionReader } from "./sessions/opencode-reader.js";
@@ -320,7 +321,26 @@ export function createApp(options: AppOptions): AppResult {
   }
 
   // Create dependencies
-  const codexScanner = new CodexSessionScanner();
+  const codexDiscoveryIndexes = new Map<
+    string,
+    NonNullable<ReturnType<typeof createCodexSessionDiscoveryIndex>>
+  >();
+  const getCodexDiscoveryIndex = (sessionsDir: string) => {
+    const existing = codexDiscoveryIndexes.get(sessionsDir);
+    if (existing) return existing;
+    const created = createCodexSessionDiscoveryIndex(
+      options.dataDir,
+      sessionsDir,
+    );
+    if (created) {
+      codexDiscoveryIndexes.set(sessionsDir, created);
+    }
+    return created;
+  };
+  const codexDiscoveryIndex = getCodexDiscoveryIndex(CODEX_SESSIONS_DIR);
+  const codexScanner = new CodexSessionScanner({
+    ...(codexDiscoveryIndex ? { discoveryIndex: codexDiscoveryIndex } : {}),
+  });
   const geminiScanner = new GeminiSessionScanner();
   const projectScanCachePath = options.dataDir
     ? join(options.dataDir, "indexes", "project-scanner-cache.json")
@@ -371,11 +391,14 @@ export function createApp(options: AppOptions): AppResult {
       case "codex-oss":
         return getOrCreateReader(
           `codex::${project.sessionDir}::${project.path}`,
-          () =>
-            new CodexSessionReader({
+          () => {
+            const discoveryIndex = getCodexDiscoveryIndex(project.sessionDir);
+            return new CodexSessionReader({
               sessionsDir: project.sessionDir,
               projectPath: project.path,
-            }),
+              ...(discoveryIndex ? { discoveryIndex } : {}),
+            });
+          },
         );
       case "gemini":
       case "gemini-acp":
@@ -434,11 +457,14 @@ export function createApp(options: AppOptions): AppResult {
   const codexReaderFactory = (projectPath: string): CodexSessionReader =>
     getOrCreateReader(
       `codex-extra::${CODEX_SESSIONS_DIR}::${projectPath}`,
-      () =>
-        new CodexSessionReader({
+      () => {
+        const discoveryIndex = getCodexDiscoveryIndex(CODEX_SESSIONS_DIR);
+        return new CodexSessionReader({
           sessionsDir: CODEX_SESSIONS_DIR,
           projectPath,
-        }),
+          ...(discoveryIndex ? { discoveryIndex } : {}),
+        });
+      },
     );
   const geminiReaderFactory = (projectPath: string): GeminiSessionReader =>
     getOrCreateReader(

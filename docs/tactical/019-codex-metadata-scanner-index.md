@@ -1,6 +1,6 @@
-# 019 — Codex metadata scanner and rollout index
+# 019 — Session discovery index and Codex metadata scanner
 
-Status: Proposed
+Status: In progress
 
 Progress:
 
@@ -13,10 +13,12 @@ Progress:
   whole-file decompression.
 - [x] Gate or revert default `.jsonl.zst` discovery until scanner metadata
   reads are first-line-only or cache-backed.
-- [ ] Add a durable Codex rollout metadata index.
-- [ ] Stop rereading `session_meta` on ordinary append/mtime/size changes.
+- [x] Add a durable provider-neutral session discovery index, with Codex as
+  the first adapter.
+- [x] Stop rereading Codex `session_meta` on ordinary append/mtime/size
+  changes once the rollout head metadata has been indexed.
 - [ ] Reconcile `.jsonl` and `.jsonl.zst` as two representations of one
-  rollout.
+  rollout with explicit transition tests and metrics.
 - [x] Add streaming zstd first-line reads, or keep compressed discovery
   explicitly opt-in until that exists.
 - [ ] Add Codex scanner metrics and slow logs.
@@ -36,10 +38,11 @@ time-oriented. The only cheap source of project membership is the rollout
 head record, `session_meta`, whose payload includes `cwd`.
 
 The current implementation works for ordinary small trees by using short-lived
-caches and provider-neutral session-summary indexing. It does not yet have a
-durable Codex-specific metadata catalog. That means YA can still repeatedly
-walk the Codex tree and reread first-line metadata after cache expiry,
-restart, broad invalidation, or full validation.
+caches and provider-neutral session-summary indexing. It now also has a
+provider-neutral, sharded session discovery index used first by the Codex
+adapter. That index is separate from the session-summary cache: it remembers
+stable head metadata for provider files that have already been observed, but
+it must never become an independent list of sessions.
 
 The related topic docs define the product and architecture constraints:
 
@@ -59,6 +62,9 @@ The current scanner model does not encode that invariant strongly enough:
 - `CodexSessionScanner` and `CodexSessionReader` keep 5-second scan caches.
 - `SessionIndexService` persists normalized summaries, not a Codex rollout
   metadata catalog.
+- `SessionDiscoveryIndex` now persists stable provider head metadata in
+  provider/root/date shards, but callers still enumerate physical provider
+  files first.
 - Full validation still enumerates rollout files and can force metadata reads.
 - Codex file events mark loaded Codex scopes dirty broadly because a raw file
   event does not cheaply identify the project scope.
@@ -76,7 +82,8 @@ proportional to historical transcript size, not just file count.
 Default session lists should be complete by default. Hidden 14-day filtering
 must not be the primary performance strategy.
 
-Codex metadata discovery should instead be bounded by a durable metadata index:
+Codex metadata discovery should instead be bounded by a durable discovery
+index:
 
 - First successful `session_meta` parse is cached by canonical rollout identity.
 - Append/modify events refresh summary/detail state, not head metadata.
@@ -85,6 +92,8 @@ Codex metadata discovery should instead be bounded by a durable metadata index:
 - `.jsonl` and `.jsonl.zst` are representations of the same logical rollout.
 - Compressed discovery is default-on only when it can use cached metadata or a
   streaming first-line zstd reader.
+- Deletion and rotation visibility follows provider-owned files. A record in
+  YA's discovery index does not make a missing provider session visible.
 
 ## Phase 0: Immediate Safety
 
@@ -114,58 +123,66 @@ Acceptance criteria:
 - [x] Tests cover the chosen gate.
 - [x] The user-visible behavior for plain `.jsonl` history remains complete.
 
-## Phase 1: Durable Metadata Index
+## Phase 1: Provider-Neutral Discovery Index
 
-Add a Codex-specific metadata index under YA's data dir, separate from the
-provider-neutral session summary index.
+Implemented 2026-06-25 as `SessionDiscoveryIndex`, with the first adapter in
+`sessions/codex-discovery.ts`.
 
-Index record sketch:
+The index is provider-neutral and sharded instead of one large JSON file:
+
+```text
+{dataDir}/indexes/session-discovery/<provider>/<source-root-hash>/<shard>.json
+```
+
+For Codex, the shard is the rollout date bucket, for example:
+
+```text
+{dataDir}/indexes/session-discovery/codex/<root-hash>/2026/06/25.json
+```
+
+The generic record stores only normalized discovery metadata:
 
 ```ts
-interface CodexRolloutMetadataRecord {
-  canonicalStem: string; // rollout-....jsonl
-  physicalPath: string;
-  representation: "plain" | "zstd";
-  sessionId: string;
-  cwd: string;
-  timestamp: string;
+interface SessionDiscoveryRecord<TMetadata> {
+  key: string;
+  relativePath: string;
+  representation?: string;
+  metadata: TMetadata;
+  metadataByteLength: number;
   fileSize: number;
   fileMtimeMs: number;
-  firstLineHash?: string;
-  missingSinceMs?: number;
-  lastValidatedMs: number;
+  firstSeenAtMs: number;
+  lastValidatedAtMs: number;
 }
 ```
 
-Open design choice: include platform file identity when cheaply available
-(`dev`/`ino` on Unix, equivalent Windows fields if Node exposes useful data).
-Path + canonical stem may be enough for the first slice, but replacement
-detection is stronger with file identity.
+For Codex, `metadata` currently contains only `id`, `cwd`, `timestamp`, and
+`isSubagent`. Large raw `session_meta` fields such as base instructions are
+not persisted in the discovery index.
 
-Implementation map:
+The load-bearing invariant is that this index is derived and
+non-authoritative:
 
-- New service near `packages/server/src/projects/` or
-  `packages/server/src/sessions/`, for example
-  `CodexRolloutMetadataIndex`.
-- Persist to `{dataDir}/indexes/codex-rollouts.json` or a sharded equivalent
-  if the file grows too large.
-- Use atomic write + existing lock conventions if multiple YA instances might
-  share a data dir.
-- Expose index stats through a debug/maintenance path or existing server
-  debug stats.
+- Provider files are enumerated first.
+- Cache records are consulted only for currently observed files.
+- Missing provider files are hidden immediately, even if stale records remain
+  on disk.
+- Stale shard cleanup can be lazy because it is not required for correctness.
+- New sessions touch only the relevant provider/root/date shard, not a global
+  monolithic JSON file.
 
 Acceptance criteria:
 
-- First scan populates the metadata index.
-- Second scan after TTL expiry reuses metadata without rereading first lines
-  for unchanged known rollouts.
-- Server restart reloads the metadata index.
-- Corrupt index entries are discarded or repaired without breaking plain
-  session listing.
+- [x] First scan populates the discovery index.
+- [x] Second scan after append/restart reuses metadata without updating head
+  validation state for known rollouts.
+- [x] Server restart reloads the discovery index.
+- [x] Corrupt shard files are ignored without breaking plain session listing.
+- [x] Deleted provider files are not resurrected from stale shard records.
 
-## Phase 2: Reader/Scanner Integration
+## Phase 2: Codex Reader/Scanner Integration
 
-Teach the existing Codex readers to ask the metadata index first.
+Teach the existing Codex readers to ask the discovery index first.
 
 Changes:
 
@@ -180,7 +197,8 @@ Changes:
 
 Important distinction:
 
-- Metadata index freshness answers "which project/session is this rollout?"
+- Discovery metadata freshness answers "which project/session is this
+  rollout?"
 - Session summary freshness answers "did visible transcript summary change?"
 
 Those should not be conflated. A file append changes the second question, not
@@ -188,11 +206,17 @@ the first.
 
 Acceptance criteria:
 
-- Appending to a known rollout does not reread line 1.
-- Changing mtime/size alone does not reread line 1.
+- [x] Appending to a known rollout does not reread line 1.
+- [x] Changing mtime/size alone does not reread line 1.
 - Replacing/truncating a rollout causes metadata validation or repair.
-- Existing project/session list tests still pass for plain Codex history.
-- Add call-count tests around `readFirstLine` or the new metadata reader.
+- [x] Existing project/session list tests still pass for plain Codex history.
+- [x] Add cache-state tests around the new metadata reader.
+
+Remaining gap: replacement detection is still conservative rather than
+complete. Plain rollout appends are intentionally trusted; a same-path
+replacement with a different first line but a non-shrinking file may keep
+serving cached head metadata until a future explicit validation strategy is
+added.
 
 ## Phase 3: Compression Reconciliation
 
@@ -221,8 +245,8 @@ Acceptance criteria:
 
 ## Phase 4: Streaming Zstd First-Line Reader
 
-If Node's zstd stream APIs are available, implement a line-oriented compressed
-head reader for scanner use.
+Implemented 2026-06-25 using Node's zstd stream APIs: `readFirstLine()` uses a
+line-oriented compressed head reader for scanner use.
 
 Requirements:
 
@@ -249,7 +273,7 @@ Near-term options:
 - Increase `CODEX_WATCH_PERIODIC_RESCAN_MS` dynamically when a periodic rescan
   takes a large fraction of the interval.
 - Record duration and skip the next tick if the prior scan overran.
-- Prefer date-bucket probing once the metadata index has high-water marks.
+- Prefer date-bucket probing once the discovery index has high-water marks.
 - Allow `CODEX_WATCH_PERIODIC_RESCAN_MS=0` to remain the hard opt-out.
 
 Longer-term option:
@@ -273,7 +297,7 @@ Add Codex scanner metrics before and after the index work:
 - scan duration;
 - directories walked;
 - rollout files discovered;
-- metadata index hits/misses;
+- discovery index hits/misses;
 - first-line reads by representation;
 - zstd first-line reads;
 - skipped compressed files due to missing gate;
@@ -288,7 +312,7 @@ spirit to `SessionIndexService` performance logs.
 
 Automated:
 
-- Unit tests for metadata index load/save/repair.
+- Unit tests for discovery index load/save/corrupt-shard handling.
 - Unit tests for canonical stem and plain/compressed sibling precedence.
 - Unit tests proving append does not reread `session_meta`.
 - Unit tests for server restart reuse of indexed metadata.
@@ -320,13 +344,11 @@ Manual:
 
 ## Open Questions
 
-- Should the metadata index be one JSON file, one file per year/month bucket,
-  or stored alongside existing session indexes?
 - Which file identity fields are portable enough on Windows to detect
   replacement without excessive stats?
 - Should archived Codex sessions get a separate root in the same index, or a
   separate archive index?
 - What is the right default for `CODEX_WATCH_PERIODIC_RESCAN_MS` after the
-  metadata index exists?
+  discovery index exists?
 - Should there be a user-facing "rebuild Codex history index" action, or only
   a maintenance/debug endpoint?

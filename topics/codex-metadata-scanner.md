@@ -2,8 +2,9 @@
 
 > The Codex metadata scanner is the YA subsystem that maps date-bucketed Codex
 > rollout files to projects and session summaries by reading rollout head
-> metadata; its current shortcut caches help common navigation but do not yet
-> provide a durable, bounded, compression-aware index.
+> metadata; its current shortcut caches and durable discovery index help common
+> navigation, but watcher scheduling, metrics, and replacement validation still
+> have known scale gaps.
 
 Topic: codex-metadata-scanner
 
@@ -34,13 +35,16 @@ append activity should not force repeated metadata reads.
 
 ## Current Implementation Shape
 
-Current Codex discovery uses layered caches, not a durable Codex metadata
+Current Codex discovery uses layered caches plus a provider-neutral discovery
 index:
 
 - `CodexSessionScanner` recursively finds rollout files, reads first-line
   `session_meta`, groups by cwd, and caches the result for 5 seconds.
 - `CodexSessionReader` has a shared 5-second scan cache keyed by sessions
   directory and active-window scope.
+- `SessionDiscoveryIndex` persists normalized provider head metadata under
+  `{dataDir}/indexes/session-discovery/<provider>/<source-root-hash>/...`.
+  Codex uses date-bucket shards such as `2026/06/25.json`.
 - `ProjectScanner` keeps a short-lived project snapshot and coalesces
   concurrent scans.
 - `SessionIndexService` persists normalized session summaries and avoids
@@ -50,9 +54,16 @@ index:
   raw file event does not identify the owning project scope cheaply, loaded
   Codex scopes are marked dirty broadly.
 
-These layers are useful for normal navigation and request bursts. They do not
-change the underlying worst case: discovering an uncached or invalidated Codex
-tree still walks rollout files and reads head metadata.
+These layers are useful for normal navigation and request bursts. The discovery
+index now avoids rereading `session_meta` for observed known rollouts, including
+ordinary append/mtime/size changes. It does not change the underlying
+enumeration cost: discovering an uncached or invalidated Codex tree still walks
+provider-owned rollout files.
+
+The discovery index is derived and non-authoritative. YA must enumerate
+provider files first and then consult the cache only for those observed files.
+A missing provider file is hidden immediately even if its discovery record
+still exists on disk.
 
 ## Compression Gate
 
@@ -96,8 +107,8 @@ Known gaps:
 - no "scan took as long as the interval, increase interval" policy;
 - no date-bucket high-water mark for routine active-list discovery;
 - no per-scope dirty precision for Codex project lists;
-- no persistent rollout metadata index to make watcher events cheap to
-  reconcile.
+- no high-water-mark scheduler using discovery shards to scan recent date
+  buckets more often than cold buckets.
 
 This is acceptable only under YA's current single-user/small-team assumption.
 It is not a design for millions of rollout files.
@@ -108,8 +119,9 @@ The main costs are filesystem and metadata costs, not full transcript parsing:
 
 - recursive `readdir` over the sessions tree;
 - `stat` calls during validation and watcher rescans;
-- first-line reads for uncached rollouts;
-- repeated first-line reads after TTL expiry or broad invalidation;
+- first-line reads for new, suspect, or unindexed rollouts;
+- replacement validation gaps for same-path files whose first line changes
+  without truncating below the cached head length;
 - full decompression if compressed files are read without streaming
   first-line support;
 - route fan-out that asks for global, project, inbox, and provider-catalog
@@ -123,20 +135,18 @@ session filtering.
 
 ## Required Near-Term Fixes
 
-Before broadening Codex history discovery, especially compressed discovery,
-the scanner should gain:
+Before broadening Codex history discovery further, especially around compressed
+transitions and very large trees, the scanner should gain:
 
-1. A durable Codex metadata index keyed by canonical rollout stem, physical
-   path, file identity where available, and representation (`plain` or
-   `zstd`).
-2. Metadata immutability rules: append/mtime/size changes refresh summaries,
-   not `session_meta`, unless replacement/truncation evidence exists.
-3. Compression reconciliation: `.jsonl` and `.jsonl.zst` map to the same
+1. Replacement/truncation validation rules stronger than the current
+   non-shrinking plain-file assumption.
+2. Compression reconciliation tests and metrics: `.jsonl` and `.jsonl.zst`
+   map to the same
    logical rollout, with plain-precedence and transition-safe dirty handling.
-4. Keep streaming zstd first-line reads covered by tests so scanner discovery
+3. Keep streaming zstd first-line reads covered by tests so scanner discovery
    does not regress to full compressed transcript decompression.
-5. Scanner metrics and slow logs specific to Codex metadata discovery.
-6. Adaptive periodic-rescan behavior or a different missed-event recovery
+4. Scanner metrics and slow logs specific to Codex metadata discovery.
+5. Adaptive periodic-rescan behavior or a different missed-event recovery
    strategy that cannot spin indefinitely on very large trees.
 
 ## Non-Goals
