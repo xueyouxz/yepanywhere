@@ -23,6 +23,7 @@ import {
   truncateSessionTitle,
 } from "@yep-anywhere/shared";
 import type { SessionDiscoveryIndex } from "../indexes/SessionDiscoveryIndex.js";
+import { getLogger } from "../logging/logger.js";
 import { canonicalizeProjectPath } from "../projects/paths.js";
 import type {
   ContextUsage,
@@ -30,12 +31,15 @@ import type {
   SessionSummary,
 } from "../supervisor/types.js";
 import {
+  codexRolloutRepresentation,
   isCodexRolloutFileName,
   preferPlainCodexRollouts,
 } from "../utils/codexRolloutFiles.js";
 import { readJsonlLines } from "../utils/jsonl.js";
 import {
+  type CodexRolloutDiscoveryStats,
   createCodexSessionDiscoveryIndex,
+  createCodexRolloutDiscoveryStats,
   readCodexRolloutMetadata,
 } from "./codex-discovery.js";
 import type {
@@ -57,6 +61,7 @@ export interface CodexSessionReaderOptions {
   projectPath?: string;
   dataDir?: string;
   discoveryIndex?: SessionDiscoveryIndex;
+  slowLogThresholdMs?: number;
 }
 
 interface CodexSessionFile {
@@ -70,6 +75,7 @@ interface CodexSessionFile {
 }
 
 const CODEX_SCAN_CACHE_TTL_MS = 5000;
+const DEFAULT_SLOW_LOG_THRESHOLD_MS = 250;
 
 function isCompressedCodexSessionFile(filePath: string): boolean {
   return filePath.endsWith(".jsonl.zst");
@@ -86,6 +92,33 @@ interface CodexSharedScanCacheEntry {
 }
 
 const codexSharedScanCache = new Map<string, CodexSharedScanCacheEntry>();
+
+export type CodexSessionReaderScanCacheStatus =
+  | "hit"
+  | "in-flight"
+  | "miss";
+
+export interface CodexSessionReaderScanMetrics {
+  sessionsDir: string;
+  projectPath?: string;
+  activeAfterMs?: number;
+  cacheKey: string;
+  sharedCacheStatus: CodexSessionReaderScanCacheStatus;
+  durationMs: number;
+  sessionsDirExists: boolean;
+  directoriesVisited: number;
+  directoryReadErrors: number;
+  rolloutFilesFound: number;
+  rolloutFilesAfterPrecedence: number;
+  plainRolloutFiles: number;
+  compressedRolloutFiles: number;
+  precedenceSkippedCompressed: number;
+  sessionsParsed: number;
+  failedFiles: number;
+  subagentSessionsSkipped: number;
+  sessionsReturned: number;
+  discovery: CodexRolloutDiscoveryStats;
+}
 
 interface CodexEntryCache {
   filePath: string;
@@ -186,6 +219,8 @@ export class CodexSessionReader implements ISessionReader {
   private sessionsDir: string;
   private projectPath?: string;
   private discoveryIndex?: SessionDiscoveryIndex;
+  private slowLogThresholdMs: number;
+  private lastScanMetrics: CodexSessionReaderScanMetrics | null = null;
 
   // Cache of session ID -> file path for quick lookups
   private sessionFileCache: Map<string, CodexSessionFile> = new Map();
@@ -199,6 +234,10 @@ export class CodexSessionReader implements ISessionReader {
     this.discoveryIndex =
       options.discoveryIndex ??
       createCodexSessionDiscoveryIndex(options.dataDir, this.sessionsDir);
+    this.slowLogThresholdMs = Math.max(
+      0,
+      options.slowLogThresholdMs ?? DEFAULT_SLOW_LOG_THRESHOLD_MS,
+    );
   }
 
   invalidateCache(): void {
@@ -209,6 +248,12 @@ export class CodexSessionReader implements ISessionReader {
         codexSharedScanCache.delete(cacheKey);
       }
     }
+  }
+
+  getLastScanMetrics(): CodexSessionReaderScanMetrics | null {
+    return this.lastScanMetrics
+      ? cloneCodexSessionReaderScanMetrics(this.lastScanMetrics)
+      : null;
   }
 
   async listSessions(projectId: UrlProjectId): Promise<SessionSummary[]> {
@@ -396,16 +441,44 @@ export class CodexSessionReader implements ISessionReader {
     const now = Date.now();
 
     if (cached && now - cached.timestamp < CODEX_SCAN_CACHE_TTL_MS) {
+      const metrics = createCodexSessionReaderScanMetrics({
+        sessionsDir: this.sessionsDir,
+        projectPath: this.projectPath,
+        activeAfterMs: options?.activeAfterMs,
+        cacheKey,
+        sharedCacheStatus: cached.inFlight ? "in-flight" : "hit",
+      });
+      const startedAt = Date.now();
       if (cached.inFlight) {
         const sessions = await cached.inFlight;
         this.hydrateSessionFileCache(sessions);
-        return sessions.filter((session) => !session.isSubagent);
+        const visibleSessions = this.filterVisibleSessionsForScanMetrics(
+          sessions,
+          metrics,
+        );
+        metrics.durationMs = Date.now() - startedAt;
+        this.recordScanMetrics(metrics);
+        return visibleSessions;
       }
       this.hydrateSessionFileCache(cached.sessions);
-      return cached.sessions.filter((session) => !session.isSubagent);
+      const visibleSessions = this.filterVisibleSessionsForScanMetrics(
+        cached.sessions,
+        metrics,
+      );
+      metrics.durationMs = Date.now() - startedAt;
+      this.recordScanMetrics(metrics);
+      return visibleSessions;
     }
 
-    const inFlight = this.scanSessionsUncached(options);
+    const metrics = createCodexSessionReaderScanMetrics({
+      sessionsDir: this.sessionsDir,
+      projectPath: this.projectPath,
+      activeAfterMs: options?.activeAfterMs,
+      cacheKey,
+      sharedCacheStatus: "miss",
+    });
+    const startedAt = Date.now();
+    const inFlight = this.scanSessionsUncached(options, metrics);
     codexSharedScanCache.set(cacheKey, {
       timestamp: now,
       sessions: [],
@@ -419,8 +492,16 @@ export class CodexSessionReader implements ISessionReader {
         sessions,
       });
       this.hydrateSessionFileCache(sessions);
-      return sessions.filter((session) => !session.isSubagent);
+      const visibleSessions = this.filterVisibleSessionsForScanMetrics(
+        sessions,
+        metrics,
+      );
+      metrics.durationMs = Date.now() - startedAt;
+      this.recordScanMetrics(metrics);
+      return visibleSessions;
     } catch (error) {
+      metrics.durationMs = Date.now() - startedAt;
+      this.recordScanMetrics(metrics);
       const entry = codexSharedScanCache.get(cacheKey);
       if (entry?.inFlight === inFlight) {
         codexSharedScanCache.delete(cacheKey);
@@ -439,19 +520,65 @@ export class CodexSessionReader implements ISessionReader {
     }
   }
 
+  private filterVisibleSessionsForScanMetrics(
+    sessions: CodexSessionFile[],
+    metrics: CodexSessionReaderScanMetrics,
+  ): CodexSessionFile[] {
+    const visibleSessions = sessions.filter((session) => {
+      if (session.isSubagent) {
+        metrics.subagentSessionsSkipped += 1;
+        return false;
+      }
+      return true;
+    });
+    metrics.sessionsReturned = visibleSessions.length;
+    return visibleSessions;
+  }
+
+  private recordScanMetrics(metrics: CodexSessionReaderScanMetrics): void {
+    this.lastScanMetrics = cloneCodexSessionReaderScanMetrics(metrics);
+    const payload = {
+      event: "codex_reader_scan",
+      ...metrics,
+    };
+    if (metrics.durationMs >= this.slowLogThresholdMs) {
+      getLogger().warn(payload, "CODEX_READER: slow scan");
+      return;
+    }
+    getLogger().debug(payload, "CODEX_READER: scan complete");
+  }
+
   private async scanSessionsUncached(
     options?: CodexScanOptions,
+    metrics?: CodexSessionReaderScanMetrics,
   ): Promise<CodexSessionFile[]> {
     const sessions: CodexSessionFile[] = [];
-    const files = await this.findJsonlFiles(this.sessionsDir);
+    try {
+      await stat(this.sessionsDir);
+      if (metrics) metrics.sessionsDirExists = true;
+    } catch {
+      return sessions;
+    }
+
+    const files = await this.findJsonlFiles(this.sessionsDir, metrics);
 
     for (const filePath of files) {
-      const session = await this.readSessionMeta(filePath, options);
+      const activeWindowSkipsBefore =
+        metrics?.discovery.activeWindowSkips ?? 0;
+      const session = await this.readSessionMeta(filePath, options, metrics);
       if (session) {
         sessions.push(session);
+      } else if (
+        metrics &&
+        metrics.discovery.activeWindowSkips === activeWindowSkipsBefore
+      ) {
+        metrics.failedFiles += 1;
       }
     }
     await this.discoveryIndex?.flush();
+    if (metrics) {
+      metrics.sessionsParsed = sessions.length;
+    }
 
     return sessions;
   }
@@ -580,26 +707,50 @@ export class CodexSessionReader implements ISessionReader {
   /**
    * Recursively find all Codex rollout files in a directory.
    */
-  private async findJsonlFiles(dir: string): Promise<string[]> {
+  private async findJsonlFiles(
+    dir: string,
+    metrics?: CodexSessionReaderScanMetrics,
+  ): Promise<string[]> {
     const files: string[] = [];
+    await this.collectJsonlFiles(dir, files, metrics);
+    const preferredFiles = preferPlainCodexRollouts(files);
+    if (metrics) {
+      metrics.rolloutFilesAfterPrecedence = preferredFiles.length;
+      metrics.precedenceSkippedCompressed =
+        files.length - preferredFiles.length;
+    }
+    return preferredFiles;
+  }
 
+  private async collectJsonlFiles(
+    dir: string,
+    files: string[],
+    metrics?: CodexSessionReaderScanMetrics,
+  ): Promise<void> {
     try {
+      if (metrics) metrics.directoriesVisited += 1;
       const entries = await readdir(dir, { withFileTypes: true });
 
       for (const entry of entries) {
         const fullPath = join(dir, entry.name);
         if (entry.isDirectory()) {
-          const subFiles = await this.findJsonlFiles(fullPath);
-          files.push(...subFiles);
+          await this.collectJsonlFiles(fullPath, files, metrics);
         } else if (entry.isFile() && isCodexRolloutFileName(entry.name)) {
           files.push(fullPath);
+          if (metrics) {
+            metrics.rolloutFilesFound += 1;
+            if (codexRolloutRepresentation(fullPath) === "zstd") {
+              metrics.compressedRolloutFiles += 1;
+            } else {
+              metrics.plainRolloutFiles += 1;
+            }
+          }
         }
       }
     } catch {
+      if (metrics) metrics.directoryReadErrors += 1;
       // Ignore errors (permission denied, etc.)
     }
-
-    return preferPlainCodexRollouts(files);
   }
 
   /**
@@ -608,6 +759,7 @@ export class CodexSessionReader implements ISessionReader {
   private async readSessionMeta(
     filePath: string,
     options?: CodexScanOptions,
+    metrics?: CodexSessionReaderScanMetrics,
   ): Promise<CodexSessionFile | null> {
     try {
       const session = await readCodexRolloutMetadata({
@@ -619,6 +771,7 @@ export class CodexSessionReader implements ISessionReader {
         ...(options?.activeAfterMs !== undefined
           ? { activeAfterMs: options.activeAfterMs }
           : {}),
+        ...(metrics ? { metrics: metrics.discovery } : {}),
       });
       if (!session) return null;
       return {
@@ -873,4 +1026,45 @@ export class CodexSessionReader implements ISessionReader {
         entry.payload.role === "user",
     );
   }
+}
+
+function createCodexSessionReaderScanMetrics(options: {
+  sessionsDir: string;
+  projectPath?: string;
+  activeAfterMs?: number;
+  cacheKey: string;
+  sharedCacheStatus: CodexSessionReaderScanCacheStatus;
+}): CodexSessionReaderScanMetrics {
+  return {
+    sessionsDir: options.sessionsDir,
+    ...(options.projectPath ? { projectPath: options.projectPath } : {}),
+    ...(options.activeAfterMs !== undefined
+      ? { activeAfterMs: options.activeAfterMs }
+      : {}),
+    cacheKey: options.cacheKey,
+    sharedCacheStatus: options.sharedCacheStatus,
+    durationMs: 0,
+    sessionsDirExists: false,
+    directoriesVisited: 0,
+    directoryReadErrors: 0,
+    rolloutFilesFound: 0,
+    rolloutFilesAfterPrecedence: 0,
+    plainRolloutFiles: 0,
+    compressedRolloutFiles: 0,
+    precedenceSkippedCompressed: 0,
+    sessionsParsed: 0,
+    failedFiles: 0,
+    subagentSessionsSkipped: 0,
+    sessionsReturned: 0,
+    discovery: createCodexRolloutDiscoveryStats(),
+  };
+}
+
+function cloneCodexSessionReaderScanMetrics(
+  metrics: CodexSessionReaderScanMetrics,
+): CodexSessionReaderScanMetrics {
+  return {
+    ...metrics,
+    discovery: { ...metrics.discovery },
+  };
 }

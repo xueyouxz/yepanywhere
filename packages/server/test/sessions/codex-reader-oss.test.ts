@@ -27,15 +27,21 @@ function zstdCompressed(content: string): Buffer {
 describe("CodexSessionReader - OSS Support", () => {
   let testDir: string;
   let reader: CodexSessionReader;
+  let extraTempDirs: string[];
 
   beforeEach(async () => {
     testDir = join(tmpdir(), `codex-reader-oss-test-${randomUUID()}`);
+    extraTempDirs = [];
     await mkdir(testDir, { recursive: true });
     reader = new CodexSessionReader({ sessionsDir: testDir });
   });
 
   afterEach(async () => {
-    await rm(testDir, { recursive: true, force: true });
+    await Promise.all(
+      [testDir, ...extraTempDirs].map((dir) =>
+        rm(dir, { recursive: true, force: true }),
+      ),
+    );
   });
 
   const createSessionFile = async (
@@ -179,6 +185,66 @@ describe("CodexSessionReader - OSS Support", () => {
     );
     expect(session?.summary.title).toBe("Hello compressed history");
     expect(session?.data.session.entries).toHaveLength(2);
+  });
+
+  it("records reader scan metrics and shared cache hits", async () => {
+    const dataDir = join(tmpdir(), `codex-reader-data-${randomUUID()}`);
+    extraTempDirs.push(dataDir);
+    await createSessionFile("metrics-one", "openai", "gpt-4o");
+    await createSessionFile("metrics-two", "openai", "gpt-4o");
+
+    const metricsReader = new CodexSessionReader({
+      sessionsDir: testDir,
+      dataDir,
+      slowLogThresholdMs: 60_000,
+    });
+
+    const files = await metricsReader.listSessionFiles(testDir);
+    expect(files).toHaveLength(2);
+
+    const missMetrics = metricsReader.getLastScanMetrics();
+    expect(missMetrics).toMatchObject({
+      sessionsDir: testDir,
+      cacheKey: `${testDir}::activeAfter=all`,
+      sharedCacheStatus: "miss",
+      sessionsDirExists: true,
+      rolloutFilesFound: 2,
+      rolloutFilesAfterPrecedence: 2,
+      plainRolloutFiles: 2,
+      compressedRolloutFiles: 0,
+      precedenceSkippedCompressed: 0,
+      sessionsParsed: 2,
+      failedFiles: 0,
+      subagentSessionsSkipped: 0,
+      sessionsReturned: 2,
+      discovery: {
+        statCalls: 2,
+        discoveryIndexMisses: 2,
+        firstLineReadsPlain: 2,
+        metadataReadFailures: 0,
+      },
+    });
+    expect(missMetrics?.directoriesVisited).toBeGreaterThanOrEqual(1);
+    expect(missMetrics?.durationMs).toBeGreaterThanOrEqual(0);
+
+    const cachedFiles = await metricsReader.listSessionFiles(testDir);
+    expect(cachedFiles).toHaveLength(2);
+
+    const hitMetrics = metricsReader.getLastScanMetrics();
+    expect(hitMetrics).toMatchObject({
+      sessionsDir: testDir,
+      sharedCacheStatus: "hit",
+      directoriesVisited: 0,
+      rolloutFilesFound: 0,
+      sessionsParsed: 0,
+      failedFiles: 0,
+      sessionsReturned: 2,
+      discovery: {
+        statCalls: 0,
+        discoveryIndexHits: 0,
+        firstLineReadsPlain: 0,
+      },
+    });
   });
 
   it("identifies session as codex-oss when model_provider is local", async () => {

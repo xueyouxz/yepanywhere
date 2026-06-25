@@ -3,7 +3,7 @@
 > The Codex metadata scanner is the YA subsystem that maps date-bucketed Codex
 > rollout files to projects and session summaries by reading rollout head
 > metadata; its current shortcut caches and durable discovery index help common
-> navigation, but date-bucket scheduling, reader-side metrics, and
+> navigation, but date-bucket scheduling, dirty-scope precision, and
 > same-identity overwrite validation still have known scale gaps.
 
 Topic: codex-metadata-scanner
@@ -41,7 +41,10 @@ index:
 - `CodexSessionScanner` recursively finds rollout files, reads first-line
   `session_meta`, groups by cwd, and caches the result for 5 seconds.
 - `CodexSessionReader` has a shared 5-second scan cache keyed by sessions
-  directory and active-window scope.
+  directory and active-window scope. Reader scans now record cache status,
+  duration, directories walked, rollout counts, plain/zstd precedence
+  filtering, discovery-index behavior, first-line reads by representation,
+  skipped metadata files, and subagent sessions filtered from ordinary lists.
 - `SessionDiscoveryIndex` persists normalized provider head metadata under
   `{dataDir}/indexes/session-discovery/<provider>/<source-root-hash>/...`.
   Codex uses date-bucket shards such as `2026/06/25.json` and stores a small
@@ -156,9 +159,8 @@ transitions and very large trees, the scanner should gain:
 1. An explicit validation strategy for same-identity, non-shrinking header
    overwrites; current source-fingerprint and shrink checks cover common
    replacement/truncation cases without rereading ordinary appends.
-2. Extend scanner-style metrics to `CodexSessionReader`; project-scanner and
-   watcher-rescan metrics now cover cache behavior, compressed discovery, file
-   walk size, emitted change counts, and overlap skips.
+2. Add dirty-scope metrics so broad Codex invalidation is visible before
+   changing the dirty-marking strategy.
 3. Keep streaming zstd first-line reads covered by tests so scanner discovery
    does not regress to full compressed transcript decompression.
 4. Date-bucket/high-water metrics once routine scans stop walking the whole

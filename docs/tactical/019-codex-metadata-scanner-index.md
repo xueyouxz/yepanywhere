@@ -28,6 +28,7 @@ Progress:
 - [x] Add watcher rescan metrics and slow logs.
 - [x] Make Codex watcher missed-event recovery bounded under expensive trees
   with adaptive periodic-rescan backoff.
+- [x] Add Codex reader session-list scan metrics and slow logs.
 
 ## Context
 
@@ -326,9 +327,23 @@ records and logs:
 Slow logs fire for Codex project metadata scans over a threshold, similar in
 spirit to `SessionIndexService` performance logs.
 
+Implemented for `CodexSessionReader` on 2026-06-25. Each scan request now
+records and logs:
+
+- shared scan-cache status (`miss`, `hit`, or `in-flight`);
+- scan duration;
+- directories walked;
+- directory read errors;
+- rollout files discovered before and after plain/zstd precedence filtering;
+- discovery index hits/misses;
+- suspect discovery-index records and refreshes;
+- cache-backed compressed discovery;
+- first-line reads by representation;
+- parsed and skipped metadata files;
+- subagent sessions skipped before ordinary Codex session lists are returned.
+
 Remaining metrics gaps:
 
-- extend equivalent metrics to `CodexSessionReader` session-list scans;
 - dirty-scope count;
 - skipped date buckets, once date-bucket probing exists.
 
@@ -345,6 +360,7 @@ Automated:
   reconciliation.
 - Unit tests for scanner metrics around cache hits/misses, plain/zstd
   precedence, and cache-backed compressed discovery.
+- Unit tests for Codex reader session-list scan metrics and shared-cache hits.
 - Unit tests for watcher rescan metrics and overlap-skip accounting.
 - Unit tests for adaptive periodic-rescan backoff and recovery.
 - Unit tests for streaming zstd first-line reads if Phase 4 lands.
