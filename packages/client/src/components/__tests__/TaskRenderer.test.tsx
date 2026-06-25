@@ -5,6 +5,7 @@ import { SchemaValidationProvider } from "../../contexts/SchemaValidationContext
 import { SessionMetadataProvider } from "../../contexts/SessionMetadataContext";
 import { ToastProvider } from "../../contexts/ToastContext";
 import type { AgentContentMap } from "../../hooks/useSession";
+import { I18nProvider } from "../../i18n";
 import { preprocessMessages } from "../../lib/preprocessMessages";
 import type { Message } from "../../types";
 import { RenderItemComponent } from "../RenderItemComponent";
@@ -55,25 +56,27 @@ function TestWrapper({
   toolUseToAgent?: Map<string, string>;
 }) {
   return (
-    <SessionMetadataProvider
-      projectId="proj-1"
-      projectPath="/test/project"
-      sessionId="session-1"
-    >
-      <ToastProvider>
-        <SchemaValidationProvider>
-          <AgentContentProvider
-            agentContent={agentContent}
-            setAgentContent={() => {}}
-            toolUseToAgent={toolUseToAgent}
-            projectId="proj-1"
-            sessionId="session-1"
-          >
-            {children}
-          </AgentContentProvider>
-        </SchemaValidationProvider>
-      </ToastProvider>
-    </SessionMetadataProvider>
+    <I18nProvider>
+      <SessionMetadataProvider
+        projectId="proj-1"
+        projectPath="/test/project"
+        sessionId="session-1"
+      >
+        <ToastProvider>
+          <SchemaValidationProvider>
+            <AgentContentProvider
+              agentContent={agentContent}
+              setAgentContent={() => {}}
+              toolUseToAgent={toolUseToAgent}
+              projectId="proj-1"
+              sessionId="session-1"
+            >
+              {children}
+            </AgentContentProvider>
+          </SchemaValidationProvider>
+        </ToastProvider>
+      </SessionMetadataProvider>
+    </I18nProvider>
   );
 }
 
@@ -348,5 +351,73 @@ describe("Task rendering", () => {
     fireEvent.click(screen.getByRole("button", { name: /Thinking/i }));
 
     expect(screen.getByText("Checking the task result renderer")).toBeDefined();
+  });
+});
+
+describe("Codex spawn_agent rendering", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders spawn_agent rows as expandable subagent transcripts", () => {
+    const messages: Message[] = [
+      {
+        id: "msg-1",
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "call-spawn-1",
+            name: "spawn_agent",
+            input: {
+              role: "reviewer",
+              prompt: "Inspect the implementation",
+            },
+          },
+        ],
+      },
+      {
+        id: "msg-2",
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "call-spawn-1",
+            content: JSON.stringify({
+              agent_id: "child-thread",
+              nickname: "Parfit",
+            }),
+          },
+        ],
+      },
+    ];
+    const [item] = preprocessMessages(messages);
+
+    expect(item?.type).toBe("tool_call");
+    if (item?.type !== "tool_call") {
+      throw new Error("Expected a tool_call render item");
+    }
+
+    render(
+      <TestWrapper
+        agentContent={{
+          "child-thread": {
+            messages: sampleAgentMessages,
+            status: "completed",
+          },
+        }}
+      >
+        <RenderItemComponent
+          item={item}
+          isStreaming={false}
+          thinkingExpanded={false}
+          toggleThinkingExpanded={() => {}}
+        />
+      </TestWrapper>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Parfit/i }));
+
+    expect(screen.getByText("Searching for tree files...")).toBeDefined();
   });
 });

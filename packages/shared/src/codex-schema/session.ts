@@ -23,15 +23,45 @@ import { z } from "zod";
 /**
  * Session metadata payload - first entry in session file.
  */
+export const CodexSessionSourceSchema = z.union([
+  z.string(),
+  z
+    .object({
+      subagent: z
+        .object({
+          thread_spawn: z
+            .object({
+              parent_thread_id: z.string().optional(),
+              depth: z.number().optional(),
+              agent_path: z.string().nullable().optional(),
+              agent_nickname: z.string().nullable().optional(),
+              agent_role: z.string().nullable().optional(),
+            })
+            .passthrough()
+            .optional(),
+        })
+        .passthrough()
+        .optional(),
+    })
+    .passthrough(),
+]);
+
 export const CodexSessionMetaPayloadSchema = z.object({
   id: z.string(),
   timestamp: z.string(),
   cwd: z.string(),
   forked_from_id: z.string().optional(),
+  session_id: z.string().optional(),
+  parent_thread_id: z.string().optional(),
   originator: z.string().optional(), // e.g. "codex_exec"
   cli_version: z.string().optional(),
   instructions: z.string().optional(),
-  source: z.string().optional(), // e.g. "exec"
+  source: CodexSessionSourceSchema.optional(), // e.g. "exec"
+  thread_source: z.string().optional(),
+  agent_nickname: z.string().optional(),
+  agent_role: z.string().optional(),
+  agent_path: z.string().optional(),
+  multi_agent_version: z.string().optional(),
   model_provider: z.string().optional(), // e.g. "openai"
 });
 

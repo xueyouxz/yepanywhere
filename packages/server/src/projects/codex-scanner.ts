@@ -48,6 +48,7 @@ interface CodexSessionInfo {
   filePath: string;
   timestamp: string;
   mtime: number;
+  isSubagent: boolean;
 }
 
 export interface CodexScannerOptions {
@@ -120,6 +121,10 @@ export class CodexSessionScanner {
     >();
 
     for (const session of sessions) {
+      if (session.isSubagent) {
+        continue;
+      }
+
       const projectPath = canonicalizeProjectPath(session.cwd);
       const existing = projectMap.get(projectPath);
       if (existing) {
@@ -172,7 +177,11 @@ export class CodexSessionScanner {
     const sessions = await this.scanAllSessions();
     const canonicalProjectPath = canonicalizeProjectPath(projectPath);
     return sessions
-      .filter((s) => canonicalizeProjectPath(s.cwd) === canonicalProjectPath)
+      .filter(
+        (s) =>
+          !s.isSubagent &&
+          canonicalizeProjectPath(s.cwd) === canonicalProjectPath,
+      )
       .sort((a, b) => b.mtime - a.mtime);
   }
 
@@ -307,9 +316,7 @@ export class CodexSessionScanner {
       const session = await readCodexRolloutMetadata({
         sessionsDir: this.sessionsDir,
         filePath,
-        ...(this.discoveryIndex
-          ? { discoveryIndex: this.discoveryIndex }
-          : {}),
+        ...(this.discoveryIndex ? { discoveryIndex: this.discoveryIndex } : {}),
         metrics: metrics.discovery,
       });
       if (!session) return null;
@@ -319,6 +326,7 @@ export class CodexSessionScanner {
         filePath,
         timestamp: session.timestamp,
         mtime: session.mtime,
+        isSubagent: session.isSubagent,
       };
     } catch (error) {
       getLogger().debug(

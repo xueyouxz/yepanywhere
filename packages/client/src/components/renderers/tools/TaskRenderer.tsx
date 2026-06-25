@@ -131,7 +131,7 @@ function TaskToolUse({ input }: { input: TaskInput }) {
 /**
  * Task nested content - renders full agent messages
  */
-function TaskNestedContent({
+export function TaskNestedContent({
   messages,
   isStreaming,
 }: {
@@ -497,7 +497,7 @@ function TaskInline({
   );
 }
 
-function Spinner() {
+export function Spinner() {
   return (
     <svg
       className="spinner"

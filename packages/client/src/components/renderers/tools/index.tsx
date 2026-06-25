@@ -163,6 +163,7 @@ import { globRenderer } from "./GlobRenderer";
 import { grepRenderer } from "./GrepRenderer";
 import { killShellRenderer } from "./KillShellRenderer";
 import { readRenderer } from "./ReadRenderer";
+import { spawnAgentRenderer } from "./SpawnAgentRenderer";
 import { taskOutputRenderer } from "./TaskOutputRenderer";
 import { taskCreateRenderer, taskUpdateRenderer } from "./TaskListRenderer";
 import { taskRenderer } from "./TaskRenderer";
@@ -196,6 +197,7 @@ toolRegistry.register(writeStdinRenderer);
 
 // Codex-specific tools
 toolRegistry.register(viewImageRenderer);
+toolRegistry.register(spawnAgentRenderer);
 
 // Tier 4: Background/async tools
 toolRegistry.register(bashOutputRenderer);

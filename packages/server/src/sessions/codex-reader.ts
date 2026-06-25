@@ -42,6 +42,7 @@ import {
   createCodexRolloutDiscoveryStats,
   readCodexRolloutMetadata,
 } from "./codex-discovery.js";
+import { normalizeSession } from "./normalization.js";
 import type {
   GetSessionOptions,
   ISessionReader,
@@ -93,10 +94,7 @@ interface CodexSharedScanCacheEntry {
 
 const codexSharedScanCache = new Map<string, CodexSharedScanCacheEntry>();
 
-export type CodexSessionReaderScanCacheStatus =
-  | "hit"
-  | "in-flight"
-  | "miss";
+export type CodexSessionReaderScanCacheStatus = "hit" | "in-flight" | "miss";
 
 export interface CodexSessionReaderScanMetrics {
   sessionsDir: string;
@@ -332,7 +330,7 @@ export class CodexSessionReader implements ISessionReader {
         parentSessionId,
         originator: metaEntry.payload.originator,
         cliVersion: metaEntry.payload.cli_version,
-        source: metaEntry.payload.source,
+        source: codexSessionSourceLabel(metaEntry.payload.source),
         approvalPolicy: turnContext?.payload.approval_policy,
         sandboxPolicy: turnContext?.payload.sandbox_policy
           ? {
@@ -412,22 +410,100 @@ export class CodexSessionReader implements ISessionReader {
     }
   }
 
-  /**
-   * Codex doesn't have subagent sessions like Claude.
-   * Returns empty array for compatibility.
-   */
   async getAgentMappings(): Promise<{ toolUseId: string; agentId: string }[]> {
-    return [];
+    const sessions = await this.scanSessions();
+    const mappings: { toolUseId: string; agentId: string }[] = [];
+    const seenToolUseIds = new Set<string>();
+
+    for (const session of sessions) {
+      if (
+        this.projectPath &&
+        canonicalizeProjectPath(session.cwd) !== this.projectPath
+      ) {
+        continue;
+      }
+
+      const entries = await this.readEntries(session.id, session.filePath);
+      const spawnAgentCallIds = new Set<string>();
+
+      for (const entry of entries) {
+        if (entry.type !== "response_item") {
+          continue;
+        }
+
+        const payload = entry.payload;
+        if (
+          payload.type === "function_call" &&
+          payload.name === "spawn_agent"
+        ) {
+          spawnAgentCallIds.add(payload.call_id);
+          continue;
+        }
+
+        if (
+          payload.type !== "function_call_output" ||
+          !spawnAgentCallIds.has(payload.call_id) ||
+          seenToolUseIds.has(payload.call_id)
+        ) {
+          continue;
+        }
+
+        const agentId = parseCodexSpawnAgentOutput(payload.output);
+        if (!agentId) {
+          continue;
+        }
+
+        mappings.push({ toolUseId: payload.call_id, agentId });
+        seenToolUseIds.add(payload.call_id);
+      }
+    }
+
+    return mappings;
   }
 
-  /**
-   * Codex doesn't have subagent sessions like Claude.
-   * Returns null for compatibility.
-   */
   async getAgentSession(
-    _agentId: string,
+    agentId: string,
   ): Promise<{ messages: Message[]; status: string } | null> {
-    return null;
+    const sessionFile = await this.findSessionFile(agentId);
+    if (!sessionFile) return null;
+
+    const entries = await this.readEntries(agentId, sessionFile.filePath);
+    if (entries.length === 0) return null;
+
+    const metaEntry = entries.find((e) => e.type === "session_meta") as
+      | CodexSessionMetaEntry
+      | undefined;
+    if (!metaEntry) return null;
+
+    const { title, fullTitle } = this.extractTitle(entries);
+    const provider = this.determineProviderFromEntries(entries);
+    const summary: SessionSummary = {
+      id: agentId,
+      projectId: "codex-subagent" as UrlProjectId,
+      title,
+      fullTitle,
+      createdAt: metaEntry.payload.timestamp,
+      updatedAt: sessionFile.timestamp,
+      messageCount: this.countMessages(entries),
+      ownership: { owner: "none" },
+      provider,
+    };
+    const loaded: LoadedSession = {
+      summary,
+      data: {
+        provider,
+        session: { entries },
+      },
+    };
+    const session = normalizeSession(loaded);
+
+    return {
+      messages: session.messages.map((message) => ({
+        ...message,
+        isSubagent: true,
+      })),
+      status: inferCodexAgentStatus(entries),
+    };
   }
 
   /**
@@ -563,8 +639,7 @@ export class CodexSessionReader implements ISessionReader {
     const files = await this.findJsonlFiles(this.sessionsDir, metrics);
 
     for (const filePath of files) {
-      const activeWindowSkipsBefore =
-        metrics?.discovery.activeWindowSkips ?? 0;
+      const activeWindowSkipsBefore = metrics?.discovery.activeWindowSkips ?? 0;
       const session = await this.readSessionMeta(filePath, options, metrics);
       if (session) {
         sessions.push(session);
@@ -765,9 +840,7 @@ export class CodexSessionReader implements ISessionReader {
       const session = await readCodexRolloutMetadata({
         sessionsDir: this.sessionsDir,
         filePath,
-        ...(this.discoveryIndex
-          ? { discoveryIndex: this.discoveryIndex }
-          : {}),
+        ...(this.discoveryIndex ? { discoveryIndex: this.discoveryIndex } : {}),
         ...(options?.activeAfterMs !== undefined
           ? { activeAfterMs: options.activeAfterMs }
           : {}),
@@ -1058,6 +1131,120 @@ function createCodexSessionReaderScanMetrics(options: {
     sessionsReturned: 0,
     discovery: createCodexRolloutDiscoveryStats(),
   };
+}
+
+function codexSessionSourceLabel(source: unknown): string | undefined {
+  if (typeof source === "string") {
+    const trimmed = source.trim();
+    return trimmed || undefined;
+  }
+
+  if (isRecord(source) && isRecord(source.subagent)) {
+    return "subagent";
+  }
+
+  return undefined;
+}
+
+function parseCodexSpawnAgentOutput(output: unknown): string | null {
+  const text = codexToolOutputText(output);
+  if (!text) {
+    return null;
+  }
+
+  const parsed = parseJsonRecord(text);
+  const agentId =
+    stringField(parsed, "agent_id") ?? stringField(parsed, "agentId");
+  if (agentId) {
+    return agentId;
+  }
+
+  return (
+    text.match(/"agent_id"\s*:\s*"([^"]+)"/)?.[1] ??
+    text.match(/"agentId"\s*:\s*"([^"]+)"/)?.[1] ??
+    null
+  );
+}
+
+function codexToolOutputText(output: unknown): string {
+  if (typeof output === "string") {
+    return output.trim();
+  }
+
+  if (!Array.isArray(output)) {
+    return "";
+  }
+
+  return output
+    .map((item) =>
+      isRecord(item) && typeof item.text === "string" ? item.text : "",
+    )
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function parseJsonRecord(text: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function stringField(
+  record: Record<string, unknown> | null | undefined,
+  field: string,
+): string | undefined {
+  const value = record?.[field];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function inferCodexAgentStatus(
+  entries: CodexSessionEntry[],
+): "pending" | "running" | "completed" | "failed" {
+  let sawTaskStarted = false;
+  let sawTaskComplete = false;
+  let sawTurnAborted = false;
+  let sawAssistantMessage = false;
+
+  for (const entry of entries) {
+    if (entry.type === "event_msg") {
+      if (entry.payload.type === "task_started") {
+        sawTaskStarted = true;
+        sawTaskComplete = false;
+      } else if (entry.payload.type === "task_complete") {
+        sawTaskComplete = true;
+      } else if (entry.payload.type === "turn_aborted") {
+        sawTurnAborted = true;
+      }
+      continue;
+    }
+
+    if (
+      entry.type === "response_item" &&
+      entry.payload.type === "message" &&
+      entry.payload.role === "assistant"
+    ) {
+      sawAssistantMessage = true;
+    }
+  }
+
+  if (sawTurnAborted) {
+    return "failed";
+  }
+  if (sawTaskStarted && !sawTaskComplete) {
+    return "running";
+  }
+  if (sawTaskComplete || sawAssistantMessage) {
+    return "completed";
+  }
+  return "pending";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function cloneCodexSessionReaderScanMetrics(

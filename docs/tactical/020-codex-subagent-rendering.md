@@ -1,6 +1,6 @@
 # 020 - Codex subagent session rendering
 
-Status: Proposed
+Status: First slice implemented
 
 Progress:
 
@@ -8,10 +8,11 @@ Progress:
   explicit subagent workflows and spawned agent threads.
 - [x] 2026-06-25: Inspected a real Codex Desktop `0.142.0` archive containing a
   root rollout and one spawned worker rollout.
-- [ ] Update Codex rollout metadata schemas and subagent discovery.
-- [ ] Implement Codex `getAgentMappings()` / `getAgentSession()`.
-- [ ] Render Codex `spawn_agent` rows through the same expandable agent-work UI
-  shape used for Claude `Task`.
+- [x] 2026-06-25: Updated Codex rollout metadata schemas and subagent discovery.
+- [x] 2026-06-25: Implemented Codex `getAgentMappings()` /
+  `getAgentSession()`.
+- [x] 2026-06-25: Rendered Codex `spawn_agent` rows through the same
+  expandable agent-work UI shape used for Claude `Task`.
 
 ## Context
 
@@ -129,7 +130,7 @@ Known gaps:
 Render Claude and Codex subagents through one shared visual component, fed by
 provider-specific adapters.
 
-Recommended component split:
+Recommended component split when the next refactor is warranted:
 
 - `AgentWorkInline` (new shared component): collapsed/expanded row, status,
   role/type badge, optional nickname, summary, stats, loading state, nested
@@ -138,6 +139,11 @@ Recommended component split:
   `AgentWorkInline` props.
 - `spawn_agent` renderer (Codex adapter): converts Codex `spawn_agent`
   input/result into the same `AgentWorkInline` props.
+
+The first implemented slice keeps the existing `TaskRenderer` file as the
+owner of the nested transcript helpers and adds a narrow Codex
+`spawn_agent` adapter. That avoids a broader component rename while preserving
+the same visual row shape and `AgentContentContext` loading path.
 
 Provider-specific fields should normalize roughly as:
 
@@ -278,17 +284,21 @@ Keep the state model provider-neutral:
 - `AgentContentContext.loadAgentContent()` remains provider-agnostic because
   the server route chooses the active session reader.
 
-Changes:
+Implemented changes:
 
-- Extract `TaskInline` / `TaskNestedContent` into shared
-  `AgentWorkInline` / `AgentNestedContent` names, or keep the old filenames but
-  remove Claude-only assumptions from the component props.
-- Register a Codex tool renderer for `spawn_agent` that uses the shared
-  component.
-- Normalize Codex result shape before rendering, since `spawn_agent` output is
-  small (`agent_id`, `nickname`) and does not include Claude-style duration,
-  token, or tool-count stats.
-- Use i18n for any new visible labels in client UI.
+- `TaskNestedContent` and the spinner are shared from `TaskRenderer`.
+- A Codex tool renderer for `spawn_agent` uses the shared nested transcript
+  path.
+- Codex result shape is normalized before rendering, since `spawn_agent`
+  output is small (`agent_id`, `nickname`) and does not include Claude-style
+  duration, token, or tool-count stats.
+
+Remaining cleanup:
+
+- Extract the shared row chrome into an `AgentWorkInline` component if Claude
+  and Codex subagent rendering continue to converge.
+- Move any new durable user-facing labels into i18n keys when this area gets a
+  broader copy pass.
 
 ## Live vs. Reload Parity
 

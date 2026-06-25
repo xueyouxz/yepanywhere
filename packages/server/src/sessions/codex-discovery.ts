@@ -101,10 +101,11 @@ export async function readCodexRolloutMetadata(
     options.filePath,
   );
   const sourceFingerprint = sourceFingerprintFromStats(stats);
-  const cached = await options.discoveryIndex?.getRecord<CodexRolloutDiscoveryMetadata>(
-    identity.shardKey,
-    identity.key,
-  );
+  const cached =
+    await options.discoveryIndex?.getRecord<CodexRolloutDiscoveryMetadata>(
+      identity.shardKey,
+      identity.key,
+    );
   if (!options.discoveryIndex) {
     if (metrics) metrics.discoveryIndexDisabled += 1;
   } else if (!cached) {
@@ -115,9 +116,7 @@ export async function readCodexRolloutMetadata(
     isCachedRecordUsable(cached, identity, stats, sourceFingerprint)
   ) {
     if (metrics) metrics.discoveryIndexHits += 1;
-    if (
-      shouldRefreshCachedRecord(cached, identity, stats, sourceFingerprint)
-    ) {
+    if (shouldRefreshCachedRecord(cached, identity, stats, sourceFingerprint)) {
       if (metrics) metrics.discoveryIndexRefreshes += 1;
       if (cached.representation !== identity.representation) {
         if (metrics) metrics.representationTransitions += 1;
@@ -265,7 +264,9 @@ function fingerprintFieldChanged(
   previous: number | undefined,
   current: number | undefined,
 ): boolean {
-  return previous !== undefined && current !== undefined && previous !== current;
+  return (
+    previous !== undefined && current !== undefined && previous !== current
+  );
 }
 
 function toDiscoveredSession(
@@ -318,23 +319,48 @@ function parseCodexSessionMeta(
 export function isSubagentSessionMeta(
   meta: Partial<CodexSessionMetaEntry["payload"]>,
 ): boolean {
-  if (
-    !("forked_from_id" in meta) ||
-    typeof meta.forked_from_id !== "string"
-  ) {
+  if (hasNonEmptyString(meta.parent_thread_id)) {
+    return true;
+  }
+
+  if (isStructuredThreadSpawnSource(meta.source)) {
+    return true;
+  }
+
+  if (isSubagentSourceString(meta.thread_source)) {
+    return true;
+  }
+
+  return false;
+}
+
+function isStructuredThreadSpawnSource(source: unknown): boolean {
+  if (!isObjectRecord(source)) {
     return false;
   }
 
-  const source = meta.source;
-  if (!source || typeof source !== "object") return false;
+  const subagent = source.subagent;
+  if (!isObjectRecord(subagent)) {
+    return false;
+  }
 
-  const subagentSource = source as {
-    subagent?: { thread_spawn?: { parent_thread_id?: string } };
-  };
+  const threadSpawn = subagent.thread_spawn;
+  if (!isObjectRecord(threadSpawn)) {
+    return false;
+  }
 
+  return hasNonEmptyString(threadSpawn.parent_thread_id);
+}
+
+function isSubagentSourceString(value: unknown): boolean {
   return (
-    typeof subagentSource.subagent?.thread_spawn?.parent_thread_id === "string"
+    typeof value === "string" &&
+    /(?:subagent|thread[_-]?spawn)/i.test(value.trim())
   );
+}
+
+function hasNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function isCodexRolloutDiscoveryMetadata(
