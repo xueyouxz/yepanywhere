@@ -17,7 +17,7 @@ export function DevelopmentSettings() {
     connected,
     reloadBackend,
     unsafeToRestart,
-    workerActivity,
+    interruptibleSessionCount,
   } = useReloadNotifications();
   const { settings: validationSettings, setEnabled: setValidationEnabled } =
     useSchemaValidation();
@@ -156,8 +156,8 @@ export function DevelopmentSettings() {
             {unsafeToRestart && (
               <p className="settings-warning">
                 {t("developmentInterruptedWarning", {
-                  count: workerActivity.activeWorkers,
-                  suffix: workerActivity.activeWorkers !== 1 ? "s " : " ",
+                  count: interruptibleSessionCount,
+                  suffix: interruptibleSessionCount !== 1 ? "s " : " ",
                 })}
               </p>
             )}

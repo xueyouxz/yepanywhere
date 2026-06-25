@@ -5,7 +5,7 @@ interface Props {
   onReload: () => void;
   onDismiss: () => void;
   unsafeToRestart?: boolean;
-  activeWorkers?: number;
+  interruptibleSessionCount?: number;
 }
 
 export function ReloadBanner({
@@ -13,7 +13,7 @@ export function ReloadBanner({
   onReload,
   onDismiss,
   unsafeToRestart,
-  activeWorkers,
+  interruptibleSessionCount = 0,
 }: Props) {
   const { t } = useI18n();
   const label = target === "backend" ? "Server" : "Frontend";
@@ -28,8 +28,10 @@ export function ReloadBanner({
       </span>
       {showWarning && (
         <span className="reload-banner-warning-text">
-          {activeWorkers} active session{activeWorkers !== 1 ? "s" : ""} will be
-          interrupted
+          {t("developmentInterruptedWarning", {
+            count: interruptibleSessionCount,
+            suffix: interruptibleSessionCount !== 1 ? "s " : " ",
+          })}
         </span>
       )}
       <button

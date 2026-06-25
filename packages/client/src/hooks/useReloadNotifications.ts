@@ -4,6 +4,7 @@ import {
   type SourceChangeEvent,
   type WorkerActivityEvent,
   activityBus,
+  getInterruptibleSessionCount,
 } from "../lib/activityBus";
 
 // Re-export for consumers
@@ -65,6 +66,7 @@ export function useReloadNotifications() {
   const [workerActivity, setWorkerActivity] = useState<WorkerActivityEvent>({
     type: "worker-activity-changed",
     activeWorkers: 0,
+    interruptibleSessionCount: 0,
     queueLength: 0,
     hasActiveWork: false,
     timestamp: "",
@@ -247,6 +249,8 @@ export function useReloadNotifications() {
   // Check if manual reload mode is active at all
   const isManualReloadMode =
     devStatus?.noBackendReload || devStatus?.noFrontendReload;
+  const interruptibleSessionCount =
+    getInterruptibleSessionCount(workerActivity);
 
   return {
     isManualReloadMode,
@@ -258,6 +262,7 @@ export function useReloadNotifications() {
     dismiss,
     dismissAll,
     workerActivity,
-    unsafeToRestart: workerActivity.hasActiveWork,
+    interruptibleSessionCount,
+    unsafeToRestart: interruptibleSessionCount > 0,
   };
 }

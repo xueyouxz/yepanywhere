@@ -7,8 +7,12 @@ import { useOnboarding } from "../../hooks/useOnboarding";
 import { usePwaInstall } from "../../hooks/usePwaInstall";
 import { useVersion } from "../../hooks/useVersion";
 import { useI18n } from "../../i18n";
+import {
+  activityBus,
+  getInterruptibleSessionCount,
+  type WorkerActivityEvent,
+} from "../../lib/activityBus";
 import { useSettingsPaneTitle } from "./SettingsPaneTitleContext";
-import { activityBus } from "../../lib/activityBus";
 import {
   formatRemoteServerVersion,
   getRemoteCompatibilityNotices,
@@ -58,15 +62,19 @@ export function AboutSettings() {
 
   // Server restart state
   const [restarting, setRestarting] = useState(false);
-  const [activeWorkers, setActiveWorkers] = useState(0);
+  const [interruptibleSessionCount, setInterruptibleSessionCount] =
+    useState(0);
 
   // Fetch worker activity on mount
   useEffect(() => {
-    fetchJSON<{ activeWorkers: number; hasActiveWork: boolean }>(
-      "/status/workers",
-    )
-      .then((data) => setActiveWorkers(data.activeWorkers))
+    fetchJSON<WorkerActivityEvent>("/status/workers")
+      .then((data) =>
+        setInterruptibleSessionCount(getInterruptibleSessionCount(data)),
+      )
       .catch(() => {});
+    return activityBus.on("worker-activity-changed", (data) => {
+      setInterruptibleSessionCount(getInterruptibleSessionCount(data));
+    });
   }, []);
 
   // When activity bus reconnects after restart, clear restarting state
@@ -198,24 +206,24 @@ export function AboutSettings() {
           <div className="settings-item-info">
             <strong>{t("developmentRestartTitle")}</strong>
             <p>{t("developmentRestartDescription")}</p>
-            {activeWorkers > 0 && !restarting && (
+            {interruptibleSessionCount > 0 && !restarting && (
               <p className="settings-warning">
                 {t("developmentInterruptedWarning", {
-                  count: activeWorkers,
-                  suffix: activeWorkers !== 1 ? "s " : " ",
+                  count: interruptibleSessionCount,
+                  suffix: interruptibleSessionCount !== 1 ? "s " : " ",
                 })}
               </p>
             )}
           </div>
           <button
             type="button"
-            className={`settings-button ${activeWorkers > 0 ? "settings-button-danger" : ""}`}
+            className={`settings-button ${interruptibleSessionCount > 0 ? "settings-button-danger" : ""}`}
             onClick={handleRestart}
             disabled={restarting}
           >
             {restarting
               ? t("developmentRestarting")
-              : activeWorkers > 0
+              : interruptibleSessionCount > 0
                 ? t("developmentRestartAnyway")
                 : t("developmentRestart")}
           </button>

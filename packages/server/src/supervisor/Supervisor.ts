@@ -3851,15 +3851,16 @@ export class Supervisor {
   private emitWorkerActivity(): void {
     if (!this.eventBus) return;
 
-    const hasActiveWork = Array.from(this.processes.values()).some((p) =>
-      this.processHasActiveWork(p),
-    );
+    const interruptibleSessionCount = Array.from(
+      this.processes.values(),
+    ).filter((p) => this.processHasActiveWork(p)).length;
 
     const event: WorkerActivityEvent = {
       type: "worker-activity-changed",
       activeWorkers: this.processes.size,
+      interruptibleSessionCount,
       queueLength: this.workerQueue.length,
-      hasActiveWork,
+      hasActiveWork: interruptibleSessionCount > 0,
       timestamp: new Date().toISOString(),
     };
     this.eventBus.emit(event);
@@ -4128,16 +4129,18 @@ export class Supervisor {
    */
   getWorkerActivity(): {
     activeWorkers: number;
+    interruptibleSessionCount: number;
     queueLength: number;
     hasActiveWork: boolean;
   } {
-    const hasActiveWork = Array.from(this.processes.values()).some((p) =>
-      this.processHasActiveWork(p),
-    );
+    const interruptibleSessionCount = Array.from(
+      this.processes.values(),
+    ).filter((p) => this.processHasActiveWork(p)).length;
     return {
       activeWorkers: this.processes.size,
+      interruptibleSessionCount,
       queueLength: this.workerQueue.length,
-      hasActiveWork,
+      hasActiveWork: interruptibleSessionCount > 0,
     };
   }
 }

@@ -63,7 +63,7 @@ export function ConnectedAppContent({ children }: { children: ReactNode }) {
     reloadFrontend,
     dismiss,
     unsafeToRestart,
-    workerActivity,
+    interruptibleSessionCount,
   } = useReloadNotifications();
   const isSessionDetailRoute = /\/sessions\/[^/]+/.test(location.pathname);
 
@@ -79,7 +79,7 @@ export function ConnectedAppContent({ children }: { children: ReactNode }) {
           onReload={reloadBackend}
           onDismiss={() => dismiss("backend")}
           unsafeToRestart={unsafeToRestart}
-          activeWorkers={workerActivity.activeWorkers}
+          interruptibleSessionCount={interruptibleSessionCount}
         />
       )}
       {isManualReloadMode && pendingReloads.frontend && (

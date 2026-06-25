@@ -127,9 +127,12 @@ export interface QueueRequestRemovedEvent {
 /** Event emitted when worker activity changes (for safe restart indicator) */
 export interface WorkerActivityEvent {
   type: "worker-activity-changed";
+  /** Owned provider processes, including idle retained workers. */
   activeWorkers: number;
+  /** Sessions that would interrupt active work if the server restarts now. */
+  interruptibleSessionCount: number;
   queueLength: number;
-  /** True if any worker is running or waiting-input (unsafe to restart) */
+  /** True if any session has interruptible active work. */
   hasActiveWork: boolean;
   timestamp: string;
 }

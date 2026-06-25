@@ -54,7 +54,7 @@ function AppContent({ children }: Props) {
     reloadFrontend,
     dismiss,
     unsafeToRestart,
-    workerActivity,
+    interruptibleSessionCount,
   } = useReloadNotifications();
 
   return (
@@ -67,7 +67,7 @@ function AppContent({ children }: Props) {
           onReload={reloadBackend}
           onDismiss={() => dismiss("backend")}
           unsafeToRestart={unsafeToRestart}
-          activeWorkers={workerActivity.activeWorkers}
+          interruptibleSessionCount={interruptibleSessionCount}
         />
       )}
       {isManualReloadMode && pendingReloads.frontend && (

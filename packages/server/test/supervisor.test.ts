@@ -1547,6 +1547,7 @@ describe("Supervisor", () => {
         );
         expect(supervisorWithHeartbeat.getWorkerActivity()).toMatchObject({
           activeWorkers: 1,
+          interruptibleSessionCount: 1,
           hasActiveWork: true,
         });
 
@@ -2595,6 +2596,72 @@ describe("Supervisor", () => {
         expect(refreshPromptCache).toHaveBeenCalledTimes(1);
 
         const abortPromise = supervisorWithProvider.abortProcess(created.id);
+        await vi.advanceTimersByTimeAsync(5000);
+        await expect(abortPromise).resolves.toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not count idle owned sessions as interruptible restart work", async () => {
+      vi.useFakeTimers();
+      try {
+        let aborted = false;
+
+        const realSdk: RealClaudeSDKInterface = {
+          startSession: async () => {
+            async function* iterator() {
+              yield {
+                type: "system",
+                subtype: "init",
+                session_id: "idle-owned-safe-restart-session",
+              };
+              yield {
+                type: "result",
+                session_id: "idle-owned-safe-restart-session",
+              };
+
+              while (!aborted) {
+                await new Promise((resolve) => setTimeout(resolve, 10));
+              }
+            }
+
+            return {
+              iterator: iterator(),
+              queue: new MessageQueue(),
+              abort: () => {
+                aborted = true;
+              },
+              isProcessAlive: () => !aborted,
+            };
+          },
+        };
+
+        const supervisorWithIdleProcess = new Supervisor({
+          realSdk,
+          idleTimeoutMs: 10 * 60 * 1000,
+        });
+
+        const process = await supervisorWithIdleProcess.startSession(
+          "/tmp/test",
+          {
+            text: "finish and stay idle",
+          },
+        );
+        if (!("id" in process)) {
+          throw new Error("expected process");
+        }
+
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(process.state.type).toBe("idle");
+        expect(supervisorWithIdleProcess.getWorkerActivity()).toMatchObject({
+          activeWorkers: 1,
+          interruptibleSessionCount: 0,
+          hasActiveWork: false,
+        });
+
+        const abortPromise = supervisorWithIdleProcess.abortProcess(process.id);
         await vi.advanceTimersByTimeAsync(5000);
         await expect(abortPromise).resolves.toBe(true);
       } finally {

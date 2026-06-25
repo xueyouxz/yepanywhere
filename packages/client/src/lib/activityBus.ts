@@ -123,10 +123,29 @@ export interface SourceChangeEvent {
 
 export interface WorkerActivityEvent {
   type: "worker-activity-changed";
+  /** Owned provider processes, including idle retained workers. */
   activeWorkers: number;
+  /** Sessions that would interrupt active work if the server restarts now. */
+  interruptibleSessionCount?: number;
   queueLength: number;
+  /** True if any session has interruptible active work. */
   hasActiveWork: boolean;
   timestamp: string;
+}
+
+export function getInterruptibleSessionCount(
+  activity: Pick<
+    WorkerActivityEvent,
+    "activeWorkers" | "hasActiveWork" | "interruptibleSessionCount"
+  >,
+): number {
+  if (
+    typeof activity.interruptibleSessionCount === "number" &&
+    Number.isFinite(activity.interruptibleSessionCount)
+  ) {
+    return Math.max(0, activity.interruptibleSessionCount);
+  }
+  return activity.hasActiveWork ? activity.activeWorkers : 0;
 }
 
 /** Event emitted when a browser tab connects to the activity stream */
