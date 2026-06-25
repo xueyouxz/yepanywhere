@@ -170,6 +170,31 @@ Follow-up, not v1.
 
 ## Cruxes / hard parts
 
+## Unfulfilled UI contract gaps
+
+The shipped phase fixed basic quote-comment insertion, but several requested UI
+contracts remain open:
+
+- **Right-click/right-drag paragraph selection.** Selecting whole paragraphs (or
+  line/block ranges) by right-click-dragging was part of the intended advanced
+  selection path. It is not yet implemented. The gesture should feed the same
+  quote-comment action as ordinary text selection, producing a range that maps
+  back to source markdown rather than a DOM-only scrape.
+- **Selection-local `>` button.** Any completed selection in agent output should
+  surface a `>` quote-comment button positioned relative to the mouse/touch end
+  point at selection-drag end. It must not depend on selecting a large span or
+  landing near a particular paragraph action rail. The current floating button
+  exists, but this contract is broader: every valid selection should get a
+  visible nearby action.
+- **Dedicated action lane for auto-shown `>` circles.** Paragraph and system
+  output section quote buttons, especially when configured always-shown, need
+  their own reserved column/lane. They must not overlay or obscure the paragraph
+  text, system output, or adjacent controls. The fix belongs in the shared
+  block/action layout, not in per-paragraph positioning patches.
+
+These are UI-surface obligations for the same quote-comment primitive; do not
+build a parallel quote path for them.
+
 ### Tint paint over rendered markdown
 
 The recovered range is a DOM `Range` clipped to the registered markdown source
