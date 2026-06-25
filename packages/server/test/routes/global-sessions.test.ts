@@ -144,6 +144,7 @@ describe("Global Sessions Routes", () => {
     // Mock metadata service
     mockMetadataService = {
       getMetadata: vi.fn((sessionId: string) => metadataMap.get(sessionId)),
+      getRecapMessages: vi.fn(() => []),
     } as unknown as SessionMetadataService;
   });
 
