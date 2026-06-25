@@ -569,7 +569,6 @@ export function ModelSettings() {
     <section className="settings-section">
       <div className="settings-group">
         <div className="model-settings-subsection">
-          <h3>{t("modelSettingsSessionDefaultsTitle")}</h3>
           <p>{t("modelSettingsSessionDefaultsDescription")}</p>
         </div>
 
