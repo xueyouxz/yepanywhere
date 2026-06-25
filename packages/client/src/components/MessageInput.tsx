@@ -28,6 +28,11 @@ import {
 import { useVersion } from "../hooks/useVersion";
 import { useI18n } from "../i18n";
 import type { BtwToolbarMode } from "../lib/btwAsideRouting";
+import {
+  getDraftTextChangeMetadata,
+  type DraftTextChangeMetadata,
+  type DraftTextEdit,
+} from "../lib/commentAnchors";
 import { hasCoarsePointer } from "../lib/deviceDetection";
 import { generateUUID } from "../lib/uuid";
 import type {
@@ -43,6 +48,7 @@ import {
   getSpeechTranscriptInsertionParts,
   getSpeechTranscriptReplacementParts,
   mapSpeechInsertionRangeThroughEdit,
+  mapSpeechInsertionRangeThroughReplacement,
   retargetSpeechInsertionRangeReplacement,
   type SpeechInsertionRange,
 } from "../lib/speechRecognition";
@@ -85,6 +91,12 @@ interface PendingSpeechFinal {
   metadata?: SpeechTranscriptionResultMetadata;
 }
 
+interface PendingDraftInputEdit {
+  start: number;
+  end: number;
+  inputType?: string;
+}
+
 const EXPANDED_COMPOSER_MAX_VIEWPORT_RATIO = 0.5;
 const FALLBACK_TEXTAREA_LINE_HEIGHT_PX = 20;
 
@@ -116,6 +128,44 @@ function clearTextareaContentsUndoably(textarea: HTMLTextAreaElement): void {
 
   textarea.setRangeText("", 0, previousLength, "start");
   textarea.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function replaceTextareaRangeUndoably(
+  textarea: HTMLTextAreaElement,
+  start: number,
+  end: number,
+  replacement: string,
+): void {
+  textarea.focus();
+  textarea.setSelectionRange(start, end);
+
+  // React state-only replacements bypass native undo; edit the textarea first
+  // so browsers that still wire execCommand into the undo stack can preserve it.
+  try {
+    const command = replacement ? "insertText" : "delete";
+    if (document.execCommand?.(command, false, replacement)) {
+      return;
+    }
+  } catch {
+    // Fall back to a direct textarea edit below.
+  }
+
+  textarea.setRangeText(replacement, start, end, "end");
+}
+
+function getInsertedTextForEdit(
+  previousText: string,
+  nextText: string,
+  start: number,
+  end: number,
+): string {
+  const replacementLength = Math.max(0, end - start);
+  const insertedLength =
+    nextText.length - previousText.length + replacementLength;
+  if (insertedLength <= 0) {
+    return "";
+  }
+  return nextText.slice(start, start + insertedLength);
 }
 
 function createClientSpeechTurnId(): string {
@@ -256,7 +306,7 @@ interface Props {
   /** Callback to receive draft controls for success/failure handling */
   onDraftControlsReady?: (controls: DraftControls) => void;
   /** Notify parent of draft edits for UI linked to the composer text. */
-  onDraftTextChange?: (text: string) => void;
+  onDraftTextChange?: (text: string, metadata: DraftTextChangeMetadata) => void;
   /** Context usage for displaying usage indicator */
   contextUsage?: ContextUsage;
   /** Last session activity timestamp for stale composer liveness display. */
@@ -408,6 +458,10 @@ export function MessageInput({
     new Map(),
   );
   const pendingSpeechFinalRef = useRef<PendingSpeechFinal | null>(null);
+  const pendingDraftInputRef = useRef<PendingDraftInputEdit | null>(null);
+  const draftTextChangeMetadataRef = useRef<DraftTextChangeMetadata | null>(
+    null,
+  );
   // True once the user manually edits (non-whitespace) during the active mic
   // transaction; holds an automatic Smart Turn endpoint send. Speech-inserted
   // finals go through setDraft (not onChange) and never set this.
@@ -676,6 +730,108 @@ export function MessageInput({
     [effectivePatientQueuePatienceSeconds, steerNowEnabled, supportsSteerNow],
   );
 
+  const noteDraftTextChange = useCallback(
+    (
+      previousText: string,
+      nextText: string,
+      edit?: Omit<DraftTextEdit, "insertedText"> & { insertedText?: string },
+    ) => {
+      const insertedText =
+        edit?.insertedText ??
+        (edit
+          ? getInsertedTextForEdit(previousText, nextText, edit.start, edit.end)
+          : "");
+      draftTextChangeMetadataRef.current = getDraftTextChangeMetadata(
+        previousText,
+        nextText,
+        edit ? { ...edit, insertedText } : undefined,
+      );
+    },
+    [],
+  );
+
+  const replaceDraftRangeUndoably = useCallback(
+    (start: number, end: number, replacement: string): string | null => {
+      const textarea = textareaRef.current;
+      if (!textarea) return null;
+
+      const previousText = controls.getDraft();
+      const replacementStart = Math.max(
+        0,
+        Math.min(start, previousText.length),
+      );
+      const replacementEnd = Math.max(
+        replacementStart,
+        Math.min(end, previousText.length),
+      );
+      const nextText = `${previousText.slice(0, replacementStart)}${replacement}${previousText.slice(replacementEnd)}`;
+      if (nextText === previousText) return nextText;
+
+      noteDraftTextChange(previousText, nextText, {
+        start: replacementStart,
+        end: replacementEnd,
+        insertedText: replacement,
+        inputType: replacement ? "insertText" : "deleteContent",
+      });
+      replaceTextareaRangeUndoably(
+        textarea,
+        replacementStart,
+        replacementEnd,
+        replacement,
+      );
+      if (textarea.value !== nextText) {
+        textarea.value = nextText;
+      }
+
+      const pendingFinal = pendingSpeechFinalRef.current;
+      if (pendingFinal) {
+        clearTimeout(pendingFinal.timer);
+        pendingSpeechFinalRef.current = null;
+      }
+      if (speechInsertionRangesRef.current.size > 0) {
+        const nextRanges = new Map<string, SpeechInsertionRange>();
+        for (const [targetId, range] of speechInsertionRangesRef.current) {
+          nextRanges.set(
+            targetId,
+            clearSpeechInsertionRangeReplacement(
+              mapSpeechInsertionRangeThroughReplacement(
+                range,
+                replacementStart,
+                replacementEnd,
+                replacement.length,
+              ),
+            ),
+          );
+        }
+        speechInsertionRangesRef.current = nextRanges;
+        speechInsertionRangeRef.current =
+          activeSpeechTargetIdRef.current !== null
+            ? (nextRanges.get(activeSpeechTargetIdRef.current) ?? null)
+            : null;
+      }
+      if (
+        activeSpeechTargetIdRef.current !== null &&
+        hasNonWhitespaceEdit(previousText, nextText)
+      ) {
+        composerEditedDuringSpeechRef.current = true;
+      }
+      noteComposerEdit(nextText);
+      setText(nextText);
+      const nextSlashQuery = getLeadingSlashQuery(nextText);
+      if (nextSlashQuery !== dismissedSlashQuery) {
+        setDismissedSlashQuery(null);
+      }
+      return nextText;
+    },
+    [
+      controls,
+      dismissedSlashQuery,
+      noteComposerEdit,
+      noteDraftTextChange,
+      setText,
+    ],
+  );
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files?.length && onAttach) {
@@ -690,8 +846,9 @@ export function MessageInput({
       focus: () => textareaRef.current?.focus(),
       setSelectionRange: (start, end) =>
         textareaRef.current?.setSelectionRange(start, end),
+      replaceDraftRangeUndoably,
     }),
-    [controls],
+    [controls, replaceDraftRangeUndoably],
   );
 
   // Provide controls to parent via callback
@@ -700,7 +857,11 @@ export function MessageInput({
   }, [draftControls, onDraftControlsReady]);
 
   useEffect(() => {
-    onDraftTextChange?.(text);
+    const metadata = draftTextChangeMetadataRef.current ?? {
+      mayAffectQuoteAnchors: true,
+    };
+    draftTextChangeMetadataRef.current = null;
+    onDraftTextChange?.(text, metadata);
   }, [onDraftTextChange, text]);
 
   useLayoutEffect(() => {
@@ -997,12 +1158,17 @@ export function MessageInput({
         : trimmed
           ? `${trimmed} ${normalizedCommand} `
           : `${normalizedCommand} `;
+      noteDraftTextChange(text, nextText, {
+        start: slashDraft ? 0 : trimmed.length,
+        end: text.length,
+        inputType: "insertText",
+      });
       noteComposerEdit(nextText);
       setText(nextText);
       setDismissedSlashQuery(null);
       textareaRef.current?.focus();
     },
-    [text, setText, onCustomCommand, noteComposerEdit],
+    [text, setText, onCustomCommand, noteComposerEdit, noteDraftTextChange],
   );
 
   const handleKeyDown = (e: KeyboardEvent) => {
@@ -1166,6 +1332,12 @@ export function MessageInput({
           clearTextareaContentsUndoably(textareaRef.current);
         }
         setInterimTranscript("");
+        noteDraftTextChange(text, "", {
+          start: 0,
+          end: text.length,
+          insertedText: "",
+          inputType: "deleteContent",
+        });
         setText("");
         resetCompositionMetadata();
         controls.flushDraft();
@@ -1189,6 +1361,12 @@ export function MessageInput({
       !text.trim()
     ) {
       e.preventDefault();
+      noteDraftTextChange(text, promptSuggestion, {
+        start: 0,
+        end: text.length,
+        insertedText: promptSuggestion,
+        inputType: "insertText",
+      });
       noteComposerEdit(promptSuggestion);
       setText(promptSuggestion);
       onDismissPromptSuggestion?.();
@@ -1651,8 +1829,33 @@ export function MessageInput({
             <textarea
               ref={textareaRef}
               value={text}
+              onBeforeInput={(event) => {
+                const nativeEvent = event.nativeEvent as InputEvent;
+                pendingDraftInputRef.current = {
+                  start: event.currentTarget.selectionStart,
+                  end: event.currentTarget.selectionEnd,
+                  inputType: nativeEvent.inputType,
+                };
+              }}
               onChange={(e) => {
                 const nextText = e.target.value;
+                const pendingInput = pendingDraftInputRef.current;
+                pendingDraftInputRef.current = null;
+                noteDraftTextChange(
+                  text,
+                  nextText,
+                  pendingInput
+                    ? {
+                        ...pendingInput,
+                        insertedText: getInsertedTextForEdit(
+                          text,
+                          nextText,
+                          pendingInput.start,
+                          pendingInput.end,
+                        ),
+                      }
+                    : undefined,
+                );
                 clearPendingSpeechFinal();
                 if (speechInsertionRangesRef.current.size > 0) {
                   const nextRanges = new Map<string, SpeechInsertionRange>();

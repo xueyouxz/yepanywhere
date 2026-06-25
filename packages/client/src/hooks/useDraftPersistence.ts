@@ -5,6 +5,12 @@ export interface DraftControls {
   getDraft: () => string;
   /** Replace input state and localStorage immediately */
   setDraft: (value: string) => void;
+  /** Replace one draft range through the owning textarea when available. */
+  replaceDraftRangeUndoably?: (
+    start: number,
+    end: number,
+    replacement: string,
+  ) => string | null;
   /** Flush any pending draft write immediately */
   flushDraft: () => void;
   /** Clear input state only, keeping localStorage for failure recovery */
