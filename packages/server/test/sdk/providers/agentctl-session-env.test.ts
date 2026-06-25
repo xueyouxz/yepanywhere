@@ -33,7 +33,7 @@ function bridgeTestEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return env;
 }
 
-const bashIt = isBashAvailable() ? it : it.skip;
+const bashIt = process.platform !== "win32" && isBashAvailable() ? it : it.skip;
 
 describe("agentctl session env bridge", () => {
   bashIt("publishes AGENTCTL_SESSION_ID to later Bash shells", () => {

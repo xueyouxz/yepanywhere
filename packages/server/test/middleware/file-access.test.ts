@@ -43,6 +43,28 @@ describe("file-access policy state", () => {
     expect(set).not.toContain("/tmp");
   });
 
+  it("expands ~ using the home path separator style", () => {
+    initFileAccess({
+      uploadsDir: "C:\\data\\uploads",
+      homeDir: "C:\\Users\\me",
+      tempPaths: ["C:\\Temp"],
+      envPaths: null,
+    });
+    updateFileAccess({
+      projects: true,
+      uploads: false,
+      temp: false,
+      home: true,
+      custom: ["~/notes", "~\\logs"],
+    });
+
+    expect(getAllowedFilePaths()).toEqual([
+      "C:\\Users\\me",
+      "C:\\Users\\me\\notes",
+      "C:\\Users\\me\\logs",
+    ]);
+  });
+
   it("gates scanned projects off", () => {
     updateFileAccess({ ...DEFAULT_FILE_ACCESS, projects: false });
     expect(shouldIncludeProjects()).toBe(false);

@@ -75,7 +75,7 @@ function isBashAvailable(): boolean {
   }
 }
 
-const bashIt = isBashAvailable() ? it : it.skip;
+const bashIt = process.platform !== "win32" && isBashAvailable() ? it : it.skip;
 
 describe("CodexProvider", () => {
   let provider: CodexProvider;

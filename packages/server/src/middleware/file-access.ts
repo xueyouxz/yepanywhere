@@ -17,8 +17,6 @@
  *   3. Built-in defaults (DEFAULT_FILE_ACCESS).
  */
 
-import * as path from "node:path";
-
 export interface FileAccessSettings {
   /** All scanned project paths (gates absolute paths landing inside a project). */
   projects: boolean;
@@ -88,7 +86,10 @@ export function updateFileAccess(
 function expandHome(p: string, home: string): string {
   if (p === "~") return home;
   if (p.startsWith("~/") || p.startsWith("~\\")) {
-    return path.join(home, p.slice(2));
+    const separator = home.includes("\\") ? "\\" : "/";
+    const normalizedHome = home.replace(/[\\/]+$/u, "");
+    const relativePath = p.slice(2).replace(/[\\/]+/gu, separator);
+    return `${normalizedHome}${separator}${relativePath}`;
   }
   return p;
 }
