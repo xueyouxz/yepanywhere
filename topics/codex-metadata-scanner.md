@@ -45,6 +45,9 @@ index:
   duration, directories walked, rollout counts, plain/zstd precedence
   filtering, discovery-index behavior, first-line reads by representation,
   skipped metadata files, and subagent sessions filtered from ordinary lists.
+- `.jsonl.zst` support is a runtime capability. YA still declares Node
+  `>=20`; Node 20 does not expose native `node:zlib` zstd APIs, so compressed
+  rollouts are skipped cleanly and counted as unsupported on those runtimes.
 - `SessionDiscoveryIndex` persists normalized provider head metadata under
   `{dataDir}/indexes/session-discovery/<provider>/<source-root-hash>/...`.
   Codex uses date-bucket shards such as `2026/06/25.json` and stores a small
@@ -94,7 +97,8 @@ newline is found. A naive `.jsonl.zst` implementation that reads and
 decompresses the whole file just to find the first line is not acceptable for
 default scanner paths.
 
-Default `.jsonl.zst` discovery is gated on at least one of:
+Default `.jsonl.zst` discovery is gated on native runtime zstd support plus at
+least one of:
 
 - a durable metadata cache hit from the earlier plain `.jsonl`
   representation;
@@ -104,9 +108,12 @@ Default `.jsonl.zst` discovery is gated on at least one of:
   during discovery.
 
 As of 2026-06-25, YA satisfies this gate with a streaming zstd first-line
-reader in `readFirstLine()`. Keep that separation intact: full compressed
-session detail loads may read the full transcript, but scanner metadata
-discovery must not depend on whole-file zstd decompression.
+reader in `readFirstLine()` when Node exposes native zstd APIs. On runtimes
+without native zstd, YA skips `.jsonl.zst` rollouts rather than crashing or
+falling back to whole-file decompression. Keep that separation intact: full
+compressed session detail loads may read the full transcript on supported
+runtimes, but scanner metadata discovery must not depend on whole-file zstd
+decompression.
 
 ## Watcher And Scheduling Gaps
 
@@ -142,6 +149,8 @@ The main costs are filesystem and metadata costs, not full transcript parsing:
   without changing source identity or shrinking below the cached observation;
 - full decompression if compressed files are read without streaming
   first-line support;
+- compressed sessions being hidden on Node runtimes without native zstd
+  support;
 - route fan-out that asks for global, project, inbox, and provider-catalog
   views close together.
 

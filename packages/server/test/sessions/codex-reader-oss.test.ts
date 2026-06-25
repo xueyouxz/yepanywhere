@@ -8,6 +8,7 @@ import type { UrlProjectId } from "@yep-anywhere/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { encodeProjectId } from "../../src/projects/paths.js";
 import { CodexSessionReader } from "../../src/sessions/codex-reader.js";
+import { isZstdJsonlSupported } from "../../src/utils/jsonl.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -16,6 +17,10 @@ const zstdCompressSync = (
     zstdCompressSync?: (buffer: Buffer) => Buffer;
   }
 ).zstdCompressSync;
+const hasNativeZstd =
+  typeof zstdCompressSync === "function" && isZstdJsonlSupported();
+const itIfNativeZstd = hasNativeZstd ? it : it.skip;
+const itIfNoNativeZstd = hasNativeZstd ? it.skip : it;
 
 function zstdCompressed(content: string): Buffer {
   if (!zstdCompressSync) {
@@ -147,7 +152,7 @@ describe("CodexSessionReader - OSS Support", () => {
     expect(session?.data.provider).toBe("codex-oss");
   });
 
-  it("loads zstd-compressed rollout files", async () => {
+  itIfNativeZstd("loads zstd-compressed rollout files", async () => {
     const sessionId = "zstd-rollout";
     const now = new Date().toISOString();
     const lines = [
@@ -185,6 +190,57 @@ describe("CodexSessionReader - OSS Support", () => {
     );
     expect(session?.summary.title).toBe("Hello compressed history");
     expect(session?.data.session.entries).toHaveLength(2);
+  });
+
+  itIfNoNativeZstd("skips zstd-compressed rollouts without native zstd", async () => {
+    const sessionId = "unsupported-zstd-rollout";
+    const now = new Date().toISOString();
+    const lines = [
+      JSON.stringify({
+        type: "session_meta",
+        timestamp: now,
+        payload: {
+          id: sessionId,
+          cwd: "/test/project",
+          timestamp: now,
+          model_provider: "openai",
+        },
+      }),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: now,
+        payload: {
+          type: "user_message",
+          message: "Hello compressed history",
+        },
+      }),
+    ];
+
+    await writeFile(
+      join(testDir, `${sessionId}.jsonl.zst`),
+      Buffer.from(`${lines.join("\n")}\n`),
+    );
+
+    await expect(
+      reader.listSessions("test-project" as UrlProjectId),
+    ).resolves.toEqual([]);
+
+    const metrics = reader.getLastScanMetrics();
+    expect(metrics).toMatchObject({
+      compressedRolloutFiles: 1,
+      sessionsParsed: 0,
+      failedFiles: 1,
+      sessionsReturned: 0,
+      discovery: {
+        zstdUnsupported: 1,
+        firstLineReadsZstd: 0,
+        metadataReadFailures: 0,
+      },
+    });
+
+    await expect(
+      reader.getSession(sessionId, "test-project" as UrlProjectId),
+    ).resolves.toBeNull();
   });
 
   it("records reader scan metrics and shared cache hits", async () => {

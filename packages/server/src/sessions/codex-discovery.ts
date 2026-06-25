@@ -11,7 +11,7 @@ import {
   type CodexRolloutDiscoveryIdentity,
   getCodexRolloutDiscoveryIdentity,
 } from "../utils/codexRolloutFiles.js";
-import { readFirstLine } from "../utils/jsonl.js";
+import { isZstdJsonlSupported, readFirstLine } from "../utils/jsonl.js";
 
 export const CODEX_META_READ_MAX_BYTES = 1024 * 1024;
 
@@ -44,6 +44,7 @@ export interface CodexRolloutDiscoveryStats {
   cacheBackedCompressedReads: number;
   firstLineReadsPlain: number;
   firstLineReadsZstd: number;
+  zstdUnsupported: number;
   metadataReadFailures: number;
 }
 
@@ -81,6 +82,7 @@ export function createCodexRolloutDiscoveryStats(): CodexRolloutDiscoveryStats {
     cacheBackedCompressedReads: 0,
     firstLineReadsPlain: 0,
     firstLineReadsZstd: 0,
+    zstdUnsupported: 0,
     metadataReadFailures: 0,
   };
 }
@@ -100,6 +102,11 @@ export async function readCodexRolloutMetadata(
     options.sessionsDir,
     options.filePath,
   );
+  if (identity.representation === "zstd" && !isZstdJsonlSupported()) {
+    if (metrics) metrics.zstdUnsupported += 1;
+    return null;
+  }
+
   const sourceFingerprint = sourceFingerprintFromStats(stats);
   const cached =
     await options.discoveryIndex?.getRecord<CodexRolloutDiscoveryMetadata>(

@@ -60,6 +60,10 @@ function getCreateZstdDecompress(): CreateZstdDecompress | null {
   return createZstdDecompressCached;
 }
 
+export function isZstdJsonlSupported(): boolean {
+  return Boolean(getZstdDecompress() && getCreateZstdDecompress());
+}
+
 function firstLineFromContent(content: string): string | null {
   const stripped = stripBom(content);
   const nl = stripped.indexOf("\n");

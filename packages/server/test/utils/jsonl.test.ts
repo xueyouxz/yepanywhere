@@ -10,6 +10,16 @@ const zstdCompressSync = (
     zstdCompressSync?: (buffer: Buffer) => Buffer;
   }
 ).zstdCompressSync;
+const createZstdDecompress = (
+  zlib as typeof zlib & {
+    createZstdDecompress?: () => NodeJS.ReadWriteStream;
+  }
+).createZstdDecompress;
+const hasNativeZstd =
+  typeof zstdCompressSync === "function" &&
+  typeof createZstdDecompress === "function";
+const itIfNativeZstd = hasNativeZstd ? it : it.skip;
+const itIfNoNativeZstd = hasNativeZstd ? it.skip : it;
 
 function zstdCompressed(content: string): Buffer {
   if (!zstdCompressSync) {
@@ -29,7 +39,7 @@ describe("jsonl utilities", () => {
     }
   });
 
-  it("streams the first line of zstd JSONL without full file reads", async () => {
+  itIfNativeZstd("streams the first line of zstd JSONL without full file reads", async () => {
     const dir = join(tmpdir(), `jsonl-zstd-${randomUUID()}`);
     tempDirs.push(dir);
     await mkdir(dir, { recursive: true });
@@ -71,5 +81,18 @@ describe("jsonl utilities", () => {
     await expect(readFirstLine(filePath, 1024 * 1024)).resolves.toBe(
       firstLine,
     );
+  });
+
+  itIfNoNativeZstd("returns null for zstd first-line reads without native zstd", async () => {
+    const dir = join(tmpdir(), `jsonl-zstd-${randomUUID()}`);
+    tempDirs.push(dir);
+    await mkdir(dir, { recursive: true });
+
+    const filePath = join(dir, "rollout-unsupported.jsonl.zst");
+    await writeFile(filePath, Buffer.from("not decoded on this runtime"));
+
+    const { readFirstLine } = await import("../../src/utils/jsonl.js");
+
+    await expect(readFirstLine(filePath, 1024 * 1024)).resolves.toBeNull();
   });
 });

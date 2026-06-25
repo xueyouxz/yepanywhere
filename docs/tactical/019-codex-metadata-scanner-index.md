@@ -9,8 +9,8 @@ Progress:
 - [x] 2026-06-25: Captured current scanner gaps and `.jsonl.zst` default
   gating in `topics/codex-metadata-scanner.md`.
 - [x] 2026-06-25: Implemented streaming zstd first-line reads for
-  `readFirstLine()`, so default compressed metadata discovery no longer uses
-  whole-file decompression.
+  `readFirstLine()` on Node runtimes with native zstd support. Runtimes
+  without native zstd skip compressed rollouts gracefully.
 - [x] Gate or revert default `.jsonl.zst` discovery until scanner metadata
   reads are first-line-only or cache-backed.
 - [x] Add a durable provider-neutral session discovery index, with Codex as
@@ -97,8 +97,8 @@ index:
 - Replacing, truncating, deleting, or compressing a rollout triggers targeted
   reconciliation.
 - `.jsonl` and `.jsonl.zst` are representations of the same logical rollout.
-- Compressed discovery is default-on only when it can use cached metadata or a
-  streaming first-line zstd reader.
+- Compressed discovery is default-on only when the runtime has native zstd
+  support and can use cached metadata or a streaming first-line zstd reader.
 - Deletion and rotation visibility follows provider-owned files. A record in
   YA's discovery index does not make a missing provider session visible.
 
@@ -106,11 +106,14 @@ index:
 
 Do this before relying on compressed rollout discovery in normal lists.
 
-Implemented 2026-06-25 with option 1 below: `readFirstLine()` now uses a
-streaming zstd decompressor and stops after the first decoded JSONL record or
-the metadata byte limit. Full compressed session detail reads still use the
-full-file path, which is acceptable because detail loading intentionally reads
-the transcript.
+Implemented 2026-06-25 with option 1 below for Node runtimes whose
+`node:zlib` exposes native zstd APIs (Node `>=22.15.0` or `>=23.8.0`):
+`readFirstLine()` uses a streaming zstd decompressor and stops after the first
+decoded JSONL record or the metadata byte limit. On declared YA runtimes that
+do not expose native zstd, such as Node 20, compressed rollouts are skipped and
+counted as unsupported instead of crashing list or detail paths. Full
+compressed session detail reads still use the full-file path, which is
+acceptable because detail loading intentionally reads the transcript.
 
 Options, in preference order:
 
@@ -128,6 +131,7 @@ Acceptance criteria:
 - [x] Normal Codex project/session listing never performs whole-file zstd
   decompression for metadata discovery by default.
 - [x] Tests cover the chosen gate.
+- [x] Unsupported Node runtimes skip `.jsonl.zst` rollouts without throwing.
 - [x] The user-visible behavior for plain `.jsonl` history remains complete.
 
 ## Phase 1: Provider-Neutral Discovery Index
@@ -236,7 +240,8 @@ Rules:
 - Canonical identity is the plain `.jsonl` filename/stem.
 - If both `.jsonl` and `.jsonl.zst` exist, prefer `.jsonl`.
 - If `.jsonl` disappears and `.jsonl.zst` appears for the same stem, preserve
-  indexed metadata and update representation/path.
+  indexed metadata and update representation/path when the runtime supports
+  zstd; otherwise skip the compressed representation cleanly.
 - If only `.jsonl.zst` exists and no metadata is indexed, use the Phase 0 gate:
   streaming first-line reader, explicit slow opt-in, or skip.
 - Opening a full compressed session detail may decompress/read the full file;
@@ -246,7 +251,7 @@ Rules:
 Acceptance criteria:
 
 - [x] A known plain rollout compressed to `.jsonl.zst` remains visible after
-  scanner cache reuse and server restart.
+  scanner cache reuse and server restart on runtimes with native zstd support.
 - [ ] Add explicit watcher-invalidation coverage for compression transitions
   if the watcher reconciliation path changes.
 - [x] A plain+compressed sibling pair lists only one session.
@@ -256,15 +261,17 @@ Acceptance criteria:
 
 ## Phase 4: Streaming Zstd First-Line Reader
 
-Implemented 2026-06-25 using Node's zstd stream APIs: `readFirstLine()` uses a
-line-oriented compressed head reader for scanner use.
+Implemented 2026-06-25 using Node's native zstd stream APIs when available:
+`readFirstLine()` uses a line-oriented compressed head reader for scanner use.
+When native zstd is unavailable, scanner discovery treats `.jsonl.zst` as
+unsupported and skips it without throwing.
 
 Requirements:
 
 - Stop after the first decoded newline or a metadata byte limit.
 - Preserve BOM stripping and empty-first-line behavior.
-- Fail closed for unsupported Node versions: skip compressed metadata discovery
-  unless an index hit exists or the user enabled the explicit slow path.
+- Fail closed for unsupported Node versions: skip compressed metadata and
+  detail discovery, and record an unsupported-zstd metric.
 - Keep full-session `.zst` detail loading separate from metadata reading.
 
 Tests:
@@ -322,6 +329,7 @@ records and logs:
 - cache-backed compressed discovery;
 - first-line reads by representation;
 - zstd first-line reads;
+- unsupported-zstd skips;
 - parsed and skipped metadata files.
 
 Slow logs fire for Codex project metadata scans over a threshold, similar in
@@ -339,6 +347,7 @@ records and logs:
 - suspect discovery-index records and refreshes;
 - cache-backed compressed discovery;
 - first-line reads by representation;
+- unsupported-zstd skips;
 - parsed and skipped metadata files;
 - subagent sessions skipped before ordinary Codex session lists are returned.
 
@@ -364,6 +373,8 @@ Automated:
 - Unit tests for watcher rescan metrics and overlap-skip accounting.
 - Unit tests for adaptive periodic-rescan backoff and recovery.
 - Unit tests for streaming zstd first-line reads if Phase 4 lands.
+- Unit tests for unsupported-zstd fallback on Node runtimes without native
+  zstd.
 - Existing server tests:
   - `test/projects/codex-scanner.test.ts`
   - `test/sessions/codex-reader-oss.test.ts`

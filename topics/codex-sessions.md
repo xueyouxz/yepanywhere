@@ -107,7 +107,10 @@ current shape has important scale and representation gaps:
   has an archived-session concept; YA's ordinary Codex session path currently
   centers on the configured active sessions directory.
 - Compression is a representation detail, but YA must not pay whole-transcript
-  decompression cost just to rediscover head metadata.
+  decompression cost just to rediscover head metadata. Because YA still
+  declares Node `>=20`, `.jsonl.zst` rollouts are supported only when the
+  active Node runtime exposes native `node:zlib` zstd APIs; older runtimes skip
+  compressed rollouts cleanly.
 - The session id visible in YA must remain explicit. Provider-native resume
   handles, filename ids, and `session_meta.id` mappings must not silently swap
   the user-facing YA session id without a documented provider contract.

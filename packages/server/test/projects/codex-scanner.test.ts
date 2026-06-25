@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CodexSessionScanner } from "../../src/projects/codex-scanner.js";
 import { createCodexSessionDiscoveryIndex } from "../../src/sessions/codex-discovery.js";
 import { getCodexRolloutDiscoveryIdentity } from "../../src/utils/codexRolloutFiles.js";
+import { isZstdJsonlSupported } from "../../src/utils/jsonl.js";
 
 function makeSessionMeta(
   id: string,
@@ -29,6 +30,10 @@ const zstdCompressSync = (
     zstdCompressSync?: (buffer: Buffer) => Buffer;
   }
 ).zstdCompressSync;
+const hasNativeZstd =
+  typeof zstdCompressSync === "function" && isZstdJsonlSupported();
+const itIfNativeZstd = hasNativeZstd ? it : it.skip;
+const itIfNoNativeZstd = hasNativeZstd ? it.skip : it;
 
 function zstdCompressed(content: string): Buffer {
   if (!zstdCompressSync) {
@@ -105,7 +110,7 @@ describe("CodexSessionScanner", () => {
     expect(projectB?.sessionCount).toBe(1);
   });
 
-  it("discovers zstd-compressed rollout files", async () => {
+  itIfNativeZstd("discovers zstd-compressed rollout files", async () => {
     const sessionsDir = join(tmpdir(), `codex-scan-${randomUUID()}`);
     tempDirs.push(sessionsDir);
 
@@ -133,6 +138,33 @@ describe("CodexSessionScanner", () => {
     expect(metrics?.discovery.cacheBackedCompressedReads).toBe(0);
   });
 
+  itIfNoNativeZstd("skips zstd rollouts when native zstd is unavailable", async () => {
+    const sessionsDir = join(tmpdir(), `codex-scan-${randomUUID()}`);
+    tempDirs.push(sessionsDir);
+
+    const dateDir = join(sessionsDir, "2026", "02", "03");
+    await mkdir(dateDir, { recursive: true });
+
+    const id = randomUUID();
+    await writeFile(
+      join(dateDir, `rollout-${id}.jsonl.zst`),
+      Buffer.from(`${makeSessionMeta(id, "/home/user/project-zst")}\n`),
+    );
+
+    const scanner = new CodexSessionScanner({ sessionsDir });
+    const projects = await scanner.listProjects();
+
+    expect(projects).toHaveLength(0);
+
+    const metrics = scanner.getLastScanMetrics();
+    expect(metrics?.compressedRolloutFiles).toBe(1);
+    expect(metrics?.sessionsParsed).toBe(0);
+    expect(metrics?.failedFiles).toBe(1);
+    expect(metrics?.discovery.zstdUnsupported).toBe(1);
+    expect(metrics?.discovery.firstLineReadsZstd).toBe(0);
+    expect(metrics?.discovery.metadataReadFailures).toBe(0);
+  });
+
   it("prefers plain rollouts over compressed siblings", async () => {
     const sessionsDir = join(tmpdir(), `codex-scan-${randomUUID()}`);
     tempDirs.push(sessionsDir);
@@ -148,7 +180,7 @@ describe("CodexSessionScanner", () => {
     );
     await writeFile(
       `${rolloutPath}.zst`,
-      zstdCompressed(`${makeSessionMeta(id, "/home/user/zst-project")}\n`),
+      Buffer.from("compressed sibling should not be read"),
     );
 
     const scanner = new CodexSessionScanner({ sessionsDir });
@@ -415,7 +447,7 @@ describe("CodexSessionScanner", () => {
     );
   });
 
-  it("reconciles an indexed plain rollout after zstd compression", async () => {
+  itIfNativeZstd("reconciles an indexed plain rollout after zstd compression", async () => {
     const sessionsDir = join(tmpdir(), `codex-scan-${randomUUID()}`);
     const dataDir = join(tmpdir(), `codex-data-${randomUUID()}`);
     tempDirs.push(sessionsDir, dataDir);
