@@ -304,23 +304,32 @@ vi.mock("../../contexts/ToastContext", () => ({
 
 vi.mock("../../i18n", () => ({
   useI18n: () => ({
-    t: (key: string) =>
-      (
-        ({
-          effortLevelLowLabel: "Low",
-          effortLevelMediumLabel: "Medium",
-          effortLevelHighLabel: "High",
-          effortLevelExtraLabel: "Extra",
-          effortLevelExtraHighLabel: "Extra High",
-          effortLevelMaxLabel: "Max",
-          effortLevelLowDescription: "Fastest responses",
-          effortLevelMediumDescription: "Moderate reasoning",
-          effortLevelHighDescription: "Deep reasoning",
-          effortLevelExtraDescription: "For your hardest tasks",
-          effortLevelExtraHighDescription: "Extra-high reasoning",
-          effortLevelMaxDescription: "Maximum effort",
-        }) satisfies Record<string, string>
-      )[key] ?? key,
+    t: (key: string, vars?: Record<string, string | number>) => {
+      const text: Record<string, string> = {
+        effortLevelLowLabel: "Low",
+        effortLevelMediumLabel: "Medium",
+        effortLevelHighLabel: "High",
+        effortLevelExtraLabel: "Extra",
+        effortLevelExtraHighLabel: "Extra High",
+        effortLevelMaxLabel: "Max",
+        effortLevelLowDescription: "Fastest responses",
+        effortLevelMediumDescription: "Moderate reasoning",
+        effortLevelHighDescription: "Deep reasoning",
+        effortLevelExtraDescription: "For your hardest tasks",
+        effortLevelExtraHighDescription: "Extra-high reasoning",
+        effortLevelMaxDescription: "Maximum effort",
+        recapModeSideSessionTimedDescription:
+          "Summarize tailed assistant output after backgrounding (not closing) for {seconds} s.",
+        recapModeForkTimedDescription:
+          "Summarize from a temporary fork after backgrounding (not closing) for {seconds} s.",
+      };
+      let translated = text[key] ?? key;
+      if (!vars) return translated;
+      for (const [name, value] of Object.entries(vars)) {
+        translated = translated.replaceAll(`{${name}}`, String(value));
+      }
+      return translated;
+    },
   }),
 }));
 
@@ -961,6 +970,45 @@ describe("NewSessionForm", () => {
     expect(headings.indexOf("modelSettingsThinkingTitle")).toBeGreaterThan(
       headings.indexOf("newSessionModelTitle"),
     );
+  });
+
+  it("shows the selected recap timing description as a caption and tooltip", async () => {
+    serverSettingsState.settings = {
+      newSessionDefaults: {
+        provider: "claude",
+        permissionMode: "default",
+        recapMode: "side-session",
+        recapAfterSeconds: 124,
+      },
+    };
+    serverSettingsState.isLoading = false;
+
+    render(
+      <NewSessionForm
+        projectId="project-1"
+        selectedProject={chooserProjects[0]}
+        projects={[...chooserProjects]}
+      />,
+    );
+
+    const tailedDescription =
+      "Summarize tailed assistant output after backgrounding (not closing) for 124 s.";
+    const forkedDescription =
+      "Summarize from a temporary fork after backgrounding (not closing) for 124 s.";
+
+    await waitFor(() => {
+      expect(screen.getByText(tailedDescription)).toBeDefined();
+    });
+    expect(
+      screen
+        .getByRole("button", { name: "recapModeSideSession" })
+        .getAttribute("title"),
+    ).toBe(tailedDescription);
+    expect(
+      screen
+        .getByRole("button", { name: "recapModeFork" })
+        .getAttribute("title"),
+    ).toBe(forkedDescription);
   });
 
   it("keeps the drafted prompt when switching from detached to a project", async () => {

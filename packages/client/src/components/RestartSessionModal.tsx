@@ -24,6 +24,7 @@ import {
 } from "../hooks/useProviders";
 import { useServerSettings } from "../hooks/useServerSettings";
 import { helperTargetsToModelOptions } from "../lib/helperTargets";
+import { getRecapModeDescription } from "../lib/recapModes";
 import type { PermissionMode } from "../types";
 import { useI18n } from "../i18n";
 import { RecapAfterSecondsControl } from "./RecapAfterSecondsControl";
@@ -930,6 +931,11 @@ export function RestartSessionModal({
                     setSelectedRecapMode(recapMode);
                   }}
                   disabled={restarting || !isAvailable}
+                  title={getRecapModeDescription(
+                    recapMode,
+                    t,
+                    recapAfterSeconds,
+                  )}
                 >
                   <span>{recapModeLabels[recapMode]}</span>
                 </button>
@@ -946,6 +952,9 @@ export function RestartSessionModal({
               }}
             />
           )}
+          <p className="recap-mode-caption">
+            {getRecapModeDescription(selectedRecapMode, t, recapAfterSeconds)}
+          </p>
         </section>
 
         <section className="model-switch-section">

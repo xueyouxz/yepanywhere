@@ -61,6 +61,7 @@ import {
   getProviderSessionDefaults,
   withProviderSessionDefaults,
 } from "../lib/newSessionDefaults";
+import { getRecapModeDescription } from "../lib/recapModes";
 import { prepareImageUpload } from "../lib/imageAttachmentResize";
 import { hasCoarsePointer } from "../lib/deviceDetection";
 import { logSessionUiTrace } from "../lib/diagnostics/uiTrace";
@@ -487,12 +488,6 @@ export function NewSessionForm({
     native: t("recapModeNative"),
     "side-session": t("recapModeSideSession"),
     fork: t("recapModeFork"),
-  };
-  const recapModeDescriptions: Record<RecapMode, string> = {
-    off: t("recapModeOffDescription"),
-    native: t("recapModeNativeDescription"),
-    "side-session": t("recapModeSideSessionDescription"),
-    fork: t("recapModeForkDescription"),
   };
   const promptSuggestionModeLabels: Record<PromptSuggestionMode, string> = {
     off: t("promptSuggestionModeOff"),
@@ -2313,7 +2308,7 @@ export function NewSessionForm({
               setSelectedRecapMode(modeValue);
             }}
             disabled={isStarting}
-            title={recapModeDescriptions[modeValue]}
+            title={getRecapModeDescription(modeValue, t, recapAfterSeconds)}
           >
             <span className={`mode-option-dot recap-${modeValue}`} />
             <span>{recapModeLabels[modeValue]}</span>
@@ -2330,6 +2325,9 @@ export function NewSessionForm({
           }}
         />
       )}
+      <p className="recap-mode-caption">
+        {getRecapModeDescription(selectedRecapMode, t, recapAfterSeconds)}
+      </p>
       {showHelperSideModel && (
         <div className="new-session-helper-model">
           <h3>{t("helperSideModelTitle")}</h3>

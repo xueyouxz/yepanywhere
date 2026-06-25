@@ -13,6 +13,7 @@ import { useProviders } from "../hooks/useProviders";
 import { useServerSettings } from "../hooks/useServerSettings";
 import { useI18n } from "../i18n";
 import { helperTargetsToModelOptions } from "../lib/helperTargets";
+import { getRecapModeDescription } from "../lib/recapModes";
 import { RecapAfterSecondsControl } from "./RecapAfterSecondsControl";
 import { Modal } from "./ui/Modal";
 
@@ -37,15 +38,6 @@ function modeLabel(mode: RecapMode, t: Translate): string {
   if (mode === "fork") return t("recapModeFork");
   if (mode === "side-session") return t("recapModeSideSession");
   return t("recapModeOff");
-}
-
-function modeDescription(mode: RecapMode, t: Translate): string {
-  if (mode === "native") return t("recapModeNativeDescription");
-  if (mode === "fork") return t("recapModeForkDescription");
-  if (mode === "side-session") {
-    return t("recapModeSideSessionDescription");
-  }
-  return t("recapModeOffDescription");
 }
 
 export function SessionRecapModal({
@@ -209,13 +201,16 @@ export function SessionRecapModal({
                   className={`font-size-option ${recapMode === mode ? "active" : ""}`}
                   onClick={() => setRecapMode(mode)}
                   disabled={isLoading || isSaving || !available}
-                  title={modeDescription(mode, t)}
+                  title={getRecapModeDescription(mode, t, recapAfterSeconds)}
                 >
                   {modeLabel(mode, t)}
                 </button>
               );
             })}
           </div>
+          <p className="recap-mode-caption">
+            {getRecapModeDescription(recapMode, t, recapAfterSeconds)}
+          </p>
         </div>
 
         {recapMode !== "off" && (

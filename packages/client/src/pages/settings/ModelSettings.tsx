@@ -35,6 +35,7 @@ import {
   getProviderSessionDefaults,
   withProviderSessionDefaults,
 } from "../../lib/newSessionDefaults";
+import { getRecapModeDescription } from "../../lib/recapModes";
 import { getPermissionModeOptions } from "../../lib/permissionModes";
 import {
   getAvailableProviders,
@@ -381,12 +382,6 @@ export function ModelSettings() {
     "side-session": t("recapModeSideSession"),
     fork: t("recapModeFork"),
   };
-  const recapModeDescriptions: Record<RecapMode, string> = {
-    off: t("recapModeOffDescription"),
-    native: t("recapModeNativeDescription"),
-    "side-session": t("recapModeSideSessionDescription"),
-    fork: t("recapModeForkDescription"),
-  };
   const promptSuggestionModeLabels: Record<PromptSuggestionMode, string> = {
     off: t("promptSuggestionModeOff"),
     native: t("promptSuggestionModeNative"),
@@ -583,7 +578,11 @@ export function ModelSettings() {
                     void updateNewSessionDefaults({ recapMode: modeValue })
                   }
                   disabled={settingsLoading}
-                  title={recapModeDescriptions[modeValue]}
+                  title={getRecapModeDescription(
+                    modeValue,
+                    t,
+                    selectedRecapAfterSeconds,
+                  )}
                 >
                   <span className={`mode-option-dot recap-${modeValue}`} />
                   <span>{recapModeLabels[modeValue]}</span>
@@ -599,6 +598,13 @@ export function ModelSettings() {
                 }
               />
             )}
+            <p className="recap-mode-caption">
+              {getRecapModeDescription(
+                selectedRecapMode,
+                t,
+                selectedRecapAfterSeconds,
+              )}
+            </p>
             {showHelperSideModel && (
               <div className="new-session-helper-model">
                 <h3>{t("helperSideModelTitle")}</h3>

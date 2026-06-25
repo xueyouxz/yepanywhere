@@ -11874,6 +11874,13 @@ a.sidebar-nav-item {
   line-height: 1.35;
 }
 
+.recap-mode-caption {
+  margin: 0.4rem 0 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.35;
+}
+
 /* Permission Mode Section */
 .new-session-mode-section {
   margin-bottom: 0.75rem;
