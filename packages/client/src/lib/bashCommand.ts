@@ -1,4 +1,10 @@
 const SHELL_EXECUTABLES = new Set(["bash", "sh", "zsh", "dash"]);
+const POWERSHELL_EXECUTABLES = new Set([
+  "pwsh",
+  "pwsh.exe",
+  "powershell",
+  "powershell.exe",
+]);
 
 function getExecutableName(token: string): string {
   const normalized = token.replace(/\\/g, "/");
@@ -10,30 +16,55 @@ function isShellExecutable(token: string): boolean {
   return SHELL_EXECUTABLES.has(getExecutableName(token));
 }
 
+function isPowerShellExecutable(token: string): boolean {
+  const executableName = getExecutableName(token);
+  return (
+    POWERSHELL_EXECUTABLES.has(executableName) ||
+    executableName.endsWith("pwsh.exe") ||
+    executableName.endsWith("powershell.exe")
+  );
+}
+
+function shouldEscapeShellChar(next: string | undefined): boolean {
+  return (
+    next !== undefined &&
+    (/\s/.test(next) || next === "\\" || next === "'" || next === '"')
+  );
+}
+
 function tokenizeShellCommand(command: string): string[] {
   const tokens: string[] = [];
   let current = "";
   let quote: "'" | '"' | null = null;
   let escaping = false;
 
-  for (const char of command) {
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i];
+    if (!char) continue;
+
     if (escaping) {
       current += char;
       escaping = false;
       continue;
     }
 
-    if (char === "\\") {
-      escaping = true;
-      continue;
-    }
-
     if (quote) {
       if (char === quote) {
         quote = null;
+      } else if (
+        quote === '"' &&
+        char === "\\" &&
+        shouldEscapeShellChar(command[i + 1])
+      ) {
+        escaping = true;
       } else {
         current += char;
       }
+      continue;
+    }
+
+    if (char === "\\" && shouldEscapeShellChar(command[i + 1])) {
+      escaping = true;
       continue;
     }
 
@@ -82,6 +113,15 @@ function getShellLauncherPrefixLength(tokens: string[]): number {
   // /bin/bash -lc "command"
   if (isShellExecutable(first) && second === "-lc" && tokens.length >= 3) {
     return 2;
+  }
+
+  if (isPowerShellExecutable(first)) {
+    for (let i = 1; i < tokens.length - 1; i++) {
+      const token = tokens[i]?.toLowerCase();
+      if (token === "-command" || token === "-c") {
+        return i + 1;
+      }
+    }
   }
 
   return 0;

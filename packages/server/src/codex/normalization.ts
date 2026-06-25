@@ -46,6 +46,12 @@ interface NormalizedCodexToolOutputWithExitCode
 }
 
 const SHELL_EXECUTABLES = new Set(["bash", "sh", "zsh", "dash"]);
+const POWERSHELL_EXECUTABLES = new Set([
+  "pwsh",
+  "pwsh.exe",
+  "powershell",
+  "powershell.exe",
+]);
 const INLINE_IMAGE_DATA_URL_PREFIX_RE =
   /^data:(image\/[a-z0-9.+-]+)(?:;[^,]*)?,/i;
 const INLINE_IMAGE_DATA_URL_GLOBAL_RE =
@@ -125,6 +131,60 @@ export function normalizeCodexToolInvocation(
   }
 
   return { toolName: "Bash", input: normalizedInput };
+}
+
+export function normalizeCodexCommandActionInvocation(
+  command: string,
+  commandActions: unknown,
+): NormalizedCodexToolInvocation | null {
+  if (!Array.isArray(commandActions) || commandActions.length !== 1) {
+    return null;
+  }
+
+  const action = commandActions[0];
+  if (!isRecord(action)) {
+    return null;
+  }
+
+  const actionType = getStringField(action, "type");
+  if (actionType === "read") {
+    const path = getStringField(action, "path");
+    if (!path) {
+      return null;
+    }
+
+    const commandReadInfo = parseReadShellCommand(
+      unwrapShellLauncherCommand(command),
+    );
+    const readShellInfo: CodexReadShellInfo = {
+      ...(commandReadInfo ?? { stripLineNumbers: false }),
+      filePath: path,
+    };
+    return {
+      toolName: "Read",
+      input: createReadToolInput(readShellInfo),
+      readShellInfo,
+    };
+  }
+
+  if (actionType === "search") {
+    const query = getStringField(action, "query");
+    if (!query) {
+      return null;
+    }
+
+    const input: Record<string, unknown> = {
+      pattern: query,
+      output_mode: "content",
+    };
+    const path = getStringField(action, "path");
+    if (path) {
+      input.path = path;
+    }
+    return { toolName: "Grep", input };
+  }
+
+  return null;
 }
 
 export function normalizeCodexToolOutputWithContext(
@@ -283,17 +343,23 @@ function tokenizeShellCommand(command: string): string[] {
       continue;
     }
 
-    if (char === "\\") {
-      escaping = true;
-      continue;
-    }
-
     if (quote) {
       if (char === quote) {
         quote = null;
+      } else if (
+        quote === '"' &&
+        char === "\\" &&
+        shouldEscapeShellChar(command[i + 1])
+      ) {
+        escaping = true;
       } else {
         current += char;
       }
+      continue;
+    }
+
+    if (char === "\\" && shouldEscapeShellChar(command[i + 1])) {
+      escaping = true;
       continue;
     }
 
@@ -329,6 +395,22 @@ function isShellExecutable(token: string): boolean {
   return SHELL_EXECUTABLES.has(getExecutableName(token));
 }
 
+function isPowerShellExecutable(token: string): boolean {
+  const executableName = getExecutableName(token);
+  return (
+    POWERSHELL_EXECUTABLES.has(executableName) ||
+    executableName.endsWith("pwsh.exe") ||
+    executableName.endsWith("powershell.exe")
+  );
+}
+
+function shouldEscapeShellChar(next: string | undefined): boolean {
+  return (
+    next !== undefined &&
+    (/\s/.test(next) || next === "\\" || next === "'" || next === '"')
+  );
+}
+
 function getShellLauncherPrefixLength(tokens: string[]): number {
   if (tokens.length < 3) {
     return 0;
@@ -351,6 +433,15 @@ function getShellLauncherPrefixLength(tokens: string[]): number {
   // /bin/bash -lc "command"
   if (isShellExecutable(first) && second === "-lc" && tokens.length >= 3) {
     return 2;
+  }
+
+  if (isPowerShellExecutable(first)) {
+    for (let i = 1; i < tokens.length - 1; i++) {
+      const token = tokens[i]?.toLowerCase();
+      if (token === "-command" || token === "-c") {
+        return i + 1;
+      }
+    }
   }
 
   return 0;
@@ -438,7 +529,122 @@ function parseReadShellCommand(command: string): CodexReadShellInfo | null {
     };
   }
 
+  const powershellRead = parsePowerShellGetContentCommand(tokens);
+  if (powershellRead) {
+    return powershellRead;
+  }
+
   return null;
+}
+
+function parsePowerShellGetContentCommand(
+  tokens: string[],
+): CodexReadShellInfo | null {
+  const command = tokens[0]?.toLowerCase();
+  if (command !== "get-content") {
+    return null;
+  }
+
+  if (
+    tokens.some((token) => token === "|" || token === "&&" || token === ";")
+  ) {
+    return null;
+  }
+
+  const flagsWithValue = new Set([
+    "-credential",
+    "-delimiter",
+    "-encoding",
+    "-erroraction",
+    "-exclude",
+    "-filter",
+    "-include",
+    "-readcount",
+    "-stream",
+  ]);
+  let filePath = "";
+  let totalCount: number | undefined;
+
+  for (let i = 1; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (!token) continue;
+    const normalized = token.toLowerCase();
+
+    if (normalized === "-path" || normalized === "-literalpath") {
+      const next = tokens[i + 1];
+      if (!next || next.startsWith("-")) {
+        return null;
+      }
+      filePath = next;
+      i += 1;
+      continue;
+    }
+
+    if (normalized.startsWith("-path:")) {
+      filePath = token.slice("-path:".length);
+      continue;
+    }
+
+    if (normalized.startsWith("-literalpath:")) {
+      filePath = token.slice("-literalpath:".length);
+      continue;
+    }
+
+    if (normalized === "-totalcount" || normalized === "-head") {
+      const next = tokens[i + 1];
+      const parsed = next ? Number.parseInt(next, 10) : Number.NaN;
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        return null;
+      }
+      totalCount = parsed;
+      i += 1;
+      continue;
+    }
+
+    if (normalized.startsWith("-totalcount:")) {
+      const parsed = Number.parseInt(token.slice("-totalcount:".length), 10);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        return null;
+      }
+      totalCount = parsed;
+      continue;
+    }
+
+    if (normalized.startsWith("-head:")) {
+      const parsed = Number.parseInt(token.slice("-head:".length), 10);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        return null;
+      }
+      totalCount = parsed;
+      continue;
+    }
+
+    if (flagsWithValue.has(normalized)) {
+      i += 1;
+      continue;
+    }
+
+    if (token.startsWith("-")) {
+      continue;
+    }
+
+    if (!filePath) {
+      filePath = token;
+    }
+  }
+
+  filePath = stripOuterQuotes(filePath);
+  if (!filePath || filePath.startsWith("-")) {
+    return null;
+  }
+
+  return {
+    filePath,
+    ...(totalCount !== undefined && totalCount > 0
+      ? { startLine: 1, endLine: totalCount }
+      : {}),
+    stripLineNumbers: false,
+  };
 }
 
 function parseHeredocWriteShellCommand(
@@ -625,6 +831,14 @@ function parseRipgrepCommand(command: string): Record<string, unknown> | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function getStringField(
+  record: Record<string, unknown>,
+  field: string,
+): string | undefined {
+  const value = record[field];
+  return typeof value === "string" && value.trim() ? value : undefined;
 }
 
 function getGrepPattern(input: unknown): string | undefined {

@@ -22,6 +22,7 @@ import {
   isCodexBackgroundProcessOutput,
   isCodexInterruptedToolOutput,
   type CodexToolCallContext,
+  normalizeCodexCommandActionInvocation,
   normalizeCodexCommandExecutionOutput,
   normalizeCodexToolInvocation,
   normalizeCodexToolOutputWithContext,
@@ -543,6 +544,7 @@ type NormalizedThreadItem =
       aggregated_output: string;
       exit_code?: number;
       status: string;
+      commandActions?: unknown[];
     }
   | {
       id: string;
@@ -4096,6 +4098,12 @@ export class CodexProvider implements AgentProvider {
       }
 
       case "command_execution": {
+        const commandActions =
+          (Array.isArray(itemRecord.commandActions)
+            ? itemRecord.commandActions
+            : Array.isArray(itemRecord.command_actions)
+              ? itemRecord.command_actions
+              : undefined) ?? undefined;
         return {
           id,
           type: "command_execution",
@@ -4109,6 +4117,7 @@ export class CodexProvider implements AgentProvider {
             this.getOptionalNumber(itemRecord.exitCode) ??
             undefined,
           status: this.normalizeStatus(itemRecord.status),
+          ...(commandActions ? { commandActions } : {}),
         };
       }
 
@@ -5087,9 +5096,14 @@ export class CodexProvider implements AgentProvider {
 
       case "command_execution": {
         const messages: SDKMessage[] = [];
-        const normalizedInvocation = normalizeCodexToolInvocation("Bash", {
-          command: item.command,
-        });
+        const normalizedInvocation =
+          normalizeCodexCommandActionInvocation(
+            item.command,
+            item.commandActions,
+          ) ??
+          normalizeCodexToolInvocation("Bash", {
+            command: item.command,
+          });
         const toolContext: CodexToolCallContext = {
           toolName: normalizedInvocation.toolName,
           input: normalizedInvocation.input,

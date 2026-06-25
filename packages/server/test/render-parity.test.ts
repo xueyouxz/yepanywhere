@@ -138,7 +138,7 @@ function codexPersistedEntries(): CodexSessionEntry[] {
         type: "function_call",
         name: "exec_command",
         call_id: "call-read",
-        arguments: '{"cmd":"cat src/readme.md"}',
+        arguments: '{"cmd":"Get-Content -Path src/readme.md -TotalCount 2"}',
       },
     },
     {
@@ -243,7 +243,7 @@ function codexStreamMessages(): Array<Record<string, unknown>> {
     {
       id: "call-read",
       type: "command_execution",
-      command: "cat src/readme.md",
+      command: String.raw`"C:\Users\sox\AppData\Local\Microsoft\WindowsApps\pwsh.exe" -Command 'Get-Content -Path src/readme.md -TotalCount 2'`,
       aggregated_output: "# Old heading\nsecond line\n",
       exit_code: 0,
       status: "completed",

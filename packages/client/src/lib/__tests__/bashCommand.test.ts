@@ -26,6 +26,19 @@ describe("bashCommand", () => {
     ).toBe("rg --files packages/client/src");
   });
 
+  it("unwraps PowerShell command wrappers for display", () => {
+    expect(
+      unwrapShellLauncherCommand(
+        String.raw`"C:\Users\sox\AppData\Local\Microsoft\WindowsApps\pwsh.exe" -Command 'Get-Content -Path CLAUDE.md -TotalCount 20'`,
+      ),
+    ).toBe("Get-Content -Path CLAUDE.md -TotalCount 20");
+    expect(
+      unwrapShellLauncherCommand(
+        `powershell.exe -NoProfile -NonInteractive -Command "Get-Content -LiteralPath 'DEVELOPMENT.md' -TotalCount 10"`,
+      ),
+    ).toBe("Get-Content -LiteralPath 'DEVELOPMENT.md' -TotalCount 10");
+  });
+
   it("detects shell launcher wrappers", () => {
     expect(
       isShellLauncherWrappedCommand(
@@ -35,6 +48,11 @@ describe("bashCommand", () => {
     expect(
       isShellLauncherWrappedCommand(
         '/usr/bin/env bash -lc "rg --files packages/client/src"',
+      ),
+    ).toBe(true);
+    expect(
+      isShellLauncherWrappedCommand(
+        String.raw`"C:\Users\sox\AppData\Local\Microsoft\WindowsApps\pwsh.exe" -Command 'Get-Content -Path CLAUDE.md -TotalCount 20'`,
       ),
     ).toBe(true);
     expect(isShellLauncherWrappedCommand("npm run lint")).toBe(false);
