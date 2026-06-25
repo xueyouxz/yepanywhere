@@ -33,15 +33,36 @@ vi.mock("../../hooks/useServerSettings", () => ({
 
 vi.mock("../../i18n", () => ({
   useI18n: () => ({
-    t: (key: string) => (key === "modalClose" ? "Close dialog" : key),
+    t: (key: string) =>
+      ({
+        codexUpdateAutoFutureVersions: "Update next versions too",
+        codexUpdateDone: "Done",
+        codexUpdateManualInstallHint:
+          "This Codex install was not installed with npm.",
+        codexUpdateWillRunCommand: "Yep Anywhere will run:",
+        modalClose: "Close dialog",
+      })[key] ?? key,
   }),
 }));
 
-const baseStatus = {
+interface TestCodexUpdateStatus {
+  installed: string | null;
+  installedPath: string | null;
+  installedPackage: string | null;
+  updateMethod: "npm" | "manual";
+  manualInstallCommand: string | null;
+  latest: string | null;
+  releaseUrl: string | null;
+  updateAvailable: boolean;
+  lastCheckedAt: number | null;
+  error: string | null;
+}
+
+const baseStatus: TestCodexUpdateStatus = {
   installed: "0.4.2",
   installedPath: "/usr/local/bin/codex",
   installedPackage: "@openai/codex",
-  updateMethod: "npm" as const,
+  updateMethod: "npm",
   manualInstallCommand: "npm install -g @openai/codex@latest",
   latest: "0.4.3",
   releaseUrl: "https://example.test/release",
@@ -52,7 +73,7 @@ const baseStatus = {
 
 describe("CodexUpdatePrompt", () => {
   let hookState: {
-    status: typeof baseStatus;
+    status: TestCodexUpdateStatus;
     isChecking: boolean;
     isInstalling: boolean;
     error: string | null;
@@ -173,6 +194,39 @@ describe("CodexUpdatePrompt", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
 
     expect(window.localStorage.getItem("codex-update-seen-tag")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("prompts for manual installs without offering auto-update", () => {
+    hookState = {
+      ...hookState,
+      status: {
+        ...baseStatus,
+        installedPackage: null,
+        updateMethod: "manual",
+        manualInstallCommand: null,
+      },
+    };
+
+    render(<CodexUpdatePrompt />);
+
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+    expect(
+      screen.queryByText("This Codex install was not installed with npm."),
+    ).not.toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Update now" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("checkbox", {
+        name: /update next versions too/i,
+      }),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    expect(mockInstall).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem("codex-update-seen-tag")).toBe("0.4.3");
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 

@@ -640,12 +640,12 @@ function CodexUpdatePanel() {
                 ? t("providersCodexUpdateInstalling")
                 : t("providersCodexUpdateNow")}
             </button>
-          ) : (
+          ) : status.manualInstallCommand ? (
             <span className="settings-hint">
               {t("providersCodexUpdateWithInstaller")}
             </span>
-          )}
-          {status.manualInstallCommand && (
+          ) : null}
+          {status.manualInstallCommand ? (
             <>
               <code
                 style={{
@@ -665,7 +665,11 @@ function CodexUpdatePanel() {
                 {t("remoteSetupCopy")}
               </button>
             </>
-          )}
+          ) : status.updateMethod === "manual" ? (
+            <span className="settings-hint">
+              {t("providersCodexUpdateManualInstallHint")}
+            </span>
+          ) : null}
         </div>
       )}
 

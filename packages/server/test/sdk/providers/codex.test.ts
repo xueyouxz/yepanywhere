@@ -17,7 +17,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   afterAll,
@@ -125,6 +125,38 @@ describe("CodexProvider", () => {
         process.env.LOCALAPPDATA = tempDir;
 
         expect(getCodexCommonPaths()).toContain(codexPath);
+      } finally {
+        if (oldLocalAppData === undefined) {
+          delete process.env.LOCALAPPDATA;
+        } else {
+          process.env.LOCALAPPDATA = oldLocalAppData;
+        }
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("should prefer OpenAI Codex desktop bins over stale sandbox fallback on Windows", () => {
+      if (process.platform !== "win32") return;
+
+      const tempDir = mkdtempSync(join(tmpdir(), "codex-desktop-bin-"));
+      const oldLocalAppData = process.env.LOCALAPPDATA;
+      try {
+        const desktopBinDir = join(tempDir, "OpenAI", "Codex", "bin", "abc123");
+        mkdirSync(desktopBinDir, { recursive: true });
+        const codexPath = join(desktopBinDir, "codex.exe");
+        writeFileSync(codexPath, "", "utf-8");
+
+        process.env.LOCALAPPDATA = tempDir;
+
+        const paths = getCodexCommonPaths();
+        const desktopIndex = paths.indexOf(codexPath);
+        const sandboxIndex = paths.findIndex((path) =>
+          path.includes(`${sep}.codex${sep}.sandbox-bin${sep}codex.exe`),
+        );
+
+        expect(desktopIndex).toBeGreaterThanOrEqual(0);
+        expect(sandboxIndex).toBeGreaterThanOrEqual(0);
+        expect(desktopIndex).toBeLessThan(sandboxIndex);
       } finally {
         if (oldLocalAppData === undefined) {
           delete process.env.LOCALAPPDATA;
