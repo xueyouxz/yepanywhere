@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type ServerInfo, api } from "../api/client";
+import { useBackgroundRevalidation } from "./useBackgroundRevalidation";
 
 /**
  * Hook to fetch server binding info (host/port).
@@ -35,6 +36,16 @@ export function useServerInfo() {
     hasFetchedRef.current = true;
     fetch();
   }, [fetch]);
+
+  // Quietly refresh binding info when the connection re-establishes.
+  useBackgroundRevalidation({
+    fetcher: () => api.getServerInfo(),
+    current: serverInfo,
+    apply: (next) => {
+      setServerInfo(next);
+      setError(null);
+    },
+  });
 
   return { serverInfo, loading, error, refetch: fetch };
 }

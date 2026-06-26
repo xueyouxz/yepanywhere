@@ -4,6 +4,7 @@ import {
   type UpdateBindingRequest,
   api,
 } from "../api/client";
+import { useBackgroundRevalidation } from "./useBackgroundRevalidation";
 
 /**
  * Hook to manage network binding configuration.
@@ -43,6 +44,18 @@ export function useNetworkBinding() {
     hasFetchedRef.current = true;
     fetch();
   }, [fetch]);
+
+  // Quietly refresh binding state when the connection re-establishes, but not
+  // while an update is being applied (avoid clobbering an in-progress change).
+  useBackgroundRevalidation({
+    fetcher: () => api.getNetworkBinding(),
+    current: binding,
+    apply: (next) => {
+      setBinding(next);
+      setError(null);
+    },
+    enabled: !applying,
+  });
 
   const updateBinding = useCallback(
     async (

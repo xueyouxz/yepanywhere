@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useBackgroundRevalidation } from "./useBackgroundRevalidation";
 
 export interface NotificationSettings {
   toolApproval: boolean;
@@ -42,6 +43,15 @@ export function useNotificationSettings() {
 
     fetchSettings();
   }, []);
+
+  // Quietly refresh settings when the connection re-establishes, without
+  // flashing a loading state over the current values.
+  useBackgroundRevalidation({
+    fetcher: () => api.getNotificationSettings().then((r) => r.settings),
+    current: state.settings,
+    apply: (settings) =>
+      setState((s) => ({ ...s, settings, error: null })),
+  });
 
   const updateSetting = useCallback(
     async (key: keyof NotificationSettings, value: boolean) => {

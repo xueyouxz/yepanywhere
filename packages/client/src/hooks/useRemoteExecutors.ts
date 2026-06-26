@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type RemoteExecutorTestResult, api } from "../api/client";
+import { useBackgroundRevalidation } from "./useBackgroundRevalidation";
 
 /**
  * Hook to fetch and manage remote executors configuration.
@@ -38,6 +39,16 @@ export function useRemoteExecutors() {
     hasFetchedRef.current = true;
     fetchExecutors();
   }, [fetchExecutors]);
+
+  // Quietly refresh the executor list when the connection re-establishes.
+  useBackgroundRevalidation({
+    fetcher: () => api.getRemoteExecutors().then((d) => d.executors),
+    current: executors,
+    apply: (next) => {
+      setExecutors(next);
+      setError(null);
+    },
+  });
 
   const addExecutor = useCallback(
     async (host: string): Promise<void> => {

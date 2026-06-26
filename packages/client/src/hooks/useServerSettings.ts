@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { type ServerSettings, api } from "../api/client";
+import { useBackgroundRevalidation } from "./useBackgroundRevalidation";
 
 interface UseServerSettingsResult {
   settings: ServerSettings | null;
@@ -39,6 +40,16 @@ export function useServerSettings(): UseServerSettingsResult {
   useEffect(() => {
     fetchSettings();
   }, [fetchSettings]);
+
+  // Quietly refresh settings when the connection re-establishes.
+  useBackgroundRevalidation({
+    fetcher: () => api.getServerSettings().then((r) => r.settings),
+    current: settings,
+    apply: (next) => {
+      setSettings(next);
+      setError(null);
+    },
+  });
 
   const updateSettings = useCallback(
     async (updates: Partial<ServerSettings>): Promise<void> => {

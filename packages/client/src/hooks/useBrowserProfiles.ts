@@ -1,6 +1,7 @@
 import type { BrowserProfileInfo } from "@yep-anywhere/shared";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useBackgroundRevalidation } from "./useBackgroundRevalidation";
 
 interface BrowserProfilesState {
   profiles: BrowserProfileInfo[];
@@ -43,6 +44,13 @@ export function useBrowserProfiles() {
   useEffect(() => {
     fetchProfiles();
   }, [fetchProfiles]);
+
+  // Quietly refresh profiles when the connection re-establishes.
+  useBackgroundRevalidation({
+    fetcher: () => api.getBrowserProfiles().then((r) => r.profiles),
+    current: state.profiles,
+    apply: (profiles) => setState((s) => ({ ...s, profiles, error: null })),
+  });
 
   const deleteProfile = useCallback(
     async (browserProfileId: string) => {

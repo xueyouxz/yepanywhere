@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useBackgroundRevalidation } from "./useBackgroundRevalidation";
 
 export type PushDeliveryUrgency = "very-low" | "low" | "normal" | "high";
 export type TestNotificationUrgency = "normal" | "persistent" | "silent";
@@ -59,6 +60,13 @@ export function useSubscribedDevices() {
   useEffect(() => {
     fetchDevices();
   }, [fetchDevices]);
+
+  // Quietly refresh the device list when the connection re-establishes.
+  useBackgroundRevalidation({
+    fetcher: () => api.getPushSubscriptions().then((r) => r.subscriptions),
+    current: state.devices,
+    apply: (devices) => setState((s) => ({ ...s, devices, error: null })),
+  });
 
   const removeDevice = useCallback(
     async (browserProfileId: string) => {

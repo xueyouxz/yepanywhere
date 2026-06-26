@@ -1,6 +1,6 @@
 # 021 - Connection readiness vs. client state consistency
 
-Status: Tier 1 implemented
+Status: Tier 1 + Tier 2 (settings) implemented
 
 Progress:
 
@@ -22,6 +22,18 @@ Progress:
   opt-in, background-only revalidation (no loading state when data exists,
   staleness-deduped, merge-not-replace) applied to settings pages only; churny
   live surfaces heal via events/005 instead. See "Tier 2 design".
+- [x] 2026-06-26: Implemented Tier 2 (settings only). Added
+  `useBackgroundRevalidation` (`packages/client/src/hooks/useBackgroundRevalidation.ts`)
+  — debounced, in-flight-guarded, applies only when data changed (deep-equal),
+  never sets a loading state when data exists, swallows errors. Adopted in
+  `useNotificationSettings`, `useSubscribedDevices`, `useBrowserProfiles`,
+  `useRemoteExecutors`, `useServerInfo`, `useNetworkBinding` (gated on
+  `!applying`), and `useServerSettings`. Also made `useConnectedDevices`'
+  reconnect/refresh backstop quiet (no loading flash on the device list).
+  Unit tests in `useBackgroundRevalidation.test.ts`. Deferred: folding
+  `InboxContext`'s now-redundant `isRemoteConnectionReady` gate (its tests
+  assert the old behavior — separate cleanup), and `usePublicShareStatus`
+  (already self-revalidates via polling).
 
 ## Why this doc exists
 
@@ -286,10 +298,13 @@ through a Tier 2 refetch.
 
 1. **Done (Tier 1):** Race A transport gate — `whenConnectionReady()` +
    `fetchJSON` await + tests.
-2. **Next (Tier 2):** opt-in, background-only revalidation helper (no loading
-   state when data exists, staleness-deduped, merge-not-replace), applied to the
-   settings pages only. Then fold the `InboxContext` `isRemoteConnectionReady`
-   gate into the Tier 1 mechanism. See "Tier 2 design" above.
-3. Continue 005 on top, now that snapshot reporters fire reliably. The churny
+2. **Done (Tier 2, settings):** `useBackgroundRevalidation` helper (no loading
+   state when data exists, staleness-deduped, apply-only-when-changed), adopted
+   in the settings read hooks + a quiet `useConnectedDevices` backstop. See
+   "Tier 2 design" above.
+3. **Remaining cleanup:** fold the `InboxContext` `isRemoteConnectionReady` gate
+   into the Tier 1 mechanism (its tests assert the old gate, so this is a
+   separate change).
+4. Continue 005 on top, now that snapshot reporters fire reliably. The churny
    live surfaces heal via events/005, not a Tier 2 refetch.
-4. Cosmetic: notification test-row layout, tracked independently.
+5. Cosmetic: notification test-row layout, tracked independently.

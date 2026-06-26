@@ -23,8 +23,10 @@ export function useConnectedDevices() {
     error: null,
   });
 
-  const fetchConnections = useCallback(async () => {
-    setState((s) => ({ ...s, isLoading: true, error: null }));
+  // `quiet` skips the loading/error flash: used by the reconnect/visibility
+  // backstop so an already-rendered device list doesn't flicker to a spinner.
+  const fetchConnections = useCallback(async (quiet = false) => {
+    if (!quiet) setState((s) => ({ ...s, isLoading: true, error: null }));
 
     try {
       const { connections } = await api.getConnections();
@@ -32,13 +34,15 @@ export function useConnectedDevices() {
       for (const conn of connections) {
         connectionMap.set(conn.browserProfileId, conn);
       }
-      setState({
+      setState((s) => ({
+        ...s,
         connections: connectionMap,
         isLoading: false,
         error: null,
-      });
+      }));
     } catch (err) {
       console.error("[useConnectedDevices] Failed to fetch:", err);
+      if (quiet) return;
       setState((s) => ({
         ...s,
         isLoading: false,
@@ -47,6 +51,8 @@ export function useConnectedDevices() {
       }));
     }
   }, []);
+
+  const refetch = useCallback(() => fetchConnections(false), [fetchConnections]);
 
   // Fetch on mount
   useEffect(() => {
@@ -92,14 +98,15 @@ export function useConnectedDevices() {
       },
     );
 
-    // Also refetch on reconnect to ensure we have accurate data
+    // Also refetch on reconnect to ensure we have accurate data — quietly, so
+    // the device list doesn't flash a loading state on every reconnect.
     const unsubReconnect = activityBus.on("reconnect", () => {
-      fetchConnections();
+      fetchConnections(true);
     });
 
-    // Refetch on visibility restore
+    // Refetch on visibility restore (also quiet)
     const unsubRefresh = activityBus.on("refresh", () => {
-      fetchConnections();
+      fetchConnections(true);
     });
 
     return () => {
@@ -114,6 +121,6 @@ export function useConnectedDevices() {
     ...state,
     /** Array of connections for easier rendering */
     connectionList: Array.from(state.connections.values()),
-    refetch: fetchConnections,
+    refetch,
   };
 }
