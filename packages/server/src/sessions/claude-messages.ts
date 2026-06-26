@@ -1,5 +1,9 @@
 import type { ClaudeSessionEntry } from "@yep-anywhere/shared";
 import {
+  getLogicalParentUuid,
+  isCompactBoundary,
+} from "@yep-anywhere/shared";
+import {
   buildDag,
   collectAllToolResultIds,
   findOrphanedToolUses,
@@ -77,12 +81,28 @@ function insertEntryByLineIndex(
   entries.splice(insertAt, 0, entry);
 }
 
+function getEntryUuid(raw: ClaudeSessionEntry): string | undefined {
+  const uuid = "uuid" in raw ? raw.uuid : undefined;
+  return typeof uuid === "string" ? uuid : undefined;
+}
+
+function getEntryParentUuid(raw: ClaudeSessionEntry): string | undefined {
+  const parentUuid = "parentUuid" in raw ? raw.parentUuid : undefined;
+  return typeof parentUuid === "string" ? parentUuid : undefined;
+}
+
+function isCompactSummaryEntry(raw: ClaudeSessionEntry): boolean {
+  return raw.type === "user" && (raw as { isCompactSummary?: unknown })
+    .isCompactSummary === true;
+}
+
 export function collectVisibleClaudeEntries(
   rawMessages: ClaudeSessionEntry[],
   options: NormalizeClaudeEntriesOptions = {},
 ): VisibleClaudeEntriesResult {
   const { includeOrphans = true } = options;
   const { activeBranch } = buildDag(rawMessages);
+  const activeBranchUuids = new Set(activeBranch.map((node) => node.uuid));
   const allToolResultIds = collectAllToolResultIds(rawMessages);
   const orphanedToolUses = includeOrphans
     ? findOrphanedToolUses(activeBranch, allToolResultIds)
@@ -91,7 +111,7 @@ export function collectVisibleClaudeEntries(
   const lineIndexByUuid = new Map<string, number>();
   for (let lineIndex = 0; lineIndex < rawMessages.length; lineIndex++) {
     const raw = rawMessages[lineIndex];
-    const uuid = raw && "uuid" in raw ? raw.uuid : undefined;
+    const uuid = raw ? getEntryUuid(raw) : undefined;
     if (uuid) {
       lineIndexByUuid.set(uuid, lineIndex);
     }
@@ -116,8 +136,60 @@ export function collectVisibleClaudeEntries(
     }
   };
 
+  const compactSummariesByParent = new Map<
+    string,
+    Array<{ lineIndex: number; raw: ClaudeSessionEntry }>
+  >();
+  for (let lineIndex = 0; lineIndex < rawMessages.length; lineIndex++) {
+    const raw = rawMessages[lineIndex];
+    if (!raw || !isCompactSummaryEntry(raw)) continue;
+
+    const parentUuid = getEntryParentUuid(raw);
+    if (!parentUuid) continue;
+
+    const existing = compactSummariesByParent.get(parentUuid);
+    const entry = { lineIndex, raw };
+    if (existing) {
+      existing.push(entry);
+    } else {
+      compactSummariesByParent.set(parentUuid, [entry]);
+    }
+  }
+
+  for (let lineIndex = 0; lineIndex < rawMessages.length; lineIndex++) {
+    const raw = rawMessages[lineIndex];
+    if (!raw || !isCompactBoundary(raw)) continue;
+
+    const uuid = getEntryUuid(raw);
+    if (!uuid) continue;
+
+    const summaries = compactSummariesByParent.get(uuid) ?? [];
+    if (activeBranchUuids.has(uuid)) {
+      for (const summary of summaries) {
+        const summaryUuid = getEntryUuid(summary.raw);
+        if (!summaryUuid || !activeBranchUuids.has(summaryUuid)) {
+          pushExtra(uuid, summary.raw, summary.lineIndex);
+        }
+      }
+      continue;
+    }
+
+    const logicalParentUuid = getLogicalParentUuid(raw);
+    if (!logicalParentUuid || !activeBranchUuids.has(logicalParentUuid)) {
+      continue;
+    }
+
+    pushExtra(logicalParentUuid, raw, lineIndex);
+    for (const summary of summaries) {
+      const summaryUuid = getEntryUuid(summary.raw);
+      if (!summaryUuid || !activeBranchUuids.has(summaryUuid)) {
+        pushExtra(logicalParentUuid, summary.raw, summary.lineIndex);
+      }
+    }
+  }
+
   for (const sibling of findSiblingToolResults(activeBranch, rawMessages)) {
-    const uuid = "uuid" in sibling.raw ? sibling.raw.uuid : undefined;
+    const uuid = getEntryUuid(sibling.raw);
     pushExtra(
       sibling.parentUuid,
       sibling.raw,
@@ -139,7 +211,7 @@ export function collectVisibleClaudeEntries(
   const includedUuids = new Set<string>();
   const includedNonUuidLineIndices = new Set<number>();
   const pushUnique = (raw: ClaudeSessionEntry, lineIndex: number) => {
-    const uuid = "uuid" in raw ? raw.uuid : undefined;
+    const uuid = getEntryUuid(raw);
     if (uuid) {
       if (includedUuids.has(uuid)) return;
       includedUuids.add(uuid);

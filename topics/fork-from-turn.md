@@ -107,6 +107,13 @@ If the selected response is still being written, **Fork after…** must not
 silently degrade to the pre-response anchor. Either wait for the assistant turn
 to complete and then fork, or show a visible pending state with Cancel.
 
+Provider compact summaries are context, not human requests. A transcript-only
+compact summary row (`isCompactSummary`) must not be accepted as the selected
+source turn, and it must not start the "next user turn" for boundary finding.
+If such a row is inside the retained window, however, it remains eligible as
+the retained boundary/context excerpt so the generated summary can see the
+provider's compact text.
+
 ### Composer fork mode
 
 Selecting **Fork before…** or **Fork after…** activates a visible composer mode.

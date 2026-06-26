@@ -78,6 +78,64 @@ function isCompactBoundary(m: Message): boolean {
   return m.type === "system" && m.subtype === "compact_boundary";
 }
 
+function getMessageText(m: Message): string | undefined {
+  const record = m as Message & {
+    content?: unknown;
+    message?: { content?: unknown };
+  };
+  if (typeof record.message?.content === "string") {
+    return record.message.content;
+  }
+  return typeof record.content === "string" ? record.content : undefined;
+}
+
+function getMessageContentArray(m: Message): unknown[] | undefined {
+  const record = m as Message & {
+    content?: unknown;
+    message?: { content?: unknown };
+  };
+  const content = record.message?.content ?? record.content;
+  return Array.isArray(content) ? content : undefined;
+}
+
+function hasOnlyToolResultContent(m: Message): boolean {
+  const content = getMessageContentArray(m);
+  return (
+    Array.isArray(content) &&
+    content.length > 0 &&
+    content.every(
+      (block) =>
+        block &&
+        typeof block === "object" &&
+        (block as { type?: unknown }).type === "tool_result",
+    )
+  );
+}
+
+function isLocalCommandTranscriptText(text: string): boolean {
+  const trimmed = text.trim();
+  return (
+    /^<local-command-caveat>[\s\S]*<\/local-command-caveat>$/.test(trimmed) ||
+    /^<local-command-stdout>[\s\S]*<\/local-command-stdout>$/.test(trimmed) ||
+    /^<command-name>[\s\S]*<\/command-name>\s*<command-message>[\s\S]*<\/command-message>\s*<command-args>[\s\S]*<\/command-args>$/.test(
+      trimmed,
+    )
+  );
+}
+
+function isSyntheticUserTurn(m: Message): boolean {
+  if ((m as { isCompactSummary?: unknown }).isCompactSummary === true) {
+    return true;
+  }
+
+  if (hasOnlyToolResultContent(m)) {
+    return true;
+  }
+
+  const text = getMessageText(m);
+  return typeof text === "string" && isLocalCommandTranscriptText(text);
+}
+
 function isUserTurn(m: Message): boolean {
   const record = m as Message & {
     role?: unknown;
@@ -89,7 +147,7 @@ function isUserTurn(m: Message): boolean {
       : typeof record.message?.role === "string"
         ? record.message.role
         : undefined;
-  return m.type === "user" || role === "user";
+  return (m.type === "user" || role === "user") && !isSyntheticUserTurn(m);
 }
 
 /**

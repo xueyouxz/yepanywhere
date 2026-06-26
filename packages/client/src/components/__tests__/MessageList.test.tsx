@@ -99,12 +99,17 @@ function codexThinkingMessage(
   };
 }
 
-function systemMessage(uuid: string, content: string): Message {
+function systemMessage(
+  uuid: string,
+  content: string,
+  details?: Array<NonNullable<Message["content"]>>,
+): Message {
   return {
     type: "system",
     uuid,
     subtype: "compact_boundary",
     content,
+    ...(details ? { details } : {}),
   };
 }
 
@@ -219,6 +224,58 @@ describe("MessageList", () => {
     fireEvent.click(buttons[0] as HTMLElement);
 
     expect(onCorrect).toHaveBeenCalledWith("user-2", "second request");
+  });
+
+  it("renders compact summaries as one collapsed compact notification", () => {
+    const { container } = render(
+      <MessageList
+        messages={[
+          {
+            type: "system",
+            uuid: "compact-boundary",
+            subtype: "compact_boundary",
+            content: "Conversation compacted",
+            compactMetadata: { trigger: "manual", preTokens: 123 },
+          },
+          {
+            type: "user",
+            uuid: "compact-summary",
+            message: {
+              role: "user",
+              content:
+                "This session is being continued from a previous conversation that ran out of context.\n\nSummary:\n- hidden detail",
+            },
+            isCompactSummary: true,
+            isVisibleInTranscriptOnly: true,
+          },
+          {
+            type: "user",
+            uuid: "compact-stdout",
+            message: {
+              role: "user",
+              content: "<local-command-stdout>Compacted </local-command-stdout>",
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Conversation compacted")).toBeTruthy();
+    expect(screen.queryByText("/compact")).toBeNull();
+    expect(screen.queryByText("Compacted")).toBeNull();
+
+    const compactDetails = container.querySelector(
+      "details.system-message-compact-boundary",
+    ) as HTMLDetailsElement | null;
+    expect(compactDetails).toBeTruthy();
+    expect(compactDetails?.open).toBe(false);
+
+    const summary = compactDetails?.querySelector("summary");
+    expect(summary).toBeTruthy();
+    fireEvent.click(summary as HTMLElement);
+    expect(compactDetails?.open).toBe(true);
+    expect(screen.getByText(/hidden detail/)).toBeTruthy();
+    expect(screen.getByText(/compactMetadata/)).toBeTruthy();
   });
 
   it("passes display text without uploaded-file metadata to correction", () => {

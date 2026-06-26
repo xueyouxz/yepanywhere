@@ -478,6 +478,16 @@ function getToolSearchPreview(item: RenderItem): string {
   return `${item.toolName}${detail}`;
 }
 
+function getSystemSearchText(item: RenderItem): string {
+  if (item.type !== "system") {
+    return "";
+  }
+  return joinSearchParts([
+    item.content,
+    ...(item.details ?? []).map(getContentBlocksText),
+  ]);
+}
+
 function getFullSessionSearchAnchorForItem(
   item: RenderItem,
 ): UserTurnNavAnchor | null {
@@ -532,14 +542,16 @@ function getFullSessionSearchAnchorForItem(
             searchText: joinSearchParts(["Thinking", item.thinking]),
           }
         : null;
-    case "system":
-      return item.content
+    case "system": {
+      const systemSearchText = getSystemSearchText(item);
+      return systemSearchText
         ? {
             id: item.id,
-            preview: getSearchPreviewFallback(item.content),
-            searchText: item.content,
+            preview: getSearchPreviewFallback(systemSearchText),
+            searchText: systemSearchText,
           }
         : null;
+    }
     case "task_notification": {
       const searchText = item.summary ?? item.raw;
       return searchText
@@ -1710,9 +1722,14 @@ export const MessageList = memo(function MessageList({
         continue;
       }
       if (item.type === "system") {
-        const preview = getSearchPreviewFallback(item.content);
+        const systemSearchText = getSystemSearchText(item);
+        const preview = getSearchPreviewFallback(systemSearchText);
         if (preview) {
-          anchors.push({ id: item.id, preview, searchText: item.content });
+          anchors.push({
+            id: item.id,
+            preview,
+            searchText: systemSearchText,
+          });
         }
       }
     }

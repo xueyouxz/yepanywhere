@@ -359,6 +359,80 @@ describe("sliceAtUserTurnBoundary", () => {
     } satisfies PaginationInfo);
   });
 
+  it("does not count compact summaries or local command wrappers as turns", () => {
+    const messages = [
+      msg("user", "u1"),
+      msg("assistant", "a1"),
+      compactBoundary("cb1"),
+      {
+        type: "user",
+        uuid: "summary",
+        isCompactSummary: true,
+        message: { role: "user", content: "Summary of previous context" },
+      },
+      {
+        type: "user",
+        uuid: "caveat",
+        isMeta: true,
+        message: {
+          role: "user",
+          content: "<local-command-caveat>Caveat</local-command-caveat>",
+        },
+      },
+      {
+        type: "user",
+        uuid: "command",
+        message: {
+          role: "user",
+          content:
+            "<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>",
+        },
+      },
+      {
+        type: "user",
+        uuid: "stdout",
+        message: {
+          role: "user",
+          content: "<local-command-stdout>Compacted </local-command-stdout>",
+        },
+      },
+      msg("user", "u2"),
+      msg("assistant", "a2"),
+      msg("user", "u3"),
+      msg("assistant", "a3"),
+    ] as Message[];
+
+    const result = sliceAtUserTurnBoundary(messages, 2);
+
+    expect(result.messages[0]).toEqual(msg("user", "u2"));
+    expect(result.pagination.totalUserTurns).toBe(3);
+    expect(result.pagination.totalCompactions).toBe(1);
+    expect(result.pagination.truncatedBeforeMessageId).toBe("u2");
+  });
+
+  it("does not count tool-result-only rows as user turns", () => {
+    const messages = [
+      msg("user", "u1"),
+      msg("assistant", "a1"),
+      {
+        type: "user",
+        uuid: "tool-result",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "tool-1" }],
+        },
+      },
+      msg("assistant", "a2"),
+      msg("user", "u2"),
+      msg("assistant", "a3"),
+    ] as Message[];
+
+    const result = sliceAtUserTurnBoundary(messages, 1);
+
+    expect(result.messages[0]).toEqual(msg("user", "u2"));
+    expect(result.pagination.totalUserTurns).toBe(2);
+  });
+
   it("can start at a clicked user turn id", () => {
     const messages = [
       msg("user", "u1"),

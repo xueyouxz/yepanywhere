@@ -5,6 +5,14 @@ const COMMAND_NAME_TAG_RE = /<command-name>[\s\S]*?<\/command-name>/g;
 const COMMAND_ARGS_TAG_RE = /<command-args>[\s\S]*?<\/command-args>/g;
 const LOCAL_COMMAND_CAVEAT_RE =
   /<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g;
+const LOCAL_COMMAND_CAVEAT_ONLY_RE =
+  /^(?:\s*<local-command-caveat>[\s\S]*?<\/local-command-caveat>\s*)+$/;
+const LOCAL_COMMAND_STDOUT_RE =
+  /^\s*<local-command-stdout>([\s\S]*?)<\/local-command-stdout>\s*$/;
+const ANSI_ESCAPE_RE = new RegExp(
+  `${String.fromCharCode(27)}\\[[\\d;:? ]*[ -/]*[@-~]`,
+  "g",
+);
 
 export interface CommandTurn {
   /** The slash command, e.g. "/harsh-review". */
@@ -38,4 +46,21 @@ export function formatCommandTurn(commandTurn: CommandTurn): string {
   return commandTurn.args
     ? `${commandTurn.command} ${commandTurn.args}`
     : commandTurn.command;
+}
+
+export function isLocalCommandCaveatOnly(text: string): boolean {
+  return LOCAL_COMMAND_CAVEAT_ONLY_RE.test(text);
+}
+
+export function parseLocalCommandStdout(text: string): string | null {
+  const match = text.match(LOCAL_COMMAND_STDOUT_RE);
+  return match?.[1]?.replace(ANSI_ESCAPE_RE, "").trim() ?? null;
+}
+
+export function isCompactionLocalCommandOutput(text: string): boolean {
+  const normalized = text
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  return normalized === "compacted" || normalized.startsWith("compacted (");
 }

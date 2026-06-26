@@ -4,6 +4,7 @@ import {
   getLatestMessageTimestampMs,
 } from "../lib/messageAge";
 import type { CommentAnchor } from "../lib/commentAnchors";
+import type { ContentBlock } from "../types";
 import type { RenderItem } from "../types/renderItems";
 import { MessageAge } from "./MessageAge";
 import { ForkSummaryDisplayObject } from "./ForkSummaryDisplayObject";
@@ -138,6 +139,69 @@ function buildDebugSnapshot(
     sourceMessages: item.sourceMessages,
     renderItem: item,
   };
+}
+
+function compactDetailToText(detail: string | ContentBlock[]): string {
+  if (typeof detail === "string") {
+    return detail;
+  }
+
+  return detail
+    .map((block) => {
+      if (block.type === "text" && typeof block.text === "string") {
+        return block.text;
+      }
+      if (block.type === "tool_result" && typeof block.content === "string") {
+        return block.content;
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function CompactBoundarySystemMessage({
+  item,
+  icon,
+}: {
+  item: Extract<RenderItem, { type: "system" }>;
+  icon: string;
+}) {
+  const details = (item.details ?? [])
+    .map(compactDetailToText)
+    .map((text) => text.trim())
+    .filter(Boolean);
+
+  if (details.length === 0) {
+    return (
+      <div className="system-message system-message-compact-boundary">
+        <span className="system-message-icon">{icon}</span>
+        <span className="system-message-text">{item.content}</span>
+      </div>
+    );
+  }
+
+  return (
+    <details className="system-message system-message-compact-boundary system-message-compact-boundary--details">
+      <summary className="system-message-compact-summary">
+        <span className="collapsible__icon" aria-hidden="true">
+          ▸
+        </span>
+        <span className="system-message-icon">{icon}</span>
+        <span className="system-message-text">{item.content}</span>
+      </summary>
+      <div className="system-message-compact-details">
+        {details.map((detail, index) => (
+          <pre
+            className="system-message-compact-detail"
+            key={`${item.id}-compact-detail-${index}`}
+          >
+            {detail}
+          </pre>
+        ))}
+      </div>
+    </details>
+  );
 }
 
 export const RenderItemComponent = memo(function RenderItemComponent({
@@ -294,6 +358,9 @@ export const RenderItemComponent = memo(function RenderItemComponent({
               : isSubagentActivity
                 ? "↳"
                 : "⟳";
+        if (item.subtype === "compact_boundary") {
+          return <CompactBoundarySystemMessage item={item} icon={icon} />;
+        }
         return (
           <div
             className={`system-message ${isCompacting ? "system-message-compacting" : ""} ${isError ? "system-message-error" : ""} ${isHighlightedConfigAck ? "system-message-config-ack" : ""} ${isLocalCommand ? "system-message-local-command" : ""}`}

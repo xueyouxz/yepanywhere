@@ -3,6 +3,43 @@ import type { SystemEntry } from "./entry/SystemEntrySchema.js";
 import type { UserEntry } from "./entry/UserEntrySchema.js";
 import type { ClaudeSessionEntry } from "./index.js";
 
+function getObjectField(
+  value: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | undefined {
+  const field = value[key];
+  return field && typeof field === "object" && !Array.isArray(field)
+    ? (field as Record<string, unknown>)
+    : undefined;
+}
+
+function getStringField(
+  value: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined {
+  if (!value) return undefined;
+  const field = value[key];
+  return typeof field === "string" ? field : undefined;
+}
+
+function getLastStringField(
+  value: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined {
+  if (!value) return undefined;
+  const field = value[key];
+  if (!Array.isArray(field)) return undefined;
+
+  for (let index = field.length - 1; index >= 0; index -= 1) {
+    const item = field[index];
+    if (typeof item === "string") {
+      return item;
+    }
+  }
+
+  return undefined;
+}
+
 /** Check if entry is a compact_boundary system entry */
 export function isCompactBoundary(
   entry: ClaudeSessionEntry,
@@ -19,7 +56,30 @@ export function getLogicalParentUuid(
   entry: ClaudeSessionEntry,
 ): string | undefined {
   if (isCompactBoundary(entry)) {
-    return (entry as { logicalParentUuid?: string }).logicalParentUuid;
+    const logicalParentUuid = (entry as { logicalParentUuid?: string })
+      .logicalParentUuid;
+    if (logicalParentUuid) {
+      return logicalParentUuid;
+    }
+
+    const compactMetadata = (entry as { compactMetadata?: unknown })
+      .compactMetadata;
+    if (!compactMetadata || typeof compactMetadata !== "object") {
+      return undefined;
+    }
+
+    const metadata = compactMetadata as Record<string, unknown>;
+    const preservedSegment = getObjectField(metadata, "preservedSegment");
+    const segmentTailUuid = getStringField(preservedSegment, "tailUuid");
+    if (segmentTailUuid) {
+      return segmentTailUuid;
+    }
+
+    const preservedMessages = getObjectField(metadata, "preservedMessages");
+    return (
+      getLastStringField(preservedMessages, "uuids") ??
+      getLastStringField(preservedMessages, "allUuids")
+    );
   }
   return undefined;
 }

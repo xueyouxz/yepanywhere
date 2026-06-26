@@ -7279,6 +7279,58 @@ a.sidebar-nav-item {
   font-style: italic;
 }
 
+.system-message-compact-boundary {
+  max-width: min(100%, 980px);
+}
+
+.system-message.system-message-compact-boundary--details {
+  display: block;
+}
+
+.system-message-compact-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.system-message-compact-summary::-webkit-details-marker {
+  display: none;
+}
+
+.system-message-compact-summary .collapsible__icon {
+  opacity: 0.72;
+}
+
+.system-message-compact-boundary[open]
+  .system-message-compact-summary
+  .collapsible__icon {
+  transform: rotate(90deg);
+}
+
+.system-message-compact-details {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding-left: 30px;
+}
+
+.system-message-compact-detail {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-primary, #1a1a1a) 55%, transparent);
+  color: var(--text-muted);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.82em;
+  font-style: normal;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .system-message-recap {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr);

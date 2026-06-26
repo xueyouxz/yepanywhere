@@ -2287,6 +2287,187 @@ describe("Sessions metadata route", () => {
     );
   });
 
+  it("keeps compact summaries in fork-after context without making them source turns", async () => {
+    const project = createProject();
+    const generateSummary = vi.fn(async () => ({
+      text: "Title: Compact continuation\n\nUse the compacted state.",
+    }));
+    const forkSession = vi
+      .fn()
+      .mockResolvedValueOnce({ sessionId: "sess-generator" })
+      .mockResolvedValueOnce({ sessionId: "sess-target" });
+    const resumeSession = vi.fn(async () => ({
+      id: "proc-target",
+      sessionId: "sess-target",
+      projectId: project.id,
+      provider: "claude",
+      model: "sonnet",
+      resolvedModel: "sonnet",
+      permissionMode: "default",
+      modeVersion: 0,
+      subscribe: vi.fn(() => vi.fn()),
+    }));
+    let transcriptDisplayObjects: TranscriptDisplayObject[] = [];
+    const addTranscriptDisplayObject = vi.fn(async (_sessionId, object) => {
+      transcriptDisplayObjects = [...transcriptDisplayObjects, object];
+    });
+    const updateTranscriptDisplayObject = vi.fn(
+      async (_sessionId, objectId, updater) => {
+        let updated: TranscriptDisplayObject | undefined;
+        transcriptDisplayObjects = transcriptDisplayObjects.map((object) => {
+          if (object.id !== objectId) return object;
+          updated = updater(object);
+          return updated;
+        });
+        return updated;
+      },
+    );
+    const getMessageHistory = vi.fn(() => [
+      {
+        type: "user",
+        uuid: "msg-user-initial",
+        message: { role: "user", content: "Start the task." },
+      },
+      {
+        type: "assistant",
+        uuid: "msg-assistant",
+        message: { role: "assistant", content: "Did the initial work." },
+      },
+      {
+        type: "system",
+        uuid: "compact-boundary",
+        subtype: "compact_boundary",
+        content: "Conversation compacted",
+      },
+      {
+        type: "user",
+        uuid: "compact-summary",
+        isCompactSummary: true,
+        isVisibleInTranscriptOnly: true,
+        message: {
+          role: "user",
+          content: "Provider compact summary text.",
+        },
+      },
+      {
+        type: "user",
+        uuid: "msg-user-next",
+        message: { role: "user", content: "Continue." },
+      },
+    ]);
+
+    const routes = createSessionsRoutes({
+      supervisor: {
+        getProcessForSession: vi.fn(() => ({
+          id: "proc-source",
+          provider: "claude",
+          model: "sonnet",
+          state: { type: "idle", since: new Date() },
+          getMessageHistory,
+        })),
+        supportsForkSession: vi.fn(() => true),
+        generateSummary,
+        forkSession,
+        resumeSession,
+      } as unknown as SessionsDeps["supervisor"],
+      scanner: {
+        getOrCreateProject: vi.fn(async () => project),
+      } as unknown as SessionsDeps["scanner"],
+      sessionMetadataService: {
+        getProvider: vi.fn(() => "claude"),
+        getRequestedModel: vi.fn(() => "sonnet"),
+        getExecutor: vi.fn(() => undefined),
+        getMetadata: vi.fn(() => ({})),
+        getTranscriptDisplayObjects: vi.fn(() => transcriptDisplayObjects),
+        addTranscriptDisplayObject,
+        updateTranscriptDisplayObject,
+        setProvider: vi.fn(async () => undefined),
+        setRequestedModel: vi.fn(async () => undefined),
+        updateMetadata: vi.fn(async () => undefined),
+      } as unknown as NonNullable<SessionsDeps["sessionMetadataService"]>,
+    });
+
+    const response = await routes.request(
+      `/projects/${project.id}/sessions/sess-1/fork-summary`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceMessageId: "msg-user-initial" }),
+      },
+    );
+
+    expect(response.status).toBe(202);
+    await vi.waitFor(() => {
+      expect(generateSummary).toHaveBeenCalledTimes(1);
+    });
+    expect(generateSummary).toHaveBeenCalledWith(
+      "claude",
+      expect.objectContaining({
+        afterTurnMessageId: "compact-summary",
+        afterTurnContext: "Provider compact summary text.",
+      }),
+    );
+    expect(forkSession).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        upToMessageId: "compact-summary",
+      }),
+    );
+  });
+
+  it("rejects compact summaries as fork-after source turns", async () => {
+    const project = createProject();
+    const forkSession = vi.fn();
+    const generateSummary = vi.fn();
+    const routes = createSessionsRoutes({
+      supervisor: {
+        getProcessForSession: vi.fn(() => ({
+          id: "proc-source",
+          provider: "claude",
+          state: { type: "idle", since: new Date() },
+          getMessageHistory: vi.fn(() => [
+            {
+              type: "user",
+              uuid: "compact-summary",
+              isCompactSummary: true,
+              isVisibleInTranscriptOnly: true,
+              message: {
+                role: "user",
+                content: "Provider compact summary text.",
+              },
+            },
+          ]),
+        })),
+        supportsForkSession: vi.fn(() => true),
+        forkSession,
+        generateSummary,
+      } as unknown as SessionsDeps["supervisor"],
+      scanner: {
+        getOrCreateProject: vi.fn(async () => project),
+      } as unknown as SessionsDeps["scanner"],
+      sessionMetadataService: {
+        getProvider: vi.fn(() => "claude"),
+        getTranscriptDisplayObjects: vi.fn(() => []),
+      } as unknown as NonNullable<SessionsDeps["sessionMetadataService"]>,
+    });
+
+    const response = await routes.request(
+      `/projects/${project.id}/sessions/sess-1/fork-summary`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceMessageId: "compact-summary" }),
+      },
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "sourceMessageId must identify a user-authored request",
+    });
+    expect(forkSession).not.toHaveBeenCalled();
+    expect(generateSummary).not.toHaveBeenCalled();
+  });
+
   it("rejects an in-progress fork boundary before creating helper work", async () => {
     const project = createProject();
     const forkSession = vi.fn();

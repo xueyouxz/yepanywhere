@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { formatCommandTurn, parseCommandTurn } from "../commandTurn";
+import {
+  formatCommandTurn,
+  isCompactionLocalCommandOutput,
+  isLocalCommandCaveatOnly,
+  parseCommandTurn,
+  parseLocalCommandStdout,
+} from "../commandTurn";
 
 describe("parseCommandTurn", () => {
   it("extracts the command from a wrapped no-arg turn", () => {
@@ -66,5 +72,33 @@ describe("parseCommandTurn", () => {
     expect(formatCommandTurn({ command: "/foo", args: "bar" })).toBe(
       "/foo bar",
     );
+  });
+
+  it("recognizes standalone local-command caveats", () => {
+    expect(
+      isLocalCommandCaveatOnly(
+        "<local-command-caveat>Caveat.</local-command-caveat>",
+      ),
+    ).toBe(true);
+    expect(
+      isLocalCommandCaveatOnly(
+        "<local-command-caveat>Caveat.</local-command-caveat>\nextra",
+      ),
+    ).toBe(false);
+  });
+
+  it("unwraps local-command stdout and strips ANSI escapes", () => {
+    expect(
+      parseLocalCommandStdout(
+        "<local-command-stdout>\u001b[2mCompacted (ctrl+o)\u001b[22m</local-command-stdout>",
+      ),
+    ).toBe("Compacted (ctrl+o)");
+    expect(parseLocalCommandStdout("ordinary text")).toBeNull();
+  });
+
+  it("recognizes compact stdout acknowledgements", () => {
+    expect(isCompactionLocalCommandOutput("Compacted")).toBe(true);
+    expect(isCompactionLocalCommandOutput("Compacted (ctrl+o)")).toBe(true);
+    expect(isCompactionLocalCommandOutput("Set model to Opus")).toBe(false);
   });
 });

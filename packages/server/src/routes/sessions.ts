@@ -1415,6 +1415,14 @@ function isHumanUserMessage(message: Message): boolean {
   return role === "user" && !messageHasToolResult(message);
 }
 
+function isCompactSummaryUserMessage(message: Message): boolean {
+  return (message as { isCompactSummary?: unknown }).isCompactSummary === true;
+}
+
+function isUserAuthoredRequest(message: Message): boolean {
+  return isHumanUserMessage(message) && !isCompactSummaryUserMessage(message);
+}
+
 function resolveForkAfterBoundary(
   messages: Message[],
   sourceMessageId: string,
@@ -1433,7 +1441,7 @@ function resolveForkAfterBoundary(
   if (sourceIndex < 0 || !sourceMessage) {
     return { error: "Selected source message was not found", status: 404 };
   }
-  if (!isHumanUserMessage(sourceMessage)) {
+  if (!isUserAuthoredRequest(sourceMessage)) {
     return {
       error: "sourceMessageId must identify a user-authored request",
       status: 400,
@@ -1443,7 +1451,7 @@ function resolveForkAfterBoundary(
   let nextUserIndex = -1;
   for (let index = sourceIndex + 1; index < messages.length; index += 1) {
     const candidate = messages[index];
-    if (candidate && isHumanUserMessage(candidate)) {
+    if (candidate && isUserAuthoredRequest(candidate)) {
       nextUserIndex = index;
       break;
     }
@@ -1693,6 +1701,7 @@ function isRestartReplacementActivity(message: SDKMessage): boolean {
 function sdkMessagesToClientMessages(sdkMessages: SDKMessage[]): Message[] {
   const messages: Message[] = [];
   for (const msg of sdkMessages) {
+    const rawFields = msg as Record<string, unknown>;
     if (isCompactBoundaryMessage(msg)) {
       const content =
         (typeof msg.message?.content === "string"
@@ -1700,6 +1709,7 @@ function sdkMessagesToClientMessages(sdkMessages: SDKMessage[]): Message[] {
           : undefined) ??
         (typeof msg.content === "string" ? msg.content : "Context compacted");
       messages.push({
+        ...rawFields,
         id: msg.uuid ?? `msg-${Date.now()}-${messages.length}`,
         type: "system",
         role: "system",
@@ -1739,6 +1749,7 @@ function sdkMessagesToClientMessages(sdkMessages: SDKMessage[]): Message[] {
       }
 
       messages.push({
+        ...rawFields,
         id: msg.uuid ?? `msg-${Date.now()}-${messages.length}`,
         type: msg.type,
         role: msg.type as "user" | "assistant",

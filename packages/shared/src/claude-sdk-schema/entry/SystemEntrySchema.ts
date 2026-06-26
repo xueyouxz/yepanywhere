@@ -22,6 +22,7 @@ const CompactBoundarySystemEntrySchema = BaseEntrySchema.extend({
       trigger: z.string(),
       preTokens: z.number(),
     })
+    .passthrough()
     .optional(),
 });
 

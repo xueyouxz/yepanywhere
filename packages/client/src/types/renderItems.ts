@@ -104,6 +104,7 @@ export interface SystemItem extends RenderItemBase {
   id: string;
   subtype: "compact_boundary" | "status" | "init" | string;
   content: string;
+  details?: Array<string | ContentBlock[]>;
   /** For status subtype: the current status (e.g., "compacting") */
   status?: "compacting" | null;
   /** For config_ack subtype: whether it differs from the previous config ack */
