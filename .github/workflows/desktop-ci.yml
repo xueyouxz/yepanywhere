@@ -189,13 +189,23 @@ jobs:
             ${{ env.HAS_UPDATER_KEY == 'true' && '--config ''{"bundle":{"createUpdaterArtifacts":true}}''' || '' }}
             ${{ matrix.platform == 'windows-latest' && secrets.AZURE_CLIENT_SECRET != '' && '--config ''{"bundle":{"windows":{"signCommand":"trusted-signing-cli -e https://eus.codesigning.azure.net -a kylegraehl -c jstorrent-profile %1"}}}''' || '' }}
 
-      # --- Diagnose flaky DMG bundling ---
-      - name: Check for flaky DMG bundling failure
+      # --- Diagnose macOS build failure ---
+      # Only blame the flaky hdiutil DMG issue when the build actually got past codesign
+      # (a signed .app exists) but produced no .dmg. Otherwise point at the real failure,
+      # so we don't chase a phantom DMG flake (config error, updater key/pubkey, etc.).
+      - name: Diagnose macOS build failure
         if: failure() && matrix.platform == 'macos-latest'
+        shell: bash
         run: |
-          echo ""
-          echo "::error::macOS DMG bundling failed. This is likely the known flaky hdiutil issue on GitHub Actions runners (not a code problem). Re-run this job: gh run rerun ${{ github.run_id }} --failed"
-          echo ""
+          app=$(find packages/desktop/src-tauri/target -type d -path '*/release/bundle/macos/*.app' 2>/dev/null | head -1)
+          dmg=$(find packages/desktop/src-tauri/target -type f -path '*/release/bundle/dmg/*.dmg' 2>/dev/null | head -1)
+          if [ -n "$app" ] && [ -z "$dmg" ]; then
+            echo "::error::macOS .app built and signed but no .dmg produced — likely the flaky hdiutil/bundle_dmg issue on GH runners. Re-run: gh run rerun ${{ github.run_id }} --failed"
+          elif [ -z "$app" ]; then
+            echo "::error::macOS build failed before the app bundle was produced (compile / config / codesign). Read the 'Build Tauri app' step log — this is a real error, NOT a DMG flake."
+          else
+            echo "::error::macOS .app and .dmg both built; failure was a later step (updater signing / latest.json). Read the 'Build Tauri app' step log — NOT a DMG flake."
+          fi
 
       # --- Cleanup ---
       - name: Clean up macOS keychain
