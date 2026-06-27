@@ -281,10 +281,13 @@ export function createApp(options: AppOptions): AppResult {
   // ships the origin response raw). Browsers send Accept-Encoding and decompress
   // transparently, so no client changes are needed; the relay path compresses
   // separately. The middleware safely skips WebSocket upgrades, SSE
-  // (text/event-stream), already-encoded responses, and sub-1KB bodies, and is a
-  // no-op for internal app.fetch() calls (public shares) which send no
-  // Accept-Encoding. Registered first so it wraps the full /api/* response.
+  // (text/event-stream), already-encoded responses, and sub-1KB bodies. It is a
+  // no-op for internal app.fetch() calls (relayed requests) which send no
+  // Accept-Encoding, but public-share links opened directly in a browser DO send
+  // it — and /public-api/shares/sessions/* serves the same multi-MB session JSON
+  // — so that prefix is covered too. Registered first so it wraps the response.
   app.use("/api/*", compress());
+  app.use("/public-api/*", compress());
 
   // Security middleware: host validation, CORS, custom header requirement
   app.use("/api/*", hostCheckMiddleware);
