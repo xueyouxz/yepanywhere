@@ -1,15 +1,17 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router-dom";
 import type { GlobalSessionItem } from "../api/client";
 import type { AgentActivity } from "../hooks/useFileActivity";
-import { useGlobalSessions } from "../hooks/useGlobalSessions";
+import { useGlobalSessionsFeed } from "../hooks/useGlobalSessionsFeed";
 import {
   buildBtwAsideParentHref,
   getBtwAsideSessionDisplayTitle,
   isBtwAsideSessionTitle,
 } from "../lib/btwAsideSessions";
 import { toBrowserAppHref } from "../lib/appHref";
+import { sessionCollectionRecordsToGlobalSessionItems } from "../lib/sessionCollectionRecords";
+import { useSessionCollectionQueryRecords } from "../lib/sessionCollectionExternalStore";
 import { ProviderBadge } from "./ProviderBadge";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 
@@ -99,11 +101,16 @@ export function RecentSessionsDropdown({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
-  // Fetch recent sessions across all projects
-  const { sessions } = useGlobalSessions({
+  // Feed recent sessions across all projects; rows render from the collection.
+  const feed = useGlobalSessionsFeed({
     limit: MAX_RECENT_SESSIONS + 5,
     includeStats: false,
   });
+  const sessionRecords = useSessionCollectionQueryRecords(feed.query);
+  const sessions = useMemo(
+    () => sessionCollectionRecordsToGlobalSessionItems(sessionRecords),
+    [sessionRecords],
+  );
 
   // Filter out current session and limit
   const recentSessions = sessions

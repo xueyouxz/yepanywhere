@@ -13,10 +13,14 @@ const { globalSessionsState } = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("../../hooks/useGlobalSessions", () => ({
-  useGlobalSessions: () => ({
-    sessions: globalSessionsState.sessions,
+vi.mock("../../hooks/useGlobalSessionsFeed", () => ({
+  useGlobalSessionsFeed: () => ({
+    query: { scope: "global-sessions" },
   }),
+}));
+
+vi.mock("../../lib/sessionCollectionExternalStore", () => ({
+  useSessionCollectionQueryRecords: () => globalSessionsState.sessions,
 }));
 
 vi.mock("../../i18n", () => ({

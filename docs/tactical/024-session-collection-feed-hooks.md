@@ -1,7 +1,6 @@
 # Session Collection Feed Hooks
 
-Status: Sidebar and Global Sessions feed migration implemented / dropdown and
-wrapper retirement remain
+Status: Implemented
 
 ## Progress
 
@@ -14,9 +13,10 @@ wrapper retirement remain
   rendered only from collection projections.
 - [x] 2026-06-27: Moved Global Sessions to `useGlobalSessionsFeed`, with rows
   rendered only from collection query records.
-- [ ] Move Recent Sessions dropdown off `useGlobalSessions().sessions`.
-- [ ] Delete the temporary `useGlobalSessions` compatibility wrapper once no
-  production consumer needs row-returning hook data.
+- [x] 2026-06-27: Moved Recent Sessions dropdown to `useGlobalSessionsFeed`
+  plus collection query records.
+- [x] 2026-06-27: Deleted the temporary `useGlobalSessions` compatibility
+  wrapper and its obsolete hook-local row reconciliation test.
 
 ## Context
 
@@ -191,10 +191,10 @@ duplicate projection logic.
    - Sidebar no longer imports `useGlobalSessions`.
 4. [x] Move Global Sessions page to `useGlobalSessionsFeed`.
    - Rows stay on `useSessionCollectionQueryRecords(feed.query)`.
-5. [ ] Move Recent Sessions dropdown off `useGlobalSessions().sessions`.
+5. [x] Move Recent Sessions dropdown off `useGlobalSessions().sessions`.
    - Use a small feed plus query records, or a dedicated recent projection if
      the dropdown only needs simple recency.
-6. [ ] Delete `useGlobalSessions`.
+6. [x] Delete `useGlobalSessions`.
    - No compatibility wrapper unless a short-lived branch needs it during the
      same patch series.
    - Remove hook-local session array reconciliation and event patching.
@@ -215,7 +215,7 @@ duplicate projection logic.
 - [x] Sidebar cannot render hook-local rows because its feed wrapper exposes no
   row arrays.
 - [x] Global Sessions renders rows only from collection query records.
-- [ ] Recent Sessions dropdown no longer consumes `useGlobalSessions().sessions`.
+- [x] Recent Sessions dropdown no longer consumes `useGlobalSessions().sessions`.
 - [x] A remote relay feed mounted before secure connection readiness does not
   publish an empty authoritative snapshot.
 - [x] `loadMore` works from collection query state after the first page.
