@@ -7,6 +7,7 @@ import type {
 } from "@yep-anywhere/shared";
 import { DEFAULT_PROMPT_CACHE_KEEPALIVE_INACTIVITY_MINUTES } from "@yep-anywhere/shared";
 import { Hono } from "hono";
+import { compress } from "hono/compress";
 import { join } from "node:path";
 import type { AuthService } from "./auth/AuthService.js";
 import { createAuthRoutes } from "./auth/routes.js";
@@ -272,6 +273,18 @@ export function createApp(options: AppOptions): AppResult {
   configureProviderRuntime({ codexCliPath: options.codexCliPath });
 
   const app = new Hono<{ Bindings: HttpBindings }>();
+
+  // Compress API responses (gzip/deflate). Large session payloads — multi-MB
+  // Codex transcripts — otherwise cross slow first-mile links uncompressed:
+  // Cloudflare-tunnel and Tailscale/LAN clients have nothing compressing the
+  // origin→edge hop (Cloudflare only compresses edge→browser, and cloudflared
+  // ships the origin response raw). Browsers send Accept-Encoding and decompress
+  // transparently, so no client changes are needed; the relay path compresses
+  // separately. The middleware safely skips WebSocket upgrades, SSE
+  // (text/event-stream), already-encoded responses, and sub-1KB bodies, and is a
+  // no-op for internal app.fetch() calls (public shares) which send no
+  // Accept-Encoding. Registered first so it wraps the full /api/* response.
+  app.use("/api/*", compress());
 
   // Security middleware: host validation, CORS, custom header requirement
   app.use("/api/*", hostCheckMiddleware);

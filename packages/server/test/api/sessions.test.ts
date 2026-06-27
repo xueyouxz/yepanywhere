@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { gunzipSync } from "node:zlib";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -727,6 +728,65 @@ describe("Sessions API", () => {
       expect(res.status).toBe(200);
       const json = await res.json();
       expect(json.status).toBe("running");
+    });
+  });
+
+  // Guards the `app.use("/api/*", compress())` wiring in app.ts. Runs on the
+  // CI Node-20 floor, so it also catches any CompressionStream regression there.
+  describe("GET /api/projects/:projectId/sessions/:sessionId (compression)", () => {
+    const projectPath = "/home/user/myproject";
+
+    async function writeBigSession(name: string) {
+      const encodedPath = projectPath.replace(/[/\\:]/g, "-");
+      const sessionDir = join(testDir, "localhost", encodedPath);
+      // Comfortably exceeds the 1KB compress threshold so encoding kicks in.
+      const bigText = "the quick brown fox jumps over the lazy dog ".repeat(400);
+      const line = JSON.stringify({
+        type: "user",
+        cwd: projectPath,
+        sessionId: name,
+        uuid: `${name}-u1`,
+        timestamp: "2026-01-01T00:00:00Z",
+        message: { role: "user", content: bigText },
+      });
+      await writeFile(join(sessionDir, `${name}.jsonl`), `${line}\n`);
+    }
+
+    it("gzip-encodes large responses when the client accepts it", async () => {
+      await writeBigSession("sess-big");
+      const { app } = createApp({ sdk: mockSdk, projectsDir: testDir });
+
+      const res = await app.request(
+        `/api/projects/${projectId}/sessions/sess-big`,
+        { headers: { "X-Yep-Anywhere": "true", "Accept-Encoding": "gzip" } },
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-encoding")).toBe("gzip");
+      // Encoded responses drop Content-Length in favor of chunked streaming.
+      expect(res.headers.get("content-length")).toBeNull();
+
+      // Body is gzip on the wire — decode it and confirm a clean round-trip.
+      const raw = Buffer.from(await res.arrayBuffer());
+      const json = JSON.parse(gunzipSync(raw).toString("utf-8"));
+      expect(Array.isArray(json.messages)).toBe(true);
+      expect(json.messages.length).toBeGreaterThan(0);
+    });
+
+    it("leaves responses uncompressed when Accept-Encoding is absent", async () => {
+      await writeBigSession("sess-plain");
+      const { app } = createApp({ sdk: mockSdk, projectsDir: testDir });
+
+      const res = await app.request(
+        `/api/projects/${projectId}/sessions/sess-plain`,
+        { headers: { "X-Yep-Anywhere": "true" } },
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-encoding")).toBeNull();
+      // Plain body parses directly (no manual decode needed).
+      const json = await res.json();
+      expect(Array.isArray(json.messages)).toBe(true);
     });
   });
 });
