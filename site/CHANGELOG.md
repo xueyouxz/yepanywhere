@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- "What Shipped This Spring" recap post (`/spring-2026`) covering first-class
+  Codex support, public session sharing, server-routed voice input, six-language
+  localization, session search, and the secure-by-default file viewer, with a
+  linked entry at the top of the News page.
+
 ## [site-v1.6.4] - 2026-06-07
 
 ### Fixed

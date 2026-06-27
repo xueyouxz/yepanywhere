@@ -1,0 +1,125 @@
+---
+import ArticleLayout from "../layouts/ArticleLayout.astro";
+---
+
+<ArticleLayout
+  title="What Shipped This Spring: Codex Grew Up, and a Lot More"
+  description="A recap of everything added to Yep Anywhere since March — first-class Codex support, switch any session to any model, public session sharing, server-routed voice input, six-language localization, session search, a secure-by-default file viewer, and an upcoming desktop app."
+  date="June 27, 2026"
+  publishedTime="2026-06-27"
+  ogImage="/screenshots/session-view.png"
+>
+  <p><a href="https://yepanywhere.com">Yep Anywhere</a> lets you supervise AI coding agents from your phone. The last update here was the <a href="/remote-device-control">remote device control</a> launch in early March. Since then we've shipped dozens of releases without stopping to write about any of them. This is the catch-up post.</p>
+
+  <p>The "we" is new, too: Yep Anywhere now has a second core contributor, <a href="https://github.com/graehl">Jonathan Graehl</a>. The extra pair of hands is a big part of why the spring moved this fast.</p>
+
+  <h2>Codex grew up</h2>
+
+  <p>Codex started as the rough sibling next to Claude Code. It's now a first-class provider with the same workflow:</p>
+
+  <ul>
+    <li><strong>Streaming, diffs, and approvals at parity.</strong> Live token deltas, <code>apply_patch</code> edits rendered as proper diffs, and tool approvals all work the way they do for Claude Code &mdash; in the stream and in replayed history.</li>
+    <li><strong>Subagents render.</strong> Codex <code>spawn_agent</code> subagents expand inline so you can follow what a delegated agent is doing instead of staring at an opaque tool call.</li>
+    <li><strong>Steering that holds up.</strong> Interrupts, queued messages, mid-flight steering, and reconnect merging were hardened so a flaky phone connection doesn't desync your session.</li>
+    <li><strong>The small stuff.</strong> Collapsed Bash rows, local image previews, and rate-limit exhaustion surfaced as real errors instead of silent stalls.</li>
+  </ul>
+
+  <p>We track the Codex CLI closely &mdash; protocol compatibility has moved forward through its 0.135 releases, including newer rollout formats. If you live in Codex, it should now feel like Yep Anywhere was built for it.</p>
+
+  <h2>Switch any session to any model</h2>
+
+  <p>You can change the model mid-session, from any session, to any model the provider offers &mdash; with <code>/model</code> or the model selector. Start a task on a fast, cheap model, hit something hard, and switch up to a stronger one without losing context or starting over. It works across providers, so the same control applies whether you're driving Claude Code, Codex, or anything else.</p>
+
+  <h2>Share a session with a link</h2>
+
+  <p>You can publish a read-only view of any session as a public link &mdash; with share controls, live viewer counts, and origin-aware gating so you decide exactly what's exposed. Good for showing a teammate what an agent did, filing a bug report with full context, or saving a transcript you're proud of.</p>
+
+  <h2>Talk to your agents</h2>
+
+  <p>Voice input grew from a single browser-only button into a real pipeline. Speech now routes through the server, so you can pick a backend that fits your setup:</p>
+
+  <ul>
+    <li><strong>Browser-native</strong> &mdash; zero setup, works everywhere.</li>
+    <li><strong>Deepgram</strong> and <strong>xAI (Grok)</strong> &mdash; bring your own key for faster, more accurate transcription.</li>
+    <li><strong>Local Whisper</strong> &mdash; fully on-device, nothing leaves your machine.</li>
+  </ul>
+
+  <p>The speech options moved into the microphone menu so switching backends is one tap, and provider keys are scoped to transcription so they don't leak into your agents' environments or get billed against the wrong thing.</p>
+
+  <h2>Now in six languages</h2>
+
+  <p>The client UI is fully localized into English, Chinese, Spanish, French, German, and Japanese, with a language selector in Appearance settings. Locale bundles load lazily, so the languages you don't use cost you nothing.</p>
+
+  <h2>Find it, recap it, stay oriented</h2>
+
+  <p>Long-running, multi-session work needed better navigation tools, so we added a batch of them:</p>
+
+  <ul>
+    <li><strong>Session search</strong> &mdash; jump straight to the session you mean instead of scrolling the sidebar.</li>
+    <li><strong>Session recaps</strong> &mdash; come back to a session that ran while you were away and get a summary of what happened.</li>
+    <li><strong>Heartbeat turns</strong> &mdash; keep an agent moving on long tasks, with queued "when done" prompts.</li>
+    <li><strong>Richer transcripts</strong> &mdash; KaTeX math, ANSI color output, expandable tool rows, in-transcript reverse search, and one-tap markdown copy.</li>
+    <li><strong>Explicit thinking controls</strong> &mdash; off / auto / on, plus per-provider effort, so you decide how hard the model works.</li>
+  </ul>
+
+  <h2>Read any file &mdash; and choose which ones</h2>
+
+  <p>There's a shared file viewer now: click a file path anywhere &mdash; in a session, a public share, or a remote link &mdash; and get a syntax-highlighted view, including specific line ranges and Markdown media.</p>
+
+  <p>Opening files remotely is exactly the kind of capability that needs a leash, so it ships locked down. <strong>Settings &rarr; Local Access</strong> lets you scope which folders the file viewer may read &mdash; project folders, uploads, temp, your home directory, or a custom allow-list. By default, the file route refuses to serve arbitrary absolute paths until you explicitly grant the folder. Secure by default, opened up only where you decide.</p>
+
+  <h2>More models, more providers</h2>
+
+  <p>Beyond Claude Code and Codex, this spring added:</p>
+
+  <ul>
+    <li><strong>Grok Build</strong> via ACP, with prompt suggestions and effort controls.</li>
+    <li><strong>Ollama</strong> for fully local models, with a customizable system prompt.</li>
+    <li><strong>OpenCode</strong> session recovery from CLI exports, plus vLLM response rendering.</li>
+  </ul>
+
+  <p>And the Claude side stayed current &mdash; newer Claude Agent SDK releases brought support for the latest Claude models as they shipped.</p>
+
+  <h2>Windows keeps getting better</h2>
+
+  <p>Windows has come a long way this spring. We fixed drive-letter and backslash path handling, spawn failures, Codex session discovery, temp-directory resolution, and a string of mixed-slash deduplication bugs. If you tried Yep Anywhere on Windows months ago and bounced off, it's worth another look.</p>
+
+  <h2>Quieter, safer, faster</h2>
+
+  <p>A lot of the spring went into work you won't see directly:</p>
+
+  <ul>
+    <li><strong>Security hardening</strong> &mdash; XSS-hardened markdown rendering, path containment across file/upload/share routes, a relay origin allowlist, approval audit logging, unsafe-Unicode visibility in approval prompts, and stronger SRP resume verification (with a compatibility grace window so older clients aren't cut off abruptly).</li>
+    <li><strong>Leaner connections</strong> &mdash; API responses are gzip/deflate compressed, and idle agent sessions get reaped so a closed tab doesn't leave a provider process running forever.</li>
+    <li><strong>Less friction</strong> &mdash; saved new-session defaults (provider, model, permission mode), output appearance controls, and lifecycle webhooks.</li>
+  </ul>
+
+  <h2>Coming soon: a one-click desktop app</h2>
+
+  <p>Claude and Codex both have excellent desktop apps, and Yep Anywhere already works alongside them. We're building a desktop app of our own &mdash; not to replace them, but to make Yep itself easier to run. No fiddling with Node and npm: download it, click install, and it keeps itself up to date automatically. It's coming soon.</p>
+
+  <h2>Get the update</h2>
+
+  <p>Everything above (except the desktop app) is live today. If you're on the npm install:</p>
+
+  <pre><code>npm update -g yepanywhere</code></pre>
+
+  <p>Then restart <code>yepanywhere</code>. New here?</p>
+
+  <p><a href="/#install" class="cta-link">Install Yep Anywhere</a></p>
+</ArticleLayout>
+
+<style>
+  .cta-link {
+    display: inline-block;
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 16px;
+    text-decoration: none;
+    margin-top: 8px;
+  }
+
+  .cta-link:hover {
+    text-decoration: underline;
+  }
+</style>
