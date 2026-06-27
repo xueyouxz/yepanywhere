@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectMetadataService } from "../../src/metadata/ProjectMetadataService.js";
 import { CodexSessionScanner } from "../../src/projects/codex-scanner.js";
+import { GeminiSessionScanner } from "../../src/projects/gemini-scanner.js";
 import { ProjectScanner } from "../../src/projects/scanner.js";
 import { encodeProjectId } from "../../src/supervisor/types.js";
 import { EventBus } from "../../src/watcher/EventBus.js";
@@ -198,7 +199,7 @@ describe("ProjectScanner cache", () => {
     expect(afterEvent?.id).toBe(encodeProjectId("/home/user/project-two"));
   });
 
-  it("marks claude projects that also have codex sessions", async () => {
+  it("aggregates provider session counts for claude projects", async () => {
     const projectsDir = join(tmpdir(), `project-scanner-${randomUUID()}`);
     tempDirs.push(projectsDir);
 
@@ -218,15 +219,32 @@ describe("ProjectScanner cache", () => {
         sessionDir: "/codex/sessions",
         activeOwnedCount: 0,
         activeExternalCount: 0,
-        lastActivity: "2025-01-01T00:00:00.000Z",
+        lastActivity: "2099-01-01T00:00:00.000Z",
         provider: "codex",
+      },
+    ]);
+    vi.spyOn(
+      GeminiSessionScanner.prototype,
+      "registerKnownPaths",
+    ).mockResolvedValue(undefined);
+    vi.spyOn(GeminiSessionScanner.prototype, "listProjects").mockResolvedValue([
+      {
+        id: encodeProjectId("/home/user/project-one"),
+        path: "/home/user/project-one",
+        name: "project-one",
+        sessionCount: 2,
+        sessionDir: "/gemini/tmp/project-one/chats",
+        activeOwnedCount: 0,
+        activeExternalCount: 0,
+        lastActivity: "2099-02-01T00:00:00.000Z",
+        provider: "gemini",
       },
     ]);
 
     const scanner = new ProjectScanner({
       projectsDir,
       enableCodex: true,
-      enableGemini: false,
+      enableGemini: true,
       cacheTtlMs: 60000,
     });
 
@@ -235,7 +253,15 @@ describe("ProjectScanner cache", () => {
     expect(projects[0]?.provider).toBe("claude");
     expect(projects[0]).toMatchObject({
       path: "/home/user/project-one",
+      sessionCount: 6,
+      sessionCountsByProvider: {
+        claude: 1,
+        codex: 3,
+        gemini: 2,
+      },
       hasCodexSessions: true,
+      hasGeminiSessions: true,
+      lastActivity: "2099-02-01T00:00:00.000Z",
     });
   });
 

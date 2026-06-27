@@ -73,6 +73,7 @@ describe("CodexSessionScanner", () => {
     expect(projects[0].path).toBe("/home/user/project-a");
     expect(projects[0].provider).toBe("codex");
     expect(projects[0].sessionCount).toBe(1);
+    expect(projects[0].sessionCountsByProvider).toEqual({ codex: 1 });
   });
 
   it("groups sessions by cwd into projects", async () => {

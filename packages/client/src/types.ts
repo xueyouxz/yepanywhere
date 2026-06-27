@@ -2,6 +2,7 @@
 import type {
   AgentStatus as AgentStatusType,
   AppContentBlock,
+  ProviderName,
 } from "@yep-anywhere/shared";
 
 // Re-export shared types
@@ -172,6 +173,7 @@ export interface Project {
   path: string;
   name: string;
   sessionCount: number;
+  sessionCountsByProvider?: Partial<Record<ProviderName, number>>;
   activeOwnedCount: number;
   activeExternalCount: number;
   lastActivity: string | null;

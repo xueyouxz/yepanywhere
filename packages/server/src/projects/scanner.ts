@@ -81,6 +81,45 @@ interface ProjectSnapshot {
   timestamp: number;
 }
 
+function cloneSessionCountsByProvider(
+  counts: Project["sessionCountsByProvider"],
+): Project["sessionCountsByProvider"] {
+  return counts ? { ...counts } : undefined;
+}
+
+function addProviderSessionCount(
+  project: Project,
+  provider: ProviderName,
+  count: number,
+): void {
+  project.sessionCount += count;
+  project.sessionCountsByProvider = {
+    ...project.sessionCountsByProvider,
+    [provider]: (project.sessionCountsByProvider?.[provider] ?? 0) + count,
+  };
+}
+
+function latestActivity(
+  current: string | null,
+  next: string | null,
+): string | null {
+  if (!next) return current;
+  if (!current) return next;
+  return next > current ? next : current;
+}
+
+function withProviderSessionCounts(project: Project): Project {
+  return {
+    ...project,
+    sessionCountsByProvider: {
+      ...project.sessionCountsByProvider,
+      [project.provider]:
+        project.sessionCountsByProvider?.[project.provider] ??
+        project.sessionCount,
+    },
+  };
+}
+
 export class ProjectScanner {
   private projectsDir: string;
   private codexSessionsDir: string;
@@ -276,6 +315,9 @@ export class ProjectScanner {
           mergedSessionDirs: project.mergedSessionDirs
             ? [...project.mergedSessionDirs]
             : undefined,
+          sessionCountsByProvider: cloneSessionCountsByProvider(
+            project.sessionCountsByProvider,
+          ),
         });
       }
 
@@ -439,6 +481,12 @@ export class ProjectScanner {
       typeof project.name === "string" &&
       typeof project.sessionDir === "string" &&
       typeof project.sessionCount === "number" &&
+      (project.sessionCountsByProvider === undefined ||
+        (typeof project.sessionCountsByProvider === "object" &&
+          project.sessionCountsByProvider !== null &&
+          Object.values(project.sessionCountsByProvider).every(
+            (count) => typeof count === "number",
+          ))) &&
       typeof project.activeOwnedCount === "number" &&
       typeof project.activeExternalCount === "number" &&
       (project.lastActivity === null ||
@@ -474,6 +522,9 @@ export class ProjectScanner {
       mergedSessionDirs: project.mergedSessionDirs
         ? [...project.mergedSessionDirs]
         : undefined,
+      sessionCountsByProvider: cloneSessionCountsByProvider(
+        project.sessionCountsByProvider,
+      ),
       hasCodexSessions: project.hasCodexSessions,
       hasGeminiSessions: project.hasGeminiSessions,
     };
@@ -531,17 +582,15 @@ export class ProjectScanner {
         // Cross-machine duplicate — merge into existing project
         const existing = projects[existingIdx];
         if (!existing) return;
-        existing.sessionCount += sessionCount;
+        addProviderSessionCount(existing, "claude", sessionCount);
         if (!existing.mergedSessionDirs) {
           existing.mergedSessionDirs = [];
         }
         existing.mergedSessionDirs.push(sessionDir);
-        if (
-          lastActivity &&
-          (!existing.lastActivity || lastActivity > existing.lastActivity)
-        ) {
-          existing.lastActivity = lastActivity;
-        }
+        existing.lastActivity = latestActivity(
+          existing.lastActivity,
+          lastActivity,
+        );
 
         // Prefer the local path for session creation.
         // Remote executor sessions (rsynced) may store a foreign cwd
@@ -568,6 +617,7 @@ export class ProjectScanner {
           path: projectPath,
           name: getProjectName(projectPath),
           sessionCount,
+          sessionCountsByProvider: { claude: sessionCount },
           sessionDir,
           hasCodexSessions: false,
           hasGeminiSessions: false,
@@ -650,12 +700,21 @@ export class ProjectScanner {
           (project) => canonicalizeProjectPath(project.path) === projectPath,
         );
         if (existing) {
+          addProviderSessionCount(
+            existing,
+            codexProject.provider,
+            codexProject.sessionCount,
+          );
           existing.hasCodexSessions = true;
+          existing.lastActivity = latestActivity(
+            existing.lastActivity,
+            codexProject.lastActivity,
+          );
           continue;
         }
         seenPaths.add(projectPath);
         projects.push({
-          ...codexProject,
+          ...withProviderSessionCounts(codexProject),
           id: encodeProjectId(projectPath),
           path: projectPath,
           name: getProjectName(projectPath),
@@ -678,12 +737,21 @@ export class ProjectScanner {
           (project) => canonicalizeProjectPath(project.path) === projectPath,
         );
         if (existing) {
+          addProviderSessionCount(
+            existing,
+            geminiProject.provider,
+            geminiProject.sessionCount,
+          );
           existing.hasGeminiSessions = true;
+          existing.lastActivity = latestActivity(
+            existing.lastActivity,
+            geminiProject.lastActivity,
+          );
           continue;
         }
         seenPaths.add(projectPath);
         projects.push({
-          ...geminiProject,
+          ...withProviderSessionCounts(geminiProject),
           id: encodeProjectId(projectPath),
           path: projectPath,
           name: getProjectName(projectPath),
@@ -718,6 +786,7 @@ export class ProjectScanner {
           path: projectPath,
           name: getProjectName(projectPath),
           sessionCount: 0,
+          sessionCountsByProvider: { claude: 0 },
           sessionDir: join(this.projectsDir, encodedPath),
           hasCodexSessions: false,
           hasGeminiSessions: false,
@@ -739,6 +808,7 @@ export class ProjectScanner {
         path: home,
         name: basename(home) || "Home",
         sessionCount: 0,
+        sessionCountsByProvider: { claude: 0 },
         sessionDir: join(this.projectsDir, encodedPath),
         activeOwnedCount: 0,
         activeExternalCount: 0,
@@ -854,6 +924,7 @@ export class ProjectScanner {
       path: projectPath,
       name: getProjectName(projectPath),
       sessionCount: 0,
+      sessionCountsByProvider: { [provider]: 0 },
       sessionDir,
       activeOwnedCount: 0,
       activeExternalCount: 0,

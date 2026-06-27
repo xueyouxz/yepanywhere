@@ -129,6 +129,7 @@ export class GeminiSessionScanner {
         path,
         name,
         sessionCount: data.sessions.length,
+        sessionCountsByProvider: { gemini: data.sessions.length },
         sessionDir: join(this.sessionsDir, data.dirName, "chats"),
         activeOwnedCount: 0,
         activeExternalCount: 0,

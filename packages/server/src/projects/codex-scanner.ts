@@ -148,6 +148,7 @@ export class CodexSessionScanner {
         path: cwd,
         name: basename(cwd),
         sessionCount: data.sessions.length,
+        sessionCountsByProvider: { codex: data.sessions.length },
         sessionDir: this.sessionsDir, // All sessions are in the same tree
         activeOwnedCount: 0,
         activeExternalCount: 0,

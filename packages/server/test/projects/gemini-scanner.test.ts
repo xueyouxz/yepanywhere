@@ -59,6 +59,7 @@ describe("GeminiSessionScanner", () => {
     expect(projects).toHaveLength(1);
     expect(projects[0].provider).toBe("gemini");
     expect(projects[0].sessionCount).toBe(1);
+    expect(projects[0].sessionCountsByProvider).toEqual({ gemini: 1 });
   });
 
   it("groups sessions from the same project directory", async () => {
