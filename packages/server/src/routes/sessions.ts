@@ -2058,6 +2058,16 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       return { redirectProjectId: workingProjectId };
     }
 
+    const activeProcess = deps.supervisor.getProcessForSession(sessionId);
+    if (
+      activeProcess &&
+      typeof activeProcess.projectId === "string" &&
+      isUrlProjectId(activeProcess.projectId) &&
+      activeProcess.projectId !== requestProjectId
+    ) {
+      return { redirectProjectId: activeProcess.projectId };
+    }
+
     const workingProject =
       await deps.scanner.getOrCreateProject(requestProjectId);
     if (!workingProject) {

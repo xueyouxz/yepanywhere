@@ -60,6 +60,7 @@
 import { open } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, isAbsolute, join, sep } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import type { UrlProjectId } from "@yep-anywhere/shared";
 import { stripBom } from "../utils/jsonl.js";
 
@@ -208,11 +209,33 @@ export function getSessionIdFromPath(filePath: string): string | null {
   return match?.[1] ?? null;
 }
 
+const CWD_SCAN_CHUNK_BYTES = 8192;
+const CWD_SCAN_MAX_BYTES = 256 * 1024;
+
+function extractCwdFromJsonLine(line: string): string | null {
+  const trimmed = stripBom(line).trim();
+  if (!trimmed) return null;
+
+  try {
+    const data = JSON.parse(trimmed) as { cwd?: unknown };
+    if (typeof data.cwd === "string") {
+      return data.cwd;
+    }
+  } catch {
+    // Skip invalid or partial JSONL lines.
+  }
+
+  return null;
+}
+
 /**
  * Read the working directory (cwd) from a session file.
  * This is the most reliable way to get the actual project path.
  *
- * The cwd is stored in the first few lines of the JSONL file by the Claude SDK.
+ * The cwd is stored near the start of Claude JSONL files, but YA queue
+ * bookkeeping can prepend long prompt lines before the first cwd-bearing entry.
+ * Scan complete JSONL records up to a bounded prefix rather than assuming a
+ * single fixed-size read reaches the field.
  *
  * @param sessionFilePath - Absolute path to the session .jsonl file
  * @returns The cwd field value, or null if not found
@@ -222,27 +245,36 @@ export async function readCwdFromSessionFile(
 ): Promise<string | null> {
   let fd: Awaited<ReturnType<typeof open>> | null = null;
   try {
-    // Read only the first 8KB — cwd is always near the start of the file.
-    // Avoids reading multi-MB session files entirely.
     fd = await open(sessionFilePath, "r");
-    const buf = Buffer.alloc(8192);
-    const { bytesRead } = await fd.read(buf, 0, 8192, 0);
-    if (bytesRead === 0) return null;
+    const decoder = new StringDecoder("utf8");
+    let bytesScanned = 0;
+    let pending = "";
 
-    const content = stripBom(buf.toString("utf-8", 0, bytesRead));
-    const lines = content.split("\n").slice(0, 20);
+    while (bytesScanned < CWD_SCAN_MAX_BYTES) {
+      const bytesToRead = Math.min(
+        CWD_SCAN_CHUNK_BYTES,
+        CWD_SCAN_MAX_BYTES - bytesScanned,
+      );
+      const buf = Buffer.alloc(bytesToRead);
+      const { bytesRead } = await fd.read(buf, 0, bytesToRead, bytesScanned);
+      if (bytesRead === 0) {
+        break;
+      }
 
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const data = JSON.parse(line);
-        if (data.cwd && typeof data.cwd === "string") {
-          return data.cwd;
-        }
-      } catch {
-        // Skip invalid JSON lines
+      bytesScanned += bytesRead;
+      pending += decoder.write(buf.subarray(0, bytesRead));
+
+      const lines = pending.split("\n");
+      pending = lines.pop() ?? "";
+      for (const line of lines) {
+        const cwd = extractCwdFromJsonLine(line);
+        if (cwd) return cwd;
       }
     }
+
+    pending += decoder.end();
+    const cwd = extractCwdFromJsonLine(pending);
+    if (cwd) return cwd;
 
     return null;
   } catch {

@@ -270,6 +270,34 @@ describe("Project Path Utilities", () => {
       expect(cwd).toBe("/home/user/project");
     });
 
+    it("reads cwd after long queue bookkeeping lines", async () => {
+      const sessionFile = join(testDir, "session-long-prefix.jsonl");
+      const longPrompt = "x".repeat(9000);
+      await writeFile(
+        sessionFile,
+        JSON.stringify({
+          type: "queue-operation",
+          operation: "enqueue",
+          content: longPrompt,
+        }) +
+          "\n" +
+          JSON.stringify({
+            type: "queue-operation",
+            operation: "dequeue",
+          }) +
+          "\n" +
+          JSON.stringify({
+            type: "user",
+            cwd: "/home/user/project",
+            message: { content: longPrompt },
+          }) +
+          "\n",
+      );
+
+      const cwd = await readCwdFromSessionFile(sessionFile);
+      expect(cwd).toBe("/home/user/project");
+    });
+
     it("returns null for file without cwd", async () => {
       const sessionFile = join(testDir, "session.jsonl");
       await writeFile(

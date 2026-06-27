@@ -47,7 +47,7 @@ export interface ScannerOptions {
 
 const CLAUDE_PROJECT_SCAN_BATCH_SIZE = 16;
 const CWD_SCAN_BATCH_SIZE = 8;
-const PROJECT_SCAN_CACHE_VERSION = 1;
+const PROJECT_SCAN_CACHE_VERSION = 2;
 
 interface ProjectScanSourceState {
   projectsDir: string;

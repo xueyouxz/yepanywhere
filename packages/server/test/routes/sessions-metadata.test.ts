@@ -152,6 +152,39 @@ async function createGrokRedirectFixture(): Promise<{
 }
 
 describe("Sessions metadata route", () => {
+  it("redirects stale active-process detail links to the process project", async () => {
+    const wrongProject = {
+      ...createProject(),
+      id: encodeProjectId("/tmp/wrong-project"),
+    };
+    const rightProject = {
+      ...createProject(),
+      id: encodeProjectId("/tmp/right-project"),
+    };
+    const getOrCreateProject = vi.fn(async () => wrongProject);
+
+    const routes = createSessionsRoutes({
+      supervisor: {
+        getProcessForSession: vi.fn(() => ({
+          projectId: rightProject.id,
+        })),
+      } as unknown as SessionsDeps["supervisor"],
+      scanner: {
+        getOrCreateProject,
+      } as unknown as SessionsDeps["scanner"],
+    });
+
+    const response = await routes.request(
+      `/projects/${wrongProject.id}/sessions/sess-1?tailCompactions=2`,
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      `/api/projects/${rightProject.id}/sessions/sess-1?tailCompactions=2`,
+    );
+    expect(getOrCreateProject).not.toHaveBeenCalled();
+  });
+
   it("returns queue summaries after accepting a deferred message", async () => {
     const deferMessage = vi.fn(() => ({ success: true, deferred: true }));
     const primeSupportedCommandsForMessage = vi.fn(async () => {});
