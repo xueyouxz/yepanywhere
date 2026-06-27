@@ -108,26 +108,36 @@ jobs:
           echo "APPLE_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
 
       # --- Signing env vars ---
-      # These MUST be set conditionally via GITHUB_ENV, not in the static env block.
-      # Tauri's bundler treats empty-string env vars as "present" and crashes
-      # trying to decode empty keys or import empty certificates.
+      # Inject secrets via this step's `env:` block (GitHub sets the values WITHOUT shell
+      # re-parsing) and write them to $GITHUB_ENV with heredocs. Do NOT inline
+      # ${{ secrets.* }} into `echo "VAR=..."`: a value containing shell metacharacters
+      # (" $ ` \) gets mangled there — an updater password with such a character yields
+      # "incorrect updater private key password: Wrong password for that key" at bundle
+      # time. Writes stay conditional so empty values don't reach the bundler (an empty
+      # APPLE_CERTIFICATE makes Tauri's bundler crash on import).
       - name: Set signing env vars
         shell: bash
+        env:
+          UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          UPDATER_PW: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          MAC_CERT: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MAC_CERT_PW: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          ASC_KEY: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_ISSUER: ${{ secrets.ASC_API_ISSUER_ID }}
         run: |
-          if [ "${{ env.HAS_UPDATER_KEY }}" = "true" ]; then
-            echo "TAURI_SIGNING_PRIVATE_KEY=${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" >> "$GITHUB_ENV"
-            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+          emit() { { printf '%s<<__YEPEOF__\n' "$1"; printf '%s\n' "$2"; printf '__YEPEOF__\n'; } >> "$GITHUB_ENV"; }
+          if [ -n "$UPDATER_KEY" ]; then
+            emit TAURI_SIGNING_PRIVATE_KEY "$UPDATER_KEY"
+            emit TAURI_SIGNING_PRIVATE_KEY_PASSWORD "$UPDATER_PW"
           fi
-          if [ "${{ env.HAS_MACOS_SIGNING }}" = "true" ] && [ "${{ matrix.platform }}" = "macos-latest" ]; then
-            echo "APPLE_CERTIFICATE<<CERT_EOF" >> "$GITHUB_ENV"
-            echo "${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}" >> "$GITHUB_ENV"
-            echo "CERT_EOF" >> "$GITHUB_ENV"
-            echo "APPLE_CERTIFICATE_PASSWORD=${{ secrets.MACOS_CERTIFICATE_PASSWORD }}" >> "$GITHUB_ENV"
+          if [ -n "$MAC_CERT" ] && [ "${{ matrix.platform }}" = "macos-latest" ]; then
+            emit APPLE_CERTIFICATE "$MAC_CERT"
+            emit APPLE_CERTIFICATE_PASSWORD "$MAC_CERT_PW"
             echo "APPLE_SIGNING_IDENTITY=Developer ID Application: Kyle Graehl (VD7BYQ6ABM)" >> "$GITHUB_ENV"
           fi
-          if [ "${{ env.HAS_MACOS_NOTARIZATION }}" = "true" ] && [ "${{ matrix.platform }}" = "macos-latest" ]; then
-            echo "APPLE_API_KEY=${{ secrets.ASC_API_KEY_ID }}" >> "$GITHUB_ENV"
-            echo "APPLE_API_ISSUER=${{ secrets.ASC_API_ISSUER_ID }}" >> "$GITHUB_ENV"
+          if [ -n "$ASC_KEY" ] && [ "${{ matrix.platform }}" = "macos-latest" ]; then
+            emit APPLE_API_KEY "$ASC_KEY"
+            emit APPLE_API_ISSUER "$ASC_ISSUER"
           fi
 
       # --- Windows signing tool ---
