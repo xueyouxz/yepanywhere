@@ -35,6 +35,7 @@ export interface SessionCollectionRecord {
   customTitle?: string;
   isArchived?: boolean;
   isStarred?: boolean;
+  activeStartedAt?: number;
   parentSessionId?: string;
   initialPrompt?: string;
   executor?: string;
@@ -130,6 +131,10 @@ function normalizeActivity(
   return activity === "in-turn" || activity === "waiting-input"
     ? activity
     : undefined;
+}
+
+function isActiveActivity(activity: AgentActivity | undefined): boolean {
+  return activity === "in-turn" || activity === "waiting-input";
 }
 
 function withContentFields(
@@ -259,10 +264,17 @@ function withLifecycleFields(
   }
 
   const normalizedActivity = normalizeActivity(fields.activity);
+  const wasActive = isActiveActivity(record.activity);
+  const isActive = isActiveActivity(normalizedActivity);
   return {
     ...record,
     ...(fields.ownership !== undefined ? { ownership: fields.ownership } : {}),
     activity: normalizedActivity,
+    activeStartedAt: isActive
+      ? wasActive
+        ? record.activeStartedAt
+        : observedAt
+      : undefined,
     pendingInputType:
       normalizedActivity === "waiting-input"
         ? fields.pendingInputType
@@ -581,6 +593,17 @@ function byUpdatedAtDesc(
   return updatedAtMs(b) - updatedAtMs(a);
 }
 
+function activeStartedAtMs(record: SessionCollectionRecord): number {
+  return record.activeStartedAt ?? record.eventCreatedAt ?? record.observedAt;
+}
+
+function byActiveStartedAtDesc(
+  a: SessionCollectionRecord,
+  b: SessionCollectionRecord,
+): number {
+  return activeStartedAtMs(b) - activeStartedAtMs(a);
+}
+
 export function selectStarredSessionRecords(
   state: SessionCollectionState,
 ): SessionCollectionRecord[] {
@@ -594,14 +617,21 @@ export function selectRecentSessionRecords(
   now = Date.now(),
 ): SessionCollectionRecord[] {
   const oneDayAgo = now - 24 * 60 * 60 * 1000;
-  return Array.from(state.entities.values())
-    .filter(
-      (record) =>
-        record.isStarred !== true &&
-        record.isArchived !== true &&
-        updatedAtMs(record) >= oneDayAgo,
-    )
+  const records = Array.from(state.entities.values()).filter(
+    (record) =>
+      record.isStarred !== true &&
+      record.isArchived !== true &&
+      updatedAtMs(record) >= oneDayAgo,
+  );
+
+  const active = records
+    .filter((record) => isActiveActivity(record.activity))
+    .sort(byActiveStartedAtDesc);
+  const idle = records
+    .filter((record) => !isActiveActivity(record.activity))
     .sort(byUpdatedAtDesc);
+
+  return [...active, ...idle];
 }
 
 export function selectOlderSessionRecords(

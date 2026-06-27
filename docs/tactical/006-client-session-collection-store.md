@@ -1,6 +1,17 @@
 # Client Session Collection Store
 
-Status: Proposed / first shadow slice
+Status: Sidebar consumer migrated / Global Sessions next
+
+## Progress
+
+- 2026-06-27: Added the normalized collection reducer/selectors, lazy
+  React external-store shell, activity-bus reducers, and `useGlobalSessions`
+  snapshot reporting as a shadow slice.
+- 2026-06-27: Removed the inert lifecycle-store slice so lifecycle facts live
+  on the session collection entity instead of a parallel overlay.
+- 2026-06-27: Migrated the sidebar's Starred, Last 24 Hours, and Older
+  buckets to collection selectors while keeping the existing
+  `useGlobalSessions` hooks mounted as fetch/pagination feeders.
 
 ## Context
 
@@ -130,17 +141,17 @@ not a plain projection.
 
 ## Migration Plan
 
-1. Add the collection reducer/selectors and tests with no UI consumers.
-2. Add a lazy external-store shell, subscribing once to `activityBus` while
-   there are mounted consumers.
-3. Wire existing `useGlobalSessions` fetches to report snapshots into the
+1. [x] Add the collection reducer/selectors and tests with no UI consumers.
+2. [x] Add a lazy external-store shell, subscribing once to `activityBus`
+   while there are mounted consumers.
+3. [x] Wire existing `useGlobalSessions` fetches to report snapshots into the
    store. This keeps current UI behavior unchanged while the store runs as
    shadow state.
-4. Move the sidebar to collection selectors first. It has the clearest
+4. [x] Move the sidebar to collection selectors first. It has the clearest
    projection bugs and the fewest filter dimensions.
-5. Move Global Sessions page next. Keep pagination/query ids server-owned.
-6. Keep InboxContext and Agents page as server-owned inventories initially, but
-   let them report snapshots into the collection/lifecycle stores.
+5. [ ] Move Global Sessions page next. Keep pagination/query ids server-owned.
+6. [ ] Keep InboxContext and Agents page as server-owned inventories initially,
+   but let them report snapshots into the collection store.
 
 ## Non-Goals
 
@@ -166,3 +177,5 @@ not a plain projection.
 - Query result ids update without duplicating row objects.
 - Existing `useGlobalSessions` behavior remains unchanged while shadow wiring
   is active.
+- Sidebar active rows remain pinned above idle rows and do not reshuffle merely
+  because `updatedAt` advances during an active turn.

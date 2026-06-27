@@ -66,6 +66,45 @@ vi.mock("../../hooks/useGlobalSessions", () => ({
     options?.starred ? starredSessionsState : globalSessionsState,
 }));
 
+vi.mock("../../lib/sessionCollectionExternalStore", () => {
+  const recordUpdatedAtMs = (session: Record<string, unknown>): number =>
+    typeof session.updatedAt === "string"
+      ? Date.parse(session.updatedAt) || 0
+      : 0;
+  const isActiveRecord = (session: Record<string, unknown>): boolean =>
+    session.activity === "in-turn" || session.activity === "waiting-input";
+
+  return {
+    useStarredSessionRecords: () =>
+      starredSessionsState.sessions.filter((session) => !session.isArchived),
+    useRecentSessionRecords: () => {
+      const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+      const sessions = globalSessionsState.sessions.filter(
+        (session) =>
+          !session.isStarred &&
+          !session.isArchived &&
+          recordUpdatedAtMs(session) >= oneDayAgo,
+      );
+      const active = sessions.filter(isActiveRecord);
+      const idle = sessions
+        .filter((session) => !isActiveRecord(session))
+        .sort((a, b) => recordUpdatedAtMs(b) - recordUpdatedAtMs(a));
+      return [...active, ...idle];
+    },
+    useOlderSessionRecords: () => {
+      const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+      return globalSessionsState.sessions
+        .filter(
+          (session) =>
+            !session.isStarred &&
+            !session.isArchived &&
+            recordUpdatedAtMs(session) < oneDayAgo,
+        )
+        .sort((a, b) => recordUpdatedAtMs(b) - recordUpdatedAtMs(a));
+    },
+  };
+});
+
 vi.mock("../../hooks/useRemoteBasePath", () => ({
   useRemoteBasePath: () => "/remote/test",
 }));

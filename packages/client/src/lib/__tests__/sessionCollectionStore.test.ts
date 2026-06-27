@@ -6,6 +6,7 @@ import {
   applyGlobalSessionsCollectionSnapshot,
   applySessionCollectionCreated,
   applySessionCollectionMetadataChanged,
+  applySessionCollectionProcessStateChanged,
   createEmptySessionCollectionState,
   createGlobalSessionsQueryKey,
   selectRecentSessionRecords,
@@ -115,6 +116,96 @@ describe("sessionCollectionStore", () => {
     expect(selectRecentSessionRecords(state, NOW)).toEqual([]);
     expect(selectStarredSessionRecords(state).map((s) => s.id)).toEqual([
       "session-1",
+    ]);
+  });
+
+  it("keeps active recent rows stable when updatedAt changes", () => {
+    let state = applyGlobalSessionsCollectionSnapshot(
+      createEmptySessionCollectionState(),
+      {
+        query: { scope: "global-sessions", limit: 50 },
+        sessions: [
+          globalSession("active-a", {
+            activity: "in-turn",
+            ownership: { owner: "self", processId: "process-a" },
+            updatedAt: "2026-06-27T11:00:00.000Z",
+          }),
+          globalSession("active-b", {
+            activity: "in-turn",
+            ownership: { owner: "self", processId: "process-b" },
+            updatedAt: "2026-06-27T11:05:00.000Z",
+          }),
+        ],
+        hasMore: false,
+      },
+      100,
+    );
+
+    expect(selectRecentSessionRecords(state, NOW).map((s) => s.id)).toEqual([
+      "active-a",
+      "active-b",
+    ]);
+
+    state = applyGlobalSessionsCollectionSnapshot(
+      state,
+      {
+        query: { scope: "global-sessions", limit: 50 },
+        sessions: [
+          globalSession("active-b", {
+            activity: "in-turn",
+            ownership: { owner: "self", processId: "process-b" },
+            updatedAt: "2026-06-27T11:10:00.000Z",
+          }),
+          globalSession("active-a", {
+            activity: "in-turn",
+            ownership: { owner: "self", processId: "process-a" },
+            updatedAt: "2026-06-27T11:01:00.000Z",
+          }),
+        ],
+        hasMore: false,
+      },
+      200,
+    );
+
+    expect(selectRecentSessionRecords(state, NOW).map((s) => s.id)).toEqual([
+      "active-a",
+      "active-b",
+    ]);
+  });
+
+  it("pins newly active recent rows above idle rows", () => {
+    let state = applyGlobalSessionsCollectionSnapshot(
+      createEmptySessionCollectionState(),
+      {
+        query: { scope: "global-sessions", limit: 50 },
+        sessions: [
+          globalSession("idle-new", {
+            updatedAt: "2026-06-27T11:30:00.000Z",
+          }),
+          globalSession("idle-old", {
+            updatedAt: "2026-06-27T11:00:00.000Z",
+          }),
+        ],
+        hasMore: false,
+      },
+      100,
+    );
+
+    state = applySessionCollectionProcessStateChanged(
+      state,
+      {
+        type: "process-state-changed",
+        projectId: PROJECT_ID,
+        sessionId: "idle-old",
+        activity: "in-turn",
+        timestamp: "2026-06-27T11:45:00.000Z",
+      },
+      200,
+    );
+
+    expect(selectRecentSessionRecords(state, NOW).map((s) => s.id)).toEqual([
+      "idle-old",
+      "idle-new",
     ]);
   });
 

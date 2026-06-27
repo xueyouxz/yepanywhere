@@ -13,6 +13,12 @@ import { useVersion } from "../hooks/useVersion";
 import { useI18n } from "../i18n";
 import { toBrowserAppHref } from "../lib/appHref";
 import { isNearScrollEnd } from "../lib/predictiveScroll";
+import {
+  useOlderSessionRecords,
+  useRecentSessionRecords,
+  useStarredSessionRecords,
+} from "../lib/sessionCollectionExternalStore";
+import type { SessionCollectionRecord } from "../lib/sessionCollectionStore";
 import { UI_KEYS } from "../lib/storageKeys";
 import { getSessionDisplayTitle } from "../utils";
 import { AgentsNavItem } from "./AgentsNavItem";
@@ -34,6 +40,53 @@ const DEFAULT_SECTION_EXPANSION = {
   recentDay: true,
   older: true,
 };
+
+function collectionRecordToGlobalSessionItem(
+  record: SessionCollectionRecord,
+): GlobalSessionItem | null {
+  const updatedAt = record.updatedAt ?? record.createdAt;
+  const createdAt = record.createdAt ?? updatedAt;
+  if (!record.provider || !record.projectId || !createdAt || !updatedAt) {
+    return null;
+  }
+
+  return {
+    id: record.id,
+    title: record.title ?? null,
+    fullTitle: record.fullTitle ?? null,
+    createdAt,
+    updatedAt,
+    messageCount: record.messageCount ?? 0,
+    provider: record.provider,
+    model: record.model,
+    projectId: record.projectId,
+    projectName: record.projectName ?? record.projectId,
+    ownership: record.ownership ?? { owner: "none" },
+    pendingInputType: record.pendingInputType,
+    activity: record.activity,
+    hasUnread: record.hasUnread,
+    customTitle: record.customTitle,
+    isArchived: record.isArchived,
+    isStarred: record.isStarred,
+    parentSessionId: record.parentSessionId,
+    initialPrompt: record.initialPrompt,
+    executor: record.executor,
+    lastAgentText: record.lastAgentText,
+  };
+}
+
+function collectionRecordsToGlobalSessionItems(
+  records: readonly SessionCollectionRecord[],
+): GlobalSessionItem[] {
+  const sessions: GlobalSessionItem[] = [];
+  for (const record of records) {
+    const session = collectionRecordToGlobalSessionItem(record);
+    if (session) {
+      sessions.push(session);
+    }
+  }
+  return sessions;
+}
 
 /**
  * A session is "active" while its agent is mid-turn or waiting on input. Active
@@ -192,7 +245,6 @@ export function Sidebar({
 
   // Fetch global sessions for sidebar (non-starred only for recent/older sections)
   const {
-    sessions: globalSessions,
     loading: globalLoading,
     hasMore: hasMoreGlobalSessions,
     loadMore: loadMoreGlobalSessions,
@@ -203,7 +255,6 @@ export function Sidebar({
 
   // Fetch starred sessions separately to ensure we get ALL starred sessions
   const {
-    sessions: starredSessions,
     loading: starredLoading,
     hasMore: hasMoreStarredSessions,
     loadMore: loadMoreStarredSessions,
@@ -212,6 +263,10 @@ export function Sidebar({
     limit: SIDEBAR_SESSION_PAGE_SIZE,
     includeStats: false,
   });
+
+  const starredSessionRecords = useStarredSessionRecords();
+  const recentSessionRecords = useRecentSessionRecords();
+  const olderSessionRecords = useOlderSessionRecords();
 
   const sessionsLoading = globalLoading || starredLoading;
   const hasNewSessionDraft = useNewSessionDraft();
@@ -299,8 +354,9 @@ export function Sidebar({
     maybeLoadMoreSidebarSessions();
   }, [
     maybeLoadMoreSidebarSessions,
-    starredSessions.length,
-    globalSessions.length,
+    starredSessionRecords.length,
+    recentSessionRecords.length,
+    olderSessionRecords.length,
     starredExpanded,
     recentDayExpanded,
     olderExpanded,
@@ -435,35 +491,20 @@ export function Sidebar({
     [expandedSidebarNewSessionHref],
   );
 
-  // Starred sessions come from dedicated fetch (filtered by server)
-  // Filter out archived just in case
-  const filteredStarredSessions = useMemo(() => {
-    return starredSessions.filter((s) => !s.isArchived);
-  }, [starredSessions]);
+  const filteredStarredSessions = useMemo(
+    () => collectionRecordsToGlobalSessionItems(starredSessionRecords),
+    [starredSessionRecords],
+  );
 
-  // Sessions updated in the last 24 hours (non-starred, non-archived)
-  const recentDaySessions = useMemo(() => {
-    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-    const isWithinLastDay = (date: Date) => date.getTime() >= oneDayAgo;
+  const recentDaySessions = useMemo(
+    () => collectionRecordsToGlobalSessionItems(recentSessionRecords),
+    [recentSessionRecords],
+  );
 
-    return globalSessions.filter(
-      (s) =>
-        !s.isStarred && !s.isArchived && isWithinLastDay(new Date(s.updatedAt)),
-    );
-  }, [globalSessions]);
-
-  // Older sessions (non-starred, non-archived, NOT in last 24 hours)
-  const olderSessions = useMemo(() => {
-    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-    const isOlderThanOneDay = (date: Date) => date.getTime() < oneDayAgo;
-
-    return globalSessions.filter(
-      (s) =>
-        !s.isStarred &&
-        !s.isArchived &&
-        isOlderThanOneDay(new Date(s.updatedAt)),
-    );
-  }, [globalSessions]);
+  const olderSessions = useMemo(
+    () => collectionRecordsToGlobalSessionItems(olderSessionRecords),
+    [olderSessionRecords],
+  );
 
   // Client-side heuristic for "obvious duplicate title" sessions (general, no hardcoded strings).
   // Within each section we group by (provider, project, normalized title).
