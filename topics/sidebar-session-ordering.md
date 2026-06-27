@@ -18,8 +18,9 @@ boundary, don't re-sort per view), [session-liveness](session-liveness.md)
 ## The behavior we want
 
 The sidebar (`packages/client/src/components/Sidebar.tsx`) shows three session
-groups: **Starred**, **Last 24 Hours**, and **Older**. The ordering complaint
-this topic addresses is in **Last 24 Hours**, where active sessions live.
+groups: **Starred**, **Last 24 Hours**, and **Older**. Active sessions can live
+in **Starred** or **Last 24 Hours**, and both sections must use the same
+active-row stability rule.
 
 What the user wants, stated as the target:
 
@@ -33,10 +34,11 @@ What the user wants, stated as the target:
    The user explicitly does *not* want active rows sorted by any churning key.
    A brand-new session may appear at the top; an already-active session simply
    stays where it is. "Stable" beats "ranked."
-4. **Idle sessions sort by recency and may be deduped.** Below the active group,
-   idle sessions are ordered most-recent-first and run through the duplicate-
-   title grouping (the `(N hidden)` expander). They don't churn, so a recency
-   sort over idle rows is safe.
+4. **Idle sessions sort by recency and may be deduped where that section
+   supports deduping.** Below the active group, idle sessions are ordered
+   most-recent-first. Last 24 Hours and Older idle rows run through the
+   duplicate-title grouping (the `(N hidden)` expander). They don't churn, so a
+   recency sort over idle rows is safe.
 
 ## Why active rows must skip the recency sort
 
@@ -46,10 +48,10 @@ refetch — with N concurrent active sessions you get an N-way shuffle. The only
 way to keep the active group stable is to **not sort it by a value that
 changes**. So the active group is rendered in a *preserved* order, never sorted.
 
-The stable order is not invented in the sidebar. `useGlobalSessions`
-(`packages/client/src/hooks/useGlobalSessions.ts`) already preserves order
-across refetches: on a non-initial fetch it updates each session **in place**
-in its existing position and only prepends genuinely-new session ids:
+The stable order used to come from `useGlobalSessions`
+(`packages/client/src/hooks/useGlobalSessions.ts`), which preserves order across
+refetches: on a non-initial fetch it updates each session **in place** in its
+existing position and only prepends genuinely-new session ids:
 
 ```js
 const updated = prev.map((existing) => newDataMap.get(existing.id) ?? existing);
@@ -58,12 +60,13 @@ const newSessions = data.sessions.filter((s) => !existingIds.has(s.id));
 return [...newSessions, ...filtered];
 ```
 
-So `globalSessions` is already a stable, churn-free order. The sidebar just has
-to *not throw it away*. `Array.filter` preserves order, so
-`recentDaySessions.filter(isActiveSession)` yields the active group in that
-stable order for free — no comparator, no ref, no transition tracking. A
-brand-new session is the one thing the hook moves to the top, which is exactly
-where a freshly-started active session should appear (target #3).
+After the sidebar moved to the session collection store, the same rule is owned
+by `selectRecentSessionRecords` and `selectStarredSessionRecords`
+(`packages/client/src/lib/sessionCollectionStore.ts`). The selectors record
+when a row enters active state (`activeStartedAt`) and sort active rows by that
+stable timestamp, while idle rows sort by `updatedAt`. A brand-new active
+session may appear at the top; an already-active session must not move merely
+because its `updatedAt` advances.
 
 ## Why active rows must skip the duplicate-title grouping
 
@@ -80,7 +83,20 @@ also few, so there is no decluttering benefit. They are therefore split out
 `isActiveSession(session)` (module-level in `Sidebar.tsx`) is the single
 predicate: `activity === "in-turn" || activity === "waiting-input"`.
 
-The Last 24 Hours section is built as:
+The collection selectors use the equivalent predicate and return active rows
+first:
+
+```js
+const active = records
+  .filter((record) => isActiveActivity(record.activity))
+  .sort(byActiveStartedAtDesc);
+const idle = records
+  .filter((record) => !isActiveActivity(record.activity))
+  .sort(byUpdatedAtDesc);
+return [...active, ...idle];
+```
+
+The Last 24 Hours render path then splits active rows out before deduping:
 
 ```js
 const recentActive = recentDaySessions.filter(isActiveSession); // pinned, stable, never deduped
@@ -88,10 +104,13 @@ const idle = recentDaySessions.filter((s) => !isActiveSession(s));
 const { visible, hidden } = groupDuplicateSessions(idle);       // recency sort + (N hidden) on idle only
 ```
 
-Render order within the section: `recentActive` → `visible` → the `(N hidden)`
+Render order within Last 24 Hours: `recentActive` → `visible` → the `(N hidden)`
 expander. The section and the empty-state guard both account for
 `recentActive.length` so an active-only list is neither hidden nor mislabeled
 "no sessions".
+
+Starred rows are not deduped, but they still use the same selector-level
+active-first ordering.
 
 The **Older** section needs no active handling: an active session has a fresh
 `updatedAt` and so is never older than 24h by construction.
@@ -103,10 +122,10 @@ The **Older** section needs no active handling: an active session has a fresh
   group, or a brand-new session) may move active rows.
 - Active sessions are never hidden behind the duplicate-title `(N hidden)`
   expander, regardless of shared titles or `messageCount`.
-- Active sessions render above idle sessions in the Last 24 Hours section.
-- The stable order is owned by `useGlobalSessions` (in-place update, prepend-
-  new). Views consume that order; they must not re-sort active rows by a
-  churning key. Recency sorting is confined to idle rows.
+- Active sessions render above idle sessions in Starred and Last 24 Hours.
+- The stable order is owned by the collection selectors. Views consume that
+  order; they must not re-sort active rows by a churning key. Recency sorting
+  is confined to idle rows.
 - Idle rows may be deduped and sorted by `updatedAt` — they don't churn, so this
   is safe and is the desired recency behavior.
 
@@ -121,3 +140,8 @@ including active rows — on every refetch, defeating the hook's preservation an
 reintroducing the every-few-seconds shuffle for concurrently-active sessions.
 The `(N hidden)` feature is the regression vector the user suspected; splitting
 active rows out of that path is the fix.
+
+After the session collection migration, Starred briefly regressed the same
+contract by sorting all starred rows by `updatedAt`. Active starred rows could
+therefore trade places during a turn. The selector now uses the same active-
+first stable ordering as Last 24 Hours.

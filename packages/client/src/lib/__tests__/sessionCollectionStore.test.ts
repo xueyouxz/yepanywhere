@@ -173,6 +173,92 @@ describe("sessionCollectionStore", () => {
     ]);
   });
 
+  it("keeps active starred rows stable when updatedAt changes", () => {
+    let state = applyGlobalSessionsCollectionSnapshot(
+      createEmptySessionCollectionState(),
+      {
+        query: { scope: "global-sessions", starred: true, limit: 50 },
+        sessions: [
+          globalSession("active-a", {
+            activity: "in-turn",
+            ownership: { owner: "self", processId: "process-a" },
+            isStarred: true,
+            updatedAt: "2026-06-27T11:00:00.000Z",
+          }),
+          globalSession("active-b", {
+            activity: "in-turn",
+            ownership: { owner: "self", processId: "process-b" },
+            isStarred: true,
+            updatedAt: "2026-06-27T11:05:00.000Z",
+          }),
+        ],
+        hasMore: false,
+      },
+      100,
+    );
+
+    expect(selectStarredSessionRecords(state).map((s) => s.id)).toEqual([
+      "active-a",
+      "active-b",
+    ]);
+
+    state = applyGlobalSessionsCollectionSnapshot(
+      state,
+      {
+        query: { scope: "global-sessions", starred: true, limit: 50 },
+        sessions: [
+          globalSession("active-b", {
+            activity: "in-turn",
+            ownership: { owner: "self", processId: "process-b" },
+            isStarred: true,
+            updatedAt: "2026-06-27T11:10:00.000Z",
+          }),
+          globalSession("active-a", {
+            activity: "in-turn",
+            ownership: { owner: "self", processId: "process-a" },
+            isStarred: true,
+            updatedAt: "2026-06-27T11:01:00.000Z",
+          }),
+        ],
+        hasMore: false,
+      },
+      200,
+    );
+
+    expect(selectStarredSessionRecords(state).map((s) => s.id)).toEqual([
+      "active-a",
+      "active-b",
+    ]);
+  });
+
+  it("pins active starred rows above idle starred rows", () => {
+    const state = applyGlobalSessionsCollectionSnapshot(
+      createEmptySessionCollectionState(),
+      {
+        query: { scope: "global-sessions", starred: true, limit: 50 },
+        sessions: [
+          globalSession("idle-new", {
+            isStarred: true,
+            updatedAt: "2026-06-27T11:30:00.000Z",
+          }),
+          globalSession("active-old", {
+            activity: "in-turn",
+            ownership: { owner: "self", processId: "process-old" },
+            isStarred: true,
+            updatedAt: "2026-06-27T11:00:00.000Z",
+          }),
+        ],
+        hasMore: false,
+      },
+      100,
+    );
+
+    expect(selectStarredSessionRecords(state).map((s) => s.id)).toEqual([
+      "active-old",
+      "idle-new",
+    ]);
+  });
+
   it("pins newly active recent rows above idle rows", () => {
     let state = applyGlobalSessionsCollectionSnapshot(
       createEmptySessionCollectionState(),

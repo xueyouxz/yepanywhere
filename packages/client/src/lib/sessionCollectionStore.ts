@@ -621,12 +621,25 @@ function byActiveStartedAtDesc(
   return activeStartedAtMs(b) - activeStartedAtMs(a);
 }
 
+function orderActiveFirst(records: SessionCollectionRecord[]) {
+  const active = records
+    .filter((record) => isActiveActivity(record.activity))
+    .sort(byActiveStartedAtDesc);
+  const idle = records
+    .filter((record) => !isActiveActivity(record.activity))
+    .sort(byUpdatedAtDesc);
+
+  return [...active, ...idle];
+}
+
 export function selectStarredSessionRecords(
   state: SessionCollectionState,
 ): SessionCollectionRecord[] {
-  return Array.from(state.entities.values())
-    .filter((record) => record.isStarred === true && record.isArchived !== true)
-    .sort(byUpdatedAtDesc);
+  return orderActiveFirst(
+    Array.from(state.entities.values()).filter(
+      (record) => record.isStarred === true && record.isArchived !== true,
+    ),
+  );
 }
 
 export function selectRecentSessionRecords(
@@ -641,14 +654,7 @@ export function selectRecentSessionRecords(
       updatedAtMs(record) >= oneDayAgo,
   );
 
-  const active = records
-    .filter((record) => isActiveActivity(record.activity))
-    .sort(byActiveStartedAtDesc);
-  const idle = records
-    .filter((record) => !isActiveActivity(record.activity))
-    .sort(byUpdatedAtDesc);
-
-  return [...active, ...idle];
+  return orderActiveFirst(records);
 }
 
 export function selectOlderSessionRecords(
