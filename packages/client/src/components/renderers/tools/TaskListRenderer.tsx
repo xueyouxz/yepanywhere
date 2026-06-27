@@ -90,7 +90,7 @@ function statusIcon(status: TaskListStatus): string {
     case "completed":
       return "✓";
     case "in_progress":
-      return "◌";
+      return "◐";
     case "failed":
       return "!";
     case "cancelled":

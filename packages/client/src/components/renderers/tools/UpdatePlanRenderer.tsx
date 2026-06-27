@@ -40,7 +40,7 @@ function getStatusIcon(status: NormalizedPlanStatus): string {
     case "completed":
       return "✓";
     case "in_progress":
-      return "◌";
+      return "◐";
     default:
       return "○";
   }
