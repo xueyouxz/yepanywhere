@@ -53,7 +53,7 @@
       "endpoints": [
         "https://updates.yepanywhere.com/desktop/tauri/{{target}}/{{arch}}/{{current_version}}"
       ],
-      "pubkey": "RWTMbSc7oMFk712l6aKLo0y9iO3kwoYE95lYs38lSkkhch3/QnkLg7zf"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVGNjRDMUEwM0IyNzZEQ0MKUldUTWJTYzdvTUZrNzEybDZhS0xvMHk5aU8za3dvWUU5NWxZczM4bFNra2hjaDMvUW5rTGc3emYK"
     }
   }
 }
